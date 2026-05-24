@@ -504,6 +504,7 @@ def write_conference_docs(
     *,
     deep_min_score: float = CONFERENCE_DEEP_MIN_SCORE,
 ) -> Dict[str, str]:
+    _ = deep_min_score  # 兼容旧参数；会议链路当前对所有展示论文生成精读与图表。
     route_by_id: Dict[str, str] = {}
     for item in ranked:
         paper_id = norm_text(item.get("paper_id"))
@@ -513,15 +514,14 @@ def write_conference_docs(
         route = build_conference_paper_route(paper, conference, years)
         md_path = docs_dir / f"{route}.md"
         md_path.parent.mkdir(parents=True, exist_ok=True)
-        if deep_min_score >= 0 and score_from_ranked_item(item) >= deep_min_score:
-            enrich_conference_paper_for_deep_read(
-                paper,
-                item,
-                md_path=md_path,
-                docs_dir=docs_dir,
-                conference=conference,
-                years=years,
-            )
+        enrich_conference_paper_for_deep_read(
+            paper,
+            item,
+            md_path=md_path,
+            docs_dir=docs_dir,
+            conference=conference,
+            years=years,
+        )
         md_path.write_text(build_conference_markdown(paper, item, conference, years), encoding="utf-8")
         route_by_id[paper_id] = route
     return route_by_id
@@ -888,7 +888,7 @@ def main() -> None:
         "--deep-min-score",
         type=float,
         default=CONFERENCE_DEEP_MIN_SCORE,
-        help="会议论文分数达到该阈值时生成精读全文和图片；设置为负数可禁用。",
+        help="兼容旧参数；会议链路现在会为所有展示论文生成精读全文和图表。",
     )
     parser.add_argument(
         "--display-min-score",

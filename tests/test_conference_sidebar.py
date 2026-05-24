@@ -21,6 +21,24 @@ class ConferenceSidebarTest(unittest.TestCase):
         root = pathlib.Path(__file__).resolve().parents[1]
         cls.mod = _load_module("conference_sidebar_mod", root / "src" / "conference_sidebar.py")
 
+    def setUp(self):
+        self.enriched_calls = []
+        self._original_enrich = self.mod.enrich_conference_paper_for_deep_read
+
+        def fake_enrich(paper, ranked_item, **kwargs):
+            self.enriched_calls.append(
+                (
+                    paper.get("id"),
+                    ranked_item.get("score"),
+                    pathlib.Path(kwargs["md_path"]).name,
+                )
+            )
+
+        self.mod.enrich_conference_paper_for_deep_read = fake_enrich
+
+    def tearDown(self):
+        self.mod.enrich_conference_paper_for_deep_read = self._original_enrich
+
     def write_result(self, path: pathlib.Path, title: str = "A Conference Paper") -> None:
         payload = {
             "papers": [
@@ -182,6 +200,47 @@ class ConferenceSidebarTest(unittest.TestCase):
             self.assertEqual(text.count("<!--dpr-conference-topic:icml-2025:query-rl-->"), 1)
             self.assertNotIn("First Title", text)
             self.assertIn("Second Title", text)
+
+    def test_update_sidebar_deep_reads_all_displayed_papers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            sidebar = tmp_path / "_sidebar.md"
+            result = tmp_path / "conference-icml-2025.supabase.llm.json"
+            sidebar.write_text("* Daily Papers\n", encoding="utf-8")
+            payload = {
+                "papers": [
+                    {
+                        "id": "openreview-icml-2025-mid",
+                        "title": "Displayed Mid Score Paper",
+                        "link": "https://openreview.net/forum?id=mid",
+                        "pdf_url": "https://openreview.net/pdf?id=mid",
+                        "source": "ICML-2025-Accepted",
+                        "abstract": "Mid score abstract.",
+                    },
+                    {
+                        "id": "openreview-icml-2025-high",
+                        "title": "Displayed High Score Paper",
+                        "link": "https://openreview.net/forum?id=high",
+                        "pdf_url": "https://openreview.net/pdf?id=high",
+                        "source": "ICML-2025-Accepted",
+                        "abstract": "High score abstract.",
+                    },
+                ],
+                "queries": [],
+                "llm_ranked": [
+                    {"paper_id": "openreview-icml-2025-mid", "score": 4, "canonical_evidence": "四分。"},
+                    {"paper_id": "openreview-icml-2025-high", "score": 9, "canonical_evidence": "九分。"},
+                ],
+            }
+            result.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            self.mod.update_sidebar_with_conference(sidebar, result, docs_dir=tmp_path / "docs", deep_min_score=9)
+
+            enriched_ids = [item[0] for item in self.enriched_calls]
+            self.assertEqual(
+                enriched_ids,
+                ["openreview-icml-2025-mid", "openreview-icml-2025-high"],
+            )
 
     def test_update_sidebar_merges_different_topics_under_same_conference(self):
         with tempfile.TemporaryDirectory() as tmp:
