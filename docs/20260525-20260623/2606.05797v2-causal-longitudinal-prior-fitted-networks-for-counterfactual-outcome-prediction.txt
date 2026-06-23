@@ -1,0 +1,1549 @@
+Title: Causal Longitudinal Prior-Fitted Networks for Counterfactual Outcome Prediction
+
+URL Source: https://arxiv.org/pdf/2606.05797v2
+
+Published Time: Tue, 09 Jun 2026 01:10:40 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+# Causal Longitudinal Prior-Fitted Networks for Counterfactual Outcome Prediction 
+
+Amirhossein Zare 1 Amirhessam Zare 1 Herlock Rahimi 2
+
+Reza Salarikia 3 Mohammad Kashkooli 4,5    
+
+> amhosseinzare@gmail.com amir.hessam.zare@gmail.com herlock.rahimi@yale.edu salarikiareza@gmail.com mohammadkashkooli594@gmail.com
+
+## Abstract 
+
+Longitudinal treatment decisions from multivariate time-series data require predict-ing potential outcomes under future treatment sequences in the presence of time-varying confounding, heterogeneous patient dynamics, and limited domain-specific data. Existing longitudinal causal estimators typically address this problem by train-ing a new model for each cohort or simulator. We introduce Causal Longitudinal Prior-Fitted Networks (C AUSAL LONG PFN), a prior-fitted network for time-series causal inference in longitudinal treatment-response data and zero-shot in-context counterfactual outcome prediction. To our knowledge, C AUSAL LONG PFN is the first PFN-style model for history-conditional potential-outcome prediction under planned longitudinal treatment sequences, with systematic comparison against established longitudinal causal baselines on branchable counterfactual treatment-response benchmarks and factual real-world clinical data. The model is pretrained entirely on synthetic episodes sampled from a broad prior over temporal structural causal models, exposing it to treatment–confounder feedback, latent heterogeneity, nonlinear state evolution, delayed effects, and cumulative treatment responses. At test time, C AUSAL LONG PFN remains frozen and is used zero-shot: it conditions on support trajectories, a query history, and a planned future treatment sequence, and returns a predictive distribution over future outcomes without gradient updates or propensity-model fitting. Multi-step predictions are obtained by recursively ap-plying the one-step predictor under the specified treatment sequence. We evaluate the model on branchable cancer, HIV, and warfarin benchmarks with ground-truth counterfactual labels, and on factual-only rolling-origin prediction in MIMIC-III ICU trajectories. C AUSAL LONG PFN is competitive with domain-trained longi-tudinal baselines on counterfactual benchmarks and performs strongly on factual MIMIC-III prediction, suggesting that broad synthetic causal pretraining can pro-vide a frozen, amortized alternative for zero-shot longitudinal treatment-response prediction when repeated domain-specific training is costly or impractical. 
+
+## 1 Introduction 
+
+Predicting how a longitudinal outcome would evolve under future treatment decisions is a central problem in time-series causal inference for longitudinal treatment-response data. In the potential-outcomes framework [Rubin, 1974], for a unit observed through history Ht, the target is a history-conditional potential outcome, such as E[Y (¯ a) 
+
+> t+τ
+
+| Ht], under a planned treatment sequence ¯a =(at, . . . , a t+τ −1). Under consistency, positivity, and sequential exchangeability, this quantity is 
+
+> 1School of Medicine, Tehran University of Medical Sciences, Tehran, Iran.
+> 2Department of Electrical and Computer Engineering, Yale University, New Haven, CT, USA.
+> 3School of Medicine, Shiraz University of Medical Sciences, Shiraz, Iran.
+> 4Laboratory for Computational Physiology, MIT, Cambridge, MA, USA.
+> 5Student Research Committee, Shiraz University of Medical Sciences, Shiraz, Iran. Preprint.
+> arXiv:2606.05797v2 [cs.LG] 7 Jun 2026
+
+identified by the longitudinal g-formula [Robins, 1986, Robins et al., 2000, Hernán and Robins, 2020]. In practice, however, estimating it is difficult: treatment assignment at each step depends on covariates that are themselves affected by prior treatment (time-varying confounding); errors accumulate during multi-step counterfactual rollout; and observational cohorts are often too small to fit reliable deep sequence models from scratch. Modern longitudinal causal estimators address these challenges by explicitly modeling treatment– confounder feedback and treatment effects over time. RMSN [Lim, 2018] combines recurrent outcome models with inverse-probability weighting; CRN [Bica et al., 2020] learns balanced recurrent representations using adversarial treatment prediction; and G-Net [Li et al., 2021] implements neural 
+
+g-computation through autoregressive simulation. More recent transformer-based methods, including the Causal Transformer [Melnychuk et al., 2022] and G-Transformer [Xiong et al., 2024], use attention to represent longitudinal histories and long-range temporal dependencies and have achieved strong performance on standard counterfactual benchmarks. Despite this progress, these methods share a fundamental operational constraint: each new cohort or simulator typically requires a separate supervised training run, including validation-based hyperparameter selection and, for some methods, propensity modeling or representation balancing. This pipeline must be repeated for every new cohort or data release. Prior-Fitted Networks (PFNs) offer a complementary route. Rather than fitting a new model for each dataset, a PFN is pretrained on tasks sampled from a prior over data-generating processes and then performs in-context learning for zero-shot prediction on a new dataset without gradient updates [Müller et al., 2022]. This idea has led to strong amortized predictors for tabular data [Hollmann et al., 2023] and time-series forecasting [Dooley et al., 2023, Taga et al., 2025]. Recent work has also begun to apply PFN-style models for cross-sectional causal inference, including Do-PFN, CausalPFN, and CausalFM [Robertson et al., 2025, Balazadeh et al., 2025, Ma et al., 2025]. However, existing causal PFNs operate on independent, cross-sectional, tabular data: none model the sequential structure of longitudinal histories, handle time-varying confounding, or support multi-step potential outcomes under future treatment sequences. CausalTimePrior [Thumm and Chen, 2026] introduced a synthetic prior over temporal SCMs with paired observational and interventional time series and demonstrated a PFN-based proof of concept on held-out temporal SCMs. It is primarily positioned as a generic interventional time-series prior, rather than as an end-to-end PFN-style model for history-conditional potential-outcome prediction under planned longitudinal treatment sequences with a systematic comparison against established longitudinal causal baselines on synthetic and real-world treatment-response benchmarks. The intersection of longitudinal causal inference and PFN-style in-context prediction therefore remains largely unexplored. 
+
+This work. We introduce C AUSAL LONG PFN, a prior-fitted network for time-series causal inference in longitudinal treatment-response data and zero-shot in-context counterfactual outcome prediction. Given support trajectories from a new domain, a query history observed up to time t, and a supplied future treatment sequence, the frozen model returns a predictive distribution for the query outcome under that sequence. It does so without target-domain gradient updates, propensity-model fitting, adversarial balancing, or domain-specific simulator access at test time. The key idea is to amortize longitudinal causal prediction across a broad prior over temporal structural causal models. During pretraining, each synthetic task contains treatment-confounder feedback, latent unit heterogeneity, nonlinear state dynamics, delayed and cumulative treatment effects, and stochastic outcome mechanisms. The model learns to use support trajectories as an in-context description of the task and to answer query-level potential-outcome questions under proposed treatment sequences. At evaluation time, the learned one-step predictor is composed autoregressively under the supplied treatment sequence, yielding multi-step potential-outcome predictions in a zero-shot setting without retraining. This framing does not remove the standard assumptions needed to interpret observational data causally. Rather, C AUSAL LONG PFN provides an amortized estimator for history-conditional poten-tial outcomes in settings where the relevant longitudinal causal structure is supported by the synthetic prior and the usual identification assumptions are plausible. Empirically, we compare the frozen model against MSM, RMSN, G-Net, CRN, Causal Transformer, and G-Transformer, each trained and tuned separately on the target domain. C AUSAL LONG PFN achieves competitive normalized RMSE on branchable counterfactual benchmarks and strong factual prediction on MIMIC-III, suggesting 2that broad synthetic causal pretraining can be a useful frozen, amortized alternative to repeated domain-specific training. 
+
+Contributions. 
+
+1. A prior-fitted model for longitudinal causal prediction. We propose C AUSAL LONG PFN for history-conditional potential-outcome prediction under planned longitudinal treatment sequences. Unlike standard longitudinal causal estimators, it is evaluated as a frozen model and requires no test-time adaptation. 2. A synthetic prior over longitudinal causal tasks. We design a temporal structural causal model prior that generates diverse longitudinal tasks with treatment-confounder feedback, latent unit heterogeneity, nonlinear lagged dynamics, delayed and cumulative treatment effects, regime changes, and mixed noise mechanisms. This prior supplies the support trajectories and query counterfactual targets used for synthetic causal pretraining. 3. Architecture for longitudinal in-context causal inference. We propose a dual-encoder architec-ture combining a causal Transformer history encoder with a PFN context encoder over support trajectories and a Gaussian-mixture prediction head for distributional outcomes. 4. Autoregressive counterfactual rollout. We extend the learned one-step predictor to multi-step prediction by autoregressively rolling it forward under supplied treatment sequences, using each predicted intermediate outcome as part of the subsequent query history. 5. Zero-shot evaluation against domain-trained baselines. We evaluate a single frozen C AUSAL -LONG PFN on branchable cancer, HIV, and warfarin counterfactual benchmarks and on factual MIMIC-III ICU prediction. The comparison contrasts amortized synthetic pretraining with baselines that receive domain-specific training and validation-based model selection. 
+
+## 2 Methods 
+
+This section describes C AUSAL LONG PFN as an amortized model for time-series causal inference in longitudinal treatment-response data. The method combines a temporal structural causal prior, a support-query in-context architecture, and autoregressive rollout under planned future treatment sequences. 
+
+2.1 Problem formulation 
+
+We consider longitudinal observational data consisting of repeated covariates, treatments, outcomes, and static features. For unit i at discrete time t, let 
+
+Si,t ∈ RdS , Ai,t ∈ A , Yi,t ∈ R, Ci ∈ RdC (1) denote time-varying covariates, treatment, scalar outcome, and static covariates. The model-facing longitudinal state is 
+
+Xi,t = ( Si,t , Y i,t ) ∈ Rd, d = dS + 1 . (2) Implementation-specific details such as padding, the discrete four-action interface, and inactive dimensions are described in Appendix D. We use the standard longitudinal ordering in which covariates and the outcome at time t are observed before treatment Ai,t is assigned. The observed history available at decision time t is therefore 
+
+Hi,t =  Ci, X i, 0, A i, 0, X i, 1, . . . , A i,t −1, X i,t 
+
+. (3) A one-step potential outcome from time t to t + 1 is indexed by the candidate treatment Ai,t applied after observing Hi,t . Given a last observed time tobs , a horizon τ ≥ 1, and t⋆ = tobs + τ , we write the planned future treatment sequence as 
+
+¯atobs :t⋆−1 = ( atobs , a tobs +1 , . . . , a t⋆−1). (4) The first planned treatment is applied after observing Xtobs .The prediction target is the conditional counterfactual predictive distribution for a query unit, 
+
+p Y qt⋆ (¯ atobs :t⋆−1) ∈ dy | Hqtobs , C , (5) 3where C denotes support trajectories from the same task or domain. The support trajectories pro-vide the in-context evidence from which the frozen PFN infers the task-specific longitudinal data-generating process, while the query history specifies the individual whose future potential outcome is to be predicted. At prediction time, the model observes the query history through tobs and the planned future treatments. Future query covariates are not observed under the hypothetical treatment sequence and are therefore excluded from the query information set. For multi-step prediction, future query outcomes are generated recursively by the model itself. For real observational data, a causal interpretation of Eq. (5) requires the usual longitudinal assump-tions: consistency, positivity, and sequential exchangeability conditional on the measured history [Robins, 1986, Robins et al., 2000, Hernán and Robins, 2020]. Under these assumptions, the cor-responding counterfactual mean is identified by the longitudinal g-formula. C AUSAL LONG PFN does not fit a separate propensity model, balancing representation, or outcome model for each target domain. Instead, it amortizes the prediction of history-conditional potential outcomes by training a prior-fitted network on synthetic longitudinal causal tasks sampled from a broad prior over temporal structural causal models (TSCMs), following the structural-causal-model perspective on interventions and counterfactuals [Pearl, 2009, Peters et al., 2017]. As in prior-fitted networks, task adaptation occurs through conditioning on the support trajectories in context, rather than through test-time gradient updates [Müller et al., 2022, Hollmann et al., 2023, Nagler, 2023]. 
+
+2.2 Causal Longitudinal PFN Overview. CAUSAL LONG PFN combines a synthetic prior over longitudinal causal tasks with an in-context transformer predictor for time-series causal inference in longitudinal treatment-response data. During pretraining, each task is sampled from a TSCM prior and provides support trajectories together with query-level factual or counterfactual prediction targets. After pretraining, the model is kept frozen. At test time, it receives support trajectories from a new domain, a query history through 
+
+tobs , and a planned future treatment sequence, and returns a predictive distribution for the query outcome under that sequence. Thus, the model is designed as an amortized estimator for longitudinal potential-outcome prediction rather than as a domain-specific supervised learner. 
+
+Temporal structural causal prior. Each training episode samples a temporal structural causal model (TSCM) M ∼ Π and then draws support and query trajectories from this sampled data-generating process. The prior is designed to span a broad class of longitudinal causal dynamics rather than to reproduce a single hand-built simulator. A sampled TSCM specifies: 1. Causal temporal graph. The latent longitudinal state St ∈ RdS has variable dimension and evolves according to sparse contemporaneous and lagged dependencies. Within a time slice, the instantaneous graph is acyclic; across time, lagged edges induce temporal dependence. This exposes the model to settings in which current covariates depend on previous covariates, previous treatments, and other variables in the same time slice. 2. Nonlinear structural mechanisms. State coordinates follow sparse nonlinear autoregressive updates with randomly sampled elementary nonlinearities, including identity, tanh , sinusoidal, rectified-linear, absolute-value, square, and softplus functions, and with Gaussian, uniform, Laplace, or zero noise. The prior therefore includes both smooth and nonsmooth dynamics, low- and moderate-noise regimes, and occasional nonstationarity through regime switches. Full sampling details are given in Appendix B. 3. Longitudinal dynamical motifs. In addition to generic nonlinear dynamics, the prior optionally overlays structured dynamical motifs on randomly selected state dimensions. These include action-memory, saturating, homeostatic, feedback-control, and smoothed-readout channels. The motifs are intended to capture qualitative mechanisms common in longitudinal data, such as delayed treatment effects, bounded accumulation, regulatory feedback, proxy measurements, and slow physiological responses. Motif equations and parameter ranges are listed in Appendix B.4. 4. Confounded behavior policy. Treatments in support trajectories and factual query prefixes are sampled from a state-dependent stochastic behavior policy. Each unit has latent heterogeneity 
+
+Zi, which affects both its initial state and its treatment policy. This produces time-varying treatment–confounder feedback with varying strength. 5. Autoregressive outcome model. The scalar outcome is generated as an autoregressive readout of the evolving state with direct and cumulative treatment effects. Consequently, the target may 4depend on current state, previous outcomes, treatment history, and accumulated exposure. A regime switch is included in a minority of sampled TSCMs to expose the model to nonstationarity. For interventional query episodes, the generator first simulates the query factual prefix up to tobs . It then fixes the future treatment sequence ¯atobs :t⋆−1 and replays the structural equations forward from the same query state under this intervention, with future additive noise set to its conditional mean. This produces a structural target for the intervention-specific conditional mean. In observational episodes, the query continues under the behavior policy and the target is factual. Details are given in Appendix B.7. 
+
+Support-query episode construction. A pretraining episode is a supervised in-context causal prediction problem generated from one sampled TSCM. The episode contains support trajectories, a query trajectory prefix, a planned future treatment sequence for the query, and a target outcome. The support trajectories serve as examples from the same task-specific longitudinal system; the query asks for the outcome of one unit under a factual or hypothetical continuation. Training uses one-step prediction problems sampled at different depths along a future path. After choosing an observation time tobs and a future target window, the generator samples a current rollout time r ≥ tobs and trains the model to predict Y qr+1 from the query history through r, the current treatment Aqr , and the support trajectories. Interventional episodes replace future behavior-policy treatments with a sampled hypothetical sequence, whereas observational episodes retain the factual behavior-policy continuation. Multi-step prediction is therefore not trained as a separate direct-horizon task; it is obtained at test time by recursively applying the learned one-step predictor. To make the support trajectories informative about the sampled task, each support unit contributes several labeled time points from its observed trajectory. These labels provide in-context examples of how histories and treatments map to subsequent outcomes within the same TSCM. Query variables beyond the information available at the current prediction time are hidden according to the information set defined in Section 2.1. Additional details on support-anchor selection, masking, task-local normalization, and training augmentations are given in Appendix C. 
+
+Architecture. CAUSAL LONG PFN has three main components: a causal history encoder, a PFN context encoder, and a distributional prediction head. Architectural details are provided in Ap-pendix D. 
+
+(i) Causal history encoder. A trajectory-level causal transformer, implemented using masked self-attention in the Transformer architecture [Vaswani et al., 2017], maps each longitudinal sequence to history representations. The encoder processes covariates, outcomes, treatments, and missingness indicators while using a causal attention mask, so the representation at time r depends only on information available up to that time. 
+
+(ii) PFN context encoder. The PFN context encoder performs in-context adaptation from the support trajectories. Support tokens summarize labeled support histories, while the query token summarizes the query history and planned current treatment. The support and query tokens are processed jointly by self-attention. No positional encoding is assigned based on the ordering of support trajectories, so the architecture is designed to treat the support trajectories as an unordered set. 
+
+(iii) Gaussian-mixture prediction head. The final query representation parameterizes a Gaussian mixture distribution [Bishop, 1994] for the normalized next outcome, 
+
+qθ (yr+1 | C , H qr , A qr ) = 
+
+> 5
+
+X
+
+> k=1
+
+πr,k N (yr+1 ; μr,k , σ 2
+
+> r,k
+
+). (6) The mixture head provides both a point prediction, given by the mixture mean, and a predictive distribution for uncertainty evaluation. In the implementation, the component means are residualized around the most recent visible or self-predicted outcome, which gives the model a stable persistence baseline at initialization. 
+
+Implementation scope. Our implementation of C AUSAL LONG PFN uses a fixed interface across all tasks. Histories contain up to 60 observed time points, rollouts are evaluated up to horizon 5,and inputs support up to 10 time-varying covariate channels, one scalar outcome channel, 5 static covariates, and four discrete treatment actions. The model uses a 4-layer causal history encoder and a 56-layer PFN context encoder with hidden dimension 256 , 8 attention heads, feed-forward width 1024 ,and a 5-component Gaussian-mixture prediction head, giving 8,138 ,384 trainable parameters. During synthetic pretraining, each episode is generated from a sampled TSCM and contains between 3 and 
+
+500 support trajectories. With 10 ,000 optimizer updates and effective batch size 256 , pretraining processes 2,560 ,000 independently sampled synthetic episodes. At evaluation time, this same model is frozen and applied to all benchmark domains without architectural changes or gradient updates. Padding, support-anchor construction, normalization, and optimization details are provided in Appendices D, C, and F. 
+
+Training and rollout. The model is pretrained on synthetic support-query episodes using a one-step Gaussian-mixture negative log-likelihood. The loss is augmented with a small auxiliary term on the mixture mean and a mild regularizer against premature mixture collapse. Optimization details, including AdamW, learning-rate schedule, gradient accumulation, mixed precision, gradient clipping, and stochastic PFN depth, are reported in Appendices E and F. At test time, all model parameters are frozen. For one-step prediction, the model directly evaluates 
+
+qθ (ytobs +1 | C , H qtobs , a tobs ). For a horizon τ > 1, C AUSAL LONG PFN performs a plug-in sequential rollout under the supplied treatment sequence. Starting at r = tobs , it predicts the next-outcome distribution under the planned treatment ar , inserts the mixture mean as the next query outcome, keeps future query covariates unavailable, and repeats this procedure until r = t⋆ − 1. The final mixture is reported as the predictive distribution for Y qt⋆ (¯ atobs :t⋆−1), and its mean is used for point-estimation metrics. This rollout is a deterministic plug-in approximation to the full posterior predictive distribution over future outcome paths. It is closely related to sequential g-computation and parametric implementations of the longitudinal g-formula [Robins, 1986, Hernán and Robins, 2020]. The learned one-step conditional predictor is composed forward under the specified treatment sequence, with predicted intermediate outcomes becoming part of the subsequent query history. A stochastic ancestral rollout that samples intermediate outcomes from the mixture is a natural extension. Appendix G gives algorithmic details and discusses the deterministic plug-in nature of this approximation. 
+
+## 3 Experiments 
+
+We evaluate whether a single frozen C AUSAL LONG PFN pretrained only on synthetic TSCM episodes can serve as a zero-shot in-context predictor for time-series causal inference in external longitudinal treatment-response data. The central comparison is between amortized synthetic pretraining and domain-specific supervised training: C AUSAL LONG PFN is evaluated without updating its parameters, whereas all baselines are trained and selected separately using the support trajectories of each target domain. 
+
+Benchmarks. We use four longitudinal benchmarks: cancer tumor growth [Lim, 2018, Bica et al., 2020, Melnychuk et al., 2022, Li et al., 2021, Geng et al., 2017], warfarin PK/PD [Holford, 1986, Hamberg et al., 2010, International Warfarin Pharmacogenetics Consortium, 2009], HIV treatment dynamics [Adams et al., 2004, Miller et al., 2020], and MIMIC-III ICU trajectories [Johnson et al., 2016a,b, Goldberger et al., 2000, Wang et al., 2020, Harutyunyan et al., 2019]. These benchmarks are summarized in Table 8 and described in Appendix H. Cancer, warfarin, and HIV are branchable simulated or semi-mechanistic systems. For these domains, the same patient-specific dynamics can be replayed under alternative future treatment sequences, giving ground-truth counterfactual outcomes for evaluation. MIMIC-III is a real observational ICU dataset and is therefore used only for factual rolling-origin prediction under the observed future treatments. Its role is to test factual temporal prediction on real clinical trajectories, not to validate individual counterfactual effects under unobserved interventions. 
+
+Evaluation configuration. All benchmark domains are mapped to a common longitudinal predic-tion format. Each trajectory contains up to 60 time points, prediction origins are selected only after at least 10 observed time points, and multi-step evaluation uses a five-step horizon. For each domain, the evaluation grid crosses five support sizes, nsup ∈ { 40 , 80 , 160 , 320 , 500 }, ten task-index levels, and two random repetitions, yielding 5 × 10 × 2 = 100 benchmark tasks per domain. Each benchmark task contains multiple rolling-origin query rows, which are first aggregated before domain-level 6Table 1: Domain-balanced normalized RMSE across cancer, HIV, MIMIC-III, and warfarin. Entries report mean ± standard deviation across domains. Lower is better. C AUSAL LONG PFN is best for one-step prediction and third for five-step rollout despite using no domain-specific training.                 
+
+> Method One-step Horizon-5 CAUSAL LONG PFN 0.222 ±0.269 0.389 ±0.214
+> MSM 0.223 ±0.275 0.418 ±0.292
+> RMSN 0.225 ±0.273 0.350 ±0.254
+> G-Net 0.247 ±0.251 0.379 ±0.223
+> CT 0.258 ±0.259 0.871 ±0.096
+> GT 0.272 ±0.238 0.489 ±0.164
+> CRN 0.347 ±0.184 0.472 ±0.188
+
+summaries are computed. In cancer, HIV, and warfarin, the ten task-index levels correspond to confounding levels that control the strength of state-dependent treatment assignment. In MIMIC-III, the same ten-level grid is retained only to match the benchmark organization across domains; it indexes factual rolling-origin task variants and does not alter the observed ICU trajectories. Cancer, HIV, and warfarin provide branchable counterfactual labels, whereas MIMIC-III provides factual labels under observed future treatments. Dataset construction details are given in Appendix H, and scoring details are given in Appendix J. 
+
+Baselines. We compare against six standard longitudinal causal baselines: a marginal structural model (MSM) [Robins et al., 2000], Recurrent Marginal Structural Networks (RMSN) [Lim, 2018], G-Net [Li et al., 2021], Counterfactual Recurrent Networks (CRN) [Bica et al., 2020], Causal Transformer (CT) [Melnychuk et al., 2022], and G-Transformer (GT) [Xiong et al., 2024]. Together, these methods represent inverse-probability weighting, recurrent neural g-computation, adversarial representation balancing, and transformer-based longitudinal counterfactual modeling. Each baseline uses support-set validation for model selection and is then refit on the target support trajectories before query evaluation. In contrast, C AUSAL LONG PFN receives the same support trajectories only as in-context input and remains frozen. 
+
+Prediction protocol. All methods follow the same observation-time convention from Section 2.1. The query history is observed through tobs , the first planned treatment is atobs , and the target is Ytobs +τ . For multi-step prediction, methods are evaluated under the supplied future treatment sequence. In branchable simulated domains, this sequence defines the intervention used to generate the counterfactual label. In MIMIC-III, the sequence is the observed future treatment path and the label is factual. Implementation details of scoring are given in Appendix J. 
+
+Metrics. The primary metric is normalized RMSE. Normalization statistics are computed from support trajectories only, so query targets are never used to define the reporting scale. Metrics are computed for each benchmark task by aggregating all scored query rows within that task and are then averaged within domains. Domain-balanced summaries average the four domain means equally, preventing large domains from dominating the reported overall performance. For MIMIC-III, normalized RMSE measures factual temporal prediction under observed clinical practice rather than counterfactual accuracy. Lower values are better; in result tables, the best, second-best, and third-best values within each comparison are highlighted in green, blue, and orange, respectively. Full scoring details are provided in Appendix J. 
+
+3.1 Results Domain-balanced performance. Table 1 reports the mean normalized RMSE after first aggregating within each domain and then averaging equally across the four domains. C AUSAL LONG PFN achieves the best domain-balanced one-step performance, with normalized RMSE 0.2217 , narrowly ahead of MSM ( 0.2233 ) and RMSN ( 0.2247 ). For five-step prediction, C AUSAL LONG PFN ranks third overall, behind RMSN and G-Net, while remaining ahead of MSM, CRN, GT, and CT. These results show that the frozen synthetically pretrained model is competitive with baselines that are trained and selected separately for each target domain. 7Table 2: Per-domain normalized RMSE with standard deviation across evaluation units. Entries report mean ± standard deviation. Lower mean normalized RMSE is better. The top three values in each row are highlighted. MIMIC-III is factual-only; cancer, HIV, and warfarin provide branchable counterfactual labels.                                                                         
+
+> Domain Task CAUSAL LONG PFN MSM RMSN G-Net CRN CT GT Cancer One-step 0.167 ±0.255 0.200 ±0.278 0.166 ±0.256 0.168 ±0.242 0.251 ±0.291 0.209 ±0.265 0.217 ±0.281 Cancer Horizon-5 0.385 ±0.356 0.465 ±0.435 0.246 ±0.337 0.308 ±0.285 0.278 ±0.334 0.849 ±0.743 0.372 ±0.456 HIV One-step 0.066 ±0.032 0.061 ±0.027 0.051 ±0.029 0.097 ±0.066 0.244 ±0.175 0.100 ±0.058 0.094 ±0.056 HIV Horizon-5 0.288 ±0.174 0.248 ±0.122 0.186 ±0.117 0.235 ±0.137 0.405 ±0.253 0.915 ±0.618 0.342 ±0.193 MIMIC-III One-step 0.617 ±0.256 0.619 ±0.256 0.626 ±0.272 0.619 ±0.246 0.622 ±0.249 0.638 ±0.264 0.620 ±0.251 MIMIC-III Horizon-5 0.688 ±0.198 0.809 ±0.260 0.729 ±0.226 0.710 ±0.193 0.725 ±0.214 0.972 ±0.373 0.694 ±0.196 Warfarin One-step 0.036 ±0.023 0.014 ±0.007 0.055 ±0.085 0.102 ±0.109 0.270 ±0.191 0.084 ±0.091 0.158 ±0.188 Warfarin Horizon-5 0.196 ±0.143 0.152 ±0.075 0.238 ±0.236 0.261 ±0.213 0.480 ±0.315 0.749 ±0.615 0.546 ±0.646
+
+Per-domain results. Table 2 reports normalized RMSE by domain, prediction task, and method. The main pattern is that C AUSAL LONG PFN remains consistently competitive across heterogeneous domains without target-domain retraining. For one-step prediction, it ranks second on cancer, third on HIV, first on MIMIC-III, and second on warfarin. For five-step prediction, it ranks first on MIMIC-III and second on warfarin, but is weaker on HIV and cancer, where domain-trained recurrent baselines perform best. This domain-level breakdown is important: C AUSAL LONG PFN is not uniformly superior, but it provides a strong frozen predictor across tasks with very different dynamics and outcome scales. 
+
+Real-world factual prediction. MIMIC-III provides a test of transfer to real-world factual ICU trajectories, where no method has access to counterfactual labels and evaluation is restricted to rolling-origin prediction under observed treatment paths. C AUSAL LONG PFN ranks first on both MIMIC-III one-step and five-step prediction. For one-step prediction, its normalized RMSE is 0.6170 ,ahead of MSM at 0.6186 and G-Net at 0.6193 . For five-step prediction, it obtains 0.6884 , ahead of GT at 0.6938 and G-Net at 0.7104 . Thus, on the real clinical benchmark, the frozen synthetically pretrained model matches or exceeds domain-trained baselines without using target-domain gradient updates. 
+
+Counterfactual simulated domains. Cancer, HIV, and warfarin provide branchable counterfactual labels, allowing direct evaluation under alternative treatment sequences. On one-step counterfactual prediction, C AUSAL LONG PFN is close to the strongest domain-trained methods: it ranks second on cancer, third on HIV, and second on warfarin. Longer-horizon performance is more mixed. CAUSAL LONG PFN remains second on warfarin and competitive on HIV, but its largest relative gap occurs on cancer five-step prediction, where RMSN, CRN, G-Net, and GT achieve lower error. This suggests that specialized recurrent or transformer models can retain an advantage when a target simulator provides enough support data for domain-specific fitting, especially over longer rollouts. 
+
+Interpretation. Overall, the results support the main claim that broad synthetic causal pretraining can produce a useful in-context model for longitudinal treatment-response prediction. C AUSAL -LONG PFN is not uniformly best, but it achieves the best domain-balanced one-step performance, the third-best domain-balanced five-step performance, and the best performance on the real MIMIC-III benchmark at both horizons. These results are notable because C AUSAL LONG PFN is evaluated as a single frozen model trained only on synthetic TSCM episodes, whereas all baselines receive domain-specific training and validation-based model selection. The pattern suggests that a sufficiently broad synthetic longitudinal causal prior can capture reusable structure across treatment-response tasks, making C AUSAL LONG PFN a strong general-purpose in-context predictor when repeated domain-specific training is expensive, rapid adaptation to a new cohort is needed, or counterfactual supervision is unavailable. 
+
+3.2 Uncertainty and Calibration 
+
+Table 3 evaluates predictive uncertainty using standard probabilistic forecasting diagnostics, including empirical coverage, NLL, CRPS, and PIT-ECE [Gneiting et al., 2007, Gneiting and Raftery, 2007]. Calibration varies by domain. Warfarin has the lowest RMSE, NLL, and CRPS, and its empirical 8Table 3: One-step calibration of C AUSAL LONG PFN predictive distributions. Lower is better for RMSE, NLL, CRPS, and PIT-ECE. Empirical coverage should match the nominal level, while interval width should be interpreted relative to coverage.                                                          
+
+> Domain RMSE NLL ↓CRPS ↓Pred. std. PIT-ECE ↓Cov. 80% Width 80% Cov. 90% Width 90% Cancer 0.167 -0.711 0.082 0.054 0.029 0.703 0.125 0.781 0.170 HIV 0.066 -1.310 0.039 0.064 0.037 0.753 0.155 0.849 0.205 MIMIC-III 0.617 0.938 0.336 0.451 0.019 0.727 1.096 0.836 1.518 Warfarin 0.036 -1.976 0.021 0.048 0.036 0.863 0.106 0.934 0.145 Domain-balanced 0.222 -0.765 0.120 0.154 0.030 0.761 0.370 0.850 0.510
+
+coverage is slightly conservative at the 90% level. HIV also shows low point error and sharp predictive intervals, although coverage remains below nominal. MIMIC-III is the most difficult calibration setting: it has the largest NLL and CRPS and substantially wider intervals, reflecting the greater heterogeneity and noise of the real ICU benchmark. Overall, the Gaussian-mixture head provides useful distributional information without domain-specific training, but the under-coverage suggests that future work should improve uncertainty propagation, especially for multi-step prediction and real-world clinical data. 
+
+## 4 Conclusion 
+
+We introduced C AUSAL LONG PFN, a prior-fitted transformer for predicting history-conditional potential outcomes in longitudinal treatment-response time series. The model is pretrained solely on synthetic temporal structural causal models and is then evaluated as a frozen in-context predictor on new domains. Given support trajectories, a query history, and a planned future treatment sequence, it returns a predictive distribution without target-domain gradient updates, propensity-model fitting, adversarial balancing, or simulator access at test time. CAUSAL LONG PFN achieves the best domain-balanced one-step normalized RMSE and the third-best domain-balanced five-step normalized RMSE. It performs particularly well on factual MIMIC-III rolling-origin prediction, where it ranks first at both horizons. These results suggest that broad synthetic causal pretraining can provide a useful in-context predictor for time-series causal inference and longitudinal treatment-response tasks, especially when retraining is costly, rapid evaluation on a new cohort is needed, or counterfactual supervision is unavailable. At the same time, the results show that domain-specific training remains valuable when sufficient target-domain data and validation signal are available. 
+
+## 5 Limitations and broader impact 
+
+As a model for time-series causal inference in longitudinal treatment-response data, C AUSAL -LONG PFN does not remove the assumptions required for causal interpretation of longitudinal observational data. In real cohorts, counterfactual validity still depends on consistency, positivity, and sequential exchangeability given the measured history, as summarized in Appendix A.2. Vio-lations due to unmeasured confounding, poor treatment overlap, censoring, irregular sampling, or measurement error can bias any longitudinal counterfactual estimator, including C AUSAL LONG PFN. The method also depends on the support of the synthetic prior. Performance may degrade when the target domain contains mechanisms, treatment policies, outcome dynamics, missingness patterns, or intervention effects that are poorly covered by the TSCM prior. The current implementation focuses on discrete treatments, fixed time grids, and deterministic mean rollout, which make the model stable, efficient, and straightforward to evaluate across heterogeneous benchmarks. These choices are not fundamental restrictions of the framework. Natural extensions include continuous or structured treatment spaces, irregular-time encoders, explicit missingness and censoring models, and stochastic rollout procedures that propagate uncertainty over future trajectories while preserving the same amortized in-context causal prediction principle. The potential benefit of this approach is to reduce dependence on hand-built disease simulators and re-peated domain-specific supervised training when studying longitudinal treatment-response prediction from time-series data. A frozen in-context model could be useful for rapid benchmarking, exploratory 9counterfactual analysis, or settings where retraining many specialized models is impractical. The main risk is over-reliance: predictions may appear precise even when the causal assumptions, data quality, treatment overlap, or prior support are inadequate. In particular, strong factual prediction on MIMIC-III should not be interpreted as validation of individual treatment effects under unobserved ICU interventions. C AUSAL LONG PFN should therefore be viewed as a research tool for causal sequence modeling and hypothesis generation, not as a standalone clinical decision system. 
+
+## Code availability 
+
+Code for model training, synthetic episode generation, benchmark construction, and evaluation is available at https://github.com/Amirhossein-Zare/causal-long-pfn .
+
+## Model availability 
+
+The pretrained C AUSAL LONG PFN inference weights are available on the Hugging Face Model Hub at 
+
+https://huggingface.co/Amirhossein-Zare/causal-long-pfn . The released checkpoint, 
+
+causal-long-pfn-v1-step10000.safetensors , contains the frozen model weights used for inference. 
+
+## Data availability 
+
+The cancer, HIV, and warfarin benchmarks are simulated or semi-mechanistic benchmarks that can be regenerated using the released code and the simulator specifications described in the paper. MIMIC-III is a credentialed-access de-identified clinical database and is not redistributed with this paper. Reproducing MIMIC-III experiments requires obtaining access through the official data-use process and applying the preprocessing protocol described in Appendix H.4. 
+
+## Funding 
+
+No external funding was received for this work. 
+
+## Competing interests 
+
+The authors declare no competing interests. 
+
+## References 
+
+Brian M. Adams, H. T. Banks, Hee-Dae Kwon, and Hien T. Tran. Dynamic multidrug therapies for HIV: Optimal and STI control approaches. Mathematical Biosciences and Engineering , 1 (2):223–241, 2004. doi: 10.3934/mbe.2004.1.223. URL https://www.aimsciences.org/ article/id/581f3255-5440-4142-ba09-cc084fac3cc4 .Vahid Balazadeh, Hamidreza Kamkari, Valentin Thomas, Benson Li, Junwei Ma, Jesse C. Cresswell, and Rahul G. Krishnan. Causalpfn: Amortized causal effect estimation via in-context learning. In 
+
+Advances in Neural Information Processing Systems , volume 38, 2025. Ioana Bica, Ahmed M. Alaa, James Jordon, and Mihaela van der Schaar. Estimating counterfactual treatment outcomes over time through adversarially balanced representations. In International Conference on Learning Representations , 2020. URL https://openreview.net/forum?id= BJg866NFvB .Christopher M. Bishop. Mixture density networks. Copyright © 1994, Christopher M. Bishop. This work is licensed under a Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License (https://creativecommons.org/licenses/by-nc-nd/4.0/)., 1994. URL https: //publications.aston.ac.uk/id/eprint/373/ .10 Samuel Dooley, Gurnoor Singh Khurana, Chirag Mohapatra, Siddartha Naidu, and Colin White. ForecastPFN: Synthetically-trained zero-shot forecasting, 2023. URL https://arxiv.org/ abs/2311.01933 .Changran Geng, Harald Paganetti, and Clemens Grassberger. Prediction of treatment response for combined chemo- and radiation therapy for non-small cell lung cancer patients using a bio-mathematical model. Scientific Reports , 7:13542, 2017. doi: 10.1038/s41598-017-13646-z. Tilmann Gneiting and Adrian E. Raftery. Strictly proper scoring rules, prediction, and es-timation. Journal of the American Statistical Association , 102(477):359–378, 2007. doi: 10.1198/016214506000001437. Tilmann Gneiting, Fadoua Balabdaoui, and Adrian E. Raftery. Probabilistic forecasts, calibration and sharpness. Journal of the Royal Statistical Society: Series B (Statistical Methodology) , 69(2): 243–268, 2007. doi: 10.1111/j.1467-9868.2007.00587.x. Ary L. Goldberger, Luis A. N. Amaral, Leon Glass, et al. Physiobank, physiotoolkit, and physionet: Components of a new research resource for complex physiologic signals. Circulation , 101(23): e215–e220, 2000. A-K Hamberg, M Wadelius, J D Lindh, M L Dahl, R Padrini, P Deloukas, A Rane, and E N Jonsson. A pharmacometric model describing the relationship between warfarin dose and inr response with respect to variations in cyp2c9, vkorc1, and age. Clinical Pharmacology & Therapeutics , 87(6):727– 734, 2010. doi: https://doi.org/10.1038/clpt.2010.37. URL https://ascpt.onlinelibrary. wiley.com/doi/abs/10.1038/clpt.2010.37 .Hrayr Harutyunyan, Hrant Khachatrian, David C. Kale, Greg Ver Steeg, and Aram Galstyan. Multitask learning and benchmarking with clinical time series data. Scientific Data , 6:96, 2019. doi: 10.1038/s41597-019-0103-9. Miguel A. Hernán and James M. Robins. Causal Inference: What If . Chapman &Hall/CRC, Boca Raton, 2020. URL https://www.hsph.harvard.edu/miguel-hernan/ causal-inference-book/ .Nicholas H. G. Holford. Clinical pharmacokinetics and pharmacodynamics of warfarin: Under-standing the dose-effect relationship. Clinical Pharmacokinetics , 11(6):483–504, 1986. doi: 10.2165/00003088-198611060-00005. Noah Hollmann, Samuel Müller, Katharina Eggensperger, and Frank Hutter. TabPFN: A transformer that solves small tabular classification problems in a second. In International Conference on Learning Representations , 2023. URL https://openreview.net/forum?id=cp5PvcI6w8_ .International Warfarin Pharmacogenetics Consortium. Estimation of the warfarin dose with clinical and pharmacogenetic data. New England Journal of Medicine , 360(8):753–764, 2009. doi: 10. 1056/NEJMoa0809329. URL https://www.nejm.org/doi/full/10.1056/NEJMoa0809329 .Alistair Johnson, Tom Pollard, and Roger Mark. MIMIC-III Clinical Database. PhysioNet , September 2016a. doi: 10.13026/C2XW26. URL https://doi.org/10.13026/C2XW26 . Version 1.4. Alistair E. W. Johnson, Tom J. Pollard, Lu Shen, Li-wei H. Lehman, Mengling Feng, Mohammad Ghassemi, Benjamin Moody, Peter Szolovits, Leo Anthony Celi, and Roger G. Mark. MIMIC-III, a freely accessible critical care database. Scientific Data , 3:160035, 2016b. doi: 10.1038/sdata. 2016.35. Rui Li, Stephanie Hu, Mingyu Lu, Yuria Utsumi, Prithwish Chakraborty, Daby M. Sow, Piyush Madan, Jun Li, Mohamed Ghalwash, Zach Shahn, and Li-wei Lehman. G-Net: A recurrent network approach to G-computation for counterfactual prediction under a dynamic treatment regime. In Proceedings of Machine Learning for Health , volume 158 of Proceedings of Machine Learning Research , pages 282–299. PMLR, 2021. URL https://proceedings.mlr.press/ v158/li21a.html .11 Bryan Lim. Forecasting treatment responses over time using recurrent marginal structural net-works. In Advances in Neural Information Processing Systems , volume 31. Curran Associates, Inc., 2018. URL https://proceedings.neurips.cc/paper_files/paper/2018/file/ 56e6a93212e4482d99c84a639d254b67-Paper.pdf .Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International Conference on Learning Representations , 2019. URL https://openreview.net/forum?id= Bkg6RiCqY7 .Yuchen Ma, Dennis Frauen, Emil Javurek, and Stefan Feuerriegel. Foundation models for causal inference via prior-data fitted networks. arXiv preprint arXiv:2506.10914 , 2025. URL https: //arxiv.org/abs/2506.10914 .Valentyn Melnychuk, Dennis Frauen, and Stefan Feuerriegel. Causal transformer for estimating counterfactual outcomes. In Proceedings of the 39th International Conference on Machine Learning , volume 162 of Proceedings of Machine Learning Research , pages 15293–15329. PMLR, 2022. URL https://proceedings.mlr.press/v162/melnychuk22a.html .John Miller, Chloe Hsu, Jordan Troutman, Juan Perdomo, Tijana Zrnic, Lydia Liu, Yu Sun, Ludwig Schmidt, and Moritz Hardt. WhyNot. Software package, 2020. URL https://doi.org/10. 5281/zenodo.3875775 .Samuel Müller, Noah Hollmann, Sebastian Pineda Arango, Josif Grabocka, and Frank Hutter. Transformers can do Bayesian inference. In International Conference on Learning Representations ,2022. URL https://openreview.net/forum?id=KSugKcbNf9 .Thomas Nagler. Statistical foundations of prior-data fitted networks. In Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research , pages 25660–25676. PMLR, 2023. URL https://proceedings.mlr.press/v202/ nagler23a.html .Judea Pearl. Causality: Models, Reasoning, and Inference . Cambridge University Press, Cambridge, 2 edition, 2009. doi: 10.1017/CBO9780511803161. Jonas Peters, Dominik Janzing, and Bernhard Schölkopf. Elements of Causal Inference: Founda-tions and Learning Algorithms . Adaptive Computation and Machine Learning. The MIT Press, Cambridge, MA, 2017. ISBN 9780262037310. Jake Robertson, Arik Reuter, Siyuan Guo, Noah Hollmann, Frank Hutter, and Bernhard Schölkopf. Do-PFN: In-context learning for causal effect estimation, 2025. URL https://arxiv.org/abs/ 2506.06039 .James M. Robins. A new approach to causal inference in mortality studies with a sustained exposure period—application to control of the healthy worker survivor effect. Mathematical Modelling , 7 (9–12):1393–1512, 1986. doi: 10.1016/0270-0255(86)90088-6. James M. Robins, Miguel A. Hernán, and Babette Brumback. Marginal structural models and causal inference in epidemiology. Epidemiology , 11(5):550–560, 2000. doi: 10.1097/ 00001648-200009000-00011. Donald B. Rubin. Estimating causal effects of treatments in randomized and nonrandomized studies. 
+
+Journal of Educational Psychology , 66(5):688–701, 1974. doi: 10.1037/h0037350. Ege Onur Taga, Muhammed Emrullah Ildiz, and Samet Oymak. TimePFN: Effective multivariate time series forecasting with synthetic data. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 39, pages 20761–20769, 2025. Dennis Thumm and Ying Chen. Interventional time series priors for causal foundation models. In 1st ICLR Workshop on Time Series in the Age of Large Models , 2026. URL https://openreview. net/forum?id=JbTgx2L9Z2 .12 Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Ł ukasz Kaiser, and Illia Polosukhin. Attention is all you need. In I. Guyon, U. Von Luxburg, S. Bengio, H. Wallach, R. Fergus, S. Vishwanathan, and R. Garnett, edi-tors, Advances in Neural Information Processing Systems , volume 30. Curran Associates, Inc., 2017. URL https://proceedings.neurips.cc/paper_files/paper/2017/file/ 3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf .Shirly Wang, Matthew B. A. McDermott, Geeticka Chauhan, Michael C. Hughes, Tristan Naumann, and Marzyeh Ghassemi. MIMIC-Extract: A data extraction, preprocessing, and representation pipeline for MIMIC-III. In Proceedings of the ACM Conference on Health, Inference, and Learning , pages 222–235, 2020. doi: 10.1145/3368555.3384469. URL https://doi.org/10. 1145/3368555.3384469 .Hong Xiong, Feng Wu, Leon Deng, Megan Su, and Li-wei H. Lehman. G-Transformer: Counterfac-tual outcome prediction under dynamic and time-varying treatment regimes. In Proceedings of the 9th Machine Learning for Healthcare Conference , volume 252 of Proceedings of Machine Learning Research . PMLR, 2024. URL https://proceedings.mlr.press/v252/xiong24a.html .13 A Causal foundations and estimand 
+
+This appendix states the longitudinal causal estimand used in the paper and the standard assumptions under which it can be interpreted causally from observational data. 
+
+A.1 Observed data and histories 
+
+For unit i at discrete time t, let 
+
+Si,t ∈ RdS , Ai,t ∈ A , Yi,t ∈ R, Ci ∈ RdC (7) denote time-varying covariates, treatment, scalar outcome, and static covariates. The model-facing longitudinal state is 
+
+Xi,t = ( Si,t , Y i,t ) ∈ Rd, d = dS + 1 . (8) Treatment Ai,t is assigned after observing Xi,t . The observed history available immediately before treatment assignment at time t is 
+
+Hi,t = ( Ci, X i, 0, A i, 0, X i, 1, A i, 1, . . . , A i,t −1, X i,t ). (9) For a query unit observed through time t, the model receives support trajectories C from the same task or domain, the query history Ht, and a planned future treatment sequence 
+
+¯at:t+τ −1 = ( at, a t+1 , . . . , a t+τ −1). (10) The target is the history-conditional potential outcome 
+
+Yt+τ (¯ at:t+τ −1), (11) or its conditional predictive distribution given the observed query history and support trajectories: 
+
+p(Yt+τ (¯ at:t+τ −1) ∈ dy | Ht, C) . (12) For point prediction, we evaluate the corresponding conditional mean. 
+
+A.2 Identification assumptions 
+
+For observational data, Eq. (12) has a causal interpretation only under the usual longitudinal causal assumptions. 
+
+Consistency. If a unit actually follows the treatment sequence ¯at:t+τ −1, then its observed outcome equals the corresponding potential outcome under that sequence. 
+
+Sequential exchangeability. At each time point, after conditioning on the observed history Ht,treatment assignment is independent of future potential outcomes. Informally, there are no unmea-sured time-varying confounders after conditioning on the recorded history. 
+
+Positivity. Every treatment sequence considered for evaluation must have positive probability, or adequate support, among units with comparable histories. Without such overlap, the corresponding counterfactual prediction requires extrapolation. 
+
+No interference and well-defined interventions. One unit’s potential outcomes are unaffected by the treatment assignments of other units, and the treatment actions correspond to well-defined interventions. These assumptions are standard for longitudinal causal inference and are not guaranteed by C AUSAL -LONG PFN. They are required for any observational counterfactual interpretation of the predictions. 
+
+A.3 Connection to the longitudinal g-formula 
+
+Under consistency, sequential exchangeability, positivity, and no interference, the conditional mean potential outcome can be written using the longitudinal g-formula [Robins, 1986, Robins et al., 2000, Hernán and Robins, 2020]. In words, the g-formula propagates the observed conditional transition law forward while setting future treatments to the specified intervention sequence. 14 Let 
+
+Ks(dx s+1 | hs, a s) = P(Xs+1 ∈ dx s+1 | Hs = hs, A s = as) (13) denote the observed one-step transition distribution. Starting from ht = Ht, define the future history recursively by appending the intervention treatment as and the next state xs+1 . Then the identified conditional mean can be written schematically as 
+
+E[Yt+τ (¯ at:t+τ −1) | Ht = ht] = 
+
+Z
+
+y(xt+τ ) 
+
+> t+τ−1
+
+Y
+
+> s=t
+
+Ks(dx s+1 | hs, a s). (14) This expression motivates the sequential prediction problem studied in the paper: future outcomes are predicted by repeatedly applying one-step conditional models under a specified future treatment sequence. 
+
+A.4 Role of C AUSAL LONG PFN 
+
+CAUSAL LONG PFN is an estimator for the prediction problem above. It does not introduce new identification assumptions and does not remove the need for consistency, positivity, and sequential exchangeability in observational data. Instead, it amortizes the estimation problem by pretraining on many synthetic longitudinal causal tasks and then conditioning on support trajectories from a new task at test time. The model is trained as a one-step predictor. Multi-step predictions are obtained by deterministic plug-in rollout: the model predicts the next outcome under the planned treatment, inserts the predicted mean into the query history, and repeats this process until the desired horizon. This procedure is an approximation to full sequential predictive inference because it does not integrate over all possible intermediate outcome paths. The empirical evaluation directly assesses the resulting multi-step predictions in the benchmark settings. 
+
+## B Temporal structural causal prior 
+
+This appendix specifies the temporal structural causal model (TSCM) prior used to generate synthetic pretraining episodes for C AUSAL LONG PFN. Each episode draws a fresh longitudinal data-generating process from the prior and then samples support trajectories and a query trajectory from that process. The prior is intentionally heterogeneous: it varies state dimension, temporal lag structure, nonlinear mechanisms, treatment-policy confounding, latent unit heterogeneity, outcome dynamics, observation windows, and interventional rollout horizons. Its purpose is not to reproduce any single disease simulator, but to expose the model to a broad family of longitudinal treatment-response tasks with reusable causal structure. 
+
+B.1 Global ranges B.2 TSCM hyperparameter sampling 
+
+A synthetic TSCM instance is sampled as follows: 1. State dimension. Sample dS ∼ Unif {1, . . . , 10 }.2. Lag order. Sample K ∼ Unif {1, 2}.3. Instantaneous graph. Sample an instantaneous adjacency matrix G(0) ∈ { 0, 1}dS ×dS as a strictly lower-triangular Erd˝ os–Rényi matrix with edge probability 
+
+pedge = 0 .1 + 0 .5B, B ∼ Beta(2 , 2) . (15) This gives an acyclic contemporaneous graph under the coordinate ordering. 4. Lagged graph. For lag k, sample a full lagged adjacency matrix G(k) ∈ { 0, 1}dS ×dS with edge probability pedge γk
+
+> lag
+
+, where γlag ∼ Unif(0 .4, 0.8) . This induces sparse temporal dependence with geometrically decaying edge probability across lags. 5. Structural weights. Sample instantaneous weights W (0)  
+
+> ij
+
+∼ N (0 , σ 2 
+
+> W
+
+)G(0)  
+
+> ij
+
+and lagged weights 
+
+W (k) 
+
+> ij
+
+∼ N (0 , (0 .7σW )2)G(k) 
+
+> ij
+
+, with σW ∼ Unif(0 .3, 1.0) .15 Table 4: Core synthetic task ranges. The prior varies state dimension, support size, observation time, and prediction horizon so that a single model is trained across heterogeneous longitudinal causal tasks. Quantity Value Observed time tobs Uniform integer 1–60 
+
+Prediction horizon τ Uniform integer 1–5
+
+Maximum input length 65 input slots, target index up to 65 
+
+State dimension dS Uniform integer 1–10 
+
+Outcome dimension 1
+
+Padded input dimension Dmax 11 
+
+Static covariate dimension 5; active in 30% of synthetic episodes Treatment space 4 discrete treatments Latent heterogeneity dimension 3
+
+Support size Uniform integer 3–500 
+
+Support anchor labels 4 per support trajectory Observational query probability 0.30 
+
+Support future-covariate masking probability 0.35 
+
+Support target-noise augmentation 0.15 
+
+Sentinel for hidden values −99 
+
+6. Nonlinearities. Sample each generic activation independently from 
+
+{id , tanh , sin , cos , | · | , (·)2, ReLU , softplus }. (16) 7. State noise. For each state coordinate, sample a centered Gaussian, uniform, or Laplace noise family. The coordinate noise scale is zero with probability 0.5; otherwise it is proportional to a task-level base scale. The base scale is sampled from a low-noise range with probability 0.6 and from a moderate-noise range with probability 0.4.8. Autoregressive persistence. Set the coordinate-level autoregressive coefficient αi = 0 with probability 0.5; otherwise sample αi ∼ Unif(0 .5, 1.0) .9. Treatment-policy confounding strength. Sample a policy strength multiplier that is zero with probability 0.08 , one with probability 0.20 , and otherwise a random integer from 2 to 5.Treatment-policy state weights are scaled by this multiplier, producing tasks with varying degrees of treatment–confounder feedback. 10. Regime switch. With probability 0.12 , sample a second structural mechanism with the same graph support and activate it after a sampled early-to-midpoint switch time. Structural weights and nonlinearities change after the switch, creating nonstationary longitudinal dynamics. 
+
+B.3 Generic structural mechanisms 
+
+For a generic non-motif state coordinate, the transition is a sparse nonlinear autoregressive update combining lagged state inputs, acyclic within-slice inputs, treatment inputs, and additive noise. Instantaneous contributions use the partially constructed next-time state St+1 ,ℓ for ℓ < m , while lagged contributions use previous states from the lag buffer. Values are clipped internally to avoid numerical explosions during synthetic generation. Thus, even before adding the structured motifs below, the prior spans nonlinear autoregression, contemporaneous acyclic dependence, lagged temporal dependence, treatment effects, and heterogeneous noise. 
+
+B.4 Latent dynamical motifs 
+
+The prior optionally allocates disjoint state coordinates to five motif types. Motif coordinates are selected by a random permutation of the state dimensions, so motif identity is not tied to a fixed input channel. These motifs are included to expose the model to qualitative mechanisms common in biomedical and behavioral longitudinal data: slow accumulation, saturation, homeostatic regulation, feedback control, and proxy readout dynamics. 16 Action-memory channel. With probability 0.25 , one coordinate follows a leaky accumulation model: 
+
+Smem  
+
+> t+1 ,m
+
+= δmSmem  
+
+> t,m
+
++ w⊤
+
+> m
+
+b(At) + v⊤
+
+> m
+
+Mt+1 + εt+1 ,m , (17) where δm ∼ Unif(0 .72 , 0.97) and Mt+1 is a running treatment-memory vector. 
+
+Saturating channel. With probability 0.25 , one or two coordinates follow a nonnegative saturating update: 
+
+Ssat  
+
+> t+1 ,m
+
+= clip [0 ,6] 
+
+
+
+Ssat  
+
+> t,m
+
++ rmbm
+
+
+
+1 − gm
+
+Lt
+
+hm + Lt + ϵ
+
+
+
+− rmSsat  
+
+> t,m
+
++ εt+1 ,m 
+
+
+
+, (18) where Lt is a nonnegative signal derived from treatment memory and, when available, latent memory coordinates. 
+
+Homeostatic channel. With probability 0.25 , one coordinate reverts toward a sampled baseline: 
+
+Shom  
+
+> t+1 ,m
+
+= Shom  
+
+> t,m
+
++ κm(μm − Shom  
+
+> t,m
+
+) + w⊤
+
+> m
+
+b(At) + εt+1 ,m . (19) 
+
+Feedback channel. With probability 0.25 , one coordinate receives error-driven control from a source coordinate j(m):
+
+Sfb  
+
+> t+1 ,m
+
+= ρmSfb  
+
+> t,m
+
++ γm(ηm − St,j (m)) + w⊤
+
+> m
+
+b(At) + εt+1 ,m . (20) 
+
+Readout channel. With probability 0.20 , one coordinate tracks another coordinate using exponen-tial smoothing: 
+
+Sread  
+
+> t+1 ,m
+
+= ρrd  
+
+> m
+
+Sread  
+
+> t,m
+
++ (1 − ρrd  
+
+> m
+
+)St+1 ,j (m) + εt+1 ,m . (21) Table 5: Sampling ranges for motif-specific parameters. The motifs introduce slow accumulation, saturation, regulation, feedback, and proxy readout dynamics into the synthetic prior. 
+
+Motif Parameter Symbol Range Memory decay δm [0 .72 , 0.97] 
+
+Saturating baseline bm [0 .5, 1.5] 
+
+rate rm [0 .02 , 0.15] 
+
+gain gm [0 .25 , 0.95] 
+
+half-saturation hm [0 .3, 2.0] 
+
+Homeostatic reversion κm [0 .03 , 0.15] 
+
+baseline μm [−0.5, 0.5] 
+
+Feedback decay ρm [0 .65 , 0.95] 
+
+gain γm [0 .10 , 0.90] 
+
+Readout smoothing ρrd  
+
+> m
+
+[0 .70 , 0.97] 
+
+B.5 Latent heterogeneity and behavior policy 
+
+Unit heterogeneity is encoded by a latent vector Zi ∼ N (0 , I 3) drawn once per support or query trajectory. This latent factor affects both the initial state and the treatment policy: 
+
+Si, 0 ≈ US0Zi + εi, 0, (22) 
+
+Wu,i = Wu + UuZi, u ∈ { 0, 1}. (23) Treatment memories used by the policy evolve as 
+
+Mt+1 ,u = λuMt,u + bu(At), λu ∼ Unif(0 .5, 0.95) . (24) The behavior-policy logits depend on current state, recent treatment memory, static covariates when active, and latent heterogeneity. Because both baseline state and treatment assignment depend on Zi,and because treatment assignment also depends on the evolving state, support trajectories exhibit persistent unit-level heterogeneity and time-varying confounding. A small probability of near-random policy strength preserves overlap. 17 Synthetic treatment encoding. In the synthetic TSCM prior, the four-valued treatment is gen-erated through two binary policy components. Conditional on the current state, recent treatment memories, static covariates when active, and latent heterogeneity, the generator computes two logistic probabilities and samples 
+
+At, 0 ∼ Bernoulli( pt, 0), At, 1 ∼ Bernoulli( pt, 1). (25) The treatment supplied to the model is then 
+
+At = At, 0 + 2 At, 1 ∈ { 0, 1, 2, 3}. (26) This bitwise construction is used only to generate heterogeneous treatment policies. The model itself receives the resulting four-valued treatment. Observed static covariates are included in a random subset of synthetic episodes. Specifically, the implementation activates the five-dimensional static covariate vector with probability 0.30 and otherwise supplies zeros. This prevents the model from assuming that static covariates are informative in every task while still exposing it to domains where baseline features are useful. 
+
+B.6 Outcome mechanism 
+
+The base readout Rt is either a selected state coordinate or an affine projection of all state vari-ables. Coordinates belonging to dynamical motifs are sampled with elevated probability as direct outcome coordinates. The scalar outcome evolves according to an autoregressive readout with 
+
+ρY ∼ Unif(0 .35 , 0.90) , state gain in [0 .35 , 1.20] , small direct and cumulative treatment effects, and weak linear trends. Outcome noise is low in most TSCMs but can be moderate in a minority of cases. Consequently, the target may depend on current state, prior outcomes, recent treatment, and accumulated treatment exposure. 
+
+B.7 Counterfactual oracle construction 
+
+For each interventional training example, the counterfactual target is constructed by structural replay: 1. The query trajectory is simulated under the observational behavior policy from t = 0 to tobs ,storing the state, treatment memories, and lag buffer at tobs .2. From tobs , a second rollout is performed under the hypothetical treatment sequence ¯atobs :t⋆−1,with future additive state noise set to its mean. 3. The oracle outcome is continued from the observed outcome prefix Y0: tobs using the counterfactual state path and the planned treatments, again with future outcome noise set to its mean. This construction produces a conditional structural target given the factual query history and the planned intervention. It focuses training on the mean causal response to the supplied treatment se-quence rather than on aleatoric future noise, while stochasticity remains present in support trajectories and factual query prefixes. 
+
+B.8 Support anchor time points 
+
+Each synthetic support trajectory contributes Ksup = 4 labeled outcome anchors. During one-step pretraining, the first anchor is the current label time r + 1 . The remaining anchors are the earliest post-observation label time tobs + 1 , a midpoint between tobs + 1 and r + 1 , and a random anchor sampled from {tobs + 1 , . . . , r + 1 }. This multi-anchor strategy provides in-context examples at several rollout depths from the same sampled TSCM, rather than relying on a single labeled support time point. For external benchmark evaluation, support anchors are chosen from each support row’s available outcome times using the same four-anchor interface but a deterministic template: latest valid outcome time, midpoint, earliest valid outcome time, and one random valid anchor. Thus, the architectural interface is shared across pretraining and evaluation—multiple labeled support anchors per support trajectory—while the exact anchor-selection rule is adapted to the available benchmark rows. 18 B.9 Data augmentation 
+
+Three augmentations are applied during synthetic training: 1. Observational mode with probability 0.30 : the query target is factual under the behavior policy rather than interventional. This keeps ordinary factual prediction within the training distribution. 2. Support target noise with probability 0.15 : the first support target anchor may receive additive noise at scale 0% , 5% , or 10% of the task outcome standard deviation. This improves robustness to noisy support labels while leaving the other support anchors unchanged. 3. Support future-covariate masking with probability 0.35 : support state values after tobs and before the target horizon are replaced with the sentinel value while support outcome labels remain visible. This discourages reliance on post-intervention covariates that are unavailable for the query under hypothetical treatment sequences. 
+
+## C Training episode construction 
+
+Algorithm 1 Synthetic C AUSAL LONG PFN episode  
+
+> 1:
+
+Sample a TSCM M ∼ Π and support size nctx . 
+
+> 2:
+
+Sample tobs , τ , and t⋆ = tobs + τ . 
+
+> 3:
+
+Generate nctx support trajectories under the behavior policy through t⋆. 
+
+> 4:
+
+Generate one query factual prefix under the behavior policy through tobs . 
+
+> 5:
+
+if interventional mode then  
+
+> 6:
+
+Sample hypothetical future treatments ¯atobs :t⋆−1. 
+
+> 7:
+
+Clone the query state, treatment memories, and lag buffer at tobs . 
+
+> 8:
+
+Simulate future state and outcome under the intervened structural equations with future noise set to its mean.  
+
+> 9:
+
+else  
+
+> 10:
+
+Continue the query under the behavior policy and use its factual future.  
+
+> 11:
+
+end if  
+
+> 12:
+
+Compute task-local support normalizers; normalize, clip, pad, and mask unavailable values.  
+
+> 13:
+
+Sample current time r ∼ Unif {tobs , . . . , t ⋆ − 1} and set label z = Y qr+1 . 
+
+> 14:
+
+Choose four support anchor times: r + 1 , tobs + 1 , a midpoint, and a random anchor from 
+
+{tobs + 1 , . . . , r + 1 }. 
+
+> 15:
+
+Return support sequences, support labels, anchor times, the query sequence, treatments, current time r, and normalized label z.
+
+Observed-prefix training and recursive evaluation. During training, the model conditions on the query outcome history through the sampled current time r and predicts the next outcome Y qr+1 ;all later query outcomes remain hidden. At evaluation time, only the query history through tobs is observed. For horizons beyond one step, the model performs plug-in sequential rollout, inserting each predicted mixture mean into the query outcome channel before predicting the next time point. 
+
+Normalization. State normalizers use only support times 0: tobs :
+
+μS,m = mean j,t ≤tobs Sj,t,m , σS,m = max {sd j,t ≤tobs (Sj,t,m ), 0.1}. (27) Outcome normalizers use support outcomes over 1: t⋆:
+
+μY = mean j, 1≤t≤t⋆ Yj,t , σY = max {sd j, 1≤t≤t⋆ (Yj,t ), 0.1}. (28) Episodes with near-constant outcome scale are rejected. Normalized state values are clipped to 
+
+[−3, 3] , normalized outcomes to [−10 , 10] , and unavailable values are marked with the sentinel −99 .
+
+## D Model architecture details 
+
+D.1 State encoder 
+
+Let Vt ∈ RDmax denote the padded model input at time t, containing the time-varying covariates and scalar outcome, and let mt = I{Vt < −90 } denote the hidden-value mask induced by the sentinel. 19 Hidden entries are set to zero before projection, while the mask itself is retained as an input feature. First differences are scaled by 0.5 and set to zero whenever either adjacent value is hidden. Let y denote the active outcome coordinate. The encoder separates covariate and outcome channels: 
+
+eSt = WS [V (−y) 
+
+> t
+
+, 0.5∆ V (−y) 
+
+> t
+
+, −2m(−y) 
+
+> t
+
+], (29) 
+
+eYt = WY [V (y) 
+
+> t
+
+, 0.5∆ V (y) 
+
+> t
+
+, −2m(y) 
+
+> t
+
+], (30) 
+
+eAt = WA onehot( At). (31) The encoded time-step representation is 
+
+et = LN( eSt + eYt + eAt ). (32) Separating the outcome channel from the covariate channels helps preserve the distinction between observed predictors and the target process. Padded inactive dimensions remain zero after cleaning, and the input scale factor pDmax /d helps keep signal magnitudes comparable across tasks with different active state dimensions. 
+
+D.2 History encoder 
+
+The history encoder is a causal transformer that maps each longitudinal trajectory to time-indexed history representations. It uses: • 4 layers of pre-norm self-attention; • model dimension 256 , 8 attention heads, and feed-forward dimension 1024 ;• sinusoidal temporal positional encodings up to the maximum sequence length; • a causal attention mask preventing each time point from attending to future positions; • zero initialization of selected residual output projections for stable training from scratch. For a query current time r, the representation hr is extracted at position r. For a support anchor label 
+
+Ys, the corresponding history representation is extracted at s − 1, so the support token represents the predictive mapping from history and treatment through time s − 1 to the outcome label at time s.
+
+D.3 PFN context encoder 
+
+The PFN context encoder performs in-context adaptation over support trajectories. All nctx Ksup 
+
+support-anchor tokens and the single query token attend bidirectionally to each other using full self-attention, with a key-padding mask for padded support slots. No positional encoding is added for the arbitrary order of support trajectories. Each PFN layer uses multi-head attention, GELU feed-forward blocks, residual connections, layer normalization, and zero-initialized residual output projections. For support trajectory j and anchor time sjk , the support token is 
+
+zctx  
+
+> jk
+
+= Wtok 
+
+hj,s jk −1 + WxVj,s jk −1 + WC Cj + WGg(C), W y (yj,s jk , 0)  , (33) where g(C) contains symmetric support-level outcome statistics, including the mean and standard deviation of support anchor outcomes. The query token at current time r is 
+
+zqry  
+
+> r
+
+= Wtok [hqr + WxV qr + WC Cq + WGg(C), e qry ] , (34) where eqry is a learned query-label embedding. Thus, support tokens contain observed anchor labels, whereas the query token marks the unknown target to be predicted. 
+
+D.4 Gaussian mixture head 
+
+The final query representation ur is mapped to the parameters of a five-component Gaussian mixture. The mixture weights, residual means, and scales are computed as 
+
+log πr = log softmax( Wπ ur /T π ), Tπ = 1 .0, (35) 
+
+∆μr = 7 tanh( Wμur /7) , (36) 
+
+σr = clip [0 .02 ,2.0] {softplus( Wσ ur ) + 0 .02 }. (37) 20 The component means are residualized around the most recent visible or self-predicted query outcome: 
+
+μr,k = clip [−12 ,12] (yqr + ∆ μr,k ). (38) The mean projection is initialized at zero, producing an initial persistence predictor. This initialization stabilizes early training because μr,k ≈ yqr before the model has learned task-specific dynamics. 
+
+D.5 Architecture and prior hyperparameters 
+
+Table 6: Architecture and synthetic-prior hyperparameters. Training and optimization settings are reported separately in Table 7. 
+
+Hyperparameter Symbol Value 
+
+Architecture 
+
+Model dimension dmodel 256 
+
+Attention heads h 8
+
+History encoder layers Nenc 4
+
+PFN layers Npfn 6
+
+feed-forward dimension dff 1024 
+
+Dropout – 0.10 
+
+GMM components Kgmm 5
+
+Mixture temperature Tπ 1.0
+
+Minimum / maximum GMM std. dev. – 0.02 / 2.0
+
+Residual mean bound before clipping – [−7, 7] 
+
+Final mean clipping – [−12 , 12] 
+
+Synthetic prior 
+
+Maximum state dimension dS, max 10 
+
+Observation window tobs 1–60 
+
+Prediction horizon τ 1–5
+
+Support size nctx 3–500 
+
+Number of treatments |A| 4
+
+Latent unit dimension – 3
+
+Support anchors Ksup 4
+
+Initialization. The self-attention output projections and final feed-forward projections in the history and PFN transformer blocks are initialized at zero. The final GMM mean projection is also initialized at zero, producing an initial persistence forecast μr,k ≈ yr .
+
+## E Loss function details 
+
+The model is trained with a Gaussian-mixture one-step predictive loss. The total loss is 
+
+L = LNLL + λmLmean + λcLconc , λm = 0 .25 , λc = 0 .03 . (39) 
+
+Robust NLL. For normalized target z, the Gaussian-mixture negative log-likelihood is 
+
+ℓNLL = − log 
+
+> Kgmm
+
+X
+
+> k=1
+
+πk
+
+1
+
+σk
+
+√2π exp 
+
+(
+
+− 12
+
+ z − μk
+
+σk
+
+2)
+
+. (40) The implementation uses a linear tail for very large NLL values: 
+
+˜ℓNLL =
+
+ℓNLL , ℓNLL ≤ 15 ,
+
+15 + 0 .01( ℓNLL − 15) , ℓNLL > 15 . (41) This robustification prevents rare unstable synthetic examples from dominating gradients while retaining a loss signal. 
+
+Mean loss. The predictive mean is 
+
+ˆz = X
+
+> k
+
+πkμk. (42) The auxiliary mean loss is 
+
+Lmean = Huber δ=3 (ˆ z − z). (43) This term provides a direct gradient signal for point prediction and stabilizes early optimization. 21 Concentration penalty. The mixture-concentration penalty is 
+
+Lconc =
+
+
+
+max  
+
+> k
+
+πk − 0.90 
+
+
+
+> +
+
+. (44) It discourages premature collapse of the mixture distribution onto a single component. 
+
+## F Training procedure and stability 
+
+Optimizer and schedule. The model is optimized with AdamW [Loshchilov and Hutter, 2019]. Weight decay is applied to ordinary dense weight matrices, while biases, layer-normalization param-eters, query embeddings, context-statistic encoders, and static-feature encoders are excluded from weight decay. The learning rate is warmed up linearly for 400 optimizer steps and then cosine-decayed to 2% of the peak over 10 ,000 steps. 
+
+Stochastic PFN depth. At each training step, the number of active PFN layers is sampled uniformly from {3, . . . , 6}. This stochastic-depth-like regularization encourages useful intermediate-depth representations and reduces dependence on the deepest PFN stack. 
+
+Gradient accumulation and clipping. Gradients are accumulated over 16 micro-batches, giving an effective batch size of 256 synthetic episodes. Before each optimizer step, gradients are unscaled under automatic mixed precision and clipped using a threshold that increases linearly from 0.5 to 
+
+1.5 over the first 4000 optimizer steps. This applies tighter clipping during early training and looser clipping after the model stabilizes. 
+
+Numerical stability safeguards. Training includes several numerical safeguards: 1. If the loss is non-finite, the batch is skipped and the AMP loss scale is reduced. 2. If the global gradient norm is non-finite, the optimizer step is skipped. 3. The GMM loss computation is upcast to FP32 before log-sum-exp operations. 4. Normalized inputs and targets are clipped, and GMM standard deviations are bounded in 
+
+[0 .02 , 2.0] .Table 7: Training and optimization hyperparameters. Gradient accumulation gives an effective batch size of 256 synthetic episodes. Quantity Value Batch size 16 
+
+Gradient accumulation 16 steps Effective batch size 256 
+
+Optimizer AdamW Learning rate 3 × 10 −4
+
+Weight decay 10 −5, excluding bias/norm/static/query parameters Warmup 400 optimizer steps Schedule Cosine decay to 0.02 of base LR over 10 ,000 steps Maximum optimizer steps 10 ,000 
+
+Random PFN depth during training Uniformly 3–6 layers Gradient clipping Linear ramp 0.5 to 1.5 over 4000 steps Checkpoint interval 500 optimizer steps Mixed precision Enabled on CUDA Seed 42 
+
+## G Autoregressive rollout 
+
+The final mixture is conditional on the self-fed mean trajectory. Thus the reported distribution does not integrate over all possible intermediate outcome paths. A stochastic ancestral variant could 22 Algorithm 2 Plug-in autoregressive counterfactual rollout  
+
+> 1:
+
+Input: frozen model qθ , support trajectories C, query history through tobs , future treatment sequence atobs :t⋆−1. 
+
+> 2:
+
+Initialize a writable query sequence eXq with future query covariates hidden and future query outcomes hidden.  
+
+> 3:
+
+for r = tobs , . . . , t ⋆ − 1 do  
+
+> 4:
+
+Run one-step inference to obtain mixture {πr,k , μ r,k , σ r,k }5
+
+> k=1
+
+. 
+
+> 5:
+
+Compute the plug-in mean ˆyr+1 = P 
+
+> k
+
+πr,k μr,k . 
+
+> 6:
+
+if r + 1 is within the input sequence then  
+
+> 7:
+
+Insert ˆyr+1 into the query outcome channel at time r + 1 . 
+
+> 8:
+
+end if  
+
+> 9:
+
+Keep future query covariates at the sentinel value.  
+
+> 10:
+
+end for  
+
+> 11:
+
+return final mixture and mean prediction at t⋆.sample from the mixture at each intermediate step and repeat the rollout to approximate full path-level uncertainty. 
+
+## H Evaluation datasets 
+
+We evaluate on four longitudinal treatment-response benchmarks: a cancer tumor growth simulator, a semi-mechanistic warfarin pharmacokinetic/pharmacodynamic (PK/PD) simulator, an HIV ODE simulator based on Adams/WhyNot dynamics, and a factual MIMIC-III ICU rolling-origin benchmark. Cancer, warfarin, and HIV are branchable simulated or semi-mechanistic systems: for these domains, counterfactual outcomes under alternative future treatment sequences are available by replaying the same patient-specific dynamics under intervened treatments. MIMIC-III contains real observational ICU data and does not reveal outcomes under unobserved interventions; it is therefore used only for factual rolling-origin prediction under observed future treatments. This distinction follows prior longitudinal counterfactual evaluations, where simulated systems provide ground-truth counterfactual labels and real ICU cohorts provide factual temporal prediction benchmarks [Lim, 2018, Bica et al., 2020, Melnychuk et al., 2022, Li et al., 2021]. 
+
+Common task construction. Let i index patients and let t index discrete time. We write Si,t 
+
+for time-varying covariates or simulator state variables, Ai,t for treatment, Yi,t for the scalar target outcome, and Ci for time-invariant patient features. The model-facing state is Xi,t = ( Si,t , Y i,t )
+
+when the outcome channel is included. Each rolling-origin query observes a patient history up to an origin time and asks for either the next outcome or the outcome after a supplied future treatment sequence. Across domains, raw trajectories have length T = 60 , the projection horizon is H = 5 , and the configured minimum observed history length is tmin = 10 . For each domain, tasks vary the confounding level γ, support size nsup ∈ { 40 , 80 , 160 , 320 , 500 }, and random repetition. In the simulated and semi-mechanistic domains, γ controls how strongly the behavior policy depends on current patient state and therefore controls the strength of time-varying confounding. In MIMIC-III, 
+
+γ is retained only as a stratification variable for consistent task organization and does not modify the observed data. All reported metrics use support-only normalization. The rolling-origin filters, indexing conventions, and clipping rules used for scoring are given in Appendix J. The domain-level summary is shown in Table 8. 
+
+Counterfactual and factual test queries. For cancer, warfarin, and HIV, one-step query rows branch from a factual patient state and evaluate alternative treatments. Horizon-5 query rows branch from a factual origin and replay the same patient-specific dynamics forward under randomly sampled treatment sequences of length H = 5 . For MIMIC-III, both one-step and horizon-5 rows are factual rolling-origin predictions: future treatments are the observed ICU treatments, not interventions. In all domains, scored rows follow the common evaluation protocol in Appendix J. 23 Table 8: Evaluation datasets. Simulated and semi-mechanistic domains provide branchable counter-factual labels; MIMIC-III is factual-only and evaluates temporal prediction under observed clinical practice. 
+
+Domain Data type Treatments Target Query construction Cancer tumor growth Fully simulated PK/PD tumor dy-namics Four discrete treatment ac-tions induced by chemother-apy/radiotherapy combina-tions 
+
+log(1 +
+
+clipped tumor volume )
+
+One-step: all four joint actions. Multi-step: ran-dom treatment sequences of length H.Warfarin Semi-mechanistic PK/PD simulator Four dose classes corre-sponding to 0, 2, 5, 10 
+
+mg/day, delivered in each 4-hour bin INR One-step: all four dose ac-tions. Multi-step: random dose se-quences of length 
+
+H.HIV Adams/WhyNot-style six-compartment ODE simulator Four antiretroviral regimens: none, PI only, RTI only, RTI+PI 
+
+log 10 (1 +
+
+free virus )
+
+One-step: all four regimens. Multi-step: random reg-imen sequences of length H.MIMIC-III Real factual ICU time series from MIMIC-Extract Four observed treatment classes from vasopressors and ventilation: none, vaso, vent, vaso+vent Diastolic blood pres-sure Factual-only rolling-origin rows; future treat-ments are observed ICU treatments, not interventions. 
+
+All targets are normalized only at scoring time using support-set statistics, as described in Appendix J. 
+
+H.1 Cancer tumor growth simulator Background. The cancer benchmark follows the tumor-growth simulator used in RMSN, CRN, Causal Transformer, G-Net, and related longitudinal counterfactual evaluations [Lim, 2018, Bica et al., 2020, Melnychuk et al., 2022, Li et al., 2021, Geng et al., 2017]. The simulator represents non-small-cell lung cancer tumor volume evolving under chemotherapy and radiotherapy. It combines Gompertz-style tumor growth with linear-quadratic radiotherapy effects and log-cell-kill chemotherapy effects. Treatment assignment depends on recent tumor history, producing time-varying confounding. 
+
+Dynamics. Let Y raw  
+
+> i,t
+
+denote raw tumor volume. Diameter and volume are converted by 
+
+Vol( d) = 43 π
+
+ d
+
+2
+
+3
+
+, Diam( y) = 2 
+
+ y
+
+4π/ 3
+
+1/3
+
+. (45) The carrying capacity is K = Vol(30) , and the death threshold is Ymax = Vol(13) . Patient-specific parameters include tumor growth rate ρi, radiosensitivity coefficients αi and βi = αi/10 , and chemotherapy kill coefficient βci .At each time t, chemotherapy and radiotherapy are assigned by Bernoulli policies depending on recent tumor diameter: 
+
+¯D(15)  
+
+> i,t
+
+= 1
+
+|W t|
+
+X
+
+> s∈W t
+
+Diam  Y raw 
+
+> i,s
+
+ , Wt = {max(0 , t − 15) , . . . , t }. (46) The behavior policy is 
+
+Pr( Aci,t = 1 | ¯Hi,t ) = Pr( Ari,t = 1 | ¯Hi,t ) = σ
+
+ γDmax 
+
+
+
+¯D(15)  
+
+> i,t
+
+− Dmax 
+
+2
+
+ 
+
+, (47) 24 where Aci,t and Ari,t denote chemotherapy and radiotherapy indicators and Dmax = 13 . Larger γ
+
+strengthens the dependence of treatment assignment on tumor history. Chemotherapy is administered as a dose of 5 units when Aci,t = 1 , with half-life one time step: 
+
+Ci,t = 2 −1Ci,t −1 + 5 Aci,t . (48) Radiotherapy is an immediate dose Ri,t = 2 Ari,t . Raw tumor volume evolves as 
+
+Y raw  
+
+> i,t +1
+
+= Y raw 
+
+> i,t
+
+
+
+1 + ρi log KY raw 
+
+> i,t
+
+!
+
+− βci Ci,t −  αiRi,t + βiR2
+
+> i,t
+
+ + ϵi,t 
+
+
+
+, ϵi,t ∼ N (0 , 0.01 2).
+
+(49) 
+
+Outcome representation. The model-facing cancer outcome is clipped log-volume, 
+
+Yi,t = log  1 + min {Y raw  
+
+> i,t
+
+, Y max } . (50) Support and query outcomes are normalized from this transformed scale. 
+
+H.2 Warfarin semi-mechanistic PK/PD simulator Background. The warfarin benchmark is a semi-mechanistic PK/PD simulator motivated by standard warfarin dose–response models: oral absorption and elimination, delayed anticoagulant response through inhibition of vitamin-K-dependent coagulation-factor synthesis, INR readout from clotting-factor activity, and patient heterogeneity driven by CYP2C9 metabolism, VKORC1 sensitivity, age, dietary vitamin K, and adherence [Holford, 1986, Hamberg et al., 2010, International Warfarin Pharmacogenetics Consortium, 2009]. 
+
+PK model. Each time step is a 4-hour bin. The treatment space is A = {0, 1, 2, 3}, corresponding to daily dose levels 
+
+(0 , 2, 5, 10) mg /day . (51) The PK state follows a gut → plasma → effect-site model: 
+
+˙Ag = −kaAg , (52) 
+
+˙Cp = kaAg /V d − keCp, (53) 
+
+˙Ce = ke0(Cp − Ce), (54) where Ag is gut depot amount, Cp is plasma concentration, Ce is effect-site concentration, ka is absorption, ke = CL /V d is elimination, and ke0 is effect-site equilibration. 
+
+PD model. Effect-site concentration inhibits vitamin-K-dependent synthesis through an Emax 
+
+model: 
+
+I(t) = Emax 
+
+Ce(t)h
+
+Ce(t)h + EC h
+
+> 50
+
+. (55) Each coagulation factor f ∈ { II , VII , X, PC } follows delayed turnover: 
+
+˙f (t) = kout ,f [VK( t){1 − sf I(t)} − f (t)] . (56) INR is computed from factor deficits: 
+
+∆f (t) = 1 .30[1 − fVII (t)] + + 0 .95[1 − fX(t)] + + 0 .80[1 − fII (t)] +, (57) 
+
+PT( t) = 1 + 1 .6∆ f (t) + 0 .70∆ f (t)2, (58) 
+
+INR( t) = INR 0 PT( t)ISI . (59) 
+
+Patient heterogeneity and confounding. Patient heterogeneity includes CYP metabolism class, VKORC1 sensitivity, age, clearance, absorption, effect-site kinetics, pharmacodynamic sensitivity, vitamin-K baseline, clinic bias, and maintenance-dose requirement. The behavior policy is a softmax over dose classes whose logits depend on current INR, distance from the therapeutic range, INR trend, effect-site concentration, recent dose load, adherence, age, maintenance-dose class, and clinic bias. The confounding parameter γ scales the INR-dependent policy terms, increasing the dependence of dosing on current patient state. 25 State and outcome. The visible model-facing state is 10-dimensional: 
+
+Xt =  Cplasma  
+
+> t
+
+, C effect  
+
+> t
+
+, F II  
+
+> t
+
+, F VII  
+
+> t
+
+, K vit  
+
+> t
+
+, INR t,
+
+doseLoad 7d,t , CYP i, VKORC1 i, ageNorm i
+
+. (60) The scalar target is 
+
+Yt = INR t. (61) 
+
+H.3 HIV Adams/WhyNot ODE simulator Background. The HIV benchmark is based on the six-compartment Adams HIV treatment ODE used in the WhyNot simulator suite [Adams et al., 2004, Miller et al., 2020]. It models immunological and virological dynamics under antiretroviral therapy and allows patient-specific counterfactual evaluation by intervening on future treatment regimens. 
+
+ODE dynamics. The raw state is 
+
+St = ( T1,t , T ∗
+
+> 1,t
+
+, T 2,t , T ∗
+
+> 2,t
+
+, V t, E t), (62) where T1, T 2 are uninfected target-cell populations, T ∗ 
+
+> 1
+
+, T ∗ 
+
+> 2
+
+are infected cell populations, V is free virus, and E is immune response. The dynamics follow 
+
+˙T1 = λ1 − d1T1 − (1 − ϵ1)k1V T 1, (63) 
+
+˙T ∗ 
+
+> 1
+
+= (1 − ϵ1)k1V T 1 − δT ∗ 
+
+> 1
+
+− m1ET ∗ 
+
+> 1
+
+, (64) 
+
+˙T2 = λ2 − d2T2 − (1 − f ϵ 1)k2V T 2, (65) 
+
+˙T ∗ 
+
+> 2
+
+= (1 − f ϵ 1)k2V T 2 − δT ∗ 
+
+> 2
+
+− m2ET ∗ 
+
+> 2
+
+, (66) 
+
+˙V = (1 − ϵ2)NT δ(T ∗ 
+
+> 1
+
++ T ∗ 
+
+> 2
+
+) − cV − [(1 − ϵ1)ρ1k1T1 + (1 − f ϵ 1)ρ2k2T2] V, (67) 
+
+˙E = λE + bE (T ∗ 
+
+> 1
+
++ T ∗ 
+
+> 2
+
+)
+
+T ∗ 
+
+> 1
+
++ T ∗ 
+
+> 2
+
++ KB
+
+E − dE (T ∗ 
+
+> 1
+
++ T ∗ 
+
+> 2
+
+)
+
+T ∗ 
+
+> 1
+
++ T ∗ 
+
+> 2
+
++ KD
+
+E − δE E. (68) 
+
+Treatment space. There are four treatment regimens: 
+
+0 : no therapy , (ϵ1, ϵ 2) = (0 , 0) ,
+
+1 : PI only , (ϵ1, ϵ 2) = (0 , 0.3) ,
+
+2 : RTI only , (ϵ1, ϵ 2) = (0 .7, 0) ,
+
+3 : RTI+PI , (ϵ1, ϵ 2) = (0 .7, 0.3) .
+
+(69) 
+
+Patient heterogeneity and confounding. Patient heterogeneity is introduced through perturbations of the ODE parameters, individual RTI/PI efficacy scales, viral and immune thresholds, and policy aggressiveness. The behavior policy computes a severity score from current log 10 (V + 1) and 
+
+log 10 (E + 1) , scales this score by γ, adds inertia for the previous treatment, and samples one of the four regimens from a softmax. Larger γ increases dependence of treatment choice on biological state. 
+
+State and outcome. The model-facing state is the log-transformed compartment vector 
+
+Xt,k = log 10 (1 + St,k ), k = 1 , . . . , 6. (70) The scalar target is transformed free virus, 
+
+Yt = log 10 (1 + Vt). (71) 
+
+H.4 MIMIC-III factual ICU rolling-origin benchmark Background. The MIMIC benchmark is constructed from MIMIC-III ICU stays using a MIMIC-Extract-style hourly representation [Johnson et al., 2016a,b, Goldberger et al., 2000, Wang et al., 2020, Harutyunyan et al., 2019]. Because MIMIC-III does not provide ground-truth counterfactual outcomes, we use it only for factual rolling-origin prediction under observed future treatments. 26 State and preprocessing. Each ICU stay is treated as a single hourly sequence. The model-facing state is 10-dimensional: 
+
+Xt = ( diastolic blood pressure , mean blood pressure , oxygen saturation , heart rate , respiratory rate ,
+
+Glasgow Coma Scale total , glucose , creatinine , bicarbonate , sodium ).
+
+(72) Static features are derived from demographic variables and represented by a fixed-dimensional vector. 
+
+Treatment space and outcome. The two binary treatment indicators are vasopressor administration 
+
+vaso t and mechanical ventilation vent t. They are combined into the four-valued treatment used by the shared model interface, 
+
+At = I{vaso t} + 2 I{vent t}, (73) with mapping 
+
+0 : none , 1 : vaso , 2 : vent , 3 : vaso+vent . (74) The scalar target is 
+
+Yt = diastolic blood pressure t. (75) MIMIC-III results should be interpreted as factual temporal prediction results, not as validation of counterfactual treatment effects. 
+
+## I Baseline models 
+
+We compare against six longitudinal baselines: a classical Marginal Structural Model (MSM), Re-current Marginal Structural Networks (RMSN), G-Net, Counterfactual Recurrent Networks (CRN), Causal Transformer (CT), and G-Transformer (GT). Together, these baselines cover the main adjust-ment strategies used in longitudinal treatment-response prediction: inverse-probability weighting [Robins et al., 2000], recurrent marginal structural modeling [Lim, 2018], neural g-computation [Li et al., 2021], adversarial representation balancing [Bica et al., 2020], and transformer-based counterfactual sequence modeling [Melnychuk et al., 2022, Xiong et al., 2024]. 
+
+Common notation. For unit i and time t, let xi,t ∈ Rdx denote the baseline-model covariate input corresponding to the time-varying covariates Si,t , let yi,t ∈ R denote the scalar outcome Yi,t , let 
+
+ai,t ∈ { 0, 1, 2, 3} denote the treatment Ai,t , and let ci ∈ R5 denote static covariates corresponding to Ci. We write ˜yi,t for the normalized outcome used by the baseline training code. All baselines follow the same inclusive observation-time convention as Section 2.1: the model observes the history through tobs , receives the first planned treatment ai,t obs , and predicts future outcomes under the supplied treatment sequence. 
+
+Normalization and metrics. Continuous inputs are normalized using statistics computed from the support trajectories of the corresponding benchmark file. The primary reported metric is normalized RMSE under the shared support-only evaluation normalization. For C AUSAL LONG PFN, predictions are first converted from the model’s internal PFN-context normalization to raw outcome units and then to the shared evaluation normalization. Full scoring details, including clipping rules, are given in Appendix J. 
+
+Treatment encodings. All methods use the same four-valued treatment space at ∈ { 0, 1, 2, 3}. For models that require vector-valued treatment inputs, we use either the one-hot encoding 
+
+ϕ4(at) = eat ∈ { 0, 1}4, (76) or the equivalent two-bit decomposition 
+
+ϕ2(at) = ( at mod 2 , ⌊at/2⌋) ∈ { 0, 1}2. (77) CAUSAL LONG PFN and the neural baselines use the four-valued treatment input, whereas MSM and RMSN use ϕ2 in their propensity-weighting components. 27 Table 9: Baseline hyperparameter search spaces used by the evaluation runner. Each baseline is tuned using support-set validation only, with random search over the listed discrete candidates. CAUSAL LONG PFN is not included because it is evaluated as a frozen model without target-domain tuning. 
+
+Method Architecture / model search space Optimization / regularization search space MSM Regressor ∈ {linear , ridge }; lag features = 2; ridge penalty α ∈ { 0.1, 1.0, 10 .0}
+
+Stabilized treatment weights are clipped at support-set quantiles (0 .01 , 0.99) . Logistic propensity models use a maximum iteration count 500 and C = 10 6.RMSN Number of recurrent layers ∈ {1, 2}. Encoder and de-coder hidden widths are selected from a data-dimensionality-aware grid. Let dx be the number of time-varying covariates, 
+
+Chist = dx + 1 + 2 + 5 , and Cdec = 1 + 2 + 5 . Can-didate widths are obtained by multiplying Chist and Cdec 
+
+by {0.5, 1, 2, 4}, rounding to a multiple of 16 , clipping to 
+
+[32 , 160] , and unioning with {32 , 48 , 64 , 96 , 128 }.Dropout ∈ {0.1, 0.2, 0.3, 0.4, 0.5}; propensity learning rate ∈ {10 −2, 10 −3, 10 −4}; encoder learning rate ∈ {10 −2, 10 −3, 10 −4}; decoder learning rate ∈ {10 −2, 10 −3, 10 −4}; encoder batch size ∈ {64 , 128 , 256 }; decoder batch size ∈ {256 , 512 , 1024 }; gradient clipping ∈{0.5, 1.0, 2.0, 4.0}.G-Net Hidden size ∈ { 48 , 64 , 96 , 128 }; representation size ∈{48 , 64 , 96 }; number of recurrent layers ∈ { 1, 2}.Dropout ∈ {0.05 , 0.10 , 0.20 }; learning rate 
+
+∈ {10 −3, 3×10 −4}; batch size ∈ {32 , 64 };epochs ∈ {80 , 120 }; covariate/vitals loss weight 
+
+∈ { 0.15 , 0.25 , 0.35 }.CRN Number of recurrent layers ∈ { 1, 2}. Hidden, balanced-representation, and fully connected widths are selected from a data-dimensionality-aware grid. Let Chist = 4+ dx +1+ 5 and Cdec = 4 + 1 + 5 . Width candidates are obtained by multiplying these quantities by {0.5, 1, 2, 4}, rounding to a multiple of 16 , clipping to [32 , 160] , and unioning hidden and balanced widths with {32 , 48 , 64 , 96 , 128 } and fully connected widths with {32 , 64 , 96 , 128 , 192 }.Dropout ∈ {0.1, 0.2, 0.3, 0.4, 0.5}; encoder learning rate ∈ {10 −2, 10 −3, 10 −4}; decoder learning rate ∈ {10 −2, 10 −3, 10 −4}; encoder batch size ∈ {64 , 128 , 256 }; decoder batch size ∈ {256 , 512 , 1024 }; gradient clipping ∈{0.5, 1.0, 2.0}.Causal Trans-former Transformer layers ∈ {2, 3, 4}; attention heads ∈{2, 4}; sequence hidden size ∈ { 64 , 96 , 128 }; balanced-representation size ∈ { 64 , 96 , 128 }; fully connected hid-den size ∈ { 64 , 96 , 128 }.Dropout ∈ {0.05 , 0.10 , 0.20 }; learning rate 
+
+∈ {10 −3, 3×10 −4, 10 −4}; weight decay ∈{10 −5, 10 −4, 10 −3}; batch size ∈ { 32 , 64 }; gra-dient clipping ∈ { 0.5, 1.0}; treatment loss weight 
+
+∈ { 0.05 , 0.10 , 0.20 }.G-Transformer Transformer layers ∈ { 2, 3, 4}; attention heads ∈ { 2, 4};model dimension ∈ {32 , 48 , 64 , 96 , 128 }; balanced-representation size ∈ {32 , 48 , 64 , 96 , 128 }; fully con-nected hidden size ∈ { 32 , 64 , 96 , 128 , 192 }.Dropout ∈ {0.1, 0.2, 0.3}; learning rate 
+
+∈ {10 −3, 10 −4, 10 −5}; weight de-cay ∈ {10 −5, 10 −4, 10 −3}; batch size 
+
+∈ { 16 , 32 , 64 }.
+
+Hyperparameter tuning protocol. Baseline hyperparameters are selected using only support tra-jectories from the target domain. For each baseline, the evaluation runner performs an initial random search over the method-specific search space in Table 9 for the first dataset in each (domain , n sup )
+
+tuning group. Candidate configurations are trained on a support-training split and ranked using normalized RMSE on a held-out support-validation split. The top cached candidate is then reused and re-evaluated on subsequent support-validation splits within the same tuning group. The selected configuration is finally refit on the full support set before query evaluation. Query outcomes are never used for hyperparameter selection. This protocol gives all baselines domain-specific supervision and validation-based model selection. In contrast, C AUSAL LONG PFN is evaluated as a frozen pretrained model: no target-domain gradients are taken, no validation set is used for model selection, and no target-domain hyperparameters are tuned. 
+
+I.1 Marginal Structural Model 
+
+The MSM baseline adjusts for time-varying confounding through stabilized inverse probability of treatment weights [Robins et al., 2000]. The numerator propensity model uses prior treatment history, 
+
+znum 
+
+i,t =
+
+t−1X
+
+u=0 
+
+ϕ2(ai,u ), (78) whereas the denominator propensity model conditions on treatment, covariate, outcome, and static history, 
+
+zden 
+
+i,t =
+
+"t−1X
+
+u=0 
+
+ϕ2(ai,u ), x i,t −Llag :t, ˜yi,t −Llag :t, c i
+
+#
+
+. (79) 28 The stabilized treatment ratio at time t is 
+
+wi,t =
+
+Q2 
+
+> b=1
+
+pnum ,b 
+
+ ai,t,b | znum 
+
+> i,t
+
+Q2 
+
+> b=1
+
+pden ,b 
+
+ ai,t,b | zden 
+
+> i,t
+
+ , (80) where ai,t,b is the bth treatment bit. The outcome model is direct in horizon: for horizon τ , it predicts 
+
+˜yi,t +τ from 
+
+zMSM  
+
+> i,t,τ
+
+=
+
+"
+
+zden  
+
+> i,t
+
+, 
+
+> t+τ−1
+
+X
+
+> u=t
+
+ϕ2(ai,u )
+
+#
+
+. (81) 
+
+I.2 Recurrent Marginal Structural Networks 
+
+RMSN replaces the propensity and outcome regressions of MSM with recurrent neural networks [Lim, 2018]. A treatment-only propensity network predicts the current treatment from previous treatments, 
+
+ˆpnum  
+
+> i,t
+
+= σ(fprop ,T (ϕ2(ai, 0: t−1))) , (82) while a history-dependent propensity network predicts treatment from previous treatments, covariates, outcomes, and static features, 
+
+ˆpden  
+
+> i,t
+
+= σ(fprop ,H (ϕ2(ai, 0: t−1), x i, 0: t, ˜yi, 0: t, c i)) . (83) Stabilized weights are computed from the ratio of these probabilities and used to train recurrent encoder and decoder outcome models. The encoder predicts one-step outcomes from 
+
+uenc  
+
+> i,t
+
+= [ xi,t , ˜yi,t , ϕ 2(ai,t ), c i] , (84) and the decoder performs autoregressive multi-step rollout under the planned future treatment sequence. 
+
+I.3 G-Net 
+
+G-Net is a recurrent neural g-computation baseline [Li et al., 2021]. It models the next outcome jointly with the next covariates and then rolls the system forward under a planned treatment sequence. At time t, the input is 
+
+uGNet  
+
+> i,t
+
+= [ ϕ4(ai,t ), x i,t , ˜yi,t , c i] . (85) The training objective combines next-outcome prediction with next-covariate prediction: 
+
+LGNet =
+
+P 
+
+> i,t
+
+mi,t (ˆ yi,t +1 − ˜yi,t +1 )2
+
+P 
+
+> i,t
+
+mi,t 
+
++ λx
+
+P 
+
+> i,t
+
+mxi,t ∥ˆxi,t +1 − xi,t +1 ∥22
+
+P 
+
+> i,t
+
+mxi,t 
+
+. (86) At test time, predicted outcomes and covariates are fed back autoregressively, implementing plug-in neural g-computation under the supplied treatment sequence. 
+
+I.4 Counterfactual Recurrent Network 
+
+CRN learns balanced recurrent representations by combining outcome prediction with adversarial treatment prediction [Bica et al., 2020]. The encoder input is 
+
+uCRN  
+
+> i,t
+
+= [ ϕ4(ai,t −1), x i,t , ˜yi,t , c i] , (87) with a zero previous-treatment vector at t = 0 . The recurrent representation is mapped to a balanced representation 
+
+bi,t = ELU( Wbhi,t + cb). (88) The treatment head predicts ai,t from a gradient-reversed version of bi,t , while the outcome head predicts ˜yi,t +1 from [bi,t , ϕ 4(ai,t )] . The objective is 
+
+LCRN =
+
+P 
+
+> i,t
+
+mi,t (ˆ yi,t +1 − ˜yi,t +1 )2
+
+P 
+
+> i,t
+
+mi,t 
+
++ λa CE active (ˆ ai,t , a i,t ). (89) A recurrent decoder performs autoregressive rollout under planned treatments. 29 Table 10: Summary of baseline mechanisms. The baselines cover inverse-probability weighting, neural g-computation, adversarial balancing, and transformer-based longitudinal sequence modeling. 
+
+Method Sequence model Adjustment mechanism Outcome objective 
+
+MSM Linear / ridge regressors IPTW via logistic propensities Weighted direct-horizon regression RMSN LSTM encoder–decoder IPTW via RNN propensities Weighted MSE G-Net LSTM Neural g-computation Outcome/covariate MSE CRN LSTM encoder–decoder Gradient reversal Outcome MSE + treatment CE CT Multi-input transformer Gradient reversal Outcome MSE + treatment CE GT Multi-input transformer Neural g-computation Factual outcome MSE 
+
+I.5 Causal Transformer 
+
+Causal Transformer replaces the recurrent backbone of CRN with a multi-input transformer [Melny-chuk et al., 2022]. The treatment, outcome, and covariate streams are initialized as 
+
+uai,t = Waϕ4(ai,t −1), uyi,t = Wy ˜yi,t , uxi,t = Wxxi,t . (90) Transformer blocks apply causal attention within and across streams. The final representation is passed to balanced treatment and outcome heads. The loss is 
+
+LCT =
+
+P 
+
+> i,t
+
+mi,t (ˆ yi,t +1 − ˜yi,t +1 )2
+
+P 
+
+> i,t
+
+mi,t 
+
++ λa
+
+P 
+
+> i,t
+
+mi,t CE(ˆ ai,t , a i,t )
+
+P 
+
+> i,t
+
+mi,t 
+
+. (91) During counterfactual rollout, future covariates are hidden and predicted outcomes are fed back autoregressively. 
+
+I.6 G-Transformer 
+
+G-Transformer is a transformer-based neural g-computation baseline inspired by Xiong et al. [2024]. It uses treatment, outcome, and covariate streams with transformer attention, but predicts outcomes through a factual g-computation head rather than an adversarial treatment-balancing head. After the transformer stack, the representation is mapped to 
+
+hri,t = ELU( Wr hi,t + cr ), (92) and the one-step head predicts ˜yi,t +1 from [hri,t , ϕ 4(ai,t )] . The loss is the masked factual MSE, 
+
+LGT =
+
+P 
+
+> i,t
+
+mi,t (ˆ yi,t +1 − ˜yi,t +1 )2
+
+P 
+
+> i,t
+
+mi,t 
+
+. (93) At test time, the one-step head is applied autoregressively under the planned future treatment sequence. 
+
+## J Evaluation protocol details 
+
+Rolling-origin filtering and indexing. The raw benchmark generators use trajectory length T = 60 
+
+and projection horizon H = 5 . They generate candidate rolling-origin rows using the generator-level minimum-origin setting, currently min_t_obs = 10 in the benchmark configuration. The shared evaluation layer uses the same minimum observed history length and applies common validity filters: only rows with 
+
+tobs ≥ 10 , tobs ≤ 64 , ttarget ≤ 65 (94) are scored. Thus, 10 is the minimum observed history length for both generated candidate origins and reported evaluation rows in the current configuration. One-step rows use 
+
+tobs = sequence_lengths − 1, ttarget = sequence_lengths . (95) Horizon-5 rows use the stored rolling-origin index with 
+
+tobs = patient_current_t + 1 , ttarget = tobs + 5 . (96) These conventions match the inclusive observation-time convention used in Section 2.1: the query history is observed through tobs , the first planned treatment is atobs , and the target is Yttarget .30 Support-only normalization and clipping. Outcome normalization statistics are computed from the support trajectories of each benchmark file. Query targets are never used to estimate normalization statistics. The reported normalized target is 
+
+Y eval  
+
+> i,t
+
+= clip 
+
+ Yi,t − μeval 
+
+> Y
+
+σeval 
+
+> Y
+
+, −10 , 10 
+
+
+
+, (97) where (μeval  
+
+> Y
+
+, σ eval  
+
+> Y
+
+) are computed from the full support set. Reported predictions are expressed in the same evaluation normalization and clipped to [−20 , 20] :
+
+bY eval  
+
+> i,t
+
+= clip 
+
+bY raw  
+
+> i,t
+
+− μeval 
+
+> Y
+
+σeval 
+
+> Y
+
+, −20 , 20 
+
+!
+
+. (98) For C AUSAL LONG PFN, the model may internally predict in the PFN-context normalization. Before scoring, predictions are converted back through the context outcome scale and then into the shared evaluation normalization. The reported normalized RMSE is 
+
+RMSE norm =
+
+vuut 1
+
+|I eval |
+
+X
+
+> (i,t )∈I eval
+
+ bY eval  
+
+> i,t
+
+− Y eval 
+
+> i,t
+
+2
+
+, (99) where Ieval denotes the set of scored query rows for the corresponding dataset, task, and method. 
+
+## K Reproducibility, statistical uncertainty, and compute 
+
+This appendix summarizes the artifacts, evaluation protocol, statistical aggregation, and compute assumptions needed to reproduce the experiments in Section 3. The model architecture is specified in Appendix D, the synthetic TSCM prior in Appendix B, the loss and training procedure in Appen-dices E–F, the rollout protocol in Appendix G, the evaluation datasets in Appendix H, the baseline models in Appendix I, and the shared scoring protocol in Appendix J. 
+
+Released artifacts. The implementation, synthetic episode generator, training configuration, roll-out code, benchmark-construction scripts, baseline runners, and evaluation scripts are available at https://github.com/Amirhossein-Zare/causal-long-pfn . The pretrained inference-only C AUSAL LONG PFN weights used for frozen-model evaluation are released on the Hugging Face Model Hub at https://huggingface.co/Amirhossein-Zare/causal-long-pfn . The reported C AUSAL LONG PFN checkpoint uses the architecture and optimization hyperparameters in Tables 6 and 7 and is pretrained entirely on synthetic episodes generated online from the TSCM prior in Appendix B. No target-domain trajectories are used during C AUSAL LONG PFN pretraining. 
+
+Reproducing benchmark evaluations. Cancer, warfarin, and HIV are simulated or semi-mechanistic domains with branchable counterfactual labels, as described in Appendix H. These datasets can be regenerated from the released code using the simulator specifications, task-grid configuration, and random seeds. For these domains, query labels are obtained by replaying the same patient-specific dynamics under the evaluated treatment sequence. MIMIC-III is a credentialed-access de-identified clinical database and cannot be redistributed with this paper; reproducing MIMIC-III results requires access through the official data-use process, the preprocessing protocol described in Appendix H.4, the released evaluation code, and the released pretrained weights. MIMIC-III evaluation is factual rolling-origin prediction only. 
+
+Baseline reproducibility. All baselines are trained using only target-domain support trajectories. Hyperparameters are selected by support-set validation using the search spaces in Table 9. The evaluation runner uses grouped tuning: an initial random search is performed for the first dataset in each (domain , n sup ) group, and the best cached candidate is reused and re-evaluated for later datasets in that group. The selected configuration is then refit on the full support set before query evaluation. Query outcomes are never used for hyperparameter selection. Thus, the baselines receive domain-specific training and validation-based model selection, whereas C AUSAL LONG PFN is evaluated as a single frozen pretrained model without test-time parameter updates, validation-based model selection, or target-domain hyperparameter tuning. 31 Statistical uncertainty. The aggregation unit is one benchmark task: a fixed method, domain, support size, task-index level, random repetition, and prediction horizon. For each unit, normalized RMSE is computed after aggregating all scored query rows within that task. Domain-level results report the mean across benchmark tasks. When standard errors are reported, they are computed as 
+
+SE( ˆ m) = sd( m1, . . . , m J )
+
+√J , (100) where mj is the normalized RMSE for benchmark task j and J is the number of tasks in the aggregation. Domain-balanced summaries are computed by first averaging within each domain and then averaging the resulting domain means equally across domains. For MIMIC-III, these summaries describe factual prediction variability and not uncertainty in individual counterfactual effects. 
+
+Compute resources. The reported C AUSAL LONG PFN pretraining run uses batch size 16 with gradient accumulation over 16 micro-batches, giving an effective batch size of 256 synthetic episodes, and is configured for 10 ,000 optimizer steps. The implementation supports CUDA training and multi-GPU data parallelism when multiple GPUs are available. Baseline methods require additional compute because they are trained and selected separately for target-domain benchmark tasks. 
+
+## L Data assets, licenses, and ethics 
+
+The proposed C AUSAL LONG PFN model, synthetic TSCM prior, and generated synthetic train-ing episodes are new research assets introduced by this work. The paper documents their in-tended use, causal assumptions, limitations, architecture, training procedure, rollout protocol, and evaluation protocol in Sections 2–5 and Appendices B–K. Code for the model, synthetic data generation, benchmark construction, evaluation, and pretrained-weight loading is available at https://github.com/Amirhossein-Zare/causal-long-pfn . The pretrained inference-only C AUSAL LONG PFN weights are available from the Hugging Face Model Hub at https: //huggingface.co/Amirhossein-Zare/causal-long-pfn .The cancer, HIV, and warfarin benchmarks, the MIMIC-III dataset, and the baseline methods are based on previously published benchmarks, simulators, datasets, or modeling frameworks cited in Appendices H and I. This paper credits the original sources used for benchmark construction and baseline comparison. Reused simulator code, preprocessing code, baseline implementations, and released model weights should be used in accordance with their respective licenses and terms of use. MIMIC-III is a de-identified credentialed-access clinical database and is not redistributed with this paper. Reproducing MIMIC-III experiments requires obtaining access through the official data-use process and applying the preprocessing protocol described in Appendix H.4. Results on MIMIC-III are factual rolling-origin prediction results and should not be interpreted as validation of individual counterfactual treatment effects under unobserved ICU interventions. This work does not involve new human-subject recruitment, prospective interventions, crowdsourcing, or direct interaction with patients. The clinical component uses an existing de-identified database, and all reported MIMIC-III results are aggregate benchmark metrics. C AUSAL LONG PFN should be viewed as a research tool for causal sequence modeling and hypothesis generation, not as a standalone clinical decision system. 32

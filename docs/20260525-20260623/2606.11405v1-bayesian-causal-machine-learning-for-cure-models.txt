@@ -1,0 +1,1629 @@
+Title: Bayesian Causal Machine Learning for Cure Models
+
+URL Source: https://arxiv.org/pdf/2606.11405v1
+
+Published Time: Thu, 11 Jun 2026 00:11:33 GMT
+
+Number of Pages: 51
+
+Markdown Content:
+# Bayesian Causal Machine Learning for Cure Models 
+
+Antonio R. Linero ∗
+
+, F. Javier Rubio †
+
+, and Piyali Basak ‡
+
+June 11, 2026 
+
+Abstract 
+
+In survival studies, treatments can benefit patients through different mechanisms: a treatment may increase the probability of being cured or delay failure among patients who are not cured. Quantifying which mechanism is dominant, and whether it varies across subpopulations, is clinically important, yet there is limited work in the causal machine learning literature addressing this problem. Standard causal survival learners target finite-horizon survival or restricted mean survival time, while many cure models capture cure structures without estimating causal effects. In this work, we define mean-ingful causal effects in the presence of a cured subpopulation and introduce BartCure ,a Bayesian causal machine learning approach for estimating them. The causal effects we recommend decompose the causal effect on restricted mean survival time into a 
+
+stochastic cure and stochastic latency component, and we relate these new effects to both stochastic intervention effects and causal effects in principal strata. In simula-tions, BartCure is competitive for estimating average effects and is especially effective at conservatively detecting the direction of treatment-effect heterogeneity. We apply 
+
+BartCure to estimate average and subgroup causal effects and to identify treatment effect heterogeneity in the CALGB 40101 breast cancer trial. 
+
+# 1 Introduction 
+
+In many clinical time-to-event studies, a non-negligible subset of patients never experience the event of interest because they are no longer susceptible to failure. For example, in breast cancer studies, patients may be successfully treated and enter long-term remission, effectively being “cured” of their cancer. In these settings, standard survival models can blur two distinct features of the outcome process: whether a patient remains at risk at 
+
+> ∗
+
+antonio.linero@austin.utexas.edu 
+
+> †
+
+f.j.rubio@ucl.ac.uk 
+
+> ‡
+
+piyali.basak@merck.com 
+
+1
+
+> arXiv:2606.11405v1 [stat.ME] 9 Jun 2026
+
+all, and how quickly events occur among those who are still susceptible. One approach for addressing this setting is the use of a cure rate model, which allows the event time to have a positive probability of being infinite (see Othus et al., 2012 and Peng and Taylor, 2014 for detailed treatments). This additional modeling is useful because it isolates the ways in which a treatment may provide benefit; for example, a treatment might shorten survival among individuals who are not cured while simultaneously increasing the probability of being cured. The interpretation of cure models as distinguishing different ways in which a treatment may affect patient outcomes naturally suggests a causal perspective, yet there has been surprisingly little work in this direction. Comparing survival times only among observed failures across treatment groups is insufficient, because the population of individuals who experience an event under treatment may differ from the population who experience an event under control. Recently, Wang et al. (2024) used principal stratification (Frangakis and Rubin, 2002) to define causal effects within the subpopulation of patients who are “always uncured”, i.e. , patients who would experience an event under either treatment arm. However, identification of these effects requires additional monotonicity assumptions on the treatment effect, and in many clinical trials, including the noninferiority CALGB 40101 (Shulman et al., 2014) trial analyzed in this paper, such assumptions may be difficult to justify. In this work, we define causal estimands tailored to the cure rate setting and develop flexible methods for estimating them. Our main contributions are summarized as follows: 1. We define useful parameters in the cure-rate setting to target using causal machine learning, including effects that decompose restricted mean survival time effects into effects attributable and not attributable to cure process. 2. We introduce BartCure as an effective method for obtaining estimates of population and conditional-average variants of these estimands. We then evaluate BartCure on both synthetic and real data, finding that it compares very favorably with other causal machine learning methods for estimating effects and detecting treatment effect hetero-2geneity. 3. We provide tools to use with BartCure for interpreting the fitted model to understand the different sources of treatment effect heterogeneity. Natural causal estimands in settings with a cured population are (i) the effect on the proba-bility of an individual being cured, and (ii) the causal effect on the restricted mean survival time (RMST, Royston and Parmar, 2013). To isolate the effect of the treatment on outcomes 
+
+removing the effect of the treatment on cure, we also define a latency effect that decomposes the RMST effect into a part depending on the cure effect and a part depending on the latency effect; we also define a stochastic latency effect that we argue is more interpretable. We show that the latency effect is a well-defined contrast of distributions of potential outcomes on the same population, and therefore defines a causal effect; an advantage of the latency effect over the proposals of Wang et al. (2024) is that it can be estimated with minimal assumptions beyond those typically made in causal survival analysis. As a particular estimation strategy, we introduce BartCure , a promotion-time cure rate model (Chen et al., 1999; Yakovlev et al., 1996) based on Bayesian additive regression trees (BART, Chipman et al., 2010), and provide evidence that it performs favorably relative to other causal machine learning techniques. BartCure is fully nonparametric in the sense that it can capture arbitrary covariate-dependent variation in the survival function over time. We provide a rigorous evaluation of its estimation accuracy and interval coverage for average and conditional average causal effects, as well as its ability to detect meaningful treatment effect heterogeneity. We believe that both the model itself and the novel data augmenta-tion algorithm used to fit it are of independent methodological interest. An advantage of 
+
+BartCure , and Bayesian machine learning more broadly, is the availability of direct uncer-tainty quantification through the posterior distribution. Empirically, these methods have demonstrated strong performance: BART has been a highly competitive prediction method since its introduction, and BART-based causal estimators have performed well in the ACIC data analysis competition (Dorie et al., 2019; Thal and Finucane, 2023). More recently, 3Kabata et al. (2026) showed that the strong empirical performance of BART-based methods extends to causal survival analysis. We apply our methodology to a large clinical trial (CALGB 40101) that aimed to establish the noninferiority of the treatment paclitaxel (T, Ai = 1) for breast cancer relative to a baseline treatment cyclophosphamide+doxorubicin (CA, Ai = 0); because T has milder side effects than CA, this would allow T to be used as a new standard of care. To facilitate interpretation of causal effect estimates, we also show how to summarize the BartCure 
+
+posterior. Our analysis shows that there is limited evidence of treatment effect heterogeneity in the relative performance of these treatments. We find weak evidence that the gap in survival is higher in older patients. We also see mild differences between CA and T over shorter time horizons, with the main treatment effect being that CA cures more individuals as opposed to lengthening the survival time of uncured individuals. 
+
+1.1 Related Work 
+
+This work contributes to a broader literature on causal machine learning in survival anal-ysis. Beyond additional flexibility, we believe an important advantage of BartCure is that it reduces the “researcher degrees of freedom” (Simmons et al., 2011) associated with an-alysts manually specifying nonlinearities and interaction effects. Several recent methods target treatment effect heterogeneity in time-to-event settings without explicitly modeling cure, including targeted learning approaches for conditional survival effects (Zhu and Gal-lego, 2020), Bayesian accelerated failure time models for individualized treatment effects (Henderson et al., 2020), causal survival forests (Cui et al., 2023), and deep representation learning methods for treatment-specific hazards (Curth et al., 2021). These methods provide flexible tools for handling censoring and treatment effect heterogeneity, but they generally treat survival as finite rather than explicitly modeling a cured subpopulation. In the context of BART, several survival models for causal inference have been proposed. The best-known approach, introduced by Henderson et al. (2020), models the logarithm of 4the survival time as log Ti(a) = r(a, X i) + Wi, where the error distribution Wi is modeled us-ing a Dirichlet process mixture model (Escobar and West, 1995). This additive specification for Ti(a) induces an accelerated failure time (AFT) structure. The method is implemented in the AFTrees package in R. In extensive simulation studies, Kabata et al. (2026) showed that AFTrees compares very favorably with causal survival forests in both estimating het-erogeneous causal effects on survival and quantifying the associated uncertainty. Outside the causal survival setting, BART has also been used for survival analysis with discrete-time hazards (Sparapani et al., 2016), semiparametric survival models (Bonato et al., 2011), and competing-risk and recurrent-event models (Sparapani et al., 2020a,b). Subsequent work has extended these ideas to clustered, interval-censored, and spatial survival settings (Basak et al., 2022; Ghosh et al., 2024); fully nonparametric survival models (Linero et al., 2022; Alam and Linero, 2025; Sparapani et al., 2023); dynamic treatment regimes (Li et al., 2024); and relative survival models (Basak et al., 2026). Several existing causal machine learning methods can accommodate a cured subpopula-tion. For example, Cui et al. (2023) proposed causal survival forests (CSFs), which extend causal forests to survival settings and target finite-horizon survival functionals such as sur-vival probabilities and restricted mean survival time. Under the assumption that there exists a time τ beyond which individuals are considered cured, these methods remain applicable in the presence of a cured subpopulation. Another common approach for modeling survival data with a cured subpopulation is the mixture cure rate modeling; Sun and Song (2025) adopt this framework, using a BART probit model for the probability of being cured and a Bayesian causal forest (BCF, Hahn et al., 2020) model on log-survival times among un-cured individuals. Unlike the promotion-time models considered here, mixture cure models parameterize the cure probability and the survival distribution among uncured individuals separately. Consequently, these approaches do not explicitly share information between the cure and latency components of the model. 52 Notation and Definition of Causal Parameters 
+
+We adopt standard notation from causal survival analysis. Let Ti denote the survival time, 
+
+Ci a right-censoring time, Xi a vector of confounders and effect modifiers, and Ai a binary treatment indicator. Rather than observing ( Ti, C i) directly, we observe only the event time 
+
+Yi = min( Ti, C i) and the event indicator δi = 1( Ti ≤ Ci). Unlike in standard survival settings, we allow individual i to be cured , in which case Ti = ∞; such individuals are therefore necessarily censored. We use the potential outcomes framework to define causal effects (Rubin, 2005). For each treatment level a ∈ { 0, 1}, let Ti(a) denote the potential survival time under treatment a. Under the consistency assumption (Rubin, 1980), the realized outcome is Ti = Ti(Ai). We also define the propensity score e(x) = Pr( Ai = 1 | Xi = x). 
+
+Causal Effects To define the causal effects of interest, it is useful to define some additional potential outcomes. First, we define the potential outcomes for the survival status indicator 
+
+Di(a, t ) = 1 {Ti(a) > t }, for t ∈ [0 , ∞]. We then define the average causal effect on survival status at time t (Chen and Tsiatis, 2001) and the causal effect on the cure event as ∆S (t) = E{Di(1 , t ) − Di(0 , t )} and ∆C = E{Di(1 , ∞) − Di(0 , ∞)},
+
+respectively. Note that E{Di(a, t )} = Pr( Ti(a) > t ) = Sa(t), so ∆ S (t) = S1(t) − S0(t) is the average causal effect on the probability of surviving beyond time t. Note also that Di(a, ∞)is never observed, and ∆ C therefore is only recoverable under assumptions about the tail behavior of Sa(t). As a measure of lifetime gained up to time t due to treatment, we define the causal effect on restricted mean survival time (RMST) (Chen and Tsiatis, 2001) as ∆R(t) = E{Ri(1 , t ) − Ri(0 , t )} where Ri(a, t ) = min {Ti(a), t }.
+
+RMST can be interpreted as the life-expectancy-up-to-time-t (Royston and Parmar, 2013) and so ∆ R(t) represents the average amount of lifetime gained due to treatment up to time t.6Alternatively, one can write the causal RMST effect as the integrated difference in survival functions ∆ R(t) = R t 
+
+> 0
+
+[Pr {Ti(1) > u } − Pr {Ti(0) > u }] du = R t 
+
+> 0
+
+{S1(u) − S0(u)} du .Conditional average versions of each of these effects can also be defined straightforwardly. For example, the conditional average treatment effect (CATE) version of ∆ R(t) is ∆ R(t, x ) = 
+
+E{Ri(1 , t ) − Ri(0 , t ) | Xi = x}. Similarly, we can define ∆ C (x), ∆ S (t, x ), and so forth. 
+
+2.1 Identification Assumptions 
+
+Throughout, we make the standard positivity, ignorability, stable unit treatment value, con-sistency, and ignorable censoring assumptions that are standard for identifying causal effects in causal survival analysis. For completeness, we list these in the Supplementary Mate-rial as Assumptions 1—4. We also make the following assumption to identify the cured subpopulation. 
+
+Assumption 5: Cure Threshold. There exists a known time τ < ∞ such that the hazard function satisfies h(t | a, x ) = 0 for all t > τ , a ∈ { 0, 1}, and x in the support of Xi.Equivalently, survival beyond τ implies cure. Additionally, we require sufficient follow-up in the sense that Pr( Ci > τ | Xi = x) > 0 for all x.Some tail behavior assumption for the survival function is required in order to conclude that an apparent asymptote in the survival curve truly reflects the presence of a cured subpopulation, since the event {Ti = ∞} is never directly observed. Assumption 5, which links {Ti = ∞} to the observable event {Ti > τ }, is a pragmatic option that is frequently adopted in the semiparametric literature on cure rate models (Peng and Taylor, 2014). While not strictly required, it has several appealing consequences for finite-sample identifiability and estimation stability, both of which can otherwise be problematic even when the model is formally identified (Li et al., 2001). Our methodology can also accommodate the weaker assumption that there exists some 
+
+τ > 0 such that the hazard is constant beyond τ , i.e. , eh(t | a, x ) = c(a, x ) for some c(·, ·)7and t > τ , which also identifies the causal effects. This replaces the sharp cutoff beyond τ
+
+with an exponential tail. See Peng and Taylor (2014) for a discussion of this point. The key requirement for identifiability is that the tail behavior of [ Ti | Ti < ∞, A i, X i] is sufficiently constrained for the model to determine where the survival curves level off. 
+
+2.2 The Latency and Stochastic Latency Effects 
+
+The effects ∆ S (t) and ∆ R(t) are standard causal estimands in survival analysis, whereas ∆ C is specific to cure rate models. Defining a companion causal effect to ∆ C that removes the con-tribution of cure is desirable, but doing so is not straightforward and involves potential pit-falls. For example, the uncured average treatment effect (UATE) proposed by Sun and Song (2025), ∆ uncured (x) = E{log Ti(1) | Xi = x, T i(1) < ∞} − E{log Ti(0) | Xi = x, T i(0) < ∞} ,does not correspond to a standard causal estimand because it compares potential outcomes across two different latent populations: individuals who would remain uncured under treat-ment and individuals who would remain uncured under control. Sun and Song (2025) discuss further assumptions required for ∆ uncured to admit a causal interpretation. As a first step in the direction of defining a causal effect that “removes” the effect of the cure process from RMST we define the latency effect 
+
+∆L(t) = E{Li(1 , t ) − Li(0 , t )} where Li(a, t ) = Ri(a, t ) − t D i(a, ∞).
+
+Equivalently, one can show that E{Li(a, t )} = R t 
+
+> 0
+
+Pr( u < T i(a) < ∞) du, so that ∆ L(t) = 
+
+R t
+
+> 0
+
+ Pr( u < T i(1) < ∞) − Pr( u < T i(0) < ∞) du represents the integrated difference in the probability of being alive and uncured at time u, for u ∈ [0 , t ]. This implies that ∆ L(t)measures how much more time, on average up to horizon t, a treated individual spends alive 
+
+and uncured relative to an untreated individual. The value of defining the latency effect is that it allows for decomposition of ∆ R(t) into a part that is directly attributable to the probability of being cured and a part that is not; 8in particular, ∆ R(t) = ∆ L(t) + t ∆C . Moreover, ∆ L(t) is a valid causal effect in the sense that it contrasts two well-defined potential outcomes. Unfortunately, ∆ L(t) does not have a clean clinical interpretation. We investigate this by introducing the principal strata (Frangakis and Rubin, 2002) 
+
+U U = {i : Ti(0) < ∞, T i(1) < ∞} , U C = {i : Ti(0) < ∞, T i(1) = ∞} ,CU = {i : Ti(0) = ∞, T i(1) < ∞} , CC = {i : Ti(0) = Ti(1) = ∞} .
+
+A common assumption in this setting is that the treatment is beneficial in the sense that the stratum CU is empty, i.e., nobody who died under treatment would have survived under control. Under this assumption, we can express ∆ L(t) in terms of its contribution to the causal effect on RMST in U U . The following proposition relates these two quantities; its main implication is that individuals who are cured by treatment contribute −∆C E{Ri(0 , t ) |
+
+i ∈ U C } to ∆ L(t), which can make the treatment appear harmful (as measured by ∆ L(t)) simply because the treatment is effective at curing individuals. 
+
+Proposition 1. Let ∆U U (t) = E{Ri(1 , t ) − Ri(0 , t ) | i ∈ U U } and p1 = Pr {Ti(1) < ∞} .Suppose that Assumptions 1—4 hold and that Pr( i ∈ CU | Xi) = 0 . Then 
+
+∆L(t) = p1∆U U (t) − ∆C E{Ri(0 , t ) | i ∈ U C }.
+
+All proofs are deferred to the Supplementary Material. This flaw in ∆ L(t) motivates us to find an alternate decomposition of ∆ R(t) that does not have this flaw. Let pa(x) = Pr {Ti(a) < ∞ | Xi = x} denote the probability of not being cured under treatment a,and define the conditional RMST among uncured individuals as ma(t, x ) = E{Ri(a, t ) |
+
+Ti(a) < ∞, X i = x}. Equivalently, if we let Ga(· | x) denote the survival function of Ti(a)conditional on not being cured, then ma(t, x ) = R t 
+
+> 0
+
+Ga(u | x) du . With these definitions, we have E{Ri(a, t ) | Xi = x} = {1 − pa(x)} × t + pa(x) × ma(t, x ). Next we define a synthetic conditional distribution Qaa ′ (· | x) by combining the cure prob-9ability under treatment a with the finite-event-time distribution under a′ as Qaa ′ (· | x) = {1−
+
+pa(x)} δ∞(·)+ pa(x) Ga′ (· | x). Let Ti(a, a ′) ∼ Qaa ′ (· | Xi) denote a draw from this distribution conditional on Xi and define Ri(a, a ′, t ) = min {Ti(a, a ′), t }. The corresponding stochastic-intervention RMST is ϑt(a, a ′) = E{Ri(a, a ′, t )} = E[{1 − pa(Xi)}t + pa(Xi)ma′ (t, X i)] and we define the stochastic cure component of the RMST effect as ∆SC (t) = ϑt(1 , 0) − ϑt(0 , 0) 2 + ϑt(1 , 1) − ϑt(0 , 1) 2= E
+
+
+
+{p0(Xi) − p1(Xi)}
+
+
+
+t − m0(t, X i) + m1(t, X i)2
+
+ 
+
+.
+
+The intuition behind this definition is that we imagine that our intervention can separately be used to replace p1(x) with p0(x) (i.e., modifying the effect of the cure) and to replace 
+
+G1(· | x) with G0(· | x) (i.e., modifying the effect on survival among those who are uncured). It is stochastic in the sense that the effect can be expressed as E{ϑt(1 , A ′) − ϑt(0 , A ′)} where 
+
+A′ ∼ Bernoulli(1 /2), so that we randomly choose which survival distribution we assign. The stochastic cure effect has a complementary latency component, defined as ∆SL (t) = E
+
+
+
+{m1(t, X i) − m0(t, X i)}
+
+p0(Xi) + p1(Xi)2
+
+ 
+
+.
+
+Similarly, it can be expressed as ∆ SL (t) = E{ϑt(A′, 1) −ϑt(A′, 0) }, where A′ ∼ Bernoulli(1 /2). We write ∆ SC (t, x ) and ∆ SL (t, x ) for the corresponding conditional quantities. As these effects are functionals of the observed data distribution, both are identified under Assump-tions 1—5. Moreover, they decompose the RMST effect. 
+
+Proposition 2. For every time horizon t and covariate value x, ∆R(t, x ) = ∆ SC (t, x ) + ∆SL (t, x ).
+
+The proposed stochastic intervention effects attempt to address the main interpretational difficulty of ∆ L(t), which implicitly attributes the entire t units of RMST in a cured individual to the effect of cure. By contrast, ∆ SC (t) treats the gain from cure as the difference between 10 t and a reference finite-event-time RMST. Thus, if treatment increases the cure probability but the finite-event-time distribution is otherwise unchanged, ∆ SC (t) captures the full RMST effect, while conversely if the treatment does not change the cure probability then ∆ SC (t) = 0 and the entire RMST effect is attributed to changes in the finite-event-time distribution. Without further assumptions, we view ∆ SC (t) and ∆ SL (t) as model-based standardiza-tions of the counterfactual survival distributions rather than as literal mechanistic effects. A mechanistic interpretation would require one to imagine treatment components that can separately alter cure incidence and post-susceptibility latency, bringing the estimands close in spirit to separable effects or interventional mediation effects (Stensrud et al., 2022; Van-derWeele et al., 2014). To link the stochastic effects to more mechanistic effects, ∆ SL (t) can also be related to effects in the principal strata. 
+
+Proposition 3. Suppose that Assumptions 1—4 hold and that Pr( i ∈ CU | Xi = x) = 0 . Let 
+
+pa(x) = Pr {Ti(a) < ∞ | Xi = x} and suppose p0(x) > 0. Let ∆s(t, x ) = E{Ri(1 , t )−Ri(0 , t ) |
+
+i ∈ s, X i = x} and Bs(t, x ) = E{Ri(0 , t ) | i ∈ s, X i = x} for s ∈ { U U, U C }. Then 
+
+∆SL (t, x ) = 
+
+p1(x) + p0(x)2
+
+  
+
+∆U U (t, x ) + ∆C (x){BU U (t, x ) − BU C (t, x )}
+
+p0(x)
+
+
+
+.
+
+Hence ∆SL (t, x ) is proportional to ∆U U (t, x ) if ∆C (x) = 0 or BU U (t, x ) = BU C (t, x ).
+
+Relative to Proposition 1, ∆ SL (t, x ) is, informally, a “doubly-robust” proxy for ∆ U U (t, x ): it can be proportional to ∆ U U (t, x ) by either (i) having ∆ C (x) = 0 (i.e., there is no cure effect) or (ii) by satisfying BU U (t, x ) = BU C (t, x ). The latter is a principal ignorability condition stating that, for individuals who are uncured under control, knowing whether they would be cured under treatment does not inform their RMST under control. This type of principal ignorability is discussed by Wang et al. (2024). Consequently, the relationship in Proposition 3 is much more desirable than the relationship in Proposition 1. Proposition 3 might also form the basis of a sensitivity analysis by varying the sensitivity parameter ρ(x) = 
+
+BU U (t, x ) − BU C (t, x ) over some plausible range of values, although we do not pursue this. 11 Share of RMST Attributable to Cure A useful summary of the overall effect of the cure probability is the signed cure share ∆ SC (t)/∆R(t), provided that ∆ R(t) is not close to zero. Because the two components may have opposite signs, this ratio need not lie between zero and one. If a bounded descriptive measure is desired, one can instead report 
+
+|∆SC (t)|/{| ∆SC (t)| + |∆SL (t)|} , which can be interpreted as the relative magnitude of the cure component rather than as a percentage of the net effect. 
+
+# 3 Bayesian Machine Learning for Cure Rate Models 
+
+To estimate the causal effects described in Section 2, we propose machine learning methods based on the promotion-time cure model (Tsodikov et al., 2003) 
+
+S(t | a, x ) = exp 
+
+n
+
+−θ(a, x ) eF (t | a, x )
+
+o
+
+, (1) where eF (t | a, x ) is a cumulative distribution function. Because lim t→∞ eF (t | a, x ) = 1, this implies that the cure probability is given by lim t→∞ S(t | a, x ) = e−θ(a,x ). The form of the promotion-time model is motivated by assuming a latent number of competing risks 
+
+Ni(a) ∼ Poisson( θ(a, x )) for individual i under treatment a. If Ni(a) = 0, the individual is cured and Ti(a) = ∞; otherwise, each of the Ni(a) latent failure times are drawn i.i.d. from the distribution with distribution function eF (t | a, x ), and the survival time Ti(a) is the minimum of these latent failure times (see Chen et al., 1999 for a derivation). An advantage of the promotion-time model is that it more effectively borrows information across the cure probability e−θ(a,x ) and the survival function conditional on not being cured 
+
+Ga(t | x) = {e−θ(a,x ) eF (t|a,x ) − e−θ(a,x )}/{1 − e−θ(a,x )}, because both quantities are determined by the same underlying functions θ(a, x ) and eF (t | a, x ). By contrast, nonparametric mixture cure models such as the one used by Sun and Song (2025) parameterize the mixture proba-bility separately from the survival distribution, and consequently do not share information across these components. 12 3.1 A Brief Review of BART 
+
+To model the unknown functions θ(a, x ) and eF (t | a, x ) we use Bayesian additive regression trees (BART) models. A general BART model expresses a function of interest as a sum of regression trees r(a, x ) = PMm=1 g(a, x ; Tm, Mm), where Tm denotes the tree shape and splitting rules of tree m and Mm = {μℓm : ℓ ∈ Leaves( Tm)} consists of the leaf node predictions such that g(a, x ; Tm, Mm) = μℓm if ( a, x ) is associated to leaf node ℓ of Tm. Each 
+
+Tm is a binary tree whose internal (non-terminal) nodes are equipped with splitting rules of the form [ xj ≤ c], where xj is a component of the input vector ( a, x ) and c is a cutpoint. An input arriving at an internal node is associated to the left child if the splitting condition is satisfied, and to the right child otherwise, until a terminal (leaf) node is reached. BART was introduced by Chipman et al. (2010) for nonparametric regression with nor-mal errors, as well as probit regression. In causal inference, Hill (2011) used BART to estimate heterogeneous treatment effects in observational studies, with the main goal of flexibly adjusting for confounding and recovering individualized counterfactual outcome sur-faces without having to prespecify interactions or nonlinear main effects. Extending this, Hahn et al. (2020) proposed the Bayesian causal forest (BCF), which reparameterizes the outcome model into separate prognostic and treatment-effect components so that treatment effect heterogeneity can be regularized more aggressively. 
+
+3.2 The One-Forest and Two-Forest Models 
+
+We now describe the BartCure model for estimation of the causal estimands defined in Section 2. We introduce two variants of BartCure , which we refer to as the one-forest and 
+
+two-forest models, respectively. These models are fully nonparametric, in the sense that they can approximate any conditional survival function S(t | a, x ). The two-forest approach 13 directly applies the BART model of Chipman et al. (2010) to (1) by setting log θ(a, x ) = 
+
+> M
+
+X
+
+> m=1
+
+g(a, x ; T θm, Mθm) and eh(t | a, x ) = λ0(t) exp 
+
+( MX
+
+> m=1
+
+g B(t), a, x ; T hm , Mhm
+
+)
+
+,
+
+where B(·) : R+ → { 1, . . . , K } maps a given time t to a bin in which the hazard function is constant, λ0(t) is a baseline hazard function, and eh(t | a, x ) = − ddt log {1 − eF (t | a, x )} is the hazard function associated to eF (t | a, x ). We adopt the shorthand rθ(a, x ) = log θ(a, x ) and 
+
+rh(t, a, x ) = P 
+
+> m
+
+g B(t), a, x ; T hm , Mhm
+
+.The one-forest model instead reparameterizes the model as 
+
+θ(a, x ) ef (t | a, x ) = λ0(t)er(t,a,x ) where r(t, a, x ) = 
+
+> M
+
+X
+
+> m=1
+
+g B(t), a, x ; Tm, Mm
+
+. (2) and where ef (t | a, x ) = ∂∂t eF (t | a, x ) is the conditional density of eF (t | a, x ). From this, we can recover θ(a, x ) = H(∞ | a, x ) and eF (t | a, x ) = H(t | a, x )/H (∞ | a, x ) where 
+
+H(t | a, x ) = R t 
+
+> 0
+
+λ0(u)er(u,a,x ) du . The one-forest model is less faithful to the promotion-time parameterization, but retains its important benefits: it is computationally simple, and allows the cure probability to be a priori correlated with better survival prognosis. A potential drawback of the one-forest model is that sharing information between θ(a, x ) and ef (t | a, x )may not always be desirable. 
+
+Prior on Tm All of the tree structures are assigned a branching process prior as described by Chipman et al. (2010, 1998). Each node at depth d is non-terminal with probability  
+
+> γ
+> (1+ d)β
+
+, where γ ∈ (0 , 1) and β > 0 control the tree size. The default values γ = 0 .95 and 
+
+β = 2 encourage trees with few terminal nodes, so that each tree captures only a small piece of the overall signal. Because treatment effect heterogenity only arises through splitting on 
+
+a and one other variable, this prior naturally penalizes treatment effect heterogeneity. 14 Prior on Mm To facilitate computations, log-gamma priors are specified for the leaf node predictions μℓm ∼ log Gam( aμ, b μ). In this setting, as well as other survival settings, the log-gamma prior is conditionally conjugate (Basak et al., 2026; Linero et al., 2022; Alam and Linero, 2025). Following Basak et al. (2026), we choose aμ and bμ so that E(μℓm ) = 0 and Var( μℓm ) = σ2
+
+> μ
+
+/M with respect to the prior, with σμ = 1 .5 in all of our examples. 
+
+Prior for λ0(t) For both the one-forest and two-forest models, we model the baseline hazard λ0(t) as piecewise-constant with cut points 0 = α0 < α 1 < · · · < α K−1 < α K = ∞
+
+such that λ0(t) = PKk=1 λk ×1( αk−1 ≤ t < α k). We impose Assumption 5 by setting αK−1 = τ
+
+and λK = 0, although this is not strictly required to fit the two-forest model. We then set 
+
+λk
+
+> iid
+
+∼ Gam( aλ, b λ) with aλ = 1 and bλ ∼ Gam(1 , 1) by default. 
+
+Targeted Selection In observational studies, treatment assignment may depend strongly on the baseline prognosis, a phenomenon referred to as targeted selection (Hahn et al., 2020). To mitigate the impact of targeted selection, it is recommended to include an estimate of the propensity score as a covariate in the model. We follow this approach by incorporating an estimated propensity score into both the one-forest and two-forest BartCure models. 
+
+Computation Inference for both the one-forest and two-forest models is performed via Gibbs sampling using the generalized Bayesian backfitting algorithm of Hill et al. (2020). In the case of the one-forest model, the algorithm is essentially identical to the algorithm of Alam and Linero (2025) except that the cure threshold is taken into account. A Gibbs sampler for the two-forest model is not immediate from prior work, but is feasible after augmenting the latent number of unobserved events Ni ∼ Poisson {θ(Ai, X i) [1 − eF (Yi |
+
+Ai, X i)] }. Importantly for computational feasibility, the latent events themselves do not need to be sampled. Details are deferred to the Supplementary Material. 15 4 Experiments 
+
+We now conduct simulation experiments to evaluate the performance of the one-forest and two-forest BartCure models relative to baseline methods. Our goal is to determine whether 
+
+BartCure provides reliable estimation of average causal effects, conditional average causal effects, and treatment effect heterogeneity, in the presence of a cured subpopulation. 
+
+4.1 Estimating Causal Effects 
+
+We compare BartCure to competing methods on a suite of data generating processes (DGPs) that were introduced in prior work on causal survival analysis, augmented (or not) to have a cured subpopulation. 
+
+Methods for Comparison We compare the one-forest model and two-forest models, which we label BartCure (1) and BartCure (2). We also consider two existing causal machine learning survival analysis methods: causal survival forests (CSF, Cui et al., 2023) and an ac-celerated failure time BART model (IndivAFT, Henderson et al., 2020). CSF is implemented in the grf package (Tibshirani et al., 2024), while IndivAFT is implemented in the AFTrees 
+
+package. IndivAFT sets log Ti(a) = μa(Xi) + ϵi with a flexible Dirichlet process mixture model specified for the error distribution. To address targeted selection (Hahn et al., 2020) all BART methods incorporated the estimate propensity score as a covariate, while the CSF uses the propensity score via inverse propensity score weighting. All BART methods use 200 trees and inferences are based on 2,000 draws from a Gibbs sampler targeting the posterior. 
+
+Data Generating Processes We consider three families of DGPs drawn from the causal survival analysis literature (Henderson et al., 2020; Cui et al., 2023; Hu et al., 2021). The same DGPs were analyzed by Kabata et al. (2026); full details on these DGPs are in the Supplementary Material. All experiments used N = 1000 samples, which is somewhat smaller than the sample size of the CALGB 40101 breast cancer trial. Each of these DGPs 16 was extended to include a cured fraction via the mixture cure model S(t | a, x ) = {1 −
+
+pa(x)}+pa(x)Ga(t | x) where Ga(t | x) is the survival function of the uncured sub-population, obtained by truncating the base survival at the time horizon t. We set the cure probability to expit {α + za(x)} where za(x) is logit Ga(t | x) standardized to have mean 0 and variance 1, and α is chosen so that the marginal cure rate is 1 /2 under all settings. This implies that individuals with a high probability of surviving until the follow-up horizon t in the uncured population also have a high probability of being cured. 
+
+Comparison Measures For the simulation settings without a cured subpopulation, we estimate ∆ R(t), ∆R(t, x ), ∆ S (t), and ∆ S (t, x ) at the fixed time horizon t. For settings with a cured subpopulation, we monitor ∆ C and ∆ C (x) rather than ∆ S (t) and ∆ S (t, x ). We then compute the bias, root mean-squared error (RMSE), and the length and coverage of nominal 95% confidence/credible intervals, averaged over all simulated datasets and individuals. 
+
+4.2 Results for Estimating Causal Effects 
+
+Table 1 and Table 2 report the results for the causal effects in settings with and without a cured subpopulation, respectively. We defer simulation results for conditional average treatment effects to the Supplementary Material, with results in Figures S1—S6. 
+
+Average Treatment Effects: With a Cured Subpopulation Across all settings, methods perform similarly for estimating average treatment effects across all metrics, with the exception of BartCure (2), which appears less stable specifically for estimating ∆ C and so has wider intervals. Aside from this, both IndivAFT and BartCure (2) perform quite poorly on the Hu 3 and Hu 4 DGPs for estimating ∆ C , and IndivAFT performs poorly for ∆ R(t) as well; in the case of IndivAFT, this occurs because the model does not account for the cured subpopulation, and it also performs poorly for estimating ∆ C on the Henderson 2 setting. In view of this, the best performing methods for estimating ATEs are BartCure (1) and the 17 ∆C ∆R(t)Setting DGP Method Bias RMSE Coverage CI Length Bias RMSE Coverage CI Length Cui 1
+
+BartCure (1) -0.014 0.029 0.95 0.108 -0.012 0.024 0.94 0.090 
+
+BartCure (2) -0.011 0.040 0.99 0.183 -0.009 0.023 0.95 0.090 CSF 0.005 0.030 0.94 0.119 0.003 0.022 0.96 0.092 IndivAFT -0.011 0.026 0.94 0.087 -0.008 0.021 0.95 0.076 2
+
+BartCure (1) -0.010 0.031 0.94 0.117 -0.003 0.034 0.96 0.134 
+
+BartCure (2) 0.005 0.044 0.96 0.190 0.000 0.034 0.96 0.133 CSF 0.000 0.034 0.95 0.131 -0.002 0.035 0.95 0.139 IndivAFT 0.015 0.031 0.91 0.109 0.022 0.039 0.91 0.130 Henderson 1
+
+BartCure (1) -0.006 0.028 0.93 0.109 -0.010 0.100 0.95 0.401 
+
+BartCure (2) -0.013 0.041 1.00 0.217 -0.011 0.104 0.94 0.413 CSF 0.006 0.030 0.97 0.123 0.014 0.105 0.98 0.460 IndivAFT -0.008 0.025 0.94 0.096 -0.008 0.095 0.97 0.408 2
+
+BartCure (1) -0.005 0.028 0.95 0.108 -0.012 0.098 0.95 0.383 
+
+BartCure (2) -0.016 0.043 1.00 0.218 -0.011 0.100 0.95 0.393 CSF 0.006 0.031 0.95 0.123 0.015 0.098 0.99 0.433 IndivAFT -0.020 0.028 0.59 0.056 -0.047 0.094 0.91 0.320 3
+
+BartCure (1) -0.005 0.028 0.94 0.109 -0.013 0.099 0.94 0.389 
+
+BartCure (2) -0.018 0.043 0.99 0.214 -0.011 0.101 0.95 0.397 CSF 0.006 0.030 0.95 0.123 0.016 0.099 0.99 0.438 IndivAFT -0.022 0.029 0.54 0.052 -0.053 0.098 0.89 0.312 4
+
+BartCure (1) -0.005 0.029 0.94 0.108 -0.008 0.084 0.96 0.321 
+
+BartCure (2) -0.017 0.042 1.00 0.212 -0.007 0.086 0.97 0.336 CSF 0.006 0.031 0.96 0.123 0.008 0.091 0.98 0.386 IndivAFT -0.008 0.026 0.93 0.099 -0.001 0.090 0.95 0.362 Hu 1
+
+BartCure (1) 0.013 0.033 0.93 0.123 0.000 0.001 0.96 0.004 
+
+BartCure (2) 0.061 0.075 0.89 0.251 0.000 0.001 0.97 0.004 CSF -0.021 0.040 0.88 0.122 -0.001 0.001 0.88 0.004 IndivAFT 0.069 0.070 0.00 0.054 0.002 0.002 0.36 0.003 2
+
+BartCure (1) -0.006 0.033 0.96 0.122 0.000 0.001 0.95 0.004 
+
+BartCure (2) 0.058 0.078 0.77 0.248 0.000 0.001 0.95 0.004 CSF -0.014 0.039 0.90 0.121 0.000 0.001 0.92 0.004 IndivAFT 0.101 0.101 0.00 0.053 0.003 0.003 0.00 0.003 3
+
+BartCure (1) -0.009 0.031 0.96 0.118 0.001 0.001 0.80 0.004 
+
+BartCure (2) 0.130 0.146 0.54 0.300 0.001 0.001 0.95 0.004 CSF -0.008 0.032 0.91 0.114 0.000 0.001 0.90 0.004 IndivAFT 0.334 0.356 0.00 0.077 0.012 0.013 0.01 0.004 4
+
+BartCure (1) -0.004 0.032 0.92 0.119 0.001 0.001 0.80 0.004 
+
+BartCure (2) 0.197 0.213 0.25 0.336 0.001 0.001 0.89 0.004 CSF -0.004 0.034 0.88 0.114 0.000 0.001 0.92 0.004 IndivAFT 0.304 0.351 0.00 0.078 0.010 0.012 0.01 0.004 
+
+Table 1: Simulation results for average treatment effects with a cured fraction. 18 ∆S (t) ∆R(t)Setting DGP Method Bias RMSE Coverage CI Length Bias RMSE Coverage CI Length Cui 1
+
+BartCure (1) -0.004 0.011 0.94 0.045 -0.015 0.028 0.91 0.094 
+
+BartCure (2) 0.002 0.017 0.88 0.054 -0.006 0.027 0.88 0.094 CSF -0.004 0.011 0.92 0.045 -0.002 0.026 0.94 0.103 IndivAFT -0.006 0.011 0.89 0.035 -0.012 0.026 0.88 0.090 2
+
+BartCure (1) -0.010 0.019 0.93 0.065 -0.012 0.043 0.93 0.164 
+
+BartCure (2) -0.002 0.023 0.89 0.076 -0.001 0.045 0.93 0.162 CSF 0.014 0.028 0.93 0.093 0.002 0.045 0.94 0.174 IndivAFT -0.009 0.018 0.95 0.064 0.000 0.039 0.98 0.163 Henderson 1
+
+BartCure (1) -0.002 0.023 0.97 0.101 -0.029 0.191 0.97 0.794 
+
+BartCure (2) -0.004 0.026 0.94 0.105 -0.021 0.209 0.92 0.787 CSF -0.045 0.398 1.00 1.354 -0.218 2.521 1.00 7.964 IndivAFT -0.001 0.021 0.93 0.085 -0.010 0.203 0.93 0.795 2
+
+BartCure (1) 0.004 0.022 0.97 0.092 0.007 0.190 0.95 0.760 
+
+BartCure (2) 0.004 0.026 0.94 0.098 0.009 0.210 0.93 0.748 CSF -0.001 0.320 1.00 1.253 -0.081 2.187 1.00 8.354 IndivAFT 0.003 0.014 0.96 0.059 0.016 0.148 0.95 0.651 3
+
+BartCure (1) 0.001 0.022 0.97 0.094 -0.015 0.188 0.97 0.769 
+
+BartCure (2) -0.001 0.027 0.95 0.098 -0.012 0.204 0.94 0.755 CSF 0.011 0.310 1.00 1.175 0.266 2.108 1.00 7.340 IndivAFT 0.000 0.015 0.95 0.061 -0.011 0.159 0.95 0.638 4
+
+BartCure (1) 0.001 0.019 0.95 0.078 -0.029 0.171 0.94 0.657 
+
+BartCure (2) -0.002 0.025 0.91 0.087 -0.020 0.182 0.91 0.648 CSF -0.013 0.262 1.00 0.949 -0.005 1.452 1.00 5.175 IndivAFT 0.005 0.018 0.96 0.071 0.006 0.173 0.97 0.704 Hu 1
+
+BartCure (1) -0.001 0.001 0.65 0.003 0.001 0.001 0.91 0.004 
+
+BartCure (2) -0.003 0.003 0.75 0.010 -0.002 0.003 0.75 0.006 CSF 0.001 0.001 0.19 0.000 0.000 0.001 0.93 0.005 IndivAFT 0.000 0.001 0.90 0.002 0.001 0.001 0.93 0.005 2
+
+BartCure (1) -0.001 0.001 0.96 0.004 0.000 0.001 0.96 0.004 
+
+BartCure (2) -0.001 0.003 0.95 0.012 0.000 0.001 0.96 0.004 CSF 0.000 0.000 0.79 0.000 0.000 0.001 0.96 0.004 IndivAFT -0.001 0.002 0.85 0.005 0.000 0.001 0.96 0.004 3
+
+BartCure (1) -0.003 0.003 0.22 0.006 0.000 0.001 0.95 0.003 
+
+BartCure (2) -0.007 0.008 0.19 0.013 -0.001 0.002 0.71 0.004 CSF 0.001 0.001 0.20 0.000 0.000 0.001 0.93 0.004 IndivAFT -0.005 0.006 0.00 0.007 0.000 0.001 0.94 0.003 4
+
+BartCure (1) -0.002 0.003 0.31 0.006 0.000 0.001 0.96 0.003 
+
+BartCure (2) -0.007 0.007 0.29 0.013 -0.002 0.002 0.71 0.004 CSF 0.001 0.001 0.25 0.000 0.000 0.001 0.95 0.004 IndivAFT -0.004 0.004 0.00 0.006 0.000 0.001 0.96 0.004 
+
+Table 2: Simulation results for average treatment effects without a cured fraction. 19 CSF; BartCure (1) performs marginally better by RMSE across most settings and better by coverage on the Hu DGPs, and so performs best overall. 
+
+Average Treatment Effects: Without a Cured Subpopulation In the absence of a cured subpopulation, the basic findings are the same, with the exception that IndivAFT no longer performs poorly on any of the settings. We see that it is extremely difficult for any method to estimate ∆ S (t) under the Hu 3 and Hu 4 settings. This occurs because the survival functions are very close to zero at these follow-up times, and so small amounts of bias in estimating ∆ S (t) dominate inference; coverage for ∆ R(t), which is determined by the full survival curve, is much better. Interestingly, CSF suffered from substantial instability across all Henderson settings due to its use of inverse weighting highlighting that the BART-based methods can be much more stable. 
+
+4.3 Directionality of Heterogeneity 
+
+To complement our results on estimation of individual effects, we also give an assessment of how well the one-forest BartCure model and CSFs perform on the task of estimating the directionality of an effect. To test for the existence of individual differences in effect, we constructed for each individual an 80% confidence/credible interval and checked whether this interval contains 0. For each individual, we then computed the centered treatment effect ∆R(τ, x ) − ∆R(τ ) so that positive values indicate above-average benefit. We recorded the 
+
+discovery rate , the correct sign rate , the Type-S error rate , and the net directional score ,DR = ND
+
+N , CS = NCD 
+
+N , Type-S = NID 
+
+ND
+
+1( ND̸ = 0) , NDS = NCD − NID 
+
+N
+
+where N is the sample size, ND is the number of discoveries, NCD is the number of correct discoveries, and NID is the number of incorrect discoveries. A method that discovers few effects will have a low correct sign rate but also a low Type-S error rate, while a method that declares many effects aggressively may achieve a high correct sign rate at the cost of elevated 20 Setting DGP Method Discovery rate Correct sign rate Type-S error Net directional score Cui 1 BartCure (1) 0.021 0.010 0.531 -0.001 CSF 0.023 0.018 0.227 0.013 2 BartCure (1) 0.263 0.261 0.008 0.259 CSF 0.229 0.225 0.016 0.221 Henderson 1 BartCure (1) 0.345 0.340 0.015 0.335 CSF 0.049 0.045 0.095 0.040 2 BartCure (1) 0.372 0.367 0.014 0.361 CSF 0.072 0.068 0.063 0.063 3 BartCure (1) 0.372 0.367 0.013 0.362 CSF 0.072 0.067 0.059 0.063 4 BartCure (1) 0.368 0.363 0.013 0.358 CSF 0.050 0.045 0.091 0.041 Hu 1 BartCure (1) 0.454 0.443 0.024 0.432 CSF 0.537 0.511 0.048 0.485 2 BartCure (1) 0.577 0.570 0.013 0.563 CSF 0.573 0.551 0.038 0.529 3 BartCure (1) 0.197 0.188 0.046 0.179 CSF 0.091 0.079 0.127 0.068 4 BartCure (1) 0.326 0.319 0.020 0.313 CSF 0.338 0.330 0.026 0.321 
+
+Table 3: Directional sign recovery for centered individual RMST heterogeneity. Type-S errors; the net directional score summarizes the tradeoff. Higher values of the net directional score indicate that a method is both willing and able to recover the direction of treatment-effect heterogeneity. Table 3 shows that BartCure is generally more effective at recovering the direction of RMST heterogeneity. In the Henderson settings, BartCure makes substantially more dis-coveries than CSF, with discovery rates around 35% compared to around 6%, while keeping Type-S error rates small. This leads to much larger net directional scores for BartCure across all four Henderson DGPs. The same pattern holds for Cui 2 and Hu 3, where BartCure has both a higher correct sign rate and lower Type-S error rates than CSF. The main exceptions to this trend occur at Cui 1, Hu 1, and Hu 4. For Cui 1, both methods make very few discoveries, and the net directional scores are close to zero, indicat-ing that neither method reliably detects directional heterogeneity; given the small amount of 21 treatment effect heterogeneity in this setting, both methods appear to be behaving reason-ably in failing to detect heterogeneity across the board. For Hu 1 and Hu 4, CSF is slightly more aggressive and obtains marginally larger net directional scores, although this comes with higher Type-S error rates. Overall, these results suggest that BartCure is conservative in weak-signal settings but, when heterogeneity is identifiable, it tends to recover directional effects with a favorable balance between discovery and sign accuracy. 
+
+# 5 Application to CALGB 40101 Trial 
+
+We now apply BartCure to data from 3,871 participants in the CALGB 40101 trial, a Phase III randomized trial designed to evaluate the noninferiority of paclitaxel (T) relative to cyclophosphamide+doxorubicin (CA) for the treatment of breast cancer. Our primary endpoint is disease-free survival (DFS). Covariates of interest include age, race, ethnicity, menopause status ( stra1 ), hormone receptor status ( stra2 ), tumor size, assigned treatment duration, and number of positive lymph nodes. We restrict attention to 3,864 subjects with complete covariate information. As suggested by Peng and Taylor (2014, Section 6.2.4), we set τ in Assumption 5 to just-after the last observed failure time ( τ = 115 months). 
+
+Average Effects and Model Comparison Table 4 compares average causal effect es-timates from different models for RMST and cure probability. Because treatment assign-ment is randomized, estimates based on the Kaplan–Meier estimator (displayed in Figure 1) provide a useful benchmark. The Kaplan–Meier-based approach estimates a −2.39-month RMST difference (95% CI: −4.31, −0.47) and a −4.7% cure-probability difference (95% CI: 
+
+−10 .7%, 1 .3%). BartCure is closest to this benchmark for ∆ R(115) ( −2.24 months), with intervals excluding zero for both ∆ R(115) and ∆ C ; this is sensible because, while BartCure is nonparametric, it applies some amount of shrinkage to the treatment effect. CSF estimates an RMST contrast in the same direction and of slightly larger magnitude, but with much wider intervals that include zero; its cure-probability estimate is also directionally similar but 22 0.00 0.25 0.50 0.75 1.00      
+
+> 030 60 90
+> Months since randomization
+> Disease−free survival probability
+> Agent CA T
+
+Figure 1: Kaplan–Meier disease-free survival curves by treatment agent, with pointwise confidence bands. 
+
+b∆R(115) b∆C
+
+Method Estimate LCL UCL P -value Estimate LCL UCL P -value Nonparametric -2.389 -4.308 -0.470 0.0147 -0.047 -0.107 0.013 0.127 CSF -3.393 -7.715 0.930 0.1240 -0.079 -0.179 0.022 0.127 IndivAFT -1.940 -3.863 -0.063 0.0432 -0.028 -0.057 -0.001 0.043 
+
+BartCure -2.241 -4.137 -0.334 0.0264 -0.039 -0.073 -0.004 0.026 Table 4: Results for the causal effects b∆R(115) and b∆C for the CALGB 40101 trial, where LCL and UCL denote the lower and upper limits of 95% confidence/credible intervals. imprecise. IndivAFT gives the most attenuated estimates for both RMST ( −1.94 months) and cure probability ( −2.8%), with comparatively narrow intervals; this may be due either to the imposition of the accelerated failure time assumption or to the fact that IndivAFT does not account for the existence of a cured population. Overall, the model-based methods agree on the direction of the effect, but BartCure most closely reproduces the nonparametric RMST estimate. The posterior distributions of ∆ R(t), ∆ SL (t), and ∆ C for BartCure are given in Figure 2. Because ∆ SL (t) is indistinguishable from 0, the RMST effect appears primarily attributable 23 −5.0 −2.5 0.0 2.5 
+
+> 9.2 13.2 16.4 20.7 24.5 29.4 33.5 38.4 43.2 48.2 55.7 63.2 72.5 83.9 115.0
+> Months since randomization
+> Average treatment effect
+
+RMST 
+
+> −1 01
+> 9.2 13.2 16.4 20.7 24.5 29.4 33.5 38.4 43.2 48.2 55.7 63.2 72.5 83.9 115.0
+> Months since randomization
+> Average treatment effect
+
+Stochastic latency 
+
+> −0.10 −0.05 0.00 0.05
+> Cure probability
+> Average treatment effect
+
+Cure probability Figure 2: Posterior distributions of the RMST treatment effect, the stochastic latency effect, and the cure-probability treatment effect in the CALGB 40101 analysis over time. Points denote posterior means and vertical intervals denote 95% credible intervals. to T curing fewer individuals rather than to latency differences among uncured individuals 
+
+Individual Effects The posterior distributions of ∆ R(115 , X i) and ∆ C (Xi) for the indi-viduals in the sample are given in Figure 3; individuals are ordered by the posterior mean effect, and bands show pointwise 95% credible intervals for the effects. We see that RMST and cure probability are very closely related. All individual effect estimates favor CA over T, with differing amounts of supporting evidence. Individual posterior probabilities of negative effects of T are given in Table 5; we see that roughly 75% of individuals are estimated to have a posterior probability of a negative treatment effect of at least 80%, and around 18% have at least a 95% posterior probability of a negative effect. For comparison, boxplots of individual RMST effect estimates for BartCure and CSF are given in Figure 4. We see that CSFs produce much larger estimates of treatment effect 24 Cure probability RMST          
+
+> 01000 2000 3000 4000 01000 2000 3000 4000
+> −20 −10 010
+> −0.3 −0.2 −0.1 0.0 0.1
+> Individuals, ordered by posterior mean effect
+> Posterior mean treatment effect
+
+Figure 3: Waterfall plots of individual posterior treatment effects for ∆ R(115 , X i) and ∆C (Xi). Pr(negative effect) Cure probability RMST [0.50, 0.80) 25.8% 24.0% [0.80, 0.90) 22.3% 22.4% [0.90, 0.95) 33.7% 35.8% [0.95, 0.99) 18.1% 17.8% Table 5: Distribution of individual posterior probabilities of a negative treatment effect. heterogeneity, with many individuals estimated to have a positive T-versus-CA effect. By contrast, BartCure regularizes towards a nearly-homogeneous treatment effect. 
+
+Subgroup Effects Following Hahn et al. (2020); Alam et al. (2025), we constructed a decision tree summary to find optimal decision-theoretic subgroups that maximize treatment effect heterogeneity. Figure 5 provides a decision tree summary of ∆ R(t, x ). This summary identifies two variables that the treatment may differ across: the age of an individual (which was stratified into 6 groups, with groups 5 and 6 corresponding to individuals above the age of 60), and stra2 (which stratifies on hormone receptor status, with 1 for positive and 2 for negative). Generally, older individuals with negative receptor status have more negative RMST contrast estimates across arms. Figure 6 shows posterior distributions for ∆ R(t) and ∆ C within these subgroups, cen-25 −10 0 
+
+> BartCure Causal survival forest
+> Individual RMST treatment−effect point estimate
+
+Figure 4: Boxplots of individual RMST treatment-effect point estimates from BartCure and the causal survival forest. tered by the population average treatment effect. For all subgroups, there is at-most weak evidence supporting treatment effect heterogeneity, with sizeable uncertainty. We see that older individuals have an RMST difference estimated to be roughly 1.5 months lower and a cure probability effect about 2.5% lower than younger individuals. We also see a negative effect of stra2 = 2 , and both of these effects are roughly additive when looked at jointly. 
+
+Additional Results Further analysis of this dataset is available in the Supplementary Material. This includes an assessment of variable importance and analysis of the proportion of the RMST effect attributable to cure. 
+
+# 6 Discussion 
+
+In this work, we proposed a causal machine learning framework for survival settings with a cured subpopulation. We defined causal effects on finite-time survival, restricted mean survival time (RMST), and cure probability, and considered decompositions of the RMST 26 Figure 5: Tree-based summary of posterior heterogeneity in the BartCure RMST treatment effect. Numbers in the nodes give estimated subgroup RMST effect and the subgroup size. effect into contributions arising from cure and from delayed failure among uncured indi-viduals. This cure-rate formulation provides clinically relevant information that standard causal analyses do not directly capture. We first considered a naive latency contrast, which is a well-defined causal estimand, but argued that its interpretation is unsatisfactory. To address this issue, we introduced stochastic cure and latency effects that separate the contri-bution of the cure probability from that of the finite-event-time distribution. We also showed how the stochastic latency effect relates to a principal-strata effect among individuals who would remain uncured under either treatment arm. For estimation, we proposed BartCure ,a BART-based promotion-time cure model targeting both average and conditional versions of these effects. The main strength of BartCure is its ability to estimate clinically interpretable cure-rate causal effects while retaining the flexibility of Bayesian nonparametric regression. In simu-lations, BartCure performs well relative to causal survival forests and an accelerated failure time BART model, both in settings with a cured subpopulation and in settings where all survival times are finite. A second strength is its behavior when estimating heterogeneous treatment effects. In many applications, overstating heterogeneity can be more harmful than failing to detect weak heterogeneity, since subgroup claims often influence clinical interpre-tation and the design of future studies. The prior used by BartCure shrinks treatment effects toward homogeneity, and the simulation results suggest that this induces conserva-27 RMST 
+
+Age 5-6 minus age 1-4 
+
+RMST 
+
+stra2 = 2 minus stra2 = 1 
+
+Cure probability 
+
+Age 5-6 minus age 1-4 
+
+Cure probability 
+
+stra2 = 2 minus stra2 = 1 
+
+-9 -6 -3 0 -7.5 -5.0 -2.5 0.0 2.5 5.0 
+
+-0.10 -0.05 0.00 -0.10 -0.05 0.00 0.05 
+
+0
+
+5
+
+10 
+
+15 
+
+20 
+
+0.0 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0
+
+5
+
+10 
+
+15 
+
+0.0 
+
+0.1 
+
+0.2 
+
+Difference in group-average treatment effect 
+
+> Posterior density
+
+Credible interval 0.90 0.95 estimand Cure probability RMST RMST 
+
+Age 1-4, stra2 = 1 
+
+RMST 
+
+Age 1-4, stra2 = 2 
+
+RMST 
+
+Age 5-6, stra2 = 1 
+
+RMST 
+
+Age 5-6, stra2 = 2 
+
+Cure probability 
+
+Age 1-4, stra2 = 1 
+
+Cure probability 
+
+Age 1-4, stra2 = 2 
+
+Cure probability 
+
+Age 5-6, stra2 = 1 
+
+Cure probability 
+
+Age 5-6, stra2 = 2 
+
+-1 0 1 2 3 -2.5 0.0 2.5 -6 -4 -2 0 2 -10 -5 0
+
+-0.02 0.00 0.02 0.04 -0.04 0.00 0.04 -0.10 -0.05 0.00 0.05 -0.15 -0.10 -0.05 0.00 0.05 
+
+0
+
+5
+
+10 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+0.20 
+
+0
+
+5
+
+10 
+
+15 
+
+20 
+
+0.0 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0
+
+10 
+
+20 
+
+0.0 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+Subgroup effect minus population-average effect 
+
+> Posterior density
+
+Credible interval 0.90 0.95 estimand Cure probability RMST Figure 6: Posterior densities for differences in group-average treatment effects at 115 months, comparing age groups and stra2 (1 if receptor status is positive and 2 if negative). Horizontal bars denote 90% and 95% posterior credible intervals. 28 tive heterogeneity detection with favorable Type-S error properties. Consequently, when the method identifies strong subgroup patterns, those patterns have persisted despite the model’s regularization toward homogeneous effects. The proposed estimands should be interpreted with care. The stochastic latency effect is identified as a functional of the observed data distribution under the stated assumptions, but connecting it to the principal-strata effect ∆ U U requires additional conditions; the connection is most direct under monotonicity and a principal ignorability condition relating the control-arm RMST distribution in the U U and U C strata. These assumptions may be plausible in some clinical settings, but they are not fully testable. A second limitation is the reliance on a cure-threshold assumption. This assumption is common for semiparametric cure models, and is useful for stabilizing estimation of the cured fraction, but it remains a substantive modeling choice. If the threshold is chosen too small, we may incorrectly classify uncured individuals as cured; if it is chosen too large, the cure probability may be weakly identified in small samples. In practice, the threshold should therefore be guided by clinical knowledge and sensitivity analyses should be conducted whenever possible. 
+
+Acknowledgements This work was supported under NSF grant DMS-2144933. 
+
+Supplementary Material Supplementary files include formal identification assumptions, proofs of all propositions, full details of the Gibbs sampling algorithm used to fit the models, additional simulation details and experiments, additional analyses CALGB 40101, and code reproducing figures and tables. 
+
+# References 
+
+Abdul Rahman, H., Zaim, S. N. N., Suhaimei, U. S., and Jamain, A. A. (2024). Prognostic factors associated with breast cancer-specific survival from 1995 to 2022: a systematic review and meta-analysis of 1,386,663 cases from 30 countries. Diseases , 12(6):111. 29 Alam, E., Kundu, P., and Linero, A. R. (2025). Decision theoretic subgroup detection with Bayesian machine learning. arXiv preprint arXiv:2509.05832 .Alam, E. and Linero, A. R. (2025). A unified Bayesian nonparametric framework for ordinal, survival, and density regression using the complementary log-log link. arXiv preprint arXiv:2502.00606 .Basak, P., Linero, A. R., Sinha, D., and Lipsitz, S. R. (2022). Semiparametric analysis of clustered interval-censored survival data using soft Bayesian additive regression trees (SBART). Biometrics , 78(3):880–893. Basak, P., Maringe, C., Rubio, F. J., and Linero, A. R. (2026). Understanding inequalities in cancer survival using Bayesian machine learning. Journal of the American Statistical Association , 121(553):72–84. Bonato, V., Baladandayuthapani, V., Broom, B. M., Sulman, E. P., Aldape, K. D., and Do, K.-A. (2011). Bayesian ensemble methods for survival prediction in gene expression data. 
+
+Bioinformatics , 27(3):359–367. Chen, M.-H., Ibrahim, J. G., and Sinha, D. (1999). A new Bayesian model for survival data with a surviving fraction. Journal of the American Statistical Association , 94(447):909– 919. Chen, P.-Y. and Tsiatis, A. A. (2001). Causal inference on the difference of the restricted mean lifetime between two groups. Biometrics , 57(4):1030–1038. Chipman, H. A., George, E. I., and McCulloch, R. E. (1998). Bayesian CART model search. 
+
+Journal of the American Statistical Association , 93(443):935–948. Chipman, H. A., George, E. I., and McCulloch, R. E. (2010). BART: Bayesian additive regression trees. The Annals of Applied Statistics , pages 266–298. 30 Cui, Y., Kosorok, M. R., Sverdrup, E., Wager, S., and Zhu, R. (2023). Estimating hetero-geneous treatment effects with right-censored data via causal survival forests. Journal of the Royal Statistical Society Series B: Statistical Methodology , 85(2):179–211. Curth, A., Lee, C., and van der Schaar, M. (2021). SurvITE: Learning heterogeneous treat-ment effects from time-to-event data. In Advances in Neural Information Processing Sys-tems , volume 34. Dorie, V., Hill, J., Shalit, U., Scott, M., and Cervone, D. (2019). Automated versus do-it-yourself methods for causal inference: Lessons learned from a data analysis competition. 
+
+Statistical Science , 34(1):43–68. Escobar, M. D. and West, M. (1995). Bayesian density estimation and inference using mixtures. Journal of the American Statistical Association , 90(430):577–588. Frangakis, C. E. and Rubin, D. B. (2002). Principal stratification in causal inference. Bio-metrics , 58(1):21–29. Ghosh, D., Sinha, D., Linero, A. R., and Rust, G. (2024). Analysis of spatially clustered survival data with unobserved covariates using SBART. Hahn, P. R., Murray, J. S., and Carvalho, C. M. (2020). Bayesian regression tree models for causal inference: Regularization, confounding, and heterogeneous effects (with discussion). 
+
+Bayesian Analysis , 15(3):965–1056. Henderson, N. C., Louis, T. A., Rosner, G. L., and Varadhan, R. (2020). Individualized treatment effects with censored data via fully nonparametric Bayesian accelerated failure time models. Biostatistics , 21(1):50–68. Hill, J., Linero, A., and Murray, J. (2020). Bayesian additive regression trees: A review and look forward. Annual Review of Statistics and its Application , 7(1):251–278. 31 Hill, J. L. (2011). Bayesian nonparametric modeling for causal inference. Journal of Com-putational and Graphical Statistics , 20(1):217–240. Hu, L., Ji, J., and Li, F. (2021). Estimating heterogeneous survival treatment effect in observational data using machine learning. Statistics in Medicine , 40(21):4691–4713. Kabata, D., Henderson, N. C., and Varadhan, R. (2026). Quantifying uncertainty of in-dividualized treatment effects in right-censored survival data: a comparison of Bayesian additive regression trees and causal survival forest. Health Services and Outcomes Research Methodology , 26:87–107. Li, C.-S., Taylor, J. M., and Sy, J. P. (2001). Identifiability of cure models. Statistics & Probability Letters , 54(4):389–395. Li, X., Logan, B. R., Hossain, S. M. F., and Moodie, E. E. M. (2024). Dynamic treatment regimes using Bayesian additive regression trees for censored outcomes. Lifetime Data Analysis , 30(1):181–212. Linero, A. R., Basak, P., Li, Y., and Sinha, D. (2022). Bayesian survival tree ensembles with submodel shrinkage. Bayesian Analysis , 17(3):997–1020. Murray, J. S. (2021). Log-linear Bayesian additive regression trees for multinomial lo-gistic and count regression models. Journal of the American Statistical Association ,116(534):756–769. Othus, M., Barlogie, B., LeBlanc, M. L., and Crowley, J. J. (2012). Cure models as a useful statistical tool for analyzing survival. Clinical Cancer Research , 18(14):3731–3736. Peng, Y. and Taylor, J. M. (2014). Cure models. Handbook of Survival Analysis , 34:113–134. Royston, P. and Parmar, M. K. (2013). Restricted mean survival time: an alternative to the hazard ratio for the design and analysis of randomized trials with a time-to-event outcome. 
+
+BMC Medical Research Methodology , 13(1):152. 32 Rubin, D. B. (1980). Randomization analysis of experimental data: The Fisher randomiza-tion test comment. Journal of the American Statistical Association , 75(371):591. Rubin, D. B. (2005). Causal inference using potential outcomes: Design, modeling, decisions. 
+
+Journal of the American Statistical Association , 100(469):322–331. Shulman, L. N., Berry, D. A., Cirrincione, C. T., Becker, H. P., Perez, E. A., O’Regan, R., Martino, S., Shapiro, C. L., Schneider, C. J., Kimmick, G., et al. (2014). Comparison of doxorubicin and cyclophosphamide versus single-agent paclitaxel as adjuvant therapy for breast cancer in women with 0 to 3 positive axillary nodes: CALGB 40101 (Alliance). 
+
+Journal of Clinical Oncology , 32(22):2311–2317. Simmons, J. P., Nelson, L. D., and Simonsohn, U. (2011). False-positive psychology: Undis-closed flexibility in data collection and analysis allows presenting anything as significant. 
+
+Psychological Science , 22(11):1359–1366. Sparapani, R. A., Logan, B. R., Maiers, M. J., Laud, P. W., and McCulloch, R. E. (2023). Nonparametric failure time: Time-to-event machine learning with heteroskedastic Bayesian additive regression trees and low information omnibus Dirichlet process mixtures. 
+
+Biometrics , 79(4):3023–3037. Sparapani, R. A., Logan, B. R., McCulloch, R. E., and Laud, P. W. (2016). Nonparametric survival analysis using Bayesian additive regression trees (BART). Statistics in Medicine ,35(16):2741–2753. Sparapani, R. A., Logan, B. R., McCulloch, R. E., and Laud, P. W. (2020a). Nonparametric competing risks analysis using Bayesian additive regression trees. Statistical Methods in Medical Research , 29(1):57–77. Sparapani, R. A., Rein, L. E., Tarima, S. S., Jackson, T. A., and Meurer, J. R. (2020b). Non-parametric recurrent events analysis with BART and an application to the hospital admissions of patients with diabetes. Biostatistics , 21(1):69–85. 33 Stensrud, M. J., Young, J. G., Didelez, V., Robins, J. M., and Hern´ an, M. A. (2022). Separable effects for causal inference in the presence of competing events. Journal of the American Statistical Association , 117(537):175–183. Sun, R. and Song, X. (2025). A tree-based Bayesian accelerated failure time cure model for estimating heterogeneous treatment effect. Bayesian Analysis , 20(2):345–373. Thal, D. R. and Finucane, M. M. (2023). Causal methods madness: Lessons learned from the 2022 ACIC competition to estimate health policy impacts. Observational Studies ,9(3):3–27. Tibshirani, J., Athey, S., Sverdrup, E., and Wager, S. (2024). grf: Generalized Random Forests . R package version 2.4.0. Tsodikov, A., Ibrahim, J. G., and Yakovlev, A. (2003). Estimating cure rates from survival data: an alternative to two-component mixture models. Journal of the American Statistical Association , 98(464):1063–1078. VanderWeele, T. J., Vansteelandt, S., and Robins, J. M. (2014). Effect decomposition in the presence of an exposure-induced mediator-outcome confounder. Epidemiology , 25(2):300– 306. Wang, Y., Deng, Y., and Zhou, X.-H. (2024). Causal inference for time-to-event data with a cured subpopulation. Biometrics , 80(2):ujae028. Yakovlev, A. Y., Tsodikov, A. D., and Asselain, B. (1996). Stochastic Models of Tumor Latency and Their Biostatistical Applications , volume 1 of Mathematical Biology and Medicine . World Scientific, Singapore. Zhu, J. and Gallego, B. (2020). Targeted estimation of heterogeneous treatment effect in observational survival analysis. Journal of Biomedical Informatics , 107:103474. 34 Supplementary Material 35 
+
+# Supplementary Material 
+
+Bayesian Causal Machine Learning for Cure Models 
+
+# S1 Causal Identification Assumptions 
+
+We require the following assumptions to identify the causal parameters. Assumptions 1–3 are standard assumptions in the causal inference literature (Rubin, 2005), which state that the treatment is well-defined with no interference between units, all individuals have some non-negligible probability of being assigned to either treatment or control, and there are no unmeasured common causes of the treatment assignment mechanism and the potential outcomes; in CALGB 40101, the treatment assignment was randomized, and so these as-sumptions are known to hold. Assumption 4 is also standard in survival analysis, and is plausible when censoring is primarily administrative. 
+
+Assumption 1: Stable Unit Treatment Value (SUTVA). The observed failure time satisfies Ti = Ti(Ai), and the potential outcomes of individual i do not depend on the treatment assignments of other individuals (Rubin, 1980). 
+
+Assumption 2: Positivity. There exists a δ > 0 such that δ < e (x) < 1 − δ for all x in the support of Xi, where we recall that e(x) = Pr( Ai = 1 | Xi = x) is the propensity score. 
+
+Assumption 3: Ignorability. Treatment assignment is independent of the potential out-comes given the observed covariates: {Ti(0) , T i(1) } ⊥ Ai | Xi.
+
+Assumption 4: Ignorable Censoring. The censoring mechanism is independent of the observed failure times given the treatment and covariates: Ci ⊥ Ti | Ai, X i.
+
+Assumption 5: Cure Threshold. There exists a known time τ < ∞ such that the hazard function satisfies h(t | a, x ) = 0 for all t > τ , a ∈ { 0, 1}, and x in the support of Xi.Supplementary Material 36 Equivalently, survival beyond τ implies cure. Additionally, we require sufficient follow-up in the sense that Pr( Ci > τ | Xi = x) > 0 for all x.
+
+# S2 Proofs of Propositions 
+
+Proof of Proposition 1. Because Li(a, t ) = Ri(a, t )1 {Ti(a) < ∞} ,∆L(t) = E [Ri(1 , t )1 {Ti(1) < ∞} − Ri(0 , t )1 {Ti(0) < ∞} ] .
+
+The condition Pr( i ∈ CU | Xi) = 0 implies Pr( i ∈ CU ) = 0, so 1 {Ti(1) < ∞} = 1 {i ∈ U U }
+
+and 1 {Ti(0) < ∞} = 1 {i ∈ U U ∪ U C }. Hence ∆L(t) = Pr( i ∈ U U )E{Ri(1 , t ) − Ri(0 , t ) | i ∈ U U } − Pr( i ∈ U C )E{Ri(0 , t ) | i ∈ U C }.
+
+Under the same condition, p1 = Pr( i ∈ U U ) and ∆ C = Pr {Ti(1) = ∞} − Pr {Ti(0) = ∞} =Pr( i ∈ U C ) = p0 − p1. Substitution gives the result. 
+
+Proof of Proposition 2. Fix x. By definition, ∆R(t, x ) = {1 − p1(x)}t + p1(x)m1(t, x ) − { 1 − p0(x)}t − p0(x)m0(t, x )= {p0(x) − p1(x)}t + p1(x)m1(t, x ) − p0(x)m0(t, x ).
+
+Also, ∆SC (t, x ) + ∆ SL (t, x ) = {p0(x) − p1(x)}
+
+
+
+t − m0(t, x ) + m1(t, x )2
+
+
+
++ {m1(t, x ) − m0(t, x )}
+
+p0(x) + p1(x)2
+
+
+
+= {p0(x) − p1(x)}t + p1(x)m1(t, x ) − p0(x)m0(t, x ),Supplementary Material 37 which equals ∆ R(t, x ). 
+
+Proof of Proposition 3. First, note that because Pr( i ∈ CU | Xi = x) = 0, an individual who is uncured under treatment must belong to the stratum U U . Hence Pr {Ti(1) < ∞ | 
+
+Xi = x} = Pr( i ∈ U U | Xi = x), so that Pr( i ∈ U U | Xi = x) = p1(x). Similarly, an individual who is uncured under control belongs to either U U or U C , and therefore 
+
+p0(x) = Pr( i ∈ U U | Xi = x) + Pr( i ∈ U C | Xi = x). It follows that Pr( i ∈ U C | Xi = x) = 
+
+p0(x) − p1(x) = ∆ C (x). Now consider the conidtional RMST among uncured individuals. Because Ti(1) < ∞ is equivalent to i ∈ U U , we have 
+
+m1(t, x ) = E{Ri(1 , t ) | i ∈ U U, X i = x}.
+
+On the other hand, rearranging the expression E{Ri(a, t ) | Xi = x} = {1−pa(x)}× t+pa(x)×
+
+ma(t, x ) with a = 0 and applying E{Ri(0 , t ) | Xi = x} = Pr( i ∈ U U | Xi = x) × E{Ri(0 , t ) |
+
+i ∈ U U, X i = x} + Pr( i ∈ U C | Xi = x) × E{Ri(0 , t ) | i ∈ U C, X i = x} gives 
+
+m0(t, x ) = p1(x)E{Ri(0 , t ) | i ∈ U U, X i = x} + ∆ C (x)E{Ri(0 , t ) | i ∈ U C, X i = x}
+
+p0(x) .
+
+Using the notation BU U (t, x ) = E{Ri(0 , t ) | i ∈ U U, X i = x}, B U C (t, x ) = E{Ri(0 , t ) | i ∈
+
+U C, X i = x}, and ∆ U U (t, x ) = E{Ri(1 , t ) − Ri(0 , t ) | i ∈ U U, X i = x}, we can write 
+
+m1(t, x ) = BU U (t, x ) + ∆ U U (t, x ) and m0(t, x ) = p1(x)BU U (t, x ) + ∆ C (x)BU C (t, x )
+
+p0(x) .Supplementary Material 38 Therefore, 
+
+m1(t, x ) − m0(t, x ) = BU U (t, x ) + ∆ U U (t, x ) − p1(x)BU U (t, x ) + ∆ C (x)BU C (t, x )
+
+p0(x)= ∆ U U (t, x ) + {p0(x) − p1(x)}BU U (t, x ) − ∆C (x)BU C (t, x )
+
+p0(x)= ∆ U U (t, x ) + ∆C (x)
+
+p0(x) {BU U (t, x ) − BU C (t, x )}.
+
+Finally, by definition, ∆SL (t, x ) = {m1(t, x ) − m0(t, x )}p0(x) + p1(x)2 .
+
+Substituting the preceding display gives the stated identity. If either ∆ C (x) = 0 or BU U (t, x ) = 
+
+BU C (t, x ), the second term in braces vanishes, so ∆ SL (t, x ) is proportional to ∆ U U (t, x ). This proves the final claim. 
+
+# S3 Full Details of Gibbs Sampler 
+
+For the one-forest model, the Gibbs sampler used is exactly the one described by Alam and Linero (2025), with the additional constraint that λK ≡ 0 is enforced at the end of each update of the λ’s. For the two-forest model, consider the promotion-time survival model with survival func-tion 
+
+S(t | x) = exp 
+
+n
+
+−θ(x) eF (t | x)
+
+o
+
+.
+
+This model has hazard function 
+
+h(t | x) = θ(x) ef (t | x).Supplementary Material 39 Adopt the shorthand S = S(t | x), eF = eF (t | x), θ = θ(x), and ef = ef (t | x); adding the subscript i is shorthand for plugging in t = Yi and x = Xi so Si = S(Yi | Xi). We also write 
+
+eS = 1 − eF and eh = − ∂∂t log eS.The likelihood in the promotion-time model is 
+
+Y
+
+> i
+
+(θi efi)δi exp 
+
+
+
+−
+
+Z Yi
+
+> 0
+
+θi ef dt 
+
+
+
+= Y
+
+> i
+
+
+
+θi ehi eSi
+
+δi
+
+exp 
+
+
+
+−θi eFi
+
+
+
+.
+
+Now, augment Ki ∼ Poisson( θi eSi). The augmented likelihood becomes 
+
+Y
+
+> i
+
+θKi+δi 
+
+> i
+
+e−θi
+
+Ki! × ehδi 
+
+> i
+
+eSδi+Ki 
+
+> i
+
+.
+
+Next, we consider the model log θ = rθ(x), with shorthand rθ and rθi . We also consider the model eh = λB(t) exp {rh(B(t), x )}, also with shorthand eh = λ exp( rh). Both of these terms can be handled in a fully conjugate fashion using log-linear BART models with log-gamma priors. For example, we could set 
+
+rθ =
+
+> M
+
+X
+
+> m=1
+
+g(x; T θm, Mθm)with leaf node parameters μθℓm ∼ log Gam( aθ, b θ). Similarly, we can use the model rh(B(t), x ) = 
+
+rh = PMm=1 g(B(t), x ; T rm, Mrm) with leaf node parameters μrℓm ; the interpretation here is that we have Ki censored values above Yi in the usual piecewise exponential model, with Yi itself either denoting an event time ( δi = 1) so that we have observed an event exactly at Yi, or itself might correspond to censoring (so that we have Ki + 1 events to consider above Yi; this shouldn’t be interpreted literally in the context of the cure model, but is just how one can interpret this component of the likelihood). The Poisson log-linear model updates are described by Murray (2021) and, while the survival updates are also relatively straightforward given the above development, we will also outline them here. Supplementary Material 40 Fix leaf ℓ of tree m and define ηib = rh(b, X i) − μℓm . Define Zib = 1( Yi ≥ cb)( cb − cb−1) + 1( cb−1 ≤ Yi < c b)( Yi − cb−1) and δib = 1( δi = 1 ∧ Yi ∈ (cb−1, c b)). Then the likelihood associated to this leaf node is 
+
+Y
+
+> i,b :( b,X i)⇝(ℓ,m )
+
+exp {δib (ηib + μℓm ) − (δi + Ki)λb Zib eηib eμℓm } ,
+
+where ( b, X i) ⇝ (ℓ, m ) denotes that ( b, X i) is associated to leaf node ℓ of tree m. Integrating out μℓm against its prior gives the integrated likelihood 
+
+m(Tm) = Y
+
+> ℓ
+
+Γ( aμ + Aℓ)(bλ + Bℓ)aμ+Aℓ
+
+× baμ
+
+> μ
+
+Γ( aμ)where Aℓ = P 
+
+> (i,b ):( b,X i)⇝(ℓ,m )
+
+δib and Bℓ = P
+
+> (i,b ):( b,X i)⇝(ℓ,m )
+
+(δi + Ki)λbZib eηib . This integrated likelihood can be used, as described by Hill et al. (2020), as the basis for a Metropolis-Hastings update for Tℓ. Given a proposal distribution Λ( T | T ′), we accept a proposed 
+
+T ′ ∼ Λ( T | T m) with probability 1 ∧ m(T ′) πT (T ′) Λ( Tm | T ′)
+
+m(Tm) πT (Tm) Λ( T ′ | T m).
+
+Reasonable proposals for new trees are the grow, prune, and change moves described by Chipman et al. (1998). After updating Tℓ by Metropolis-Hastings, we then sample μℓm ∼
+
+log Gam( aμ + Aℓ, b μ + Bℓ). Finally, after all of the ( Tm, Mm)’s have been updated, the baseline hazard parameters are updated similarly as λb ∼ Gam( aλ + Ab, b λ + Bb) where Ab = P 
+
+> i
+
+δib and Bb = P
+
+> i
+
+(δi +
+
+Ki)Zib erhi .Supplementary Material 41 
+
+# S4 Additional Simulation Details 
+
+S4.1 More Details on the DGPs 
+
+We now provide the full details for the different DGPs used in the simulation experiments of Section 4. 
+
+Henderson et al. (2020) This setting is based on real data taken from the SOLVD trial (Henderson et al., 2020). Covariates and treatment data are taken directly from the trial data, while the outcome Ti(a) follows an accelerated failure time model with log Ti(a) = 
+
+μa(x) + ϵi, where ϵi has mean zero and unit variance following either a normal (DGP 1), Gumbel (DGP 2), standardized gamma (DGP 3), or t-mixture (DGP 4) distribution. The propensity score is estimated by a logistic regression on Xi, while the censoring time is sampled independently as Ci ∼ Uniform(6 .5, 10). We use t = 6 for the follow-up time. 
+
+Cui et al. (2023) Covariates for this setting are sampled by setting Xi = UiV where 
+
+Uij ∼ Uniform(0 , 1) and V is given by the Cholesky decomposition of a matrix with ( j, k )th 
+
+entry 0 .5|j−k|. We consider two sub-settings: 1. Log-normal AFT: log Ti(a) = μa(Xi) + ϵi where ϵi ∼ Normal(0 , 1) and with μ0(x) = 
+
+−1.85 − 0.8 · 1( x1 < 0.5) + 0 .7√x2 + 0 .2x3 and μ1(x) = μ0(x) + 0 .7 − 0.4 · 1( x1 <
+
+0.5) − 0.4√x2. The propensity score is taken to be e(x) = (1 + fβ (x1; 2 , 4)) /4, where 
+
+fβ is the Beta density. Censoring is covariate-dependent via a Weibull model with 
+
+Ci(a) = p− log( Ui)/ exp {fCa (Xi)}, where Ui ∼ Uniform(0 , 1), fC0(x) = −1.75 −
+
+0.5pmax( x2, 0)+0 .2x3, and fC1(x) = fC0(x)+1 .15+0 .5·1( x1 < 0.5) −0.3pmax( x2, 0). The follow-up time is taken to be t = 1 .5. 2. Weibull proportional hazards: S(t | x, a ) = exp( −efa(x) t1/2), with f0(x) = x1 and 
+
+f1(x) = x1 + x2 − 0.5. The propensity score is e(x) = (1 + fβ (x2; 2 , 4)) /4, while censoring is Ci ∼ Uniform(0 , 3). The time horizon is t = 1 .25. Supplementary Material 42 
+
+Hu et al. (2021) Covariates for this setting consist of five continuous variables X1, . . . , X 5iid 
+
+∼
+
+Normal(0 , 0.35 2) and five binary variables X6, . . . , X 10 iid 
+
+∼ Bernoulli(0 .5). The propensity score is e(x) = expit(0 .3 − 0.25 x1 − 2.25 x2 − 0.75 x3 − 0.25 x5 − 0.25 x6 − 0.50 x7 − x9 + 1 .25 x10 ). Potential event times follow Weibull proportional hazards models with shape η = 2 and scale parameters κa(x) = da exp {fa(x)}, where d0 = 1200 and d1 = 2000, so that Ti(0) = [− log( Ui)/{1200 exp( f0(Xi)) }]1/2 and Ti(1) = [ − log( Ui)/{2000 exp( f1(Xi)) }]1/2 with Ui ∼
+
+Uniform(0 , 1). Censoring is independent with Ci ∼ Gam(1 , 0.007). The functions f0 and f1
+
+are given by 1. DGP 1: f0(x) = 0 .2 − 0.5x1 − 0.8x3 − 1.8x5 − 0.9x6 − 0.1x7 and f1(x) = −0.2 + 0.1 expit( x1) − 0.8 sin( x3) − 0.1x25 − 0.3x6 − 0.2x7.2. DGP 2: f0(x) = −0.1 + 0 .1x21 − 0.2 sin( x3) + 0 .2 expit( x5) + 0 .2x6 − 0.3x7 and f1(x) = 
+
+−0.2 + 0 .1 expit( x1) − 0.8 sin( x3) − 0.1x25 − 0.3x6 − 0.2x7.3. DGP 3: f0(x) = −0.1 + 0 .1x21 − 0.2 sin( x3) + 0 .2 expit( x5) + 0 .2x6 − 0.3x7 and f1(x) = 0.5 − 0.1 expit( x2) + 0 .1 sin( x3) − 0.1x24 + 0 .2x4 − 0.1x25 + 0 .2 expit( x5) + 0 .2x6 − 0.3x7.4. DGP 4: f0(x) = −0.2 + 0 .5 sin( πx 1x3) + 0 .2 expit( x5) + 0 .2x6 − 0.3x7 and f1(x) = 0.5 − 0.1 expit( x2) + 0 .1 sin( x3) − 0.1x24 + 0 .2x4 − 0.1x25 − 0.3x6.We use a time horizon of t = 0 .05 for all settings. 
+
+S4.2 Results for Conditional Average Treatment Effects 
+
+Conditional Average Treatment Effects: With a Cured Subpopulation Estimat-ing conditional average treatment effects is a much more difficult problem than estimating average treatment effects, and methods differ much more strongly in their performance here. Results for when a cured subpopulation is present are given in Figures S1—S3. We did not observe any consistent patterns in terms of overall bias, except that IndivAFT performs very poorly on the Hu settings. For coverage, interval length, and RMSE, BartCure (1) Supplementary Material 43 is the most consistent in the sense that it never performs particularly poorly and always outperforms CSF, but no method attains nominal coverage of confidence/credible intervals; an advantage of BartCure (1) even in this context is that, as shown in Section 4.3, it is generally conservative in identifying treatment effect heterogeneity, so in settings where it 
+
+does detect treatment effect heterogeneity it will generally be underestimating it rather than overestimating it. 
+
+Conditional Average Treatment Effects: Without a Cured Subpopulation Re-sults are given in Figures S4—S6. We again note no consistent patterns in terms of overall bias, and that BartCure (1) is overall the most robust method and outperforms CSF in terms of RMSE and performance of interval estimands. Interestingly, coverage for all of the effects is much better when there is no cured subpopulation. BartCure (2) remains a more unstable method than BartCure (1). Just as with the average effects, the CSF breaks down entirely on the Henderson settings, and IndivAFT is mostly competitive with BartCure (1) except for the Hu 3 and Hu 4 settings. 
+
+# S5 Additional Analyses of the CALGB 40101 Trial 
+
+Proportion of the RMST Effect Attributable to Cure Plots of the signed and un-signed shares of the effect attributable to cure as defined in Section 2.2 are given in Fig-ure S7. These plots provide further evidence that the majority of the effect is attributable to the cured subpopulation, and generally there is a substantial amount of uncertainty in the stochastic latency effect. 
+
+Variable Importance Figure S8 displays the variable importances from the BartCure 
+
+model, quantified using the average number of splitting rules involving each variable as suggested by Chipman et al. (2010). The most influential variable in the model was time, which suggests that a proportional hazards variant of the model (2) that takes r(t, a, x ) = Supplementary Material 44 1 2
+
+> RMST Bias  RMST CI Cov  RMST CI Len  RMST RMSE  Surv Bias  Surv CI Cov  Surv CI Len  Surv RMSE
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+-0.05 
+
+0.00 
+
+0.05 
+
+0.6 
+
+0.8 
+
+1.0 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.04 
+
+0.08 
+
+0.12 
+
+0.16 
+
+-0.10 
+
+-0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.6 
+
+0.8 
+
+1.0 
+
+0.20 
+
+0.25 
+
+0.30 
+
+0.35 
+
+0.40 
+
+0.04 
+
+0.08 
+
+0.12 
+
+Method 
+
+BartCure(1) BartCure(2) CSF IndivAFT 
+
+Figure S1: Conditional average treatment effect metrics for the Cui DGPs with a cured fraction. Supplementary Material 45 1 2 3 4
+
+> RMST Bias  RMST CI Cov  RMST CI Len  RMST RMSE  Surv Bias  Surv CI Cov  Surv CI Len  Surv RMSE
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+-0.2 
+
+-0.1 
+
+0.0 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.6 
+
+0.8 
+
+1.0 
+
+0.8 
+
+1.0 
+
+1.2 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+-0.10 
+
+-0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+1.0 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.09 
+
+0.12 
+
+0.15 
+
+Method 
+
+BartCure(1) BartCure(2) CSF IndivAFT 
+
+Figure S2: Conditional average treatment effect metrics for the Henderson DGPs with acured fraction. Supplementary Material 46 1 2 3 4
+
+> RMST Bias  RMST CI Cov  RMST CI Len  RMST RMSE  Surv Bias  Surv CI Cov  Surv CI Len  Surv RMSE
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+-0.010 
+
+-0.005 
+
+0.000 
+
+0.005 
+
+0.010 
+
+0.015 
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+0.008 
+
+0.010 
+
+0.012 
+
+0.014 
+
+0.004 
+
+0.008 
+
+0.012 
+
+-0.2 
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+Method 
+
+BartCure(1) BartCure(2) CSF IndivAFT 
+
+Figure S3: Conditional average treatment effect metrics for the Hu DGPs with a cured fraction. Supplementary Material 47 1 2
+
+> RMST Bias  RMST CI Cov  RMST CI Len  RMST RMSE  Surv Bias  Surv CI Cov  Surv CI Len  Surv RMSE
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+-0.10 
+
+-0.05 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+0.2 
+
+0.4 
+
+0.6 
+
+0.8 
+
+0.05 
+
+0.10 
+
+0.15 
+
+0.20 
+
+-0.04 
+
+0.00 
+
+0.04 
+
+0.08 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.025 
+
+0.050 
+
+0.075 
+
+0.100 
+
+Method 
+
+BartCure(1) BartCure(2) CSF IndivAFT 
+
+Figure S4: Conditional average treatment effect metrics for the Cui DGPs without a cured fraction. Supplementary Material 48 1 2 3 4
+
+> RMST Bias  RMST CI Cov  RMST CI Len  RMST RMSE  Surv Bias  Surv CI Cov  Surv CI Len  Surv RMSE
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+-4 
+
+0
+
+4
+
+8
+
+0.80 
+
+0.85 
+
+0.90 
+
+0.95 
+
+1.00 
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+0.0 
+
+2.5 
+
+5.0 
+
+7.5 
+
+10.0 
+
+-1.0 
+
+-0.5 
+
+0.0 
+
+0.5 
+
+1.0 
+
+0.80 
+
+0.85 
+
+0.90 
+
+0.95 
+
+1.00 
+
+0
+
+2
+
+4
+
+6
+
+0.0 
+
+0.5 
+
+1.0 
+
+Method 
+
+BartCure(1) BartCure(2) CSF IndivAFT 
+
+Figure S5: Conditional average treatment effect metrics for the Henderson DGPs without acured fraction. Supplementary Material 49 1 2 3 4
+
+> RMST Bias  RMST CI Cov  RMST CI Len  RMST RMSE  Surv Bias  Surv CI Cov  Surv CI Len  Surv RMSE
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+BartCure(1) 
+
+BartCure(2) 
+
+CSF 
+
+IndivAFT 
+
+-0.0050 
+
+-0.0025 
+
+0.0000 
+
+0.0025 
+
+0.5 
+
+0.6 
+
+0.7 
+
+0.8 
+
+0.9 
+
+1.0 
+
+0.01 
+
+0.02 
+
+0.03 
+
+0.04 
+
+0.005 
+
+0.010 
+
+-0.020 
+
+-0.015 
+
+-0.010 
+
+-0.005 
+
+0.000 
+
+0.005 
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+0.00 
+
+0.03 
+
+0.06 
+
+0.09 
+
+0.00 
+
+0.01 
+
+0.02 
+
+0.03 
+
+Method 
+
+BartCure(1) BartCure(2) CSF IndivAFT 
+
+Figure S6: Conditional average treatment effect metrics for the Hu DGPs without a cured fraction. Supplementary Material 50 02468    
+
+> 0.0 0.5 1.0 1.5 2.0
+> Ratio
+> Posterior density
+
+Signed ratio 
+
+> 0.0 0.4 0.8
+> 9.2 13.2 16.4 20.7 24.5 29.4 33.5 38.4 43.2 48.2 55.7 63.2 72.5 83.9 115.0
+> Months since randomization
+> Ratio
+
+Unsigned ratio 
+
+Figure S7: Posterior summaries of the stochastic cure contribution to the RMST effect. The signed ratio is shown at the end of follow-up, where the RMST effect is most stable; the unsigned ratio is shown over time and measures the relative magnitude of the stochastic cure component. 
+
+r(a, x ) would be inadequate, i.e., some variables have a time-varying effect on the hazard. Among baseline clinical covariates, receptor status, tumor size, menopausal status, and age category were the largest contributors to survival. Overall, the variable importance profile suggests that BartCure distributes predictive importance across several clinically relevant covariates rather than concentrating heavily on a single factor. The prominence of receptor status, tumor size, and age is consistent with established prognostic factors in breast cancer survival (Abdul Rahman et al., 2024). Supplementary Material 51 Treatment length 
+
+Treatment agent 
+
+Menopause status 
+
+Number of positive axillary nodes 
+
+Age category 
+
+Ethnicity 
+
+Race 
+
+Tumor size 
+
+Receptor status 
+
+Time 
+
+0 10 20 30 
+
+Average split count 
+
+Figure S8: Variable importance for the BartCure fit, measured by average split counts across posterior samples.

@@ -1,0 +1,2252 @@
+Title: Transferring Information Across Interventions in Causal Bayesian Optimization
+
+URL Source: https://arxiv.org/pdf/2606.01457v1
+
+Published Time: Tue, 02 Jun 2026 01:47:26 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+> 1
+
+# Transferring Information Across Interventions in Causal Bayesian Optimization 
+
+Mohammad Ali Javidian 
+
+Computer Science Department Appalachian State University 
+
+Boone, USA javidianma@appstate.edu 
+
+Abstract 
+
+Bayesian optimization is a popular way to optimize expensive systems, where every experiment, simulation, or intervention costs time or money. In its standard form it treats the variables we control as plain inputs to a black box and cannot tell apart mere correlation from a real cause and effect. Causal Bayesian optimization closes part of this gap by using a known causal graph together with observational data to decide which variables are worth intervening on. Existing methods, however, learn the effect of each possible intervention almost in isolation, even though in a causal system these effects usually share the same underlying mechanisms. We propose graph-coupled causal Bayesian optimization, which ties the different intervention effects together through the uncertainty we have about a small set of shared causal parameters. The result is a causal kernel that lets evidence collected from one intervention improve our estimate of related interventions. For identifiable linear Gaussian causal models we show that this kernel has low rank, bounded by the number of shared parameters rather than by the size of the intervention menu. This in turn yields an information-gain bound that grows only logarithmically in the optimization horizon, and a regret bound that cleanly separates three sources of error: optimization, causal estimation, and the choice of which intervention sets to consider. We also describe nonlinear and adaptive extensions. Across theory-aligned Gaussian systems, shared-mechanism stress tests, and standard causal optimization benchmarks, the method keeps the benefits of causal Bayesian optimization while transferring information across related interventions, with the clearest gains when direct interventions on the target’s parents are unavailable and sparse interventional data must be reused across a large family of candidate interventions. 
+
+I. I NTRODUCTION 
+
+Bayesian optimization (BO) is a central methodology for sequential decision making when evaluating an objective function is expensive, noisy, or experimentally constrained. It has become a standard tool in hyperparameter tuning [23], scientific experimentation [15], engineering design [8], robotics [17], materials discovery [21, 11], and simulation-based optimization because it uses a probabilistic surrogate to trade off exploration and exploitation while requiring relatively few objective evaluations [28, 10, 12]. In its most common form, BO places a Gaussian process (GP) prior on an unknown response surface and selects new evaluations by maximizing an acquisition function such as expected improvement, knowledge gradient, Thompson sampling, or an upper-confidence-bound criterion [24, 30]. However, many high-stakes optimization problems are not ordinary black-box input-output problems. In scientific, medical, environmental, and engineering systems, the decision maker often chooses interventions on variables in a causal system, and the goal is to optimize an interventional response rather than a conditional association. Standard BO ignores this distinction: it treats controllable variables as inputs to a black-box function and therefore cannot exploit the difference between observing a variable and intervening on it. Causal Bayesian optimization (CBO) addresses this issue by combining BO with structural causal models, do-calculus, and observational data [22, 29] so that the optimizer can reason about which variables are worth intervening on, how observational data can inform interventional effects, and when causal structure can reduce the intervention search space [1, 26, 19]. Despite this progress, existing CBO methods leave an important source of structure underused. In a structural causal model, the response functions associated with different intervention sets are not generally 
+
+> arXiv:2606.01457v1 [cs.AI] 31 May 2026 2
+
+independent black-box objectives. They are different functionals of the same underlying mechanisms. For example, intervening on a parent, mediator, or ancestor of a target may reveal information about shared edge coefficients, path coefficients, or downstream structural parameters. Existing CBO methods use causal structure to construct priors, restrict candidate intervention sets, or estimate intervention effects, but they do not generally derive an explicit cross-intervention covariance from shared identifiable causal parameters. As a result, learning about one intervention-response function does not systematically reduce uncertainty about another, even when the two effects are causally linked. This paper addresses that gap by introducing graph-coupled causal Bayesian optimization (GC-CBO). The key idea is to replace a collection of independent or weakly coupled intervention-specific surrogates with a single graph-coupled surrogate over the joint intervention domain. The coupling is induced by a target-relevant causal parameter vector whose posterior covariance is propagated through the Jacobians of the interventional response functions. When two interventions depend on overlapping uncertain causal parameters, their response functions acquire nonzero cross-covariance. Thus, sparse data collected from one intervention set can improve posterior inference and acquisition decisions for other causally related intervention sets. Our contributions are as follows. 1) We formulate a graph-coupled CBO surrogate in which interventional response functions are coupled through shared identifiable causal parameters rather than modeled independently across intervention sets. 2) We derive a causal cross-intervention covariance kernel based on the Jacobians of intervention-response functionals and the posterior covariance of target-relevant causal parameters. In linear Gaussian structural equation models, this covariance is exact; in nonlinear settings, it gives a first-order local approximation with controlled second-order remainder. 3) We prove that, under identifiable linear Gaussian assumptions, the coupled causal kernel has finite rank bounded by the dimension of the shared target-relevant causal parameter vector. This yields an explicit maximum-information-gain bound of order Oprcausal log T q.4) We establish a dynamic regret decomposition for GC-CBO that separates optimization regret within the selected intervention family, finite-sample causal-estimation error, and approximation error from restricting attention to a finite exploration set. 5) We provide an implementable GC-CBO algorithm and evaluate it on theory-aligned Gaussian examples, cross-set transfer stress tests, nonlinear shared-mechanism settings, and standard causal optimization benchmarks. The results show that graph-coupling is most beneficial when intervention functions share downstream mechanisms, direct parent interventions are unavailable, and interven-tional data are sparse. II. R ELATED WORK 
+
+Bayesian optimization. Bayesian optimization studies the sequential optimization of expensive black-box functions using probabilistic surrogate models and acquisition functions [28, 10, 12]. Classical GP-based BO is closely connected to experimental design and bandit optimization, with regret guarantees often expressed through the maximum information gain of the GP kernel [30, 24]. Recent advances have expanded BO along several practically important axes. Multi-objective and noisy parallel BO have been strengthened by differentiable expected hypervolume improvement and noisy expected hypervolume improvement methods [6, 7]. High-dimensional BO has improved through sparse axis-aligned subspace modeling, which uses sparsity assumptions to make GP surrogates viable in large ambient spaces [9]. Grey-box BO exploits partial knowledge of the internal structure of the objective evaluation, including composite and multi-fidelity structure [3], while cost-aware BO explicitly accounts for heterogeneous evaluation costs in acquisition design [33]. Recent work has also studied the global optimization of acquisition functions themselves, emphasizing that acquisition maximization can be a nontrivial source of error in practical BO pipelines [34]. Our work is complementary to these directions: rather than improving 3
+
+the acquisition optimizer or scaling generic black-box BO, we use causal structure to define a surrogate whose covariance reflects shared causal mechanisms across intervention functions. 
+
+Causal Bayesian optimization. Causal Bayesian optimization extends BO to settings in which the objective is an interventional response in a structural causal model. The original CBO framework uses a known causal graph and observational data to estimate intervention effects, construct causal GP priors, and trade off observation and intervention during sequential optimization [1]. Subsequent work has broadened the CBO family in several directions. Causal Entropy Optimization incorporates uncertainty over the causal graph and jointly trades off structure learning and effect optimization [5]. Constrained CBO introduces feasibility constraints on interventions and models both target and constraint quantities with GP surrogates [2]. Functional CBO extends the intervention class from point interventions to functional interventions, enabling variables to be set as functions of other variables [13]. Adversarial CBO considers external or adversarial interventions and obtains regret guarantees using online-learning ideas combined with causal reward modeling [31]. Other recent work improves CBO by learning or representing exogenous-variable distributions, thereby extending CBO beyond simple additive-noise assumptions [25]. These methods demonstrate the growing importance of causal structure in sequential optimization. The present paper addresses a different gap: it derives an explicit cross-intervention covariance from shared identifiable causal parameters, allowing evidence from one intervention set to transfer directly to other causally related intervention sets. 
+
+Gaussian-process theory and information gain. The theoretical analysis of GP-based BO is often organized around confidence bounds and maximum information gain γT , which measures the information that T noisy evaluations can reveal about the latent function [30]. Recent theoretical work has sharpened this perspective. Vakili et al. [32] refined information-gain bounds using kernel eigenvalue decay and improved regret rates for common kernels, including Mat´ ern kernels. Bogunovic and Krause [4] studied misspecified GP bandits and showed how regret degrades when the true function is only approximately represented by the assumed RKHS. Kassraie and Krause [20] connected neural contextual bandits to neural tangent kernels and bounded regret through NTK information gain. Gupta et al. [14] established regret guarantees for expected-improvement-type algorithms in noisy GP bandit optimization, addressing a long-standing gap between the empirical popularity and theoretical understanding of EI. More recent work has further improved GP-UCB regret bounds for Mat´ ern and squared-exponential kernels by refining the analysis of information gain along the adaptive sequence of queried points [18]. Our analysis uses this information-gain framework but exploits a different source of structure: the causal kernel induced by shared structural parameters has finite rank, so its information gain scales with the target-relevant causal dimension rather than with the ambient intervention family. 
+
+Position of this work. GC-CBO can be viewed as a bridge between causal inference, multi-task GP modeling, and information-theoretic BO analysis. Like CBO, it optimizes interventional rather than asso-ciational responses. Like multi-output GP models, it shares information across related response surfaces. Unlike generic multi-task kernels, however, its cross-task covariance is derived from the causal graph, identifiable causal parameters, and local sensitivities of interventional response functionals. This yields both an algorithmic advantage, through transfer across intervention sets, and a theoretical advantage, through a finite-rank information-gain bound and a regret decomposition that explicitly separates optimization, causal-estimation, and exploration-set errors. III. G RAPH -C OUPLED CAUSAL BAYESIAN OPTIMIZATION 
+
+A. Motivation and departure from prior causal Bayesian optimization 
+
+Causal Bayesian optimization (CBO) optimizes an interventional response function 
+
+fspxsq “ ErY | do pXs “ xsqs (1) over candidate intervention sets Xs P E and intervention values xs. Because fs is defined through the do-operator rather than ordinary conditioning, it cannot in general be estimated from observational data alone without exploiting causal structure and an identification formula. 4
+
+Aglietti et al. [1] address this by placing a Gaussian process surrogate on each interventional response, 
+
+fspxsq „ GP `mspxsq, k C pxs, x 1
+
+> s
+
+q˘, (2) with prior mean 
+
+mspxsq “ pErY | do pXs “ xsqs (3) estimated from observational data via do-calculus, and causal kernel 
+
+kC pxs, x 1
+
+> s
+
+q “ kRBF pxs, x 1
+
+> s
+
+q ` σspxsq σspx1
+
+> s
+
+q, (4) where σ2 
+
+> s
+
+pxsq is an estimated interventional variance. This construction allows observational data to shape the GP prior before any interventions are performed. However, the GP surrogates for different intervention sets are not coupled through an explicit cross-intervention covariance. The causal graph informs the prior mean and variance correction for each surrogate separately, but the posterior uncertainty of one intervention-response function is not directly tied to that of another through shared structural parameters. This missing coupling is the key limitation we address. In a structural causal model, the functions 
+
+tfs : s P Eu are not unrelated black-box objectives. They are different functionals of the same underlying structural mechanisms: the effects of intervening on a parent, an ancestor, or a mediator of Y may depend on overlapping edge coefficients, path coefficients, or total-effect parameters. Consequently, observing or intervening on one candidate set can reduce uncertainty about another whenever their causal effects share identifiable parameters. We exploit this by replacing the collection of separately modeled causal GPs with a single graph-coupled surrogate over the joint intervention domain. The coupling is induced by a shared identifiable causal parameter vector θY , which collects the structural parameters or identifiable causal functionals needed to express every fs in E. The coupled kernel, derived formally in Theorem 1 and defined in (32), uses the Jacobians of the interventional responses with respect to θY and the posterior covariance of 
+
+θY . Whenever two intervention sets depend on common uncertain causal parameters, their Jacobians can overlap under this posterior covariance, producing nonzero cross-covariance and enabling transfer between the corresponding surrogates. Beyond improving posterior inference, this structure has direct theoretical consequences. The coupled kernel admits a finite-dimensional feature representation, so its rank is at most dim pθY q. This bounded rank yields an explicit maximum information-gain bound and, in turn, a regret decomposition that separates three distinct sources of error: optimization error within the exploration set, finite-sample causal-estimation error from estimating θY from DO, and exploration-set approximation error from restricting attention to 
+
+E.
+
+B. Setup 
+
+Let V “ pV1, . . . , V pqJ denote the observed endogenous variables associated with the vertex set 
+
+V “ t 1, . . . , p u of a known causal graph, and let y P V denote the index of the target variable Y “ Vy.We assume that the directed part of the causal graph is acyclic. Hidden common causes among ob-served variables are allowed and are represented, in the linear Gaussian model, by correlated structural disturbances. Specifically, we assume a linear Gaussian structural equation model (SEM) 
+
+V “ W JV ` ε, ε „ N p0, Ωq, (5) where W respects the directed edges of the acyclic graph and Ω is positive definite, ensuring that the Gaussian disturbance distribution, and therefore P pV q, is non-degenerate. Off-diagonal entries of Ω
+
+represent residual correlations between structural disturbances and provide a linear Gaussian representation of latent common causes among observed variables. The special case in which Ω is diagonal corresponds to causal sufficiency. We adopt the following coefficient convention throughout. 5
+
+Convention 1 (Structural coefficients) . Wij is the coefficient of Vi in the structural equation for Vj .Equivalently, Vj “ ř 
+
+> iPPa pjq
+
+Wij Vi ` εj , j “ 1, . . . , p, so that W encodes directed parent-to-child effects. This convention is maintained throughout the paper. 
+
+Order the variables topologically so that every directed parent precedes its children. Under this ordering and the coefficient convention above, Wij ‰ 0 only if Vi is a directed parent of Vj , hence only if i ă j.Therefore W is strictly upper triangular. Since W J is then strictly lower triangular, it is also nilpotent, with pW Jqp “ 0. Consequently, I ´ W J is invertible, with inverse given by the finite Neumann series 
+
+pI ´ W Jq´1 “ I ` W J ` ¨ ¨ ¨ ` p W Jqp´1, (6) which terminates at pW Jqp´1 because pW Jqp “ 0. Nilpotence of strictly triangular matrices is standard; see Horn and Johnson [16, Thm. 3.1.5]. The reduced-form solution is therefore 
+
+V “ p I ´ W Jq´1ε. (7) For each candidate intervention set Xs Ď Vzt yu in the exploration set E, let 
+
+Xs “ ą
+
+> iPXs
+
+Xi, Xi Ă R compact , (8) denote the corresponding intervention domain. We use Xs both for the set of intervention indices and, by slight abuse of notation, for the corresponding variables tVi : i P Xsu.The exploration set E Ď PpVzt yuq is a chosen collection of candidate intervention sets. Natural choices include the Minimal Intervention Sets (MIS) and Possibly-Optimal Minimal Intervention Sets (POMIS) of Aglietti et al. [1]. The approximation error incurred by restricting attention to E is formalized in Section III-K. For each s P E, the interventional response function is 
+
+fspxsq “ ErVy | do pXs “ xsqs , (9) where the expectation is taken under the interventional distribution induced by the do-operator [22]. When 
+
+Ω is non-diagonal, some interventional distributions P pVy | do pXs “ xsqq may not be identifiable from 
+
+P pV q alone; the identifiability conditions required for each s P E are stated in Assumption 1. Under causal sufficiency pΩ diagonal q and a known directed acyclic graph (DAG), interventional distributions are identifiable by the truncated factorization formula [22, 29]; for single-effect queries this includes the usual backdoor-adjustment cases. The optimization problem is to find the intervention set and value that jointly maximize the interventional response: 
+
+ps‹, x ‹ 
+
+> s
+
+q P arg max 
+
+> sPE, x sPXs
+
+fspxsq. (10) 
+
+C. Assumptions 
+
+The theoretical results below rely on four assumptions. They separate identifiability of causal effects, posterior regularity of the shared causal parameterization, boundedness of the intervention domain, and the fixed-kernel condition used only for the main regret theorem. 
+
+Assumption 1 (Identifiability and constructive shared parameterization) . For every s P E, the interven-tional mean fspxsq “ ErVy | do pXs “ xsqs is identifiable from the observational distribution P pV q
+
+under the known causal graph, including its directed structure and any latent-confounding structure represented by correlated disturbances. Moreover, in the linear Gaussian SEM, each fs can be written as a differentiable function 
+
+fspxsq “ gspxs; θY q, (11) 
+
+where θY P Rd is a shared vector of identifiable causal parameters or identifiable causal functionals sufficient to express all intervention-response functions tfs : s P Eu.6
+
+Concretely, θY is the minimal sufficient vector of identifiable total-effect parameters, path coefficients, structural coefficients, or identifiable functionals that enter this collection. For a given graph, target Vy,and exploration set E, θY is obtained constructively by applying the ID algorithm to each query P pVy |
+
+do pXs “ xsqq , s P E, and then collecting the unique identifiable quantities needed to express the resulting interventional means. Thus θY is not an existential object: it is the shared causal parameterization induced by the graph, the exploration set, and the target. The ID algorithm provides a complete graphical procedure for identifying interventional distributions in recursive semi-Markovian models [29, 22]. 
+
+Role of Assumption 1. This assumption ensures that the optimization target is well defined from the available observational information. If some fs is not identifiable, then its prior mean and causal uncertainty cannot be computed from P pV q without additional assumptions or experimental data. The shared parameterization is what makes cross-intervention transfer possible: if two intervention responses depend on overlapping components of θY , then observations relevant to one response can reduce uncer-tainty about the other. Without this shared parameterization, the method collapses to separately modeled intervention-set surrogates. 
+
+Assumption 2 (Posterior regularity) . Given observational data DONt , the posterior distribution of the shared causal parameterization satisfies 
+
+θY | DONt « N ppθY,t , Σθ,t q. (12) 
+
+For the main linear Gaussian theory, this approximation is exact when θY consists of conjugate Gaussian structural parameters or linear identifiable functionals of them. When θY contains smooth nonlinear functionals, such as products of path coefficients or total effects, we use the corresponding delta-method, Laplace, or large-sample Gaussian approximation. The covariance Σθ,t is the posterior covariance of the chosen shared parameterization θY , not necessarily only of the primitive edge coefficients. 
+
+Role of Assumption 2. This assumption makes the cross-intervention covariance analytically tractable. The causal kernel is obtained by linearizing each interventional response gspxs; θY q with respect to the same posterior uncertainty in θY . If the posterior is exactly Gaussian and the response is linear in θY ,the covariance formula is exact. If the response is nonlinear, the same expression is the usual first-order delta-method covariance, with second-order error controlled later in Theorem 1. Without this assumption, the kernel could still be estimated by Monte Carlo, but the finite-rank covariance and information-gain statements would no longer hold in their exact closed form. 
+
+Assumption 3 (Bounded intervention domain and bounded causal variance) . For every s P E, the intervention domain Xs defined in (8) is compact. There exists κ ă 8 such that 
+
+kcausal pz, z q ď κ2 (13) 
+
+for all z “ p s, x sq, s P E, xs P Xs. A sufficient condition is that the domains Xs are compact, the Jacobians Jspxsq are uniformly bounded over those domains, and the posterior covariance used in the kernel has bounded spectral norm. 
+
+Role of Assumption 3. This is the standard bounded-variance condition needed for GP-UCB information gain bounds. It rules out intervention values or Jacobian norms that would make the surrogate variance unbounded. The condition is natural in intervention design: practical interventions have finite feasible ranges, and smooth interventional response functions have bounded Jacobians on compact domains. 
+
+Assumption 4 (Fixed reference kernel) . For the main regret theorem, the causal kernel is constructed using a fixed posterior covariance Σθ, 0 and a fixed linearization point pθY, 0. That is, 
+
+kcausal pz, z 1q “ Jz ppθY, 0qΣθ, 0Jz1 ppθY, 0qJ. (14) 7
+
+The kernel is therefore fixed during the GP-UCB analysis. Updating pθY,t , Σθ,t , and the corresponding kernel as additional observational data arrive is natural in implementation, but the resulting adaptive-kernel method is treated as an extension rather than as the object of the main regret theorem. 
+
+Role of Assumption 4. This assumption is technical rather than conceptual. Standard GP-UCB regret bounds are stated for a fixed kernel and depend on the maximum information gain of that kernel [30]. If the kernel changes every round because Σθ,t shrinks or the Jacobians are re-evaluated, then the analysis becomes a nonstationary-kernel GP-UCB problem. Freezing the kernel gives a conservative but clean theoretical object. 
+
+Remark 1 (Cost of the fixed-kernel assumption) . Assumption 4 is conservative. If the initial observational dataset is small, Σθ, 0 may be over-dispersed, so the regret bound is stated in terms of the causal rank and information gain of this initial kernel. As Nt grows and Σθ,t shrinks, the effective rank of the adaptive coupled kernel may decrease, and a time-varying-kernel analysis could yield a tighter bound. We leave this nonstationary extension for future work. D. Interventional means on mutilated graphs 
+
+Consider an intervention do pXs “ xsq. Incoming edges into Xs are removed, and the variables in Xs
+
+are fixed to xs. Let Rs “ VzXs index the non-intervened variables. Using the convention that Wij is the coefficient of Vi in the structural equation for Vj , the structural equations restricted to Rs become 
+
+Rs “ W J 
+
+> RsRs
+
+Rs ` W J 
+
+> XsRs
+
+xs ` εRs , (15) where WXsRs denotes the submatrix of W with rows indexed by Xs and columns indexed by Rs. Thus 
+
+W J 
+
+> XsRs
+
+xs is the contribution of the intervened variables to the structural equations of the non-intervened variables. The matrix I ´ W J 
+
+> RsRs
+
+is invertible because WRsRs inherits the strict upper triangularity of W under the topological ordering. Hence (15) admits the solution 
+
+Rs “ p I ´ W J 
+
+> RsRs
+
+q´1W J 
+
+> XsRs
+
+xs ` p I ´ W J 
+
+> RsRs
+
+q´1εRs . (16) Taking expectations in (16) and using ErεRs s “ 0, the interventional mean of Vy P Rs is the deterministic part: 
+
+fspxsq “ eJ 
+
+> y
+
+pI ´ W J 
+
+> RsRs
+
+q´1W J 
+
+> XsRs
+
+xs. (17) Here ey denotes the coordinate vector selecting Vy from the Rs-indexed block. This expectation step remains valid when Ω is non-diagonal. Correlated structural disturbances represent latent common causes, but the intervention do pXs “ xsq is not a conditioning event on Xs “ xs. The exogenous disturbance distribution is left unchanged by the intervention, and therefore the marginal mean of εRs remains zero. Since fspxsq is scalar, transposing the right-hand side of (17) and applying pI ´ W J 
+
+> RsRs
+
+q´J “ p I ´
+
+WRsRs q´1 gives the source-to-target form 
+
+fspxsq “ xJ 
+
+> s
+
+WXsRs pI ´ WRsRs q´1ey. (18) Define the total-effect vector in the mutilated graph by 
+
+τspW q “ WXsRs pI ´ WRsRs q´1ey. (19) Then 
+
+fspxsq “ xJ 
+
+> s
+
+τspW q. (20) The transpose appearing in (15) reflects the convention V “ W JV ` ε, while the source-to-target orientation of τspW q in (19) removes it. 8
+
+Equation (20) shows why the relevant causal dimension is not generally |Pa pVyq| . When interventions are restricted to direct parents of Vy, τspW q collects only the direct edge coefficients into Vy. When interventions occur on deeper ancestors, τspW q accumulates products and sums of path coefficients along directed paths from Xs to Vy in the mutilated graph. This is precisely why the shared parameterization 
+
+θY introduced in Assumption 1 cannot in general be reduced to the edge coefficients into Vy alone: its components are the identifiable causal functionals appearing in τspW q.
+
+E. Cross-intervention covariance 
+
+Let z “ p s, x sq denote an intervention query. By Assumption 1, each interventional response can be written as fspxsq “ gspxs; θY q, where θY is the shared identifiable causal parameterization. For a fixed posterior mean pθY , define the Jacobian 
+
+Jspxsq “ Bgspxs; θY qBθJ
+
+> Y
+
+ˇˇˇˇθY “pθY
+
+. (21) A first-order Taylor expansion around pθY gives 
+
+gspxs; θY q “ gspxs; pθY q ` Jspxsqp θY ´ pθY q ` rspxsq, (22) where rspxsq is the second-order remainder. 
+
+Theorem 1 (Cross-intervention covariance) . Assume Assumptions 1–3. Fix a posterior covariance matrix 
+
+Σθ and posterior mean pθY . For any two intervention queries z “ p s, x sq, z1 “ p t, x tq, the posterior covariance between their intervention responses satisfies, to first order, 
+
+Cov `fspxsq, f tpxtq | DO˘ “ JspxsqΣθJtpxtqJ. (23) 
+
+If gs and gt are linear in θY , then (23) is exact. If gs and gt are twice continuously differentiable with operator-norm Hessians bounded by Hs, H t ă 8 
+
+in a neighborhood of pθY , then the second-order remainder-remainder correction satisfies 
+
+|Cov prspxsq, r tpxtqq| ď CH sHt ptr Σ θq2 (24) 
+
+for a universal constant C. Hence the omitted second-order correction is Opp tr Σ θq2q .
+
+Proof. Let δ “ θY ´ pθY . Under Assumption 2, conditional on DO, δ „ N p0, Σθq. Taylor expansion gives 
+
+fspxsq “ gspxs; pθY q ` Jspxsqδ ` rspxsq, (25) 
+
+ftpxtq “ gtpxt; pθY q ` Jtpxtqδ ` rtpxtq. (26) The deterministic terms do not contribute to covariance. Therefore, 
+
+Cov `fspxsq, f tpxtq | DO˘ “ Cov pJspxsqδ, J tpxtqδq` Cov pJspxsqδ, r tpxtqq ` Cov prspxsq, J tpxtqδq` Cov prspxsq, r tpxtqq . (27) The leading term is 
+
+Cov pJspxsqδ, J tpxtqδq “ Jspxsq Cov pδ | DOqJtpxtqJ (28) 
+
+“ JspxsqΣθJtpxtqJ. (29) The two mixed linear-remainder terms vanish under the centered Gaussian posterior. Indeed, the second-order Taylor remainder can be written as rtpxtq “ 12 δJHtpξtqδ for some intermediate point ξt between 9
+
+pθY and θY . Hence Cov pJspxsqδ, r tpxtqq involves third-order central moments of δ. These vanish for a centered Gaussian random vector. The same argument applies to Cov prspxsq, J tpxtqδq .
+
+It remains to bound the remainder-remainder term. By Taylor’s theorem and the Hessian bounds, 
+
+|rspxsq| ď 12 Hs}δ}2, |rtpxtq| ď 12 Ht}δ}2. Therefore, by Cauchy–Schwarz, 
+
+|Cov prspxsq, r tpxtqq| ď aVar prspxsqq Var prtpxtqq (30) 
+
+ď 14HsHtE}δ}4. (31) For δ „ N p0, Σθq, the standard fourth-moment identity gives E}δ}4 “ p tr Σ θq2 ` 2}Σθ}2 
+
+> F
+
+. Since }Σθ}F ď
+
+tr Σ θ for positive semidefinite Σθ, we obtain E}δ}4 ď 3 ptr Σ θq2 . Substituting this into (31) yields 
+
+|Cov prspxsq, r tpxtqq| ď 34 HsHt ptr Σ θq2 . Thus (24) holds with C “ 3{4.If gs and gt are linear in θY , then rspxsq “ rtpxtq “ 0, and (23) is exact. 
+
+Remark 2 (Beyond exact Gaussian posteriors) . The vanishing of the mixed linear-remainder terms in the proof relies on the centered Gaussian approximation for δ “ θY ´ pθY . When the posterior over θY is only approximately Gaussian, as in a Laplace or large-sample approximation, the mixed linear-remainder covariances need not vanish exactly. Under standard regularity conditions, however, they are higher-order terms relative to the first-order covariance and can be absorbed into the causal-estimation error term in the regret decomposition. F. The coupled causal kernel 
+
+Define the graph-coupled causal kernel by the first-order cross-intervention covariance from Theorem 1: 
+
+kcausal pp s, x sq, pt, x tqq “ Jspxsq Σθ JtpxtqJ. (32) Here Jspxsq and Jtpxtq are row vectors of sensitivities with respect to the shared causal parameterization 
+
+θY , and Σθ is the posterior covariance of θY .This kernel is positive semidefinite because it admits the feature representation 
+
+ϕspxsq “ Σ1{2 
+
+> θ
+
+JspxsqJ, (33) where Σ1{2 
+
+> θ
+
+denotes any matrix square root of the positive semidefinite posterior covariance. Then 
+
+kcausal pp s, x sq, pt, x tqq “ ϕspxsqJϕtpxtq. (34) Thus, for any finite collection of queries zi “ p si, x si q and coefficients ci, ř 
+
+> i,j
+
+cicj kcausal pzi, z j q “ }ř 
+
+> i
+
+ciϕsi pxsi q} 2 ě 0. Therefore kcausal is positive semidefinite. The coupled causal kernel is a finite-dimensional linear kernel over graph-induced causal features in Rd, where d “ dim pθY q.
+
+Corollary 1 (Finite causal rank) . For any set of T intervention queries zi “ p si, x si q, i “ 1, . . . , T, 
+
+let KT be the kernel matrix with entries pKT qij “ kcausal pzi, z j q. Then 
+
+rank pKT q ď rcausal and rcausal ď dim pθY q, (35) 
+
+where 
+
+rcausal “ sup 
+
+> T,z 1,...,z T
+
+rank pKT q. (36) 
+
+Proof. Let ΦT “
+
+»–
+
+ϕs1 pxs1 qJ
+
+...
+
+ϕsT pxsT qJ
+
+fi fl P RT ˆd. By the feature representation, KT “ ΦT ΦJ 
+
+> T
+
+. Therefore, rank pKT q “ 
+
+rank pΦT ΦJ 
+
+> T
+
+q “ rank pΦT q ď d “ dim pθY q. The first inequality in (35) is immediate from the definition of 
+
+rcausal as a supremum: any specific rank pKT q is at most the supremum over all finite query sets. Taking the supremum over all finite query sets in the display above gives rcausal ď dim pθY q.The finite-rank bound (35) is the structural property that drives the information-gain bound in Sec-tion III-I and ultimately the regret guarantee for graph-coupled causal Bayesian optimization. 10 
+
+G. Special cases 
+
+Direct-parent interventions. The cleanest case occurs when every intervention set contains all directed parents of the target, that is, Xs “ Pa pVyq. Then, under do pXs “ xsq, the structural equation for Vy gives 
+
+fspxsq “ ÿ 
+
+> iPPa pVyq
+
+βiy xi, (37) where βiy denotes the coefficient of Vi in the structural equation for Vy. Therefore the shared parameter-ization reduces to θY “ p βiy : i P Pa pVyqq , and hence 
+
+rcausal ď | Pa pVyq| . (38) This is the special case in which the causal rank is bounded directly by the parent dimension. If instead Xs Ĺ Pa pVyq, then the non-intervened parents of Vy remain random under the intervention. In that case, 
+
+fspxsq “ ÿ
+
+> iPXs
+
+βiy xi ` ÿ 
+
+> jPPa pVyqz Xs
+
+βjy ErVj | do pXs “ xsqs . (39) The second term may depend on additional upstream coefficients or total-effect parameters. Thus the bound (38) holds exactly when all parents of Vy are intervened on, or when the interventional means of the non-intervened parents are known or do not introduce additional unknown parameters into θY .
+
+Deeper ancestor interventions. If intervention sets include ancestors of Vy that are not direct parents, the relevant shared parameter vector can include additional path coefficients or total-effect parameters. 
+
+Example 1 (Chain graph) . Consider the chain X Ñ Z Ñ Y with Z “ aX ` εZ , Y “ bZ ` εY . The interventional responses are 
+
+fX pxq “ abx, fZ pzq “ bz. (40) 
+
+Here Pa pY q “ t Zu, |Pa pY q| “ 1. However, if both a and b are unknown, the shared parameterization is θY “ p a, b q, so dim pθY q “ 2.
+
+Thus |Pa pVyq| is not the correct default complexity measure. The general bound is rcausal ď dim pθY q,
+
+where θY is the minimal sufficient vector of unknown identifiable causal quantities required by the exploration set E. Known coefficients or known total effects reduce dim pθY q correspondingly. For instance, in Example 1, if b is known from prior experiments, then θY “ p aq and dim pθY q “ 1.
+
+Remark 3 (Estimated Jacobians) . In nonlinear or multiplicative cases, the Jacobian itself depends on the unknown causal parameters. In Example 1, JX pxq “ “bx ax ‰ , which depends on pa, b q. In practice, this Jacobian is evaluated at the posterior mean ppa, pbq. Therefore the kernel kcausal is itself estimated. Assumption 4 absorbs this issue by fixing the kernel at the initial posterior mean and covariance for the main theorem. The additional error caused by estimating the Jacobian is included in the causal-estimation error term in Theorem 2. H. Example: cross-intervention covariance in a chain 
+
+We illustrate Theorem 1 on the chain graph of Example 1. Consider again X Ñ Z Ñ Y with Z “
+
+aX `εZ , Y “ bZ `εY . Let θY “ p a, b qJ and suppose θY | DO „ N ppθY , Σθq, Σθ “
+
+ˆ σ2 
+
+> a
+
+σab 
+
+σab σ2
+
+> b
+
+˙
+
+.
+
+As established in Example efex:chain, the two intervention-response functions are fX pxq “ abx and 
+
+fZ pzq “ bz . Their Jacobians with respect to θY “ p a, b qJ are 
+
+JX pxq “ “bx ax ‰ , JZ pzq “ “0 z‰ . (41) 11 
+
+Theorem 1 gives 
+
+Cov `fX pxq, f Z pzq | DO˘ “ JX pxqΣθJZ pzqJ
+
+“ “bx ax ‰ ˆ σ2 
+
+> a
+
+σab 
+
+σab σ2
+
+> b
+
+˙ „ 0
+
+z
+
+ȷ
+
+“ bxz σ ab ` axz σ 2 
+
+> b
+
+. (42) The cross-covariance is generally nonzero because both intervention responses depend on the shared parameter b. Observing or intervening on Z can therefore reduce uncertainty about the effect of intervening on X, and vice versa. Independent causal GPs over intervention sets, such as those used in Aglietti et al. [1], place separate priors on fX and fZ and do not encode this cross-intervention transfer. For completeness, the self-covariance of the ancestor intervention is 
+
+Cov `fX pxq, f X px1q | DO˘ “ JX pxqΣθJX px1qJ
+
+“ b2xx 1σ2 
+
+> a
+
+` 2abxx 1σab ` a2xx 1σ2 
+
+> b
+
+. (43) Similarly, the self-covariance of the mediator intervention is 
+
+Cov `fZ pzq, f Z pz1q | DO˘ “ JZ pzqΣθJZ pz1qJ
+
+“ zz 1σ2 
+
+> b
+
+. (44) The kernel is therefore generally nonstationary in the intervention values: its magnitude depends on the query values and on the current causal-parameter linearization point pθY . This motivates the fixed-reference kernel choice in Assumption 4, under which pθY and Σθ are held fixed for the main regret analysis. 
+
+I. Information gain for the coupled causal kernel 
+
+Let A “ t z1, . . . , z T u be a set of queried intervention points, and suppose noisy observations are generated as yi “ f pziq ` ηi, ηi „ N p0, σ 2q, independently across i. For a Gaussian process with kernel matrix KA, the mutual information between the latent function values fA and the noisy observations 
+
+yA is 
+
+IpyA; fAq “ 12 log det pI ` σ´2KAq. (45) The maximum information gain is 
+
+γT “ max 
+
+> A:|A|“ T
+
+IpyA; fAq. (46) This is the central kernel-dependent complexity quantity in GP-UCB regret theory [30, 32]. When the kernel is the coupled causal kernel kcausal , we write γcausal  
+
+> T
+
+for the corresponding maximum information gain. 
+
+Lemma 1 (Finite-rank information-gain bound) . Assume rank pKAq ď rcausal for every query set A with 
+
+|A| “ T , and assume kcausal pz, z q ď κ2 for all z P Z. Then 
+
+γcausal  
+
+> T
+
+ď rcausal 
+
+2 log 
+
+ˆ
+
+1 ` T κ 2
+
+σ2rcausal 
+
+˙
+
+. (47) 
+
+Consequently, 
+
+γcausal  
+
+> T
+
+“ Oprcausal log T q ď Opdim pθY q log T q. (48) 
+
+Proof. Let the nonzero eigenvalues of KA be λ1, . . . , λ r, where r ď rcausal . Then log det pI ` σ´2KAq “ řrj“1 log p1 ` σ´2λj q. Since log p1 ` xq is concave, Jensen’s inequality gives 
+
+> r
+
+ÿ
+
+> j“1
+
+log p1 ` σ´2λj q ď r log 
+
+˜
+
+1 ` σ´2
+
+r
+
+> r
+
+ÿ
+
+> j“1
+
+λj
+
+¸
+
+. (49) 12 
+
+Moreover, řrj“1 λj “ tr pKAq “ řTi“1 kcausal pzi, z iq ď T κ 2. Therefore, 
+
+IpyA; fAq ď r
+
+2 log 
+
+ˆ
+
+1 ` T κ 2
+
+σ2r
+
+˙
+
+. (50) It remains only to replace r by rcausal . Let hprq “ r 
+
+> 2
+
+log 
+
+´
+
+1 ` T κ 2
+
+> σ2r
+
+¯
+
+. Writing c “ T κ 2{σ2, we have 
+
+h1prq “ 12
+
+”
+
+log p1 ` c{rq ´ c{r
+
+> 1`c{r
+
+ı
+
+. Since log p1 ` uq ě u 
+
+> 1`u
+
+for all u ě 0, it follows that h1prq ě 0.Hence h is monotone increasing in r, and because r ď rcausal , IpyA; fAq ď rcausal  
+
+> 2
+
+log 
+
+´
+
+1 ` T κ 2
+
+> σ2rcausal
+
+¯
+
+.
+
+Taking the maximum over all A with |A| “ T gives (47). The big-O statement follows directly from (47) and rcausal ď dim pθY q.
+
+Remark 4 (Effective-rank refinement) . The bound in Lemma 1 is conservative when the posterior covari-ance Σθ has low effective rank. If some causal parameters are strongly identified from observational data, their posterior variances contribute negligibly to the kernel. In that case the information-gain bound can be sharpened by replacing rcausal with an effective rank. For example, for a threshold δ ą 0, one may use 
+
+reff “ #tj : λj pΣθq ě δu, together with a corresponding residual trace term for the discarded spectrum. Thus the stated rank bound is worst-case; it can be substantially tighter when Σθ has rapidly decaying eigenvalues. 
+
+The information-gain bound (48) is the key input to the regret analysis in Theorem 2, where it controls the optimization-error term in the dynamic regret decomposition. 
+
+J. Causal UCB acquisition 
+
+Define the joint intervention domain Z “ tp s, x sq : s P E, x s P Xsu. Let pμt´1pzq and pσfunc  
+
+> t´1
+
+pzq denote the predictive mean and standard deviation of the coupled causal GP at z, based on the interventional evaluations available before round t. The term pσfunc  
+
+> t´1
+
+pzq captures uncertainty from the surrogate model over the interventional response surface. The causal-parameter contribution to uncertainty is 
+
+pσcausal  
+
+> t´1
+
+pzq “ “Jz Σθ,t JJ
+
+> z
+
+‰1{2 , (51) where Jz is shorthand for the Jacobian Jspxsq when z “ p s, x sq. This is the posterior standard deviation of the first-order causal response Jz pθY ´ pθY,t q under the Gaussian posterior approximation in Assumption 2. Equivalently, pσcausal  
+
+> t´1
+
+pzq2 is the diagonal of the adaptive coupled causal kernel at z.In practice, we use the cost-adjusted causal UCB acquisition 
+
+αtpzq “ pμt´1pzq ` aβt pσfunc  
+
+> t´1
+
+pzq ` λtpσcausal  
+
+> t´1
+
+pzq ´ ηc pzq, (52) where cpzq is the intervention cost and η ě 0 controls the cost–reward tradeoff. The first uncertainty term is the usual GP-UCB exploration bonus. The second uncertainty term prioritizes interventions whose effects are sensitive to uncertain causal parameters. 
+
+Formal confidence correction. For the regret analysis, it is cleaner to separate the empirical causal bonus in (52) from the high-probability causal estimation error. Assume that, with probability at least 
+
+1 ´ δ, there is a predictable sequence ϵt such that 
+
+sup 
+
+> zPZ
+
+|pμt´1pzq ´ f pzq| ď ϵt, t “ 1, . . . , T. (53) Here pμt´1 denotes the surrogate predictive mean, so (53) is the uniform error between the current causal surrogate mean and the true interventional response. A sufficient decomposition is 
+
+ϵt “ ϵparam pNt, δ q ` ϵadj pNt, M t, δ q, (54) 13 
+
+where ϵparam is the error from estimating the shared causal parameterization θY , and ϵadj is the Monte Carlo, quadrature, or numerical error incurred when computing adjustment-based causal functionals. In the linear Gaussian case with closed-form adjustment, ϵadj pNt, M t, δ q “ 0.
+
+Under Assumption 3, the Jacobians are uniformly bounded: sup zPZ }Jz } ď L. Therefore, by the mean-value theorem, 
+
+sup 
+
+> zPZ
+
+ˇˇˇgz ppθY,t q ´ gz pθY q
+
+ˇˇˇ ď L }pθY,t ´ θY }. (55) Thus the causal-estimation term can be taken as 
+
+ϵparam pNt, δ q “ L }pθY,t ´ θY } (56) on the corresponding high-probability event. A concrete high-probability rate for }pθY,t ´ θY }, and hence for ϵparam pNt, δ q, is derived in Section III-L. 
+
+Regret-safe acquisition. For the formal regret theorem, one may use the regret-safe additive acquisition 
+
+αsafe  
+
+> t
+
+pzq “ pμt´1pzq ` aβt pσfunc  
+
+> t´1
+
+pzq ` ϵt ´ ηc pzq. (57) The additive correction ϵt avoids degeneracy when pσcausal  
+
+> t´1
+
+pzq “ 0, which can occur at intervention values where the Jacobian Jz vanishes. For example, in the chain X Ñ Z Ñ Y , the mediator intervention has 
+
+JZ pzq “ r 0, z s, so JZ p0q “ 0.The multiplicative bonus λtpσcausal  
+
+> t´1
+
+pzq in (52) remains useful in practice because it allocates more exploration to intervention queries whose effects are sensitive to uncertain causal parameters. However, the formal regret analysis only requires that the acquisition include a valid high-probability correction for causal-estimation error. This can be done either by the additive ϵt term in (57), or by a pointwise calibration at the selected query zt:
+
+λtpσcausal  
+
+> t´1
+
+pztq ě ϵtpztq, (58) where ϵtpzq is a pointwise causal-estimation error bound. We use the additive version (57) in the main regret theorem because it is robust to zero-Jacobian queries and yields the same regret decomposition. 
+
+K. Dynamic regret decomposition 
+
+Define the best value over the full admissible intervention class as f ‹ 
+
+> all
+
+“ sup s,x s fspxsq, and the best value over the chosen exploration set E as f ‹ 
+
+> E
+
+“ sup sPE, x sPXs fspxsq. The exploration-set approximation error is 
+
+ϵE “ f ‹ 
+
+> all
+
+´ f ‹ 
+
+> E
+
+. (59) If E contains an optimal intervention set for the admissible class, then ϵE “ 0.Let zt “ p st, x st q denote the intervention query selected at round t, and define the instantaneous regret and cumulative regret by rt “ f ‹ 
+
+> all
+
+´ f pztq, RT “ řTt“1 rt. The regret decomposes into three terms: optimization regret within the chosen exploration set, causal-estimation error, and exploration-set approximation error. 
+
+Theorem 2 (Dynamic regret bound for graph-coupled CBO) . Assume Assumptions 1–4. Suppose the regret-safe causal UCB acquisition αsafe  
+
+> t
+
+pzq “ pμt´1pzq ` ?βt pσfunc  
+
+> t´1
+
+pzq ` ϵt ´ ηc pzq is run with the fixed coupled causal kernel kcausal in (32) . Suppose that, with probability at least 1 ´ δ, the causal-estimation error satisfies the uniform bound 
+
+sup 
+
+> zPZ
+
+|pμt´1pzq ´ f pzq| ď ϵt, t “ 1, . . . , T, (60) 
+
+where ϵt is defined in (54) . Then, with probability at least 1 ´ 2δ over the joint randomness of the causal estimator and the GP-UCB confidence event, the cumulative regret satisfies: 
+
+RT ď C
+
+b
+
+T β T γcausal  
+
+> T
+
+` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵparam pNt, δ q ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵadj pNt, M t, δ q ` T ϵ E , (61) 14 
+
+for a universal constant C ą 0. Consequently, using Lemma 1, 
+
+RT ď CaT β T rcausal log T ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵparam pNt, δ q ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵadj pNt, M t, δ q ` T ϵ E . (62) 
+
+Since rcausal ď dim pθY q, we also have 
+
+RT ď CaT β T dim pθY q log T ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵparam pNt, δ q ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵadj pNt, M t, δ q ` T ϵ E . (63) 
+
+Proof. For each round t, decompose the instantaneous regret as rt “ f ‹ 
+
+> all
+
+´f pztq “ f ‹ 
+
+> all
+
+´ f ‹
+
+> E
+
+looomooon 
+
+> ϵE
+
+` f ‹ 
+
+> E
+
+´ f pztqloooomoooon  
+
+> regret within E
+
+.
+
+Summing over t gives 
+
+RT “ T ϵ E `
+
+> T
+
+ÿ
+
+> t“1
+
+pf ‹ 
+
+> E
+
+´ f pztqq . (64) Let z‹ 
+
+> t
+
+P arg max zPZ f pzq. We bound the regret within E. On the event (60), the surrogate mean satisfies f pzq ď pμt´1pzq ` ϵt @z P Z. On the standard GP-UCB confidence event, the functional GP uncertainty gives f pzq ď pμt´1pzq ` ?βt pσfunc  
+
+> t´1
+
+pzq ` ϵt @z P Z. Similarly, the lower-confidence side gives f pzq ě pμt´1pzq ´ ?βt pσfunc  
+
+> t´1
+
+pzq ´ ϵt @z P Z.
+
+Because zt maximizes αsafe  
+
+> t
+
+, αsafe  
+
+> t
+
+pztq ě αsafe  
+
+> t
+
+pz‹ 
+
+> t
+
+q. Using the upper confidence bound at z‹ 
+
+> t
+
+, the maxi-mization property, and the lower confidence bound at zt, we obtain 
+
+f pz‹ 
+
+> t
+
+q ´ f pztq ď αsafe  
+
+> t
+
+pz‹ 
+
+> t
+
+q ` ηc pz‹ 
+
+> t
+
+q ´ f pztqď αsafe  
+
+> t
+
+pztq ` ηc pz‹ 
+
+> t
+
+q ´ f pztq“ pμt´1pztq ` aβtpσfunc  
+
+> t´1
+
+pztq ` ϵt ´ ηc pztq ` ηc pz‹ 
+
+> t
+
+q ´ f pztqď 2aβtpσfunc  
+
+> t´1
+
+pztq ` 2ϵt ` η`cpz‹ 
+
+> t
+
+q ´ cpztq˘. (65) For the standard value-regret statement, we either take η “ 0 or drop the cost-difference term when analyzing value regret rather than cost-adjusted regret. Thus 
+
+f pz‹ 
+
+> t
+
+q ´ f pztq ď 2aβtpσfunc  
+
+> t´1
+
+pztq ` 2ϵt. (66) The factor 2 arises from using the upper confidence bound at z‹ 
+
+> t
+
+and the lower confidence bound at zt,as in the standard GP-UCB argument. Summing (66) over t yields řTt“1 pf ‹ 
+
+> E
+
+´ f pztqq ď 2?βT
+
+řTt“1 pσfunc  
+
+> t´1
+
+pztq ` 2 řTt“1 ϵt. The standard GP-UCB information-gain inequality gives řTt“1 pσfunc  
+
+> t´1
+
+pztq ď C1aT γ causal  
+
+> T
+
+, for a universal constant C1; see, for example, Srinivas et al. [30, Lemma 5.4]. Therefore, řTt“1 pf ‹ 
+
+> E
+
+´ f pztqq ď CaT β T γcausal  
+
+> T
+
+` 2 řTt“1 ϵt.
+
+Substituting ϵt “ ϵparam pNt, δ q ` ϵadj pNt, M t, δ q and then using (64) gives (61). Finally, Lemma 1 gives γcausal  
+
+> T
+
+“ Oprcausal log T q, which yields (62). Corollary 1 gives rcausal ď
+
+dim pθY q, which yields (63). 
+
+Remark 5 (Value regret versus cost-adjusted regret) . The theorem states a value-regret bound for f ‹ 
+
+> all
+
+´
+
+f pztq. The acquisition may include the cost penalty ´ηc pzq to discourage expensive interventions. If one wants a regret bound for the cost-adjusted objective f pzq ´ ηc pzq, the same proof applies directly with f
+
+replaced by f ´ ηc . For pure value regret, one may set η “ 0 in the theorem or treat the additional term 
+
+η řTt“1
+
+`cpz‹ 
+
+> t
+
+q ´ cpztq˘ separately. 15 
+
+L. Causal parameter concentration 
+
+The dynamic term řTt“1 ϵparam pNt, δ q in Theorem 2 captures the fact that causal estimation improves as more observational data is collected. In the linear Gaussian case, this improvement follows from standard Bayesian linear regression concentration. Suppose first that the shared causal parameterization θY consists of structural coefficients or linear identifiable functionals of structural coefficients. Each structural equation can then be estimated by Gaus-sian linear regression conditional on its parents. With a Gaussian prior and Gaussian noise, the posterior covariance has the standard form 
+
+Σθ,t “ `Σ´1 
+
+> θ, 0
+
+` XJ 
+
+> t
+
+Xt{σ2
+
+> ε
+
+˘´1 , (67) where Xt denotes the relevant observational design matrix for the components of θY .Under the regular design condition λmin pXJ 
+
+> t
+
+Xtq — Nt, the posterior covariance shrinks in spectral norm as 
+
+}Σθ,t } “ OpN ´1 
+
+> t
+
+q, (68) and therefore }Σ1{2 
+
+> θ,t
+
+} “ OpN ´1{2 
+
+> t
+
+q. Standard Bayesian linear regression concentration then gives, with probability at least 1 ´ δ,
+
+}pθY,t ´ θY } “ O
+
+˜d 
+
+dim pθY q ` log p1{δq
+
+Nt
+
+¸
+
+. (69) By Assumption 3, the interventional response functions are uniformly Lipschitz in θY over the compact intervention domain: there exists L ă 8 such that sup zPZ }Jz } ď L. Hence, by the mean-value theorem, 
+
+sup 
+
+> zPZ
+
+ˇˇˇgz ppθY,t q ´ gz pθY q
+
+ˇˇˇ ď L}pθY,t ´ θY }. (70) Combining (69) and (70), the causal parameter estimation term may be taken as 
+
+ϵparam pNt, δ q “ O
+
+˜
+
+L
+
+d
+
+dim pθY q ` log p1{δq
+
+Nt
+
+¸
+
+. (71) The same Gaussian conditioning identities underlie Bayesian linear regression and Gaussian process regression [24]. If θY contains smooth nonlinear identifiable functionals, such as products of path coefficients, the same rate follows by the delta method under bounded Jacobians of the functional map. In that case, Σθ,t should be interpreted as the posterior covariance of the chosen shared parameterization θY , not necessarily only of the primitive structural coefficients. 
+
+Remark 6 (Weakly identified components) . The regular design condition λmin pXJ 
+
+> t
+
+Xtq — Nt assumes that the observational data are informative about all components of θY . When some causal parameters are weakly identified, for example under partial latent confounding or poor overlap in the observational design, the rate in (71) applies only to the well-identified components. In such cases, the analysis should be specialized to the effective rank of Σθ,t , as in Remark 4. 
+
+Corollary 2 (Regret under growing observational data) . Assume the clean identifiable linear Gaussian setting: ϵadj pNt, M t, δ q “ 0, ϵE “ 0, and ϵparam pNt, δ q “ OppN ´1{2 
+
+> t
+
+q. If Nt — tα, 0 ă α ď 1, then 
+
+> T
+
+ÿ
+
+> t“1
+
+ϵparam pNt, δ q “ Op
+
+˜ Tÿ
+
+> t“1
+
+t´α{2
+
+¸
+
+“ OppT 1´α{2q. (72) 
+
+Consequently, 
+
+RT “ O
+
+´a T β T rcausal log T
+
+¯
+
+` OppT 1´α{2q. (73) 16 
+
+In particular, if observational data accumulate linearly, Nt — t, then 
+
+RT “ O
+
+´a T β T rcausal log T
+
+¯
+
+` Opp?T q. (74) 
+
+Both terms scale as ?T , with the coupled-UCB term carrying the additional factor ?βT rcausal log T . 
+
+Thus, under linear observational growth, the causal-estimation term is asymptotically dominated by the coupled-UCB term whenever βT rcausal log T Ñ 8 , which holds under standard choices of βT .Proof. By (71), ϵparam pNt, δ q “ OppN ´1{2 
+
+> t
+
+q. If Nt — tα, then N ´1{2 
+
+> t
+
+— t´α{2. Therefore, řTt“1 ϵparam pNt, δ q “ 
+
+Op
+
+´řTt“1 t´α{2
+
+¯
+
+. For 0 ă α ď 1, řTt“1 t´α{2 “ OpT 1´α{2q. Substituting this rate into Theorem 2 gives (73). Setting α “ 1 gives (74). The dominance statement follows by comparing ?T β T rcausal log T with ?T as T Ñ 8 .
+
+M. Comparison with independent intervention-set GPs 
+
+The CBO surrogate of Aglietti et al. [1] places a separate Gaussian process prior on each intervention set 
+
+s P E, using do-calculus to construct causal prior means and variance corrections. Thus, each interventional response fspxsq “ ErVy | do pXs “ xsqs is modeled as a separate surrogate-modeling problem. Let γind  
+
+> T
+
+denote the maximum information gain of the resulting independent multi-task surrogate over 
+
+T queries distributed across intervention sets. For independent GPs, the joint kernel over the disjoint intervention-set domains is block diagonal. Therefore, if Ts queries are allocated to intervention set s,with ř 
+
+> sPE
+
+Ts “ T, the information gain decomposes as ř 
+
+> sPE
+
+γpsq 
+
+> Ts
+
+. Consequently, 
+
+γind  
+
+> T
+
+“ max    
+
+> tTsusPE:ř
+> sTs“T
+
+ÿ
+
+> sPE
+
+γpsq 
+
+> Ts
+
+ď ÿ
+
+> sPE
+
+γpsq 
+
+> T
+
+. (75) The final inequality is a worst-case upper bound, since each γpsq 
+
+> Ts
+
+ď γpsq 
+
+> T
+
+.By contrast, the graph-coupled surrogate satisfies 
+
+γcausal  
+
+> T
+
+ď Oprcausal log T q ď Opdim pθY q log T q. (76) Thus graph coupling replaces a collection of independent information-gain terms with a single finite-rank causal information-gain term. Substituting these quantities into the GP-UCB regret form RT “ O`?T β T γT
+
+˘ , the graph-coupled surrogate yields the optimization term 
+
+Rcausal  
+
+> T
+
+“ O
+
+´a T β T rcausal log T
+
+¯
+
+ď O
+
+´a T β T dim pθY q log T
+
+¯
+
+, (77) whereas independent intervention-set GPs incur 
+
+Rind  
+
+> T
+
+“ O
+
+ˆb 
+
+T β T γind 
+
+> T
+
+˙
+
+. (78) The advantage is largest when rcausal log T ! γind  
+
+> T
+
+, or, more conservatively, when dim pθY q log T ! γind  
+
+> T
+
+.
+
+This is precisely the regime in which the causal graph is informative: multiple interventional responses are different views of the same shared causal mechanisms. For example, in the chain graph of Example 1 with E “ tt Xu, tZuu , the independent surrogate uses two separate one-dimensional GPs, one for fX and one for fZ . The graph-coupled surrogate instead represents 
+
+fX pxq “ abx, fZ pzq “ bz through the shared parameterization θY “ p a, b q. If both a and b are unknown, then dim pθY q “ 2; if one coefficient or total effect is known from prior data, the dimension decreases accordingly. The independent surrogate cannot transfer information between fX and fZ , even though both depend on the shared parameter b. The graph-coupled surrogate exploits this overlap through the cross-intervention covariance kcausal 
+
+`pX, x q, pZ, z q˘ “ JX pxqΣθJZ pzqJ.17 
+
+We avoid claiming a universal dimensional comparison such as ř 
+
+> s
+
+dim pXsq versus dim pθY q without specifying the kernel class. Squared-exponential, Mat´ ern, and finite-dimensional linear kernels have distinct information-gain rates, so ambient dimension alone is not the right comparison quantity. The clean comparison is in terms of information gain: independent CBO accumulates separate per-intervention-set information-gain terms, while graph-coupled CBO uses a shared finite-rank causal information-gain term controlled by the identifiable causal parameterization. 
+
+N. Nonlinear extension: GP-per-mechanism and path-Lipschitz propagation 
+
+The linear Gaussian theory gives closed-form cross-intervention covariance and finite-rank regret guar-antees. For nonlinear SEMs, we keep the same graph-factorized principle but do not claim the same finite-rank GP-UCB regret theorem. Instead, we give a path-wise error propagation guarantee showing how local mechanism-estimation errors affect interventional response estimates. Assume each structural equation is 
+
+Vi “ gipPa iq ` εi, gi „ GP . (79) For an intervention do pXs “ xsq, the graph is mutilated by replacing the structural equations for Xs
+
+with constants xs, and uncertainty is propagated through the remaining graph. This propagation may be implemented by Monte Carlo sampling, moment matching, sigma-point propagation, or Bayesian quadrature. We assume each mechanism is coordinate-wise Lipschitz in its parents. That is, for all parent configu-rations u, u 1,
+
+|gj puq ´ gj pu1q| ď ÿ
+
+> iPPa pjq
+
+Lij |ui ´ u1
+
+> i
+
+|. (80) This condition is stronger than ordinary joint Lipschitz continuity, but it is the natural assumption for decomposing error propagation along individual directed edges. Let pgi be the learned mechanism on a compact domain Ui, and suppose 
+
+sup 
+
+> uPUi
+
+|pgipuq ´ gipuq| ď ϵi. (81) For GP-learned mechanisms, ϵi can be controlled in probability by standard posterior contraction or GP regression concentration results on compact domains. For example, one may have ϵi “ OppN ´βi 
+
+> i
+
+q for some rate βi ą 0 depending on the smoothness of gi, the kernel, and the effective dimension of the parent domain. For a directed path π : i ⇝ y, define its path sensitivity as 
+
+Lpπq “ ź
+
+> paÑbqP π
+
+Lab . (82) Let GXs denote the mutilated graph obtained by deleting incoming edges into Xs. The total path sensitivity from Vi to Vy in the mutilated graph is 
+
+Lpsq 
+
+> iÑy
+
+“ ÿ  
+
+> π:i⇝yin GXs
+
+Lpπq. (83) 
+
+Proposition 1 (Path-Lipschitz nonlinear error propagation) . Under (80) and (81) , the error in the nonlinear intervention-response estimate satisfies 
+
+| pfspxsq ´ fspxsq| ď ÿ 
+
+> iPAn py;GXs q
+
+Lpsq
+
+> iÑy
+
+ϵi. (84) 
+
+Proof. Under do pXs “ xsq, incoming edges into Xs are removed. In the remaining acyclic graph GXs ,variables can be evaluated in topological order. 18 
+
+For any non-intervened node j,
+
+| pVj ´ Vj | “ | pgj pxPa j q ´ gj pPa j q| ď | pgj pxPa j q ´ gj pxPa j q| ` | gj pxPa j q ´ gj pPa j q| . (85) The first term is bounded by ϵj by (81). The second term is bounded by the coordinate-wise Lipschitz condition (80). Therefore, 
+
+| pVj ´ Vj | ď ϵj ` ÿ 
+
+> iPPa pj;GXs q
+
+Lij | pVi ´ Vi|. (86) This inequality holds pointwise for every realization of the exogenous noise. Unrolling (86) along directed paths ending at Vy gives | pVy ´Vy| ď ř 
+
+> iPAn py;GXs q
+
+´ř  
+
+> π:i⇝yin GXs
+
+ś 
+
+> paÑbqP π
+
+Lab 
+
+¯
+
+ϵi. The inner sum is exactly 
+
+Lpsq
+
+> iÑy
+
+. Hence, | pVy ´ Vy| ď ř  
+
+> iPAn py;GXs q
+
+Lpsq
+
+> iÑy
+
+ϵi. Since this bound holds pointwise, Jensen’s inequality gives 
+
+| pfspxsq ´ fspxsq| “ 
+
+ˇˇˇEdo pXs“xsqr pVy ´ Vys
+
+ˇˇˇ
+
+ď Edo pXs“xsq
+
+”
+
+| pVy ´ Vy|
+
+ı
+
+ď ÿ 
+
+> iPAn py;GXs q
+
+Lpsq
+
+> iÑy
+
+ϵi. (87) This proves (84). The bound shows that mechanism errors are amplified multiplicatively along directed paths to Vy: each edge contributes a factor Lab , and the total contribution from ancestor Vi is the sum over all directed paths from Vi to Vy in the mutilated graph. Graphs with long high-sensitivity paths amplify uncertainty more than shallow graphs or graphs with weak edge sensitivities. 
+
+Remark 7 (Conservativeness of the path bound) . The bound (84) controls | pfspxsq ´ fspxsq| by applying Jensen’s inequality to the absolute pointwise error. It is therefore valid but may be conservative when pointwise mechanism errors partially cancel under the intervened distribution. 
+
+This proposition provides a graph-factorized predictive-accuracy guarantee for the nonlinear extension of graph-coupled CBO. While the full regret theorem in Section III-K relies on the closed-form linear Gaussian covariance, Proposition 1 shows how local GP mechanism errors can be combined with graph structure to control nonlinear interventional-response error. 
+
+O. Adaptive-kernel extension 
+
+Assumption 4 gives a clean fixed-kernel regret theorem, but it is conservative in practice. As additional observational data arrive, the posterior over the shared causal parameterization changes, so it is natural to update pθY,t , Σθ,t , Jz ppθY,t q. This leads to the adaptive causal kernel 
+
+ktpz, z 1q “ Jz ppθY,t qΣθ,t Jz1 ppθY,t qJ, (88) where z “ p s, x sq, z1 “ p t, x tq, and Jz denotes the Jacobian of the corresponding interventional response with respect to the shared causal parameterization. The adaptive kernel is the empirically natural version of graph-coupled CBO: as Nt grows, Σθ,t typically shrinks and the surrogate becomes less conservative. However, because the kernel changes over time, standard GP-UCB regret theory does not apply directly. We therefore state a conditional adaptive-kernel result with two explicit additional ingredients: a kernel-drift confidence term and an adaptive variance-sum condition. 19 
+
+Assumption 5 (Adaptive-kernel confidence with drift) . At each round t, the algorithm uses the adaptive kernel kt in (88) . Assume that, with probability at least 1 ´ δ, the corresponding posterior mean and standard deviation satisfy 
+
+ˇˇˇf pzq ´ pμptq
+
+> t´1
+
+pzq
+
+ˇˇˇ ď aβt pσptq
+
+> t´1
+
+pzq ` ϵt ` ρt @z P Z, t “ 1, . . . , T. (89) 
+
+Here pμptq 
+
+> t´1
+
+and pσptq 
+
+> t´1
+
+are the GP posterior mean and standard deviation computed using the current kernel 
+
+kt, ϵt is the causal-estimation error defined in (54) , and ρt ě 0 is a kernel-drift error accounting for the use of an estimated, time-varying kernel. 
+
+Remark 8 (Interpretation of the drift term) . The term ρt is an abstract high-probability bound on the error caused by replacing a fixed reference kernel with the adaptive estimated kernel kt. It absorbs changes in the linearization point, posterior covariance, and induced posterior mean and variance. A typical perturbative control depends on }pθY,t ´ pθY,t ´1}, }Σθ,t ´ Σθ,t ´1}, sup zPZ }Jz ppθY,t q ´ Jz ppθY,t ´1q} .
+
+For example, if the Jacobians are Lipschitz in θY , the intervention domain is compact, and the posterior covariance changes smoothly, then ρt can be bounded by a perturbation term of the schematic form 
+
+ρt À LJ }pθY,t ´ pθY,t ´1}} Σθ,t } ` } Σθ,t ´ Σθ,t ´1}, up to constants depending on the bounded intervention domain. The adaptive regret theorem below conditions on the event (89) ; deriving sharp finite-sample bounds on ρt for general adaptive kernels is a separate nonstationary-GP problem. 
+
+Assumption 6 (Adaptive variance sum) . Let γT “ sup 1ďtďT γT pktq be the worst-case maximum informa-tion gain over the adaptive kernel sequence. Assume the adaptive posterior variances along the selected queries satisfy Tÿ
+
+> t“1
+
+´pσptq
+
+> t´1
+
+pztq
+
+¯2
+
+ď Cγ γT (90) 
+
+for a constant Cγ ą 0.
+
+Remark 9 (Why Assumption 6 is needed) . For a fixed kernel, the standard GP-UCB variance-sum inequality bounds řTt“1 pσ2
+
+> t´1
+
+pztq by a constant multiple of the maximum information gain [30, Lemma 5.3]. That argument relies on using the same kernel throughout the sequential posterior update. When the kernel changes with t, the fixed-kernel proof no longer applies directly. Assumption 6 is therefore an explicit slow-drift-type condition on the adaptive kernel sequence. It is expected to hold when tktu changes sufficiently slowly, for example when }kt ´ kt´1}8 decays with t, but a general verification is left for future work. 
+
+Theorem 3 (Approximate regret bound for adaptive graph-coupled CBO) . Assume Assumptions 1–3, Assumption 5, and Assumption 6. Suppose the adaptive causal-UCB algorithm selects 
+
+zt P arg max 
+
+> zPZ
+
+!pμptq
+
+> t´1
+
+pzq ` aβt pσptq
+
+> t´1
+
+pzq ` ϵt ´ ηc pzq
+
+)
+
+. (91) 
+
+Then, on the event in Assumption 5, the cumulative value regret satisfies 
+
+RT ď CaT β T γT ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵparam pNt, δ q ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵadj pNt, M t, δ q ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ρt ` T ϵ E , (92) 
+
+for a universal constant C ą 0.If each adaptive kernel kt has rank at most rcausal and satisfies ktpz, z q ď κ2 @z P Z, t “ 1, . . . , T, 
+
+then 
+
+γT ď rcausal 
+
+2 log 
+
+ˆ
+
+1 ` T κ 2
+
+σ2rcausal 
+
+˙
+
+, (93) 
+
+and therefore 
+
+RT ď CaT β T rcausal log T ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵparam pNt, δ q ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵadj pNt, M t, δ q ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ρt ` T ϵ E . (94) 20 
+
+Proof. Let z‹ 
+
+> t
+
+P arg max zPZ f pzq. On the event in Assumption 5, we have the upper and lower confidence inequalities f pzq ď pμptq
+
+> t´1
+
+pzq ` ?βtpσptq
+
+> t´1
+
+pzq ` ϵt ` ρt and f pzq ě pμptq
+
+> t´1
+
+pzq ´ ?βtpσptq
+
+> t´1
+
+pzq ´ ϵt ´ ρt for all 
+
+z P Z. By the same upper-confidence/lower-confidence argument used in the proof of Theorem 2, now with the additional drift term ρt, the instantaneous regret within E satisfies 
+
+f pz‹ 
+
+> t
+
+q ´ f pztq ď 2aβtpσptq
+
+> t´1
+
+pztq ` 2ϵt ` 2ρt, (95) for value regret, taking η “ 0 or treating the cost-adjusted objective separately as in the fixed-kernel theorem. Summing (95) over t gives řTt“1 pf ‹ 
+
+> E
+
+´ f pztqq ď 2 řTt“1
+
+?βt pσptq
+
+> t´1
+
+pztq ` 2 řTt“1 ϵt ` 2 řTt“1 ρt. Assuming 
+
+βt ď βT and applying Cauchy–Schwarz, řTt“1
+
+?βt pσptq
+
+> t´1
+
+pztq ď 
+
+c
+
+T β T
+
+řTt“1
+
+´pσptq
+
+> t´1
+
+pztq
+
+¯2
+
+. By Assumption 6, 
+
+řTt“1
+
+´pσptq
+
+> t´1
+
+pztq
+
+¯2
+
+ď Cγ γT . Therefore, řTt“1
+
+?βt pσptq
+
+> t´1
+
+pztq ď C1aT β T γT . Adding the exploration-set approximation term T ϵ E and using ϵt “ ϵparam pNt, δ q ` ϵadj pNt, M t, δ q gives (92). It remains to bound γT . For each fixed t, the kernel kt is finite-rank with rank at most rcausal and diagonal bounded by κ2. Applying Lemma 1 to kt gives γT pktq ď rcausal  
+
+> 2
+
+log 
+
+´
+
+1 ` T κ 2
+
+> σ2rcausal
+
+¯
+
+. Taking the supremum over t “ 1, . . . , T gives (93). Substituting this bound into (92) yields (94). 
+
+Remark 10 (Comparison with the fixed-reference theorem) . Compared with the fixed-kernel bound in Theorem 2, the adaptive-kernel bound adds the cumulative kernel-drift penalty 2 řTt“1 ρt and requires the adaptive variance-sum condition in Assumption 6. Under slow drift conditions where ρt “ Opt´1{2q, the drift contribution is Op?T q, matching the causal-estimation term under linear observational growth and not dominating the coupled-UCB term up to logarithmic and rank factors. Thus the adaptive theorem captures the practical benefit of updating the causal kernel while making explicit the extra nonstationary-kernel assumptions needed for regret control. P. Summary of theoretical improvement 
+
+The theoretical spine of graph-coupled CBO in the identifiable linear Gaussian case is: identifiable shared SEM parameters pAssumption 1 qó
+
+Cov `fspxsq, f tpxtq | DO˘ “ JspxsqΣθJtpxtqJ pTheorem 1 qó
+
+rank pKT q ď rcausal ď dim pθY q pCorollary 1 qó
+
+γcausal  
+
+> T
+
+“ Oprcausal log T q pLemma 1 qó
+
+RT ď CaT β T rcausal log T ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵparam pNt, δ q ` 2
+
+> T
+
+ÿ
+
+> t“1
+
+ϵadj pNt, M t, δ q ` T ϵ E pTheorem 2 q.
+
+The causal graph produces an optimization advantage by coupling intervention-response functions through shared identifiable mechanisms. The regret depends on the rank of the shared causal parame-terization rather than on a collection of independent intervention-set surrogates (Section III-M). For nonlinear SEMs, Proposition 1 provides a graph-factorized path-Lipschitz error guarantee in place of the closed-form linear Gaussian covariance. For the practical adaptive-kernel implementation, Theorem 3 gives an approximate regret bound under explicit kernel-drift and adaptive variance-sum conditions. 21 
+
+IV. A LGORITHM 
+
+This section translates the graph-coupled theory into a concrete sequential optimization procedure. The algorithm maintains three objects across rounds: (i) an observational dataset DONt , which determines the posterior over the shared causal parameterization θY ; (ii) an interventional dataset DIt “ tp zi, y iqu t´1
+
+> i“1
+
+,where zi “ p si, x si q; and (iii) a coupled causal Gaussian process surrogate whose kernel is induced by the posterior uncertainty in θY .
+
+Algorithm 1: Graph-coupled causal Bayesian optimization (GC-CBO) 
+
+Input : Causal graph G; exploration set E; initial observational data DON0 ; intervention domains 
+
+tXsusPE ; horizon T ; cost function c; cost weight η ě 0; confidence level δ P p 0, 1q;observation budget Nmax ; observation probability pobs .
+
+Output: Estimated best intervention pz‹ “ p ps‹, px‹q and value pf ‹. 
+
+> 1
+
+Initialization:  
+
+> 2
+
+Construct the shared parameterization θY by applying the ID algorithm to each query 
+
+P pVy | do pXs “ xsqq , s P E 
+
+> 3
+
+Compute the initial posterior ppθY, 0, Σθ, 0q from DON0 
+
+> 4
+
+Compute the response maps gspxs; θY q and Jacobians Jspxs; pθY, 0q for s P E 
+
+> 5
+
+Set DI 
+
+> 0
+
+Ð H and N Ð N0 
+
+> 6
+
+for t “ 1, . . . , T do  
+
+> 7
+
+Compute ϵt “ ϵparam pN, δ q ` ϵadj pN, M t, δ q 
+
+> 8
+
+Sample u „ Uniform p0, 1q 
+
+> 9
+
+if u ă pobs and N ă Nmax then 
+
+// Observe step  
+
+> 10
+
+Collect observational sample vt „ P pV q 
+
+> 11
+
+Set N Ð N ` 1 
+
+> 12
+
+DON Ð DON ´1 Y t vtu 
+
+> 13
+
+Update ppθY,t , Σθ,t q from DON 
+
+> 14
+
+Set DIt Ð DIt´1 
+
+> 15
+
+else 
+
+// Intervene step  
+
+> 16
+
+Build the coupled causal kernel ktpz, z 1q “ Jz ppθY,t qΣθ,t Jz1 ppθY,t qJ 
+
+> 17
+
+for z, z 1 P Z // or use k0 in the fixed-reference variant  
+
+> 18
+
+Compute coupled GP posterior mean pμt´1pzq and standard deviation pσfunc  
+
+> t´1
+
+pzq using DIt´1 
+
+> 19
+
+Select zt P arg max zPZ
+
+␣pμt´1pzq ` ?βt pσfunc  
+
+> t´1
+
+pzq ` ϵt ´ ηc pzq( 
+
+> 20
+
+Perform do pXst “ xst q, where zt “ p st, x st q 
+
+> 21
+
+Observe yt “ fst pxst q ` ξt, ξt „ N p0, σ 2q 
+
+> 22
+
+DIt Ð DIt´1 Y tp zt, y tqu  
+
+> 23
+
+Update the coupled GP posterior  
+
+> 24
+
+end  
+
+> 25
+
+end  
+
+> 26
+
+Return pz‹ P arg max pzi,y iqP DIT pμT pziq, pf ‹ “ pμT ppz‹q.
+
+A. Graph-coupled CBO 
+
+Let Z “ tp s, x sq : s P E, x s P Xsu denote the joint intervention domain. In the fixed-reference version analyzed in Theorem 2, the causal kernel is constructed once from ppθY, 0, Σθ, 0q. In the adaptive version, 22 
+
+the kernel is updated as DONt grows, as described in Section III-O. The pseudocode below is written for the adaptive implementation; the fixed-reference variant is obtained by replacing ppθY,t , Σθ,t q by ppθY, 0, Σθ, 0q
+
+in the kernel construction. 
+
+B. Explanation and connection to the theory 
+
+Constructing θY . The initialization step applies the ID algorithm to every interventional query in the exploration set and collects the unique identifiable causal quantities needed to express all response functions fspxsq “ gspxs; θY q. This is the constructive content of Assumption 1. The resulting dimension 
+
+dim pθY q is the quantity that controls the finite-rank information-gain bound. 
+
+Posterior over θY . The posterior ppθY,t , Σθ,t q is estimated from observational data. In conjugate linear Gaussian models this update is closed-form; for smooth identifiable functionals, Σθ,t is interpreted as the posterior covariance of the chosen shared parameterization, as in Assumption 2. 
+
+Coupled causal kernel. At an intervention query z “ p s, x sq, the Jacobian Jz “ Jspxsq measures the sensitivity of the interventional response to the shared causal parameters. The kernel ktpz, z 1q “ Jz Σθ,t JJ
+
+> z1
+
+therefore couples intervention sets through posterior uncertainty in common causal mechanisms. This is the algorithmic realization of Theorem 1 and Corollary 1. 
+
+Observation versus intervention. The observation branch reduces causal-estimation error by shrinking 
+
+Σθ,t and therefore ϵparam pNt, δ q. The intervention branch reduces optimization error by sampling high-value or high-uncertainty interventional queries. The Bernoulli observation schedule is a simple baseline policy. More adaptive policies can choose whether to observe or intervene based on the current size of 
+
+Σθ,t , the remaining budget, or the expected reduction in ϵt.
+
+Regret-safe acquisition. The intervention branch uses αsafe  
+
+> t
+
+pzq “ pμt´1pzq ` ?βt pσfunc  
+
+> t´1
+
+pzq ` ϵt ´ ηc pzq.
+
+The first two terms are the standard GP-UCB mean and exploration bonus. The additive ϵt term is the high-probability correction for causal estimation error, introduced in Section III-J. The cost term penalizes expensive interventions. Setting η “ 0 recovers the pure value-regret objective analyzed in Theorem 2. 
+
+Reporting rule. The algorithm returns the best intervention among those evaluated, measured by the final posterior mean. This is the standard reporting rule for sequential black-box optimization. One may instead return the best observed interventional outcome or the posterior maximizer over all of Z.
+
+C. Soundness 
+
+The following proposition states that the algorithm inherits the regret guarantee of the theory section when run in the fixed-reference setting. 
+
+Proposition 2 (Soundness of fixed-reference GC-CBO) . Suppose Assumptions 1–4 hold. Run Algorithm 1 in its fixed-reference variant with η “ 0, and suppose the causal-estimation event (60) and the standard GP-UCB confidence event hold. Then the sequence of intervention queries satisfies the regret bound in 
+
+(63) . If, in addition, ϵadj pNt, M t, δ q “ 0, ϵE “ 0, and Nt — t, then 
+
+RT
+
+T “ O
+
+˜c βT dim pθY q log TT
+
+¸
+
+` OppT ´1{2q. (96) 
+
+Consequently, the best true intervention encountered by the algorithm satisfies the same rate in simple regret: 
+
+f ‹ 
+
+> all
+
+´ max  
+
+> 1ďtďT
+
+f pztq ď RT
+
+T . (97) 
+
+Proof. In the fixed-reference variant, Algorithm 1 uses the kernel kcausal pz, z 1q “ Jz ppθY, 0qΣθ, 0Jz1 ppθY, 0qJ
+
+and the regret-safe acquisition analyzed in Theorem 2. Therefore the regret bound in (63) follows directly from Theorem 2 and Corollary 1. Under linear observational growth, Corollary 2 gives (96). Finally, 
+
+f ‹ 
+
+> all
+
+´ max 1ďtďT f pztq ď 1
+
+> T
+
+řTt“1 pf ‹ 
+
+> all
+
+´ f pztqq “ RT 
+
+> T
+
+, which proves the simple-regret claim. 23 
+
+Remark 11 (Returned posterior maximizer) . The simple-regret guarantee in Proposition 2 applies to the best true queried intervention, arg max 1ďtďT f pztq. The posterior-mean reporting rule in Algorithm 1 is a practical estimator of this best queried intervention and is consistent on the same confidence event when posterior mean error vanishes. 
+
+Remark 12 (Adaptive implementation) . If Algorithm 1 updates the kernel at every round using ppθY,t , Σθ,t q,
+
+then its guarantee is the adaptive-kernel bound in Theorem 3, provided the drift and adaptive variance-sum assumptions of Section III-O hold. D. Complexity analysis 
+
+Let d “ dim pθY q, r “ rcausal ď d, and let M “ | Z| denote the number of candidate intervention queries after discretizing the domains Xs. For continuous domains, M should be replaced by the cost of the numerical acquisition optimizer. 
+
+Posterior update over θY . A direct Bayesian linear regression update over d parameters costs Opd3q if a full covariance matrix is inverted. With rank-one or online updates, this can be reduced to Opd2q per observational sample after an initial factorization. 
+
+Coupled GP update. After t interventional evaluations, the naive GP posterior update costs Opt3q time and Opt2q memory. Because the causal kernel has the low-rank form Kt “ ΦtΦJ 
+
+> t
+
+, Φt P Rtˆr, the matrix inversion lemma gives Optr 2 ` r3q time for the core low-rank solve and Optr ` r2q memory, assuming Φt has been computed. 
+
+Acquisition evaluation. Evaluating the acquisition over M candidate queries requires computing feature vectors ϕpzq “ Σ1{2 
+
+> θ,t
+
+JJ 
+
+> z
+
+and posterior mean/variance terms. Direct evaluation costs OpM r q for feature construction when Jacobians are available, plus posterior variance evaluation. Using the low-rank posterior representation, this is typically OpM r 2q per acquisition sweep. For continuous domains, M is replaced by the number of optimizer evaluations times the same per-query cost. 
+
+Total complexity. Ignoring observational-data storage and assuming T intervention rounds, the low-rank coupled GP computations cost approximately OpT 2r2 `T r 3q over the full run, while exhaustive acquisition evaluation over a discretized domain contributes OpT M r 2q. The total computational cost is therefore 
+
+O`T 2r2 ` T r 3 ` T M r 2˘ , (98) plus the cost of updating the observational posterior over θY . Since r ď d, this is substantially cheaper than a full GP update when r ! T .
+
+Memory complexity. The low-rank implementation stores the feature matrix Φt P Rtˆr and the posterior covariance over θY , requiring Optr ` d2q memory plus observational data storage. This improves over the 
+
+Opt2q memory required by storing a dense GP kernel matrix. 
+
+Comparison with independent CBO. Independent intervention-set CBO maintains separate GP surrogates for each s P E. If ts interventions are allocated to set s, then dense kernel factorizations recomputed from scratch have total cost ř 
+
+> sPE
+
+Opt3 
+
+> s
+
+q across the separate kernels. With incremental Cholesky updates this can be reduced, but the independent surrogates still do not share information across intervention sets. Graph-coupled CBO instead uses one low-rank surrogate over the joint domain. The main advantage is statistical rather than only computational: interventional data from one set can reduce posterior uncertainty for another whenever the responses share identifiable causal parameters, as quantified by Section III-M. V. E XPERIMENTAL RESULTS 
+
+We evaluate GC-CBO from the strongest theory-aligned setting to progressively more realistic and more challenging scenarios. All experiments are minimization problems and report the best value found so far as a function of cumulative intervention cost. For each method, curves show the median trajectory across random seeds with interquartile bands. Tables report terminal mean, terminal standard deviation, terminal 24 
+
+median, cumulative cost, and the first cost at which the median curve reaches an ϵ-neighborhood of the optimum. Unless otherwise stated, GC-CBO uses the paper-aligned lower-confidence-bound acquisition 
+
+μtpzq ´ aβtσtpzq ` ηc pzq,
+
+where the posterior covariance includes the proposed causal finite-rank coupling term. The extra causal-uncertainty bonus is set to zero in the main experiments to avoid double-counting uncertainty already present in the coupled posterior. In all experiments, the horizontal axis is cumulative intervention cost rather than the number of optimization iterations. Observational data are used as an offline resource to estimate the initial causal model, causal prior, and parameter uncertainty; they are not charged on the intervention-cost axis. Each interventional query incurs cost equal to the number of variables actively manipulated in that query. Thus, an intervention on a singleton costs 1, an intervention on a pair costs 2, and an intervention on a set 
+
+S costs |S|. This convention reflects the increasing experimental burden of manipulating more variables and is especially important in the ECOLI70 no-parent study, where allowing larger intervention sets both expands the feasible search family and permits more expensive high-order interventions. 
+
+Linear-Gaussian theory validation. We first test the setting that directly matches the theory: a linear-Gaussian chain 
+
+X ÝÑ Z ÝÑ Y, Z “ aX ` εZ , Y “ bZ ` εY .
+
+This example is deliberately small, but it is the cleanest test of the main mechanism. The two intervention functions, 
+
+fX pxq “ ErY | do pX “ xqs and fZ pzq “ ErY | do pZ “ zqs ,
+
+are not independent black-box functions: both are determined by the same low-dimensional structural parameter vector θY “ p a, b q. GC-CBO should therefore induce a low-rank cross-intervention covariance, whereas independent CBO treats the two intervention functions separately. The corresponding finite-rank, cross-covariance, information-gain, and parameter-concentration diagnostics are shown in Figure 1, with the main numerical quantities summarized in Table I. The fitted parameters were 
+
+pθY “ p 0.8515 , ´1.3654 q, θY “ p 0.8, ´1.3q.
+
+As reported in Table I and visualized in the first panel of Figure 1, the empirical coupled kernel had 
+
+rank pKT q “ 2 “ dim pθY q,
+
+which exactly matches the finite-rank prediction. Moreover, the numerically estimated cross-intervention covariance agreed with the analytic covariance to machine precision over the tested query pairs, as shown in the second panel of Figure 1 and summarized by the zero cross-covariance error in Table I. This is the most direct validation that the implementation is using the intended causal kernel rather than merely adding another generic covariance function. The information-gain experiment further supports the theory, as shown in the third panel of Figure 1 and reported in Table I. At T “ 320 , the causal kernel has information gain 5.416 , while the corresponding independent kernel has information gain 32 .152 . Thus, the coupled kernel grows far more slowly because it reuses a shared causal parameterization across intervention functions. The empirical value also remains below the finite-rank bound used in the regret analysis, as shown in Table I. Finally, the parameter-concentration diagnostic in the fourth panel of Figure 1 shows that the estimation error decreases as the observational sample size grows; the trace of the parameter covariance falls from 0.1784 at N “ 25 to 
+
+0.00123 at N “ 3200 , with the latter value reported in Table I. These results justify the central modeling choice of GC-CBO: when intervention functions are linked by shared structural mechanisms, the optimizer should exploit this coupling rather than learning each function from scratch. 
+
+Cross-set transfer stress tests. The finite-rank diagnostics in Figure 1 and Table I establish that the kernel has the right algebraic form. We next ask whether this structure improves optimization when 25 1 2 3 4 5                        
+
+> eigenvalue index
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> eigenvalue of  KT
+> dim( Y) = 2 0.01 0.00 0.01
+> analytic Cov (fX(x), fZ(z))
+> 0.015
+> 0.010
+> 0.005
+> 0.000
+> 0.005
+> 0.010
+> 0.015
+> numeric  JX JZ
+> y = x 050 100 150 200 250 300
+> number of interventions T
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> information gain  (nats)
+> ind
+> T(block-diagonal)
+> bound r
+> 2log(1 + T2/2r)
+> causal
+> T(coupled) 10 210 3
+> number of observations N
+> 10 3
+> 10 2
+> 10 1
+> error / posterior variance
+> O(N1/2 ) reference
+> tr( )
+
+Fig. 1. Theory-aligned diagnostics on the linear-Gaussian chain. Left to right: finite rank of the causal kernel, analytic versus numerical cross-intervention covariance, information gain of the causal kernel compared with an independent kernel, and concentration of the fitted structural parameters as the observational sample size increases. TABLE I THEORY -ALIGNED DIAGNOSTICS ON THE LINEAR -G AUSSIAN CHAIN . T HE COUPLED CAUSAL KERNEL HAS RANK EQUAL TO THE TARGET -RELEVANT PARAMETER DIMENSION AND SUBSTANTIALLY SMALLER INFORMATION GAIN THAN AN INDEPENDENT KERNEL .Diagnostic Quantity Value Interpretation Finite rank rank pKT q 2 Equals dim pθY q “ 2
+
+Cross-covariance error max |pk ´ k| 0.0 Matches analytic covariance Information gain γcausal p320 q 5.416 Below rank-based bound 7.068 
+
+Independent baseline γind p320 q 32 .152 Much larger than causal kernel Parameter concentration tr pΣθ q at N “ 3200 0.00123 Decreases with observational data 
+
+the intervention family is large and only sparse interventional data are available. To isolate this effect, we use two stress tests in which several intervention functions share a downstream mechanism. In the linear confounded-funnel case, held-out intervention sets are predicted from a small number of observed intervention outcomes on related sets. Independent CBO cannot transfer across sets, while GC-CBO can transfer through the shared causal kernel. The resulting transfer behavior is plotted in Figure 2 and quantified in Table II. The difference is substantial, as shown by the left panel of Figure 2 and the linear-funnel columns of Table II. With budget 3, GC-CBO has prediction error 0.7707 , compared with 1.5801 for independent CBO. As the budget increases to 48 , GC-CBO improves to 0.1726 , while CBO remains around 1.6320 . This is the clearest empirical demonstration of the proposed mechanism: GC-CBO does not merely optimize a single intervention function; it learns shared causal structure that generalizes across related intervention functions. The nonlinear shared-mechanism stress test gives a similar message but also reveals a limitation, as shown in the right panel of Figure 2 and the nonlinear-funnel columns of Table II. Independent CBO remains inaccurate, with error near 3.69 –4.21 across budgets. GC-CBO with a linearized causal kernel reduces the error to about 0.38 by budget 48 , while the nonlinear shared-mechanism version reaches 0.3017 .Thus, even an approximate causal coupling is useful, but nonlinear mechanisms benefit from richer causal features. This supports the paper’s emphasis on finite-rank and locally linear causal representations while also clarifying that nonlinear domains may require adaptive or learned Jacobian features. 
+
+Gaussian-network case study: ECOLI70. We then evaluate GC-CBO on a real Gaussian Bayesian network derived from the ECOLI70 network. This case study is important because it matches the paper narrative more closely than the nonlinear toy benchmarks: the graph is a Gaussian network, intervention effects are induced by structural equations, and multiple intervention functions share downstream causal parameters. We consider two variants. The parent-intervention variant is included in the main benchmark comparison in Figure 4 and Table V, while the no-parent ancestor-intervention variant is shown separately in Figure 3 and Tables III–IV. The first variant allows direct intervention on the parents of the target. For target yaeM , the optimal 26 10 20 30 40 50 interventional budget (only on a few sets) 0.25 0.50 0.75 1.00 1.25 1.50 mean error on 6 held-out sets  fs|      
+
+> CBO (independent per-set GPs) GC-CBO (coupled causal kernel) 10 20 30 40 50 interventional budget (only on a few sets) 1234mean error on 6 held-out sets  fs|
+> CBO (independent per-set GPs) GC-CBO, linear coupling JJ
+> GC-CBO, nonlinear coupling (shared-mechanism GP)
+
+Fig. 2. Cross-set transfer stress tests. Left: linear confounded-funnel setting, where GC-CBO substantially reduces held-out intervention error compared with independent CBO. Right: nonlinear shared-mechanism setting, where both linearized and nonlinear GC-CBO variants outperform independent CBO, with the nonlinear variant giving the best performance. TABLE II CROSS -SET TRANSFER STRESS TESTS . E RRORS ARE HELD -OUT INTERVENTION -FUNCTION ERRORS ; LOWER IS BETTER .Budget Linear funnel Nonlinear funnel CBO GC-CBO CBO GC-CBO linear GC-CBO nonlinear 
+
+3 1.5801 0.7707 3.9687 0.5139 0.4212 6 1.5136 0.5312 3.9317 0.4875 0.4724 12 1.4865 0.2697 3.7933 0.5179 0.4396 24 1.5627 0.2445 4.2117 0.3909 0.3147 48 1.6320 0.1726 3.6944 0.3787 0.3017 
+
+intervention set is 
+
+tcspG , lacA , lacZ u,
+
+with optimal value 
+
+f ‹ “ ´ 4.6304 .
+
+Both CBO and GC-CBO reach this optimum reliably, whereas vanilla BO remains far from it, as shown in the ECOLI70 yaeM rows of Table V and the corresponding panel of Figure 4. Specifically, BO obtains terminal mean ´1.9102 , while CBO and GC-CBO both obtain ´4.6304 . This experiment confirms that GC-CBO behaves correctly in a theorem-aligned Gaussian-network setting and that the finite-rank diagnostic again holds: 
+
+rank pKT q “ 16 “ dim pθY q.
+
+However, this setting is also too easy for CBO because the direct parent set is available and the exploration family is small. Consequently, this experiment should be interpreted as a correctness check rather than as the main evidence for superiority over CBO. The second ECOLI70 variant is designed to reflect a more realistic experimental constraint: direct parents of the target cannot be manipulated. For target b1583 , the direct parents 
+
+tlacA , lacZ , yceP u
+
+are excluded from the intervention set. The allowed variables are instead non-parent ancestors, and the optimizer searches over singleton, pair, triple, and up-to-five-variable ancestor interventions, yielding a substantially larger intervention-family search problem. This setting better exposes the difference between 27 0 10 20 30 40            
+
+> cumulative intervention cost
+> 1.0
+> 1.2
+> 1.4
+> 1.6
+> best  E[Y | do ] found  CBO
+> GC-CBO
+> optimal
+> 020 40
+> cumulative intervention cost
+> 0.8
+> 1.0
+> 1.2
+> 1.4
+> best  E[Y | do ] found  CBO
+> GC-CBO
+> optimal
+> 020 40 60
+> cumulative intervention cost
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> 1.4
+> best  E[Y | do ] found  CBO
+> GC-CBO
+> optimal 010 20 30 40 50 60
+> cumulative intervention cost
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> 1.4
+> best  E[Y | do ] found
+> CBO
+> CBO-noprior
+> GC-CBO (no coupling)
+> GC-CBO (EI)
+> GC-CBO (UCB)
+> GC-CBO (fixed kernel)
+> optimal
+
+Fig. 3. ECOLI70 no-parent intervention experiments for target b1583 . Direct parents are excluded from manipulation. Left: sweep over maximum intervention-set size. For maximum set sizes 2 and 3, the feasible intervention families are still small enough that both CBO and GC-CBO reach or approach the corresponding optimum. When the maximum set size increases to 5, the feasible optimum moves to a higher-order ancestor intervention and the intervention family becomes much larger; GC-CBO reaches the new optimum, while independent CBO does not within the tested budget. The cumulative cost increases with maximum set size because each intervention on a set S costs 
+
+|S|, and larger caps allow the optimizer to query larger, more expensive intervention sets. Right: ablation study in the max-set-size-5 setting, showing that removing causal prior information substantially degrades performance, while the UCB and fixed-kernel GC-CBO variants reach the optimum. 
+
+independent CBO and GC-CBO: CBO must learn many set-specific response surfaces, whereas GC-CBO can share information through the downstream Gaussian mechanism. The results of this no-parent case are plotted in Figure 3 and reported in Table III. Because vanilla BO over the full manipulative set would violate the imposed set-size cap, the no-parent ECOLI70 comparisons intentionally focus on causal methods and ablations that respect the same intervention-family constraint. For singleton and pair interventions, the optimum is 
+
+f ‹ “ 0.8427 , best set “ t lacY , eutG u.
+
+Both CBO and GC-CBO have terminal median 0.8427 , but their terminal means are 0.8930 due to seed variability, as reported in the max-set-size-2 rows of Table III. The corresponding convergence behavior is shown in the left panel of Figure 3. When triple interventions are allowed, the optimal set becomes 
+
+tlacY , eutG , fixC u, f ‹ “ 0.6422 .
+
+In this harder setting, the no-parent sweep in Table III shows that GC-CBO improves the terminal mean from 0.7315 for CBO to 0.7154 and reduces the terminal standard deviation from 0.1377 to 0.1097 . When the maximum intervention-set size is increased to 5, the feasible optimum improves further to 
+
+f ‹ “ 0.3183 , best set “ t lacY , eutG , fixC , cspG , sucA u.
+
+This final sweep is substantially harder because the best feasible intervention is now a high-order ancestor set and the admissible intervention family is much larger. As shown in Table III, GC-CBO reaches the optimum with terminal mean and median 0.3183 , whereas CBO remains above the optimum with terminal mean 0.7688 and median 0.6927 . The full convergence experiment in Table V gives a consistent comparison under the same max-set-size-5 constraint: CBO reaches terminal mean 0.6680 , whereas GC-CBO reaches 
+
+0.3500 , with a lower terminal standard deviation of 0.0630 compared with 0.1550 . The gain is now much clearer and occurs in the scenario where transfer across many ancestor-intervention functions is most useful. The ablation study clarifies which components matter most in the max-set-size-5 no-parent setting. In this harder ECOLI70 setting, CBO with causal prior reaches terminal mean 0.7775 , while CBO without the causal prior remains at 1.2752 , as reported in Table IV and shown in the right panel of Figure 3. This is the largest ablation gap and shows that causal structure is essential when direct parent interventions are unavailable. The GC-CBO variants separate more clearly than in the max-set-size-3 case: GC-CBO without explicit cross-set coupling reaches 0.4315 , GC-CBO with EI reaches 0.7934 , and the UCB and fixed-kernel variants reach 0.3183 , exactly matching the optimum. The UCB and fixed-kernel variants also 28                                                                                          
+
+> TABLE III ECOLI70 NO -PARENT INTERVENTION SWEEP FOR TARGET B1583 . D IRECT PARENTS ARE EXCLUDED FROM THE INTERVENTION SET .LOWER VALUES ARE BETTER .Max set size Method Mean Std. Median f‹Best set Rank/dim.
+> 2CBO 0.8930 0.0872 0.8427 0.8427 lacY;eutG –
+> 2GC-CBO 0.8930 0.0872 0.8427 0.8427 lacY;eutG 19 {19 3CBO 0.7315 0.1377 0.6571 0.6422 lacY;eutG;fixC –
+> 3GC-CBO 0.7154 0.1097 0.6571 0.6422 lacY;eutG;fixC 19 {19 5CBO 0.7688 0.1723 0.6927 0.3183 lacY;eutG;fixC;asnA –
+> 5GC-CBO 0.3183 0.0000 0.3183 0.3183 lacY;eutG;fixC;cspG;sucA 19 {19
+> TABLE IV ABLATION STUDY ON THE ECOLI70 NO -PARENT MAX -SET -SIZE -5SETTING . T HE CAUSAL PRIOR IS ESSENTIAL ;THE UCB AND FIXED -KERNEL GC-CBO VARIANTS REACH THE OPTIMUM .Method Mean Std. Median Cost to ϵ-opt. CBO 0.7775 0.1363 0.7495 –CBO-noprior 1.2752 0.1542 1.3074 –GC-CBO no coupling 0.4315 0.1961 0.3183 28 .3
+> GC-CBO EI 0.7934 0.1227 0.7734 –GC-CBO UCB 0.3183 0.0000 0.3183 33 .3
+> GC-CBO fixed kernel 0.3183 0.0000 0.3183 33 .3
+
+achieve terminal median equal to the optimum with zero terminal variance. These results indicate that, in the no-parent ECOLI70 experiment, the causal prior and intervention-family restriction are essential, while the coupled UCB kernel provides the strongest and most stable performance when the family becomes combinatorial. The broader implication is that the finite-rank GC-CBO coupling becomes most valuable when many related intervention functions must be learned from sparse data, as shown more clearly by the stress-transfer experiments in Figure 2 and Table II. 
+
+Benchmark sanity checks. Finally, we compare BO, CBO, and GC-CBO on the toy, synthetic, and healthcare benchmarks from [1] used as sanity checks. These examples are less directly aligned with the linear-Gaussian theory, especially the synthetic and healthcare settings, so we use them to test robustness rather than to validate the finite-rank theory. Their convergence behavior is shown in Figure 4, and the corresponding terminal statistics are reported in Table V. On the toy chain, the optimum is approximately ´2.17 and is achieved by intervening on Z. BO jointly intervenes on tX, Z u and incurs higher intervention cost. It reaches only ´1.8224 on average, while CBO reaches ´2.1687 and GC-CBO reaches ´2.1693 , as reported in the toy-chain rows of Table V. The corresponding panel in Figure 4 shows that both causal methods therefore recover the optimum, but with roughly half the cumulative cost of BO. This confirms the classical CBO message and shows that GC-CBO preserves it. The synthetic nonlinear DAG is more challenging. The optimum is ´2.0, with best set tD, E u. BO reaches ´1.9216 , CBO reaches ´1.9019 , and GC-CBO reaches ´1.9105 , as shown in Table V. The synthetic-DAG panel of Figure 4 shows that all three methods remain away from the continuous optimum under the tested grid and budget. Here GC-CBO is slightly better than CBO but does not dominate BO. This is not a contradiction of the theory because the benchmark is nonlinear and the causal coupling is only a first-order approximation. Rather, it illustrates a boundary of the current implementation: when the structural equations are nonlinear and the finite-rank approximation is imperfect, GC-CBO should be viewed as a useful inductive bias rather than a guaranteed improvement. The healthcare PSA benchmark is also noisy. All methods obtain values close to the deterministic reference value 5.155 , with BO at 5.1461 , CBO at 5.1560 , and GC-CBO at 5.1488 , as reported in the healthcare rows of Table V. The healthcare panel in Figure 4 shows that the methods remain close through-29 0 20 40 60 80               
+
+> cumulative intervention cost
+> 2.2
+> 2.0
+> 1.8
+> 1.6
+> 1.4
+> best  E[Y | do ] found
+> BO
+> CBO
+> GC-CBO
+> optimal
+> 050 100 150 200
+> cumulative intervention cost
+> 2.0
+> 1.8
+> 1.6
+> 1.4
+> 1.2
+> 1.0
+> best  E[Y | do ] found
+> BO
+> CBO
+> GC-CBO
+> optimal
+> 020 40 60
+> cumulative intervention cost
+> 5.2
+> 5.3
+> 5.4
+> 5.5
+> best  E[Y | do ] found
+> BO
+> CBO
+> GC-CBO
+> optimal
+> 010 20 30 40
+> cumulative intervention cost
+> 4
+> 2
+> 0
+> 2
+> 4
+> best  E[Y | do ] found
+> BO
+> CBO
+> GC-CBO
+> optimal
+> 020 40 60
+> cumulative intervention cost
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> 1.2
+> 1.4
+> best  E[Y | do ] found
+> CBO
+> GC-CBO
+> optimal
+
+Fig. 4. Convergence across benchmark scenarios: toy chain graph, synthetic DAG from [1], healthcare PSA from [1], ECOLI70 from [27] with yaeM and b1583 as target variable, respectively. GC-CBO preserves the gains of CBO on the toy chain, matches CBO on ECOLI70 parent interventions, remains competitive on nonlinear and noisy benchmarks, and improves over CBO in the no-parent ECOLI70 max-set-size-5 ancestor-intervention setting. TABLE V MAIN BENCHMARK RESULTS . L OWER VALUES ARE BETTER . T HE STRONGEST EVIDENCE FOR GC-CBO IS THE THEORY -ALIGNED 
+
+GAUSSIAN SETTING AND THE TRANSFER STRESS TESTS ; THE NONLINEAR AND HEALTHCARE BENCHMARKS ARE INCLUDED AS ROBUSTNESS CHECKS .Experiment Method Mean Std. Median Total cost Optimum Toy chain BO ´1.8224 0.2357 ´1.8495 86 .0 ´2.1700 
+
+Toy chain CBO ´2.1687 0.0009 ´2.1685 46 .0 ´2.1700 
+
+Toy chain GC-CBO ´2.1693 0.0005 ´2.1692 46 .0 ´2.1700 
+
+Synthetic DAG BO ´1.9216 0.0139 ´1.9177 198 .0 ´2.0000 
+
+Synthetic DAG CBO ´1.9019 0.0219 ´1.8971 155 .6 ´2.0000 
+
+Synthetic DAG GC-CBO ´1.9105 0.0152 ´1.9072 158 .4 ´2.0000 
+
+Healthcare PSA BO 5.1461 0.0045 5.1459 66 .0 5.1550 
+
+Healthcare PSA CBO 5.1560 0.0089 5.1568 65 .6 5.1550 
+
+Healthcare PSA GC-CBO 5.1488 0.0053 5.1488 66 .9 5.1550 
+
+ECOLI70 yaeM BO ´1.9102 1.8054 ´1.3749 33 .0 ´4.6304 
+
+ECOLI70 yaeM CBO ´4.6304 0.0000 ´4.6304 38 .6 ´4.6304 
+
+ECOLI70 yaeM GC-CBO ´4.6304 0.0000 ´4.6304 39 .4 ´4.6304 
+
+ECOLI70 b1583 no-parent CBO 0.6680 0.1550 0.6500 39 .8 0.3183 
+
+ECOLI70 b1583 no-parent GC-CBO 0.3500 0.0630 0.3183 63 .4 0.3183 
+
+out the tested budget range. Since the simulator includes stochastic outcomes, sample-based terminal values can fluctuate slightly below the deterministic reference. We therefore interpret this experiment only qualitatively: GC-CBO remains stable and competitive, but this benchmark is not the strongest evidence for the proposed finite-rank mechanism. The ECOLI70 no-parent max-set-size-5 benchmark is also included in Figure 4 and Table V. Unlike the parent-intervention ECOLI70 setting, this benchmark excludes direct parent interventions and forces the optimizer to search through upstream ancestor sets. CBO reaches terminal mean 0.6680 , while GC-CBO reaches 0.3500 , and GC-CBO identifies the optimal five-variable intervention set lacY;eutG;fixC;cspG;sucA .This result is one of the more practically relevant case studies because it captures the intended regime of GC-CBO: direct interventions are unavailable, the intervention family is combinatorial, and related intervention functions share downstream mechanisms. Overall, the experiments support three conclusions. First, in the linear-Gaussian setting where the assumptions are satisfied, GC-CBO produces the predicted finite-rank kernel, exact cross-intervention covariance, reduced information gain, and parameter concentration, as shown in Figure 1 and Table I. This is the strongest evidence that the proposed construction is mathematically and computationally faithful to the theory. Second, in cross-set transfer problems, GC-CBO substantially improves over independent CBO because it shares information across intervention functions, as demonstrated in Figure 2 and Table II. This is the main practical advantage of the method. Third, on small causal benchmarks, GC-CBO often matches rather than dramatically exceeds CBO, as reflected in Figure 4, Table V, Figure 3, and Tables III–IV. This is expected: when the correct parent set is directly manipulable or the intervention family is small, 30 
+
+independent CBO already has enough information. The benefit of GC-CBO becomes most meaningful when direct interventions are unavailable, the exploration family is combinatorial, or sparse interventional data must be shared across related causal mechanisms. The updated max-set-size-5 ECOLI70 result reinforces this interpretation: once the optimizer must search over upstream ancestor interventions of increasing order, GC-CBO improves both mean performance and stability relative to independent CBO, while the ablation study confirms that the causal prior and coupled UCB kernel are essential for making the no-parent search tractable. VI. C ONCLUSION 
+
+We introduced graph-coupled causal Bayesian optimization, which ties the effects of different inter-ventions together through the posterior uncertainty of a shared, identifiable causal parameterization. The resulting causal kernel is exact and finite-rank in identifiable linear Gaussian models, yielding a logarithmic information-gain bound and a regret decomposition into optimization, causal-estimation, and exploration-set terms. Nonlinear and adaptive extensions retain the graph-factorized principle under clearly stated, weaker guarantees. Empirically, the method preserves the strengths of causal BO and adds genuine transfer across related interventions, most visibly when direct parent interventions are off-limits and interventional data are sparse. Natural next steps include sharper analysis of the adaptive, time-varying kernel and learned causal features for strongly nonlinear mechanisms. REFERENCES 
+
+[1] Virginia Aglietti, Xiaoyu Lu, Andrei Paleyes, and Javier Gonz´ alez. Causal Bayesian optimization. In Proceedings of the 23rd International Conference on Artificial Intelligence and Statistics , pages 3155–3164. PMLR, 2020. [2] Virginia Aglietti, Alan Malek, Ira Ktena, and Silvia Chiappa. Constrained causal Bayesian optimization. In International Conference on Machine Learning , pages 304–321. PMLR, 2023. [3] Raul Astudillo and Peter I Frazier. Thinking inside the box: A tutorial on grey-box Bayesian optimization. In 2021 Winter Simulation Conference (WSC) , pages 1–15. IEEE, 2021. [4] Ilija Bogunovic and Andreas Krause. Misspecified Gaussian process bandit optimization. Advances in neural information processing systems , 34:3004–3015, 2021. [5] Nicola Branchini, Virginia Aglietti, Neil Dhir, and Theodoros Damoulas. Causal entropy optimiza-tion. In International Conference on Artificial Intelligence and Statistics , pages 8586–8605. PMLR, 2023. [6] Samuel Daulton, Maximilian Balandat, and Eytan Bakshy. Differentiable expected hypervolume improvement for parallel multi-objective Bayesian optimization. Advances in neural information processing systems , 33:9851–9864, 2020. [7] Samuel Daulton, Maximilian Balandat, and Eytan Bakshy. Parallel Bayesian optimization of multiple noisy objectives with expected hypervolume improvement. Advances in neural information processing systems , 34:2187–2200, 2021. [8] Bach Do and Ruda Zhang. Multi-fidelity Bayesian optimization in engineering design. arXiv preprint arXiv:2311.13050 , 2023. [9] David Eriksson and Martin Jankowiak. High-dimensional Bayesian optimization with sparse axis-aligned subspaces. In Uncertainty in artificial intelligence , pages 493–503. PMLR, 2021. [10] Peter I. Frazier. A tutorial on Bayesian optimization. arXiv preprint arXiv:1807.02811 , 2018. [11] Peter I Frazier and Jialei Wang. Bayesian optimization for materials design. In Information science for materials discovery and design , pages 45–75. Springer, 2015. [12] Roman Garnett. Bayesian optimization . Cambridge University Press, 2023. [13] Limor Gultchin, Virginia Aglietti, Alexis Bellot, and Silvia Chiappa. Functional causal Bayesian optimization. In Uncertainty in Artificial Intelligence , pages 756–765. PMLR, 2023. 31 
+
+[14] Sunil Gupta, Santu Rana, Svetha Venkatesh, et al. Regret bounds for expected improvement algorithms in Gaussian process bandit optimization. In International Conference on Artificial Intelligence and Statistics , pages 8715–8737. PMLR, 2022. [15] Riley J Hickman, Gary Tom, Yunheng Zou, Matteo Aldeghi, and Al´ an Aspuru-Guzik. Anubis: Bayesian optimization with unknown feasibility constraints for scientific experimentation. Digital Discovery , 4(8):2104–2122, 2025. [16] Roger A. Horn and Charles R. Johnson. Matrix Analysis . Cambridge University Press, 2 edition, 2013. [17] Md Abir Hossen, Mohammad Ali Javidian, Vignesh Narayanan, Jason M O’Kane, and Pooyan Jamshidi. Multi-objective multi-fidelity Bayesian optimization with causal priors. arXiv preprint arXiv:2602.00788 , 2026. [18] Shogo Iwazaki. Improved regret bounds for Gaussian process upper confidence bound in Bayesian optimization. Advances in Neural Information Processing Systems , 38:96922–96964, 2026. [19] Luuk Jacobs and Mohammad Ali Javidian. Extending multi-source Bayesian optimization with causality principles. arXiv preprint arXiv:2602.14791 , 2026. [20] Parnian Kassraie and Andreas Krause. Neural contextual bandits without regret. In International Conference on Artificial Intelligence and Statistics , pages 240–278. PMLR, 2022. [21] Qiaohao Liang, Aldair E Gongora, Zekun Ren, Armi Tiihonen, Zhe Liu, Shijing Sun, James R Deneault, Daniil Bash, Flore Mekki-Berrada, Saif A Khan, et al. Benchmarking the performance of Bayesian optimization across multiple experimental materials science domains. npj Computational Materials , 7(1):188, 2021. [22] Judea Pearl. Causality: Models, Reasoning, and Inference . Cambridge University Press, 2 edition, 2009. [23] Florian Pfisterer, Lennart Schneider, Julia Moosbauer, Martin Binder, and Bernd Bischl. Yahpo gym-an efficient multi-objective multi-fidelity benchmark for hyperparameter optimization. In 
+
+International Conference on Automated Machine Learning , pages 3–1. PMLR, 2022. [24] Carl Edward Rasmussen and Christopher K. I. Williams. Gaussian Processes for Machine Learning .MIT Press, 2006. [25] Shaogang Ren and Xiaoning Qian. Causal Bayesian optimization via exogenous distribution learning. 
+
+arXiv preprint arXiv:2402.02277 , 2024. [26] Jeremy Roberts and Mohammad Ali Javidian. Causalbo: A python package for causal Bayesian optimization. In SoutheastCon 2024 , pages 1370–1375. IEEE, 2024. [27] Marco Scutari. Learning bayesian networks with the bnlearn r package. Journal of statistical software , 35:1–22, 2010. [28] Bobak Shahriari, Kevin Swersky, Ziyu Wang, Ryan P Adams, and Nando De Freitas. Taking the human out of the loop: A review of Bayesian optimization. Proceedings of the IEEE , 104(1):148–175, 2015. [29] Ilya Shpitser and Judea Pearl. Identification of joint interventional distributions in recursive semi-markovian causal models. In Proceedings of the Twenty-First National Conference on Artificial Intelligence , 2006. [30] Niranjan Srinivas, Andreas Krause, Sham M. Kakade, and Matthias Seeger. Information-theoretic regret bounds for Gaussian process optimization in the bandit setting. IEEE Transactions on Information Theory , 58(5):3250–3265, 2012. [31] Scott Sussex, Pier Giuseppe Sessa, Anastasia Makarova, and Andreas Krause. Adversarial causal Bayesian optimization. In International Conference on Learning Representations , volume 2024, pages 19332–19353, 2024. [32] Sattar Vakili, Kia Khezeli, and Victor Picheny. On information gain and regret bounds in Gaussian process bandits. In Proceedings of the 24th International Conference on Artificial Intelligence and Statistics . PMLR, 2021. [33] Qian Xie, Raul Astudillo, Peter I Frazier, Ziv Scully, and Alexander Terenin. Cost-aware Bayesian 32 
+
+optimization via the pandora’s box gittins index. Advances in Neural Information Processing Systems ,37:115523–115562, 2024. [34] Yilin Xie, Shiqiang Zhang, Joel A. Paulson, and Calvin Tsay. Global optimization of Gaussian process acquisition functions using a piecewise-linear kernel approximation. arXiv preprint arXiv:2410.16893 , 2024.

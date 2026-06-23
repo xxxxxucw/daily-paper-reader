@@ -1,0 +1,560 @@
+Title: Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding
+
+URL Source: https://arxiv.org/pdf/2606.03080v1
+
+Published Time: Wed, 03 Jun 2026 00:30:15 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+# Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding 
+
+Mingkuan Zhao * 1 Xiayu Sun * 1 Wentao Hu 1 Suquan Chen 1 Jiaxuan Li 1 Xiaoyan Zhu 1 Xin Lai 1
+
+Jiayin Wang 1
+
+## Abstract 
+
+Causal language models factorize sequence prob-abilities using only preceding context, leaving future information unexploited during training de-spite its availability in the training data. This paper introduces Regret Pre-training, a self-supervised framework grounded in the Learning Using Privileged Information (LUPI) paradigm. The framework employs a dual-view architecture in which a single model generates both a causal Student distribution and a future-conditioned Teacher distribution. The training objective aug-ments standard language modeling with a re-gret loss that minimizes the KL divergence from teacher to student, transferring future-aware sig-nals to the causal representations. We investigate two teacher configurations on the OLMoE-1B-7B architecture: L OCAL REGRET , which extends attention by one future token, and G LOBAL RE-
+
+> GRET
+
+, which conditions on bidirectional context with the target position masked. Experiments on nine downstream tasks following 4 billion tokens of training demonstrate that both configurations consistently outperform the baseline. On average, GLOBAL REGRET and L OCAL REGRET achieve 33.9% and 32.2% accuracy respectively, surpass-ing the baseline’s 30.2%. Most notably, G LOBAL -REGRET improves BoolQ performance by 18.1 percentage points (61.0% vs 42.9%). The frame-work introduces no additional parameters and requires only one extra inference-mode forward pass per training step. The source code for this pa-per is publicly available at https://github. com/RegretPretraining/Code2026 .
+
+> *
+
+Equal contribution 1Contact email: xiayusun@stu.xjtu.edu.cn. The School of Computer Science and Technology, Xi’an Jiaotong University, China. Correspondence to: Jiayin Wang <wangji-ayin@mail.xjtu.edu.cn >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+## 1. Introduction 
+
+Large Language Models (LLMs) have achieved substantial progress in natural language understanding and generation tasks. The predominant training paradigm for these models is Causal Language Modeling (CLM), which factorizes the joint probability of a text sequence X = ( x1, x 2, . . . , x T )
+
+as a product of conditional probabilities: 
+
+P (X) = 
+
+> T
+
+Y
+
+> t=1
+
+P (xt|x<t ) (1) Under this formulation, the probability of each token is con-ditioned exclusively on its preceding context (Vaswani et al., 2017; Touvron et al., 2023). This left-to-right factorization enables efficient autoregressive generation and has proven effective across a wide range of applications. However, an inherent asymmetry exists between training and inference: during training, the complete sequence (x1, x 2, . . . , x T ) is fully observed, yet the model is trained to predict each to-ken xt using only the partial observation (x1, . . . , x t−1).The future context (xt+1 , . . . , x T ), though present in the training data, remains unexploited under the standard causal objective. The exclusion of future context during training constitutes a form of information waste. Natural language exhibits statistical dependencies that extend beyond unidirectional causality. Coreference resolution, syntactic agreement, and semantic coherence often require bidirectional reasoning. When a human reader encounters an ambiguous token, they leverage both preceding and following context to resolve the ambiguity. The causal language model, by construction, can-not access this disambiguating information during training, despite its availability in the training corpus. This limita-tion becomes particularly pronounced in domains where long-range dependencies dominate local patterns. The ques-tion then arises whether future context can be incorporated into the training process without compromising the causal structure required for autoregressive generation. This paper introduces Regret Pre-training , a framework that addresses this asymmetry by incorporating future context as privileged information during training. The term regret 
+
+1
+
+> arXiv:2606.03080v1 [cs.CL] 2 Jun 2026 Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding
+
+originates from decision theory, where it quantifies the dif-ference between the outcome of a decision made under uncertainty and the outcome that would have been achieved with full information (Savage, 1951). In language modeling, the causal model makes predictions under uncertainty about future tokens, while a model with access to future context can make more informed predictions. The regret of the causal model, in this sense, is the gap between its predictive distribution and the distribution that would be formed with knowledge of the future. Our framework operationalizes this concept through a dual-view architecture. Let PS (xt|x<t ) denote the Student distri-bution, which maintains causal attention and corresponds to the standard autoregressive model. Let PT (xt|x<t , x >t ) de-note the Teacher distribution, which conditions on both past and future context. Both distributions are parameterized by the same model weights θ, differing only in their attention masks. The training objective augments the standard nega-tive log-likelihood with a regret loss that minimizes the KL divergence from teacher to student: 
+
+L(θ) = − X
+
+> t
+
+log PS (xt|x<t )
+
+| {z }
+
+> Causal Objective
+
++α X
+
+> t
+
+DKL (PT ∥PS )
+
+| {z }
+
+> Regret Loss
+
+(2) This formulation instantiates Vapnik’s Learning Using Priv-ileged Information (LUPI) paradigm (Vapnik & Vashist, 2009), where the future context serves as privileged informa-tion available during training but not during inference. The regret loss transfers the teacher’s future-informed predic-tions to the student, enabling the causal model to internalize patterns that would otherwise require future observation. The information-theoretic foundation of this approach rests on the data processing inequality. For any position t, the mutual information between the input and target satisfies 
+
+I(x<t , x >t ; xt) ≥ I(x<t ; xt), with equality only when the future provides no additional information about the target given the past. In natural language, this inequality is typ-ically strict: the future context (xt+1 , . . . , x T ) often dis-ambiguates the target token xt in ways that the past con-text alone cannot. The regret loss encourages the student to extract features from the causal context that maximize correlation with the teacher’s future-informed distribution, effectively distilling the information gain I(x>t ; xt|x<t )
+
+into the student’s representations. (Kahneman, 2011) A critical design dimension in this framework is the scope 
+
+of future context available to the teacher. We investigate two configurations representing endpoints of this spec-trum. The LOCAL REGRET configuration restricts the teacher to observe exactly one future token, setting Ct =(x1, . . . , x t, x t+1 ). The GLOBAL REGRET configuration grants the teacher access to the complete sequence excluding the target position, setting Ct = ( x1, . . . , x t, x t+2 , . . . , x T ).These two configurations induce qualitatively different train-ing dynamics: L OCAL REGRET provides a local signal de-rived from immediate successor information, while G LOB -
+
+> AL
+
+REGRET provides a global signal derived from long-range bidirectional context. The choice between these con-figurations determines the nature of the inductive bias trans-ferred to the student model. We conduct experiments on the OLMoE-1B-7B architec-ture (Muennighoff et al., 2024), a sparse Mixture-of-Experts model with 1 billion active parameters and 7 billion total parameters. Training is performed on the DCLM-Baseline corpus (Li et al., 2025) using 8 NVIDIA A100 GPUs. Eval-uation spans nine downstream tasks in the zero-shot set-ting, covering reading comprehension, factual knowledge, commonsense reasoning, and natural language inference. The experimental results demonstrate that both L OCAL -REGRET and G LOBAL REGRET consistently outperform the baseline causal language model across all evaluated benchmarks. The two configurations exhibit distinct perfor-mance profiles, with G LOBAL REGRET achieving the largest improvements on reading comprehension tasks and L O-
+
+> CAL
+
+REGRET achieving the largest improvements on com-monsense reasoning tasks. When averaged across all nine benchmarks, G LOBAL REGRET improves accuracy by 3.7 percentage points over the baseline, and L OCAL REGRET 
+
+improves accuracy by 2.0 percentage points over the base-line. The largest single-task improvement is observed on BoolQ, where G LOBAL REGRET achieves an accuracy of 61.0% compared to the baseline accuracy of 42.9%, repre-senting an improvement of 18.1 percentage points. The Regret Pre-training framework offers several desirable properties for large-scale language model training. The parameter sharing between teacher and student views elim-inates the need for a separate teacher model, avoiding the memory overhead associated with traditional knowledge distillation methods. The teacher forward pass operates without gradient computation, adding only inference-time cost to each training step. The method requires no architec-tural modifications to the underlying transformer, with all changes confined to attention mask construction. The frame-work is compatible with standard training optimizations in-cluding sequence packing, mixed-precision arithmetic, and gradient accumulation. These properties enable direct inte-gration with existing pre-training pipelines without requir-ing specialized infrastructure or significant computational overhead beyond the additional forward pass. 
+
+Conflict of Interest Disclosure. All authors of this work are affiliated with the School of Computer Science and Tech-nology, Xi’an Jiaotong University. The models evaluated in this study, including the OLMoE-1B-7B architecture and the DCLM-Baseline corpus, are publicly released artifacts developed by third parties with which the authors have no fi-2Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding 
+
+nancial or employment relationship. The authors declare no financial conflicts of interest related to the research, method-ology, or results presented in this paper. 
+
+## 2. Related Work 
+
+Research on distilling a bidirectional teacher into a unidirec-tional student was introduced by Chen et al. (2020) (Chen et al., 2020) within the context of Neural Machine Transla-tion. They demonstrated that a BERT teacher could improve the generation quality of a causal decoder. However, this approach relies on maintaining a separate encoder model, which doubles the memory requirements. In the context of Large Language Models (LLMs) with hundreds of bil-lions of parameters, maintaining a distinct teacher model is computationally infeasible. The work presented here ex-tends this paradigm by integrating the teacher as a view of the same model weights. This method requires only an additional forward pass without backpropagation, making it efficient for training large-scale models. Several architectures have been developed to incorporate future context directly into the training objective. Prophet-Net (Qi et al., 2020) modifies the self-attention mechanism to predict the next N tokens simultaneously. Similarly, GLM (Du et al., 2022) utilizes a permutation objective to enable bidirectional attention over spans, while XLNet (Yang et al., 2019) employs permutation language modeling to access future contexts. Recent work has also explored sparse attention patterns to improve efficiency while main-taining performance (Zhao et al., 2026). Objectives like Fill-in-the-Middle (Bavarian et al., 2022) have successfully adapted causal models to utilize bidirectional context. Al-though these methods are effective, they often necessitate non-standard architectures or specific inference procedures. In contrast, our work focuses on objective modifications that leave the standard causal transformer architecture un-changed. In the domain of diffusion and consistency models, CDLM (Strudel et al., 2022) employs a block-causal masking strat-egy to distill the iterative refinement capability of diffusion into autoregressive models. Furthermore, BiAlign (Qin et al., 2025) aligns causal models with bidirectional priors for In-Context Learning. The theoretical foundation of our approach is derived from Vapnik’s Learning Using Privileged Information (LUPI) framework (Vapnik & Vashist, 2009). The central concept of LUPI is defined by the inequality I(X, X ∗; Y ) ≥ I(X; Y ),which states that the mutual information between the input and the target is increased given privileged information X∗.In this framework, X∗ represents the future text xt+1: T . The objective of regret learning is to transfer the information gap defined by this inequality into the model parameters θ.…x 1 x 2 ? ? ?                     
+
+> Visible context Visible target Masked target Hidden context
+> Predicting
+> Target xt+1
+> xt
+> …x1x2xt+1 ??xt
+> …x1x2?xt+2 xt…xT
+> …
+> …Standard Training
+> Blind to future
+> Local Regret
+> Sees immediate future token
+> Global Regret
+> Sees global context
+
+Figure 1. Dual-View Regret Distillation. The model processes each input under two attention configurations: a causal Student View and a future-aware Teacher View . The Regret Loss minimizes the KL divergence between the student distribution PS and the teacher distribution, where the teacher is conditioned on either local context ( PT L ) or global context ( PT G ). 
+
+Beyond modifications to the pre-training objective, a par-allel line of research has sought to improve the efficiency and reliability of Mixture-of-Experts architectures through interventions on the expert pool itself. Mosaic Pruning (Hu et al., 2026b) addresses the substantial static memory over-head of sparse MoE models by introducing a hierarchical “cluster-then-select” framework that constructs a function-ally comprehensive subset of experts, mitigating the catas-trophic cross-domain degradation observed in single-corpus pruning approaches. Counterfactual Routing (Hu et al., 2026a) instead targets the inference-time behavior of MoE routers, demonstrating that hallucinations can be alleviated by awakening dormant experts whose specialized knowl-edge is otherwise bypassed under standard routing. These approaches share with our framework the broader goal of extracting greater capability from sparse architectures with-out inflating parameter counts, but operate along orthogonal axes: expert selection and routing rather than the training objective. Regret Pre-training is therefore complementary to these methods, and the structural sparsity they exploit could in principle be combined with objective-level distilla-tion to further improve the trade-off between capability and compute. 
+
+## 3. Methodology 
+
+This section presents the Regret Pre-training framework. We first establish the mathematical formulation in Section 3.1, then describe the two teacher view configurations in Sec-tion 3.2, and finally detail the extension to packed sequences and Mixture-of-Experts architectures in Sections 3.3. 
+
+3.1. Mathematical Framework 
+
+Let X = ( x1, x 2, . . . , x T ) denote a sequence of tokens drawn from vocabulary V. We consider a transformer model 3Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding 
+
+πθ parameterized by θ that defines conditional distributions over the vocabulary at each position. 3.1.1. D UAL -V IEW ARCHITECTURE 
+
+The proposed framework processes each training batch through two distinct computational paths using identical parameters θ. The Student View applies a standard causal attention mask, producing the distribution: 
+
+PS (xt+1 |x1: t; θ) = softmax (fθ (x1: t)t) (3) where fθ (x1: t)t ∈ R|V| denotes the logit vector at position t
+
+under causal attention. The Teacher View applies a modified attention mask that incorporates future context, producing: 
+
+PT (xt+1 |C t; θ) = softmax (gθ (Ct)t) (4) where Ct ⊇ x1: t denotes the extended context available to the teacher, and gθ (Ct)t denotes the corresponding logit vector. The teacher view operates in inference mode with all gradients detached. 3.1.2. C OMPOSITE OBJECTIVE FUNCTION 
+
+The optimization objective combines the standard language modeling loss with a distillation term: 
+
+L(θ) = LNLL (θ) + α · L Regret (θ) (5) where α ≥ 0 is a hyperparameter. The negative log-likelihood component is defined as: 
+
+LNLL (θ) = − 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+log PS (xt+1 |x1: t; θ) (6) This term ensures that the model retains standard autore-gressive generation capability. 3.1.3. R EGRET LOSS FORMULATION 
+
+The regret loss quantifies the divergence between the student and teacher distributions. We adopt the forward Kullback-Leibler divergence: 
+
+LRegret (θ) = 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+DKL (sg [PT (·|C t)] ∥ PS (·| x1: t)) (7) where sg [·] denotes the stop-gradient operator. Expanding the KL divergence: 
+
+DKL (PT ∥ PS ) = X
+
+> v∈V
+
+PT (v) log PT (v)
+
+PS (v)= H(PT , P S ) − H(PT )
+
+(8) where H(PT , P S ) is the cross-entropy and H(PT ) is the entropy of the teacher distribution. Since the teacher param-eters are detached from the computational graph, H(PT ) is constant with respect to θ, and minimizing Equation 7 is equivalent to minimizing: 
+
+LRegret (θ) ≡ 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+H (sg [PT (·|C t)] , P S (·| x1: t)) (9) 3.1.4. C HOICE OF DIVERGENCE DIRECTION 
+
+The forward KL divergence DKL (PT ∥ PS ) and reverse KL divergence DKL (PS ∥ PT ) exhibit distinct optimization behaviors. The gradient of the forward KL with respect to the student logits zS takes the form: 
+
+∂D KL (PT ∥ PS )
+
+∂z S
+
+= PS − PT (10) This gradient is bounded and well-defined across the entire support of PT . In contrast, the reverse KL gradient: 
+
+∂D KL (PS ∥ PT )
+
+∂z S
+
+= PS (log PS − log PT + 1) (11) contains the term log PT , which becomes unbounded as 
+
+PT (v) → 0 for any v ∈ V . The forward KL formulation therefore provides stable gradients throughout training. 3.1.5. CONNECTION TO LEARNING USING PRIVILEGED 
+
+INFORMATION 
+
+The proposed framework instantiates the Learning Using Privileged Information (LUPI) paradigm (Vapnik & Vashist, 2009). In LUPI, a teacher has access to privileged informa-tion X∗ unavailable at inference time. The data processing inequality establishes: 
+
+I(X, X ∗; Y ) ≥ I(X; Y ) (12) where I(·; ·) denotes mutual information. In our formula-tion, X = x1: t represents the causal context, X∗ = xt+1: T
+
+represents the future context, and Y = xt+1 is the prediction target. The teacher distribution PT (Y |X, X ∗) conditions on both past and future, while the student PS (Y |X) condi-tions only on the past. The regret loss transfers information from the privileged view to the student’s representations. 
+
+3.2. Teacher View Configurations 
+
+The teacher’s attention mask M teacher ∈ RT ×T determines the context Ct at each position. We define two configurations representing distinct points in the design space of future context scope. 3.2.1. L OCAL CONFIGURATION (L OCAL REGRET )The local configuration extends the causal context by exactly one position. For a query at position i, the attention mask 4Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding Prior         
+
+> (Student view)
+> Predict
+> distribution Ps
+> Posterior
+> (Teacher view)
+> Target distribution PTL
+> Regret signal
+> Target distribution PTG
+> Local Regret Global Regret
+> Or
+
+Figure 2. Teacher View Configurations. Three attention patterns are illustrated. Standard (Causal) conditions on x1: t. LOCAL -REGRET conditions on x1: t+1 . GLOBAL REGRET conditions on 
+
+x1: t ∪ xt+2: T .
+
+permits attending to all positions j ≤ i + 1 :
+
+M Local  
+
+> i,j
+
+=
+
+(
+
+0 if j ≤ i + 1 
+
+−∞ otherwise (13) The resulting teacher context is Ct = x1: t+1 , and the teacher distribution becomes: 
+
+PT L (xt+1 |x1: t+1 ; θ) = softmax (gθ (x1: t+1 )t) (14) Let zt ∈ R|V| denote the student logits at position t. Under the local configuration, the teacher logits ˜zt incorporate attention to position t + 1 . The teacher distribution can be expressed as: 
+
+PT L (v|x1: t+1 ) = exp(˜ z(v) 
+
+> t
+
+)
+
+P 
+
+> v′∈V
+
+exp(˜ z(v′) 
+
+> t
+
+) (15) The regret loss for this configuration is: 
+
+LLocal Regret = 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+X
+
+> v∈V
+
+PT L (v|x1: t+1 ) log PT L (v|x1: t+1 )
+
+PS (v|x1: t)
+
+(16) 3.2.2. G LOBAL CONFIGURATION (G LOBAL REGRET )The global configuration grants bidirectional attention to the full sequence while masking the target position. For a query at position i predicting position i + 1 , the mask is: 
+
+M Global  
+
+> i,j
+
+=
+
+(
+
+−∞ if j = i + 1 0 otherwise (17) The teacher context becomes Ct = x1: t ∪ xt+2: T , yielding the distribution: 
+
+PT G (xt+1 |x1: t, x t+2: T ; θ) = softmax (gθ (x1: t, x t+2: T )t)
+
+(18) The information available to the teacher under the global configuration satisfies I(x1: t, x t+2: T ; xt+1 ) ≥
+
+I(x1: t; xt+1 ) by the data processing inequality. 3.2.3. A TTENTION COMPLEXITY ANALYSIS 
+
+Both configurations maintain the same asymptotic complex-ity as standard causal attention. Let T denote sequence length and d denote model dimension. For L OCAL REGRET ,the attention pattern remains lower-triangular with one addi-tional diagonal, requiring O(T 2d) operations. For G LOB -
+
+> AL
+
+REGRET , the attention pattern is dense with T masked positions (one per row), requiring O(T 2d) operations. The total training cost per batch increases by a factor of at most 
+
+2× due to the additional teacher forward pass, with no in-crease in memory footprint for model parameters. 
+
+3.3. Extension to Packed Sequences 
+
+Training pipelines for large language models concatenate multiple documents into fixed-length sequences to maxi-mize hardware utilization. Let a packed sequence of length 
+
+L contain documents with lengths D = ( d1, d 2, . . . , d K )
+
+where PKk=1 dk = L. The attention mask must enforce document boundaries to prevent cross-document attention. 3.3.1. M ASK CONSTRUCTION FOR GLOBAL REGRET 
+
+For the global configuration with packed sequences, the attention mask combines target-position masking with doc-ument isolation. Define the document assignment function 
+
+ϕ : {1, . . . , L } → { 1, . . . , K } mapping each position to its document index: 
+
+ϕ(i) = k where 
+
+> k−1
+
+X
+
+> j=1
+
+dj < i ≤
+
+> k
+
+X
+
+> j=1
+
+dj (19) The composite mask is then: 
+
+M Packed  
+
+> i,j
+
+=
+
+
+
+−∞ if j = i + 1 and ϕ(i) = ϕ(j)
+
+−∞ if ϕ(i)̸ = ϕ(j)0 otherwise (20) The first condition implements target-position masking within documents, and the second condition enforces docu-ment isolation. Algorithm 1 presents an efficient vectorized implementation. The algorithm constructs the mask in O(L2) time using broadcasting operations, enabling integration with standard training frameworks. 3.3.2. M ASK CONSTRUCTION FOR LOCAL REGRET 
+
+For the local configuration, the mask extends causal atten-tion by one position while respecting document boundaries: 
+
+M Packed-Local  
+
+> i,j
+
+=
+
+
+
+−∞ if j > i + 1 
+
+−∞ if ϕ(i)̸ = ϕ(j)0 otherwise (21) 5Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding 
+
+Algorithm 1 Attention Mask Construction for G LOBAL RE- 
+
+> GRET
+
+with Packed Sequences  
+
+> 1:
+
+Input: Sequence length L, document lengths D =(d1, . . . , d K ) 
+
+> 2:
+
+Output: Attention bias matrix M ∈ R1×1×L×L 
+
+> 3:
+
+Initialize M ← 0L×L 
+
+> 4:
+
+Compute position indices p ← (0 , 1, . . . , L − 1)  
+
+> 5:
+
+{Construct target-position mask } 
+
+> 6:
+
+Ti,j ← 1[j = i + 1] for all i, j ∈ { 0, . . . , L − 1} 
+
+> 7:
+
+{Construct document assignment vector } 
+
+> 8:
+
+ϕ ← repeat ((0 , 1, . . . , K − 1) , (d1, . . . , d K ))  
+
+> 9:
+
+{Construct document isolation mask } 
+
+> 10:
+
+Bi,j ← 1[ϕi̸ = ϕj ] for all i, j ∈ { 0, . . . , L − 1} 
+
+> 11:
+
+{Combine masks } 
+
+> 12:
+
+Mi,j ← −∞ where Ti,j = 1 or Bi,j = 1  
+
+> 13:
+
+return M reshaped to (1 , 1, L, L )
+
+This ensures that the lookahead attention does not cross document boundaries within the packed sequence. 
+
+## 4. Experiments 
+
+We empirically validate the proposed Regret Pre-training framework using the OLMoE architecture. The experimen-tal design focuses on quantifying the downstream zero-shot performance benefits of integrating future-conditioned re-gret signals into the pre-training objective. We rigorously control for model capacity, training data, and computational constraints to ensure a fair comparison between the baseline causal approach and our dual-view distillation methods. 
+
+4.1. Experimental Setup Model Architecture and Data We utilize the OLMoE-1B-7B architecture, a sparse Mixture-of-Experts (MoE) model comprising 1 billion active parameters and approxi-mately 7 billion total parameters. The architecture employs a router mechanism to select experts for each token, allow-ing for high total capacity with reduced inference costs. All configurations are pre-trained from scratch on a subset of the DCLM-Baseline corpus. The training budget is fixed at 4 billion tokens for all models to simulate a compute-constrained pre-training scenario. To maximize hardware utilization, we employ sequence packing, where multiple documents are concatenated to fill a fixed sequence length of 2,048 tokens. The model architecture consists of 16 transformer layers with a hidden dimension of 2,048 and 16 attention heads. Each MoE layer contains 64 experts with a top-2 routing strategy. 
+
+Training Implementation Experiments are conducted on a cluster of 8 NVIDIA A100 (80GB) GPUs. We imple-ment the training loop using PyTorch with mixed-precision (bfloat16) arithmetic. The optimization process involves two distinct forward passes per training step. The first pass com-putes the standard causal language modeling loss and the auxiliary load-balancing loss required for the MoE router. The second pass computes the teacher distribution under the specified future-aware attention mask. Crucially, the teacher forward pass is executed in inference mode with gra-dient computation disabled to minimize memory overhead. We employ the AdamW optimizer with a learning rate of 
+
+3 × 10 −4, weight decay of 0.1, and gradient clipping with a maximum norm of 1.0. The learning rate follows a cosine decay schedule with 2,000 warmup steps. Training runs for 50,000 steps, corresponding to approximately 4 billion tokens given the sequence length of 2,048 and batch size configuration. 
+
+MoE Routing Isolation A critical implementation detail in Regret Pre-training with MoE architectures is the han-dling of the auxiliary load-balancing loss. The teacher view, having access to future context, may generate routing deci-sions that differ significantly from those of a causal model. Including the teacher’s routing statistics in the auxiliary loss calculation would optimize the router for a data distribution unavailable during inference. We therefore explicitly clear the load-balancing statistics prior to the teacher forward pass and compute the auxiliary loss exclusively based on the student’s routing decisions: 
+
+Laux (θ) = 
+
+> E
+
+X
+
+> e=1
+
+f (S) 
+
+> e
+
+· p(S) 
+
+> e
+
+(22) where f (S) 
+
+> e
+
+denotes the fraction of tokens routed to expert e
+
+and p(S) 
+
+> e
+
+denotes the average routing probability for expert e,both computed from the student forward pass. This ensures that the expert selection mechanism is optimized solely for causal inference. The auxiliary loss is weighted by a coefficient of 0.01 and added to the total training objective. 
+
+Attention Masking and Document Isolation We strictly enforce document boundaries within packed sequences to prevent data leakage. For the G LOBAL REGRET configura-tion, we construct a composite attention mask that serves two functions. First, it permits bidirectional attention while masking the specific target position t + 1 for a query at t.Second, it applies a block-diagonal mask based on document identifiers. Let D(i) denote the document index of token 
+
+i. The attention weight Aij is masked if D(i)̸ = D(j), re-gardless of the relative positions of i and j. This document isolation ensures that the teacher’s privileged information is strictly limited to the future context of the current document. We utilize a masking value of −10 4 rather than negative infinity to ensure numerical stability within the bfloat16 dynamic range while effectively zeroing out attention prob-abilities after the softmax operation. The packed sequences 6Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding 
+
+contain between 3 and 8 documents per batch depending on individual document lengths, with padding applied only at sequence boundaries. 
+
+4.2. Evaluation Protocol 
+
+We evaluate the pre-trained models on a diverse suite of nine downstream benchmarks in a zero-shot setting. The evaluation set covers reading comprehension (BoolQ), sci-entific reasoning (ARC-Challenge), commonsense reason-ing (PIQA, HellaSwag, WinoGrande, CommonsenseQA), and multi-task language understanding (MMLU). For the MMLU benchmark, we report results across four aggre-gated categories: Humanities, Other, Social Sciences, and STEM. We employ a likelihood-based evaluation metric where the model computes the conditional probability of each answer option given the context, selecting the option with the highest likelihood. This protocol assesses the intrin-sic knowledge grounding of the model without introducing variance from generation sampling strategies or few-shot prompt engineering. All evaluations are performed using the EleutherAI Language Model Evaluation Harness frame-work with default settings. For multiple-choice tasks, we compute the log-likelihood of each candidate continuation and normalize by the number of tokens in each option to account for length bias. The final prediction corresponds to the option with the highest normalized log-likelihood. 
+
+## 5. Results 
+
+Table 1 summarizes the zero-shot performance of the base-line causal model compared to the L OCAL REGRET and GLOBAL REGRET configurations. The baseline model is trained using the standard autoregressive objective for 4 billion tokens. The regret-based models utilize the same training data and budget, differing only in the inclusion of the auxiliary regret loss with α = 1 .0.Both regret-based configurations outperform the baseline across all seven individual tasks, demonstrating the con-sistent effectiveness of incorporating future-conditioned signals during pre-training. The average accuracy across all benchmarks increases from 30.2% for the baseline to 32.2% for L OCAL REGRET and 33.9% for G LOBAL REGRET .These improvements are achieved without any increase in model parameters or architectural modifications, validating the efficiency of the dual-view distillation framework. The most substantial improvement is observed on BoolQ, where G LOBAL REGRET achieves 61.0% accuracy com-pared to 42.9% for the baseline, representing an absolute gain of 18.1 percentage points. BoolQ requires models to answer binary yes/no questions based on passage content, a task that fundamentally depends on synthesizing infor-mation across the entire context to resolve the query. The bidirectional attention available to the global teacher enables it to capture long-range dependencies that span the question and answer passages. On tasks requiring global context integration, G LOBAL -REGRET consistently achieves the highest accuracy. For ARC-Challenge, which tests scientific reasoning and fac-tual knowledge, G LOBAL REGRET achieves 25.8% com-pared to 23.4% for L OCAL REGRET and 21.7% for the baseline. On WinoGrande, which evaluates commonsense reasoning through pronoun disambiguation, G LOBAL RE- 
+
+> GRET
+
+achieves 50.8%, L OCAL REGRET achieves 50.6%, and the baseline achieves 49.6%. The superior performance of GLOBAL REGRET on these benchmarks indicates that tasks requiring long-range reasoning and coreference resolution benefit substantially from bidirectional context signals. Conversely, L OCAL REGRET achieves the highest accuracy on tasks emphasizing local coherence and commonsense plausibility. On PIQA, which tests physical commonsense reasoning, L OCAL REGRET achieves 58.9% compared to 57.2% for G LOBAL REGRET and 56.4% for the baseline. On HellaSwag, which requires selecting the most likely continuation of a scenario, L OCAL REGRET achieves 27.5% compared to 25.1% for G LOBAL REGRET and 24.3% for the baseline. On CommonsenseQA, L OCAL REGRET achieves 26.5% compared to 23.4% for G LOBAL REGRET and 22.1% for the baseline, representing a relative improvement of 19.9% over the baseline. On MMLU, which aggregates performance across 57 tasks spanning multiple domains, LOCAL REGRET achieves 25.8% compared to 25.0% for GLOBAL REGRET and 24.5% for the baseline. These results demonstrate that local future context provides stronger train-ing signals for tasks that depend on immediate transition dynamics and next-token prediction. This dichotomy reflects the fundamental difference in the training signals provided by the two configurations. The global teacher distills long-range dependencies and bidi-rectional context into the student’s representations, while the local teacher emphasizes immediate transition dynamics and next-step prediction. The choice of teacher configura-tion thus determines the inductive bias transferred to the causal model, with global configurations favoring tasks that require global reasoning and local configurations favoring tasks that require local plausibility judgments. The perfor-mance differential across task categories suggests that the optimal teacher configuration depends on the target applica-tion domain and the nature of reasoning required. The computational overhead of regret pre-training is strictly limited to the additional forward pass required to compute the teacher distribution. Since the teacher operates in infer-ence mode with all gradients detached, the memory footprint remains identical to standard training. The wall-clock time per training step increases by a factor of approximately 1.8 7Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding Raw data       
+
+> OLMoE
+> Local Regret
+> (α = 0.1 )
+> Global Regret
+> (α = 0.1 )
+> Final Comprehensive Evaluation
+> 10 k
+> 50 k
+> 20 k
+> 0
+> Steps
+> α∈{0.1, 0.5, 1.0, 2.0} α∈{0.1, 0.5, 1.0, 2.0}
+> Baseline stream Checkpoint Regret streams
+
+(a) GlobalRegret  
+
+> (α=0.1)
+> GlobalRegret
+> (α=0.5)
+> GlobalRegret
+> (α=1.0)
+> GlobalRegret
+> (α=2.0)
+> LocalRegret
+> (α=0.1)
+> LocalRegret
+> (α=0.5)
+> LocalRegret
+> (α=1.0)
+> LocalRegret
+> (α=2.0)
+> Method and Hyperparameter (α)
+> −10
+> 0
+> 10
+> 20
+> 30
+> 40
+> Performance Improvement over Baseline (%)
+> Baseline Performance
+
+(b) Figure 3. Training Curriculum and Hyperparameter Sensitivity. (a) Schematic of the branched training schedule designed to decouple stability from alignment gains. (b) Distribution of downstream task improvements across varying regret weights α.
+
+Table 1. Zero-shot accuracy comparison on downstream tasks after 4 billion tokens of pre-training. L OCAL REGRET and G LOBAL REGRET 
+
+denote the proposed regret pre-training configurations. The Baseline represents standard causal language modeling. The highest accuracy for each task is highlighted in bold. METHOD BOOL Q ARC-C WINO GRANDE PIQA HELLA SWAG CSQA MMLU (A VG ) AVERAGE 
+
+BASELINE 42.9 21.7 49.6 56.4 24.3 22.1 24.5 30.2 LOCAL REGRET 48.5 23.4 50.6 58.9 27.5 26.5 25.8 32.2 GLOBAL REGRET 61.0 25.8 50.8 57.2 25.1 23.4 25.0 33.9 
+
+to 2.0 depending on hardware and implementation details. This overhead is substantially lower than traditional knowl-edge distillation approaches that maintain separate teacher and student models, which typically require at least twice the memory and computational resources. Profiling mea-surements indicate that the teacher forward pass accounts for 45% of the total step time, with the remaining overhead attributed to loss computation and data preparation. The memory consumption per GPU remains at approximately 72GB throughout training, leaving sufficient headroom for the 80GB capacity of the A100 GPUs. To justify the selection of the hyperparameter α, we em-pirically investigate the impact of the regret loss magni-tude on downstream zero-shot performance. As shown in Figure 3a, training begins with a standard causal warmup. At step 10k, we branch into Local and Global streams with unified ( α = 0.1). At step 20k, we perform a sensitivity sweep, branching into varying regret strengths 
+
+α ∈ { 0.1, 0.5, 1.0, 2.0} to analyze the performance and sta-bility boundaries. Each branch is trained for an additional 30,000 steps to reach the final checkpoint at step 50,000. Figure 3b illustrates the distribution of accuracy improve-ments relative to the baseline across the benchmarks. The data reveals a non-linear relationship between the distilla-tion strength and model efficacy. For the G LOBAL REGRET 
+
+configuration, the setting α = 1 .0 yields the highest median improvement while maintaining a favorable interquartile range. In contrast, lower coefficients (e.g., α = 0 .1) re-sult in negligible deviations from the baseline, suggesting insufficient information transfer from the teacher distribu-tion. Conversely, increasing coefficient to α = 2 .0 leads to performance degradation in the lower quartile and the emergence of negative outliers, indicating that excessive regularization may interfere with the optimization of the pri-mary causal objective.(Wei et al., 2022; Power et al., 2022) The L OCAL REGRET configuration demonstrates higher re-silience to hyperparameter variations but similarly exhibits optimal convergence properties at α = 1 .0. Based on these observations, α = 1 .0 is adopted for all subsequent compar-ative experiments to maximize expected performance gain while mitigating instability. 
+
+## 6. Conclusion 
+
+This paper presents Regret Pre-training, a self-supervised framework that augments causal language modeling with future-aware distillation signals. The proposed method in-troduces a dual-view architecture in which a single trans-former processes each input under both causal and future-8Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding 
+
+conditioned attention masks, enabling knowledge transfer from the privileged teacher view to the student view without additional model parameters. We investigate two teacher view configurations that define distinct scopes of future context. G LOBAL REGRET , which conditions the teacher on bidirectional context excluding the target position, achieves substantial improvements on reading comprehension and factual knowledge tasks. On BoolQ, G LOBAL REGRET improves accuracy by 18.1 per-centage points over the baseline, representing the largest gain observed in our experiments. L OCAL REGRET , which extends the teacher’s context by exactly one future token, achieves the highest performance on physical commonsense and commonsense reasoning tasks, improving PIQA, Hel-laSwag, and CSQA accuracy over the baseline. The empirical results demonstrate that the scope of future context available to the teacher view yields distinct down-stream performance profiles. Both configurations improve over standard causal language modeling on the majority of evaluated tasks, with each configuration achieving the high-est accuracy on a complementary subset of the evaluation suite. The framework requires only an additional forward pass per training step without backpropagation, maintaining computational efficiency while enabling effective transfer of future-aware signals to the causal model. The proposed approach establishes a new direction for self-supervised language model training that leverages the dual-ity between causal and non-causal views of the same model weights. Future work may explore intermediate points in the spectrum of future context scope, alternative divergence measures for the regret loss, and scaling behavior on larger model architectures and training budgets. 
+
+## Impact Statement 
+
+This paper presents work whose goal is to advance the field of Machine Learning. There are many potential societal consequences of our work, none which we feel must be specifically highlighted here. 
+
+## Author Contributions 
+
+Mingkuan Zhao conceived and designed the core idea of the Regret Pre-training framework. Xiayu Sun implemented and carried out all of the experiments, and produced all of the figures in this paper. Wentao Hu, Suquan Chen, and Jiaxuan Li contributed to a portion of the manuscript text. Xiaoyan Zhu and Xin Lai assisted with manuscript polishing and revision. Jiayin Wang is the corresponding author. 
+
+## References 
+
+Bavarian, M., Jun, H., Tezak, N., Schulman, J., McLeavey, C., Tworek, J., and Chen, M. Efficient training of language models to fill in the middle, 2022. URL 
+
+https://arxiv.org/abs/2207.14255 .Chen, Y.-C., Gan, Z., Cheng, Y., Liu, J., and Liu, J. Dis-tilling knowledge learned in bert for text generation. In 
+
+ACL , 2020. Du, Z., Qian, Y., Liu, X., Ding, M., Qiu, J., Yang, Z., and Tang, J. Glm: General language model pretraining with autoregressive blank infilling, 2022. URL https: //arxiv.org/abs/2103.10360 .Hu, W., Zhai, Y., Hu, X., Zhao, M., Yu, S., Liu, X., Yu, K., Song, S., and Li, X. Awakening dormant experts: Counterfactual routing to mitigate moe hallucinations, 2026a. Hu, W., Zhao, M., Song, S., Zhu, X., Lai, X., and Wang, J. Mosaic pruning: A hierarchical framework for generaliz-able pruning of mixture-of-experts models. In Proceed-ings of the AAAI Conference on Artificial Intelligence ,volume 40, pp. 21885–21893, 2026b. Kahneman, D. Thinking, Fast and Slow . Farrar, Straus and Giroux, 2011. ISBN 9780374275631. URL 
+
+https://books.google.com/books?id= SHvzzuCnuv8C .Li, J., Fang, A., Smyrnis, G., Ivgi, M., Jordan, M., Gadre, S., Bansal, H., Guha, E., Keh, S., Arora, K., Garg, S., Xin, R., Muennighoff, N., Heckel, R., Mercat, J., Chen, M., Gururangan, S., Wortsman, M., Albalak, A., Bitton, Y., Nezhurina, M., Abbas, A., Hsieh, C.-Y., Ghosh, D., Gardner, J., Kilian, M., Zhang, H., Shao, R., Pratt, S., Sanyal, S., Ilharco, G., Daras, G., Marathe, K., Gokaslan, A., Zhang, J., Chandu, K., Nguyen, T., Vasiljevic, I., Kakade, S., Song, S., Sanghavi, S., Faghri, F., Oh, S., Zettlemoyer, L., Lo, K., El-Nouby, A., Pouransari, H., Toshev, A., Wang, S., Groeneveld, D., Soldaini, L., Koh, P. W., Jitsev, J., Kollar, T., Dimakis, A. G., Carmon, Y., Dave, A., Schmidt, L., and Shankar, V. Datacomp-lm: In search of the next generation of training sets for language models, 2025. URL https://arxiv.org/ abs/2406.11794 .Muennighoff, N., Soldaini, L., Groeneveld, D., Lo, K., Mor-rison, J., Min, S., Shi, W., Walsh, P., Tafjord, O., Lambert, N., Gu, Y., Arora, S., Bhagia, A., Schwenk, D., Wadden, D., Wettig, A., Hui, B., Dettmers, T., Kiela, D., Farhadi, A., Smith, N. A., Koh, P. W., Singh, A., and Hajishirzi, H. Olmoe: Open mixture-of-experts language models, 2024. URL https://arxiv.org/abs/2409.02060 .9Regret Pre-training: Bridging Prior and Posterior Views for Enhanced Knowledge Grounding 
+
+Power, A., Burda, Y., Edwards, H., Babuschkin, I., and Misra, V. Grokking: Generalization beyond overfitting on small algorithmic datasets, 2022. URL https:// arxiv.org/abs/2201.02177 .Qi, W., Yan, Y., Gong, Y., Liu, D., Duan, N., Chen, J., Zhang, R., and Zhou, M. ProphetNet: Pre-dicting future n-gram for sequence-to-SequencePre-training. In Cohn, T., He, Y., and Liu, Y. (eds.), Findings of the Association for Computa-tional Linguistics: EMNLP 2020 , pp. 2401–2410, On-line, November 2020. Association for Computational Linguistics. doi: 10.18653/v1/2020.findings-emnlp. 217. URL https://aclanthology.org/2020. findings-emnlp.217/ .Qin, C., Xia, W., Jiao, F., Chen, C., Hu, Y., Ding, B., Chen, R., and Joty, S. Beyond output matching: Bidi-rectional alignment for enhanced in-context learning. In Che, W., Nabende, J., Shutova, E., and Pilehvar, M. T. (eds.), Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 32732–32758, Vienna, Austria, July 2025. Association for Computational Linguistics. ISBN 979-8-89176-251-0. doi: 10.18653/v1/2025.acl-long. 1573. URL https://aclanthology.org/2025. acl-long.1573/ .Savage, L. J. The theory of statistical decision. Journal of the American Statistical Association , 46(253):55–67, 1951. ISSN 01621459, 1537274X. URL http://www. jstor.org/stable/2280094 .Strudel, R., Tallec, C., Altch ´e, F., Du, Y., Ganin, Y., Men-sch, A., Grathwohl, W., Savinov, N., Dieleman, S., Sifre, L., and Leblond, R. Self-conditioned embed-ding diffusion for text generation, 2022. URL https: //arxiv.org/abs/2211.04236 .Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux, M.-A., Lacroix, T., Rozi `ere, B., Goyal, N., Hambro, E., Azhar, F., Rodriguez, A., Joulin, A., Grave, E., and Lample, G. Llama: Open and efficient foundation lan-guage models, 2023. URL https://arxiv.org/ abs/2302.13971 .Vapnik, V. and Vashist, A. A new learning paradigm: Learning using privileged information. Neural Networks , 22(5):544–557, 2009. ISSN 0893-6080. doi: https://doi.org/10.1016/j.neunet.2009.06.042. URL https://www.sciencedirect.com/ science/article/pii/S0893608009001130 .Advances in Neural Networks Research: IJCNN2009. Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, L. u., and Polosukhin, I. Attention is all you need. In Guyon, I., Luxburg, U. V., Bengio, S., Wallach, H., Fergus, R., Vishwanathan, S., and Garnett, R. (eds.), Advances in Neural Information Processing Systems , volume 30. Curran Associates, Inc., 2017. URL https://proceedings.neurips. cc/paper_files/paper/2017/file/ 3f5ee243547dee91fbd053c1c4a845aa-Paper. pdf .Wei, J., Tay, Y., Bommasani, R., Raffel, C., Zoph, B., Borgeaud, S., Yogatama, D., Bosma, M., Zhou, D., Met-zler, D., Chi, E. H., Hashimoto, T., Vinyals, O., Liang, P., Dean, J., and Fedus, W. Emergent abilities of large language models. Transactions on Machine Learning Research , 2022. ISSN 2835-8856. URL https:// openreview.net/forum?id=yzkSU5zdwD . Sur-vey Certification. Yang, Z., Dai, Z., Yang, Y., Carbonell, J., Salakhutdinov, R., and Le, Q. V. XLNet: generalized autoregressive pre-training for language understanding . Curran Associates Inc., Red Hook, NY, USA, 2019. Zhao, M., Hu, W., Wang, J., Lai, X., Huang, T., Min, Y., Yan, R., and Zhu, X. Making every head count: Sparse attention without the speed-performance trade-off. In 
+
+Proceedings of the AAAI Conference on Artificial Intelli-gence , volume 40, pp. 34959–34967, 2026. 10

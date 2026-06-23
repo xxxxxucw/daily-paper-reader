@@ -1,0 +1,1232 @@
+Title: Multi-component Causal Tracing in Large Language Models
+
+URL Source: https://arxiv.org/pdf/2606.03085v1
+
+Published Time: Wed, 03 Jun 2026 00:30:35 GMT
+
+Number of Pages: 21
+
+Markdown Content:
+Multi-component Causal Tracing in Large Language Models 
+
+Zirui Yan 1, Dennis Wei 2, Dmitriy A. Katz 2, Prasanna Sattigeri 2, Ali Tajer 1
+
+> 1
+
+Rensselaer Polytechnic Institute, 2IBM Research 
+
+Abstract 
+
+Causal tracing systematically intervenes on a large language model’s (LLM’s) internal repre-sentations to uncover and quantify the causal pathways linking specific inputs or computa-tions to specific metrics of interest, quantify-ing the LLM’s behavior. Building on previ-ous single-component or single-layer studies, this paper presents a unified framework for causally tracing multiple components simul-taneously. This framework systematically iden-tifies the subsets of components (e.g., attention heads and multi-layer perceptron neurons) most critical to a desired target performance metric (e.g., accuracy and fairness). This is achieved by incorporating flexible interventions applied to a wide range of desired metrics. To ad-dress the combinatorial complexity of the multi-component problem, an efficient algorithm is designed that leverages soft interventions and a carefully designed metric transformation, con-verting the combinatorial search problem into a continuous one that can be solved efficiently under proper constraints, thereby generating proper binary decisions for selecting compo-nents. Experimental results demonstrate that the proposed method efficiently identifies sub-sets of the model’s components that have a high impact on the target metric, outperform-ing existing baseline approaches. Our code is available at https://github.com/ZiruiYan/ multi-component-causal-tracing .
+
+1 Introduction 
+
+Large language models (LLMs) have revolution-ized natural language processing through their abil-ity to generate fluent, contextually-aware text, with a wide range of applications such as machine translation (Zhang et al., 2023), text summariza-tion (Van Veen et al., 2024), code generation (Jiang et al., 2024), and agentic tasks (Xi et al., 2025). However, LLMs are prone to various forms of safety risks. They can inadvertently learn and prop-agate societal biases (Sheng et al., 2021), produce factually incorrect statements (Augenstein et al., 2024), and even generate harmful or deceptive con-tent through jailbreak attacks (Wang et al., 2025). These challenges, coupled with the fundamental interest in revealing how LLM knowledge flows, highlight the need for interpretability capabilities to systematically analyze and elucidate the underlying mechanisms of these models. Several interpretability approaches have been presented recently (Luo and Specia, 2024), ranging from external explanations that focus on the impact of the prompt on a single prediction (e.g., gradient-based (Sikdar et al., 2021) and vector-based (Chen et al., 2020; Modarressi et al., 2022; Paes et al., 2025)), to internal explanations that aim to uncover general knowledge and representational structures within a model (e.g., probing (Petroni et al., 2019; Li et al., 2023), circuit analysis (Chughtai et al., 2023; Wang et al., 2023; Conmy et al., 2023), and sparse autoencoders (Bricken et al., 2023; Cunning-ham et al., 2024)). Among the global methods, causal tracing (Vig et al., 2020b), which is also called activation patch-ing (Davies et al., 2023) or interchange interven-tions (Geiger et al., 2020, 2022), has emerged as an effective strategy by treating LLMs as causal models, enabling systematic interventions on inter-nal values to pinpoint which specific model compo-nents most strongly influence a chosen metric. This goes beyond counterfactual explanations for black-box models (Wachter et al., 2017; Karimi et al., 2022) and recent work has proposed different meth-ods (Mohebbi et al., 2023) and metrics (Zhang and Nanda, 2024). By revealing the importance of spe-cific network components, causal tracing enables more targeted editing, fine-tuning or enhancement of LLMs (Geiger et al., 2021; Meng et al., 2022, 2023; Cai et al., 2024; Hase et al., 2023; Chen et al., 2026; Prakash et al., 2024). For example, Cai et al. (2024) uses causal mediation analysis to identify model components that contribute most to               
+
+> arXiv:2606.03085v1 [cs.LG] 2 Jun 2026 689
+> Layer Index
+> 6
+> 8
+> 9Layer Index
+> -0.0004
+> -0.0003
+> -0.0002
+> -0.0001
+> 0.0000
+> 0.0012
+> 0.0024
+> 0.0036
+> 0.0048 012345678910 11
+> Layer Index
+> 0246810
+> Layer Index
+> -36.84
+> -27.63
+> -18.42
+> -9.21
+> 0.00
+> 2.73
+> 5.47
+> 8.20
+> 10.93
+
+Figure 1: The deviation from linearity due to intervening on two attention heads within layers {6, 8, 9} of GPT2-small on the WinoBias dataset (left), and two MLP layers of GPT2-small on the Professions dataset (right). 
+
+gender bias and then mitigate gender bias by in-tervening on those components; Chen et al. (2026) show tracing-guided editing can rival fine-tuning and in-context editing; Prakash et al. (2024) show that fine-tuning improves performance mainly by strengthening existing circuits rather than creating new ones through causal tracing. Most existing studies in causal tracing have fo-cused on analyzing single components in isolation: an individual neuron (Vig et al., 2020b,a) or en-tire layer (Meng et al., 2022, 2023; Hase et al., 2023). This overlooks the potentially non-linear 
+
+effects arising from interactions among multiple components. Emergent multi-component behav-iors have been revealed in circuit analysis. Elhage et al. (2021) and Olsson et al. (2022) discovered the 
+
+induction heads mechanism, according to which two attention heads in different layers jointly in-crease the likelihood of a specific token. We refer to Ferrando et al. (2024) for more findings. A phenomenon similar to induction heads can also be observed in the causal tracing of LLMs, in which jointly intervened-on pairs of attention heads or multi-layer perceptron (MLP) neurons exhibit a pronounced non-linear impact on the model’s outputs. Figure 1 illustrates this phenomenon in GPT2-small on two datasets, where selecting spe-cific subsets of components can significantly boost the metric of interest (which are discussed in detail in Appendix C.5). The figure shows the metric values obtained by intervening on two components simultaneously, minus the sum of the metric values obtained when intervening on each component in-dividually. Red indicates a positive difference (the joint intervention enhances the metric), whereas blue indicates a negative difference (the joint in-tervention diminishes the metric). These nonlinear effects violate the observation of Syed et al. (2023); Hanna et al. (2024); Shah et al. (2024) for these specific models and metrics, implying that linear approximations do not hold in general. Motivated by these observations, we argue that causal tracing in LLMs should be pursued through a multi-component perspective. Although exist-ing studies provide valuable evidence, they lack a unified framework to define the problem and rig-orously account for non-linear interactions. We address this gap by formulating the problem of 
+
+multi-component causal tracing , in which the goal is to identify a subset of components (e.g., attention heads, MLP neurons) that collectively maximize a chosen metric of interest. Recent work by Davies et al. (2023) investigated a similar problem via gradient-based search. However, our analysis in Appendix D.5 indicates that their penalty and op-timization choices drive much of the performance gap. The relative efficiency and effectiveness of gradient-based algorithms compared with alterna-tive methods remain unknown. We fill these gaps and our main contributions are as follows. • Unified Framework. We formalize a causal tracing approach that systematically traces causal effects across multiple components of LLMs. This framework provides general def-initions of intervention and metrics that can be tailored for various tasks, including probing lin-guistic features, testing bias, and monitoring fac-tual correctness. The multi-component causal tracing problem poses a combinatorial challenge, resulting in a search space that grows exponen-tially with model size. • Efficient Algorithm. To efficiently search in the combinatorial space, we perform soft interven-tions on components, combined with a carefully designed metric transformation and scheduled penalty function. The transformation unlocks the power of gradient descent, while the penalty function ensures sparsity and binary values. Fur-thermore, the scheduling in the penalty function allows the algorithm to converge to the desired sparsity level at an appropriate rate and stop once it is achieved. • Empirical Efficiency and Effectiveness. We show that baseline top-k and greedy algorithms can be computationally expensive since they re-quire computing multiple forward runs, at least one for each component on all samples. In our experiments on GPT2-medium with the Wino-Gender dataset, our method achieves a 1.76 -times speedup compared to top-k and a 229 -times speedup compared to greedy, while main-taining performance close to greedy and superior to top-k.
+
+2 LLM Model & Notations 
+
+Pre-trained LLM. Consider a pre-trained LLM fθ,where θ compactly parameterizes the LLM. The model receives the prompt s, operates over the vocabulary set V, and generates words sequentially. The word generated at time t is denoted by vt, and accordingly, we define the sequence generated up to t as the ordered sequence vt ≜ {vi ∈ V : i ∈
+
+[t]}. Word generation begins with an initial ordered 
+
+sentence of n words denoted by vn and proceeds by generating subsequent tokens sequentially and autoregressively for indices t > n . Specifically, at time t, the token is generated according to 
+
+vt ≜ arg max  
+
+> v∈V
+
+P(v | vt−1) , (1) where P(v | vt−1) is an unknown conditional prob-ability mass function with the following shorthand: 
+
+Pv 
+
+> t
+
+(v) ≜ P(v | vt−1) , ∀ v ∈ V . (2) This token-generation process continues sequen-tially until a predefined stopping criterion is met, such as the generation of a predetermined end-of-sequence token. In designing our algorithm presented in Sec-tion 4, we leverage the average likelihood of the tokens generated over specified intervals. For this purpose, we define the following mixture distribu-tion, which for any given t, d ∈ N, averages the conditional probability mass functions (PMFs) over 
+
+{t, . . . , t + d}, i.e., 
+
+¯Pv
+
+> t:d
+
+(vt+d) ≜ 1
+
+d + 1 
+
+> d
+
+X
+
+> i=0
+
+Pv
+
+> t+i
+
+(vt+i) . (3) 
+
+LLM Components. LLMs are constructed by stacking multiple computational blocks. Each block consists of several key components, includ-ing attention heads, feed-forward layers, MLP lay-ers, and normalization layers. We denote the set of components available for our analysis by 
+
+C ≜ {ci : i ∈ [N ]} . (4) This set can include any non-overlapping substruc-tures of the model, allowing flexibility in analyzing specific components. Without loss of generality, we assume the components in C are ordered following the order they appear in the LLM’s architecture. Some studies suggest that key knowledge in LLMs is primarily stored in attention heads and MLP layers (see, e.g., (Clark et al., 2019; Vig et al., 2020b; Geva et al., 2021, 2022; Meng et al., 2022)). Hence, this paper focuses primarily on the attention heads and the MLP layers. Specifically, we are in-terested in each head’s attention weights and the be-havior of individual neurons after the down-project layer. In our empirical analysis, we consider mod-els ranging from DistilGPT2 ( 72 attention heads and 4608 MLP neurons) to GPT2-xl ( 1200 atten-tion heads and 76800 MLP neurons), as well as new architectures of similar size. 
+
+Forward Mapping. For each component ci ∈ C ,we denote the input hidden states by gi, the output hidden states by hi, and the component mapping function by fi, which maps out gi to hi, i.e., 
+
+hi = fi
+
+ gi
+
+ , ∀i ∈ [N ] . (5) We use the notations g ≜ (gi, · · · , gN ) and h ≜
+
+(hi, · · · , hN ) to compactly represent all the input and output states, respectively. 
+
+3 Multi-Component Causal Tracing 
+
+Causal Mediation Analysis. Our central objective is to quantify how changes in specific components of an LLM influence an LLM’s behavior in spe-cific contexts (e.g., biases). To formalize a princi-pled approach to trace the impact of a change in a component, we perform causal mediation analy-sis (Pearl, 2022). This enables examination of how an interventional treatment (i.e., a change in a com-ponent) affects the outcome (i.e., a target metric) through variations in intermediate variables, known as mediators (i.e., intermediate components). In the setting of LLMs, the mediators are various com-ponents of the LLM, such as attention heads and MLP neurons, where the intervention targets can be attention weights and MLP down-projection. Our focus is on these indirect effects: specifically, how our treatment, intervening on mediators, changes the metric of interest. <latexit  sha1_base64="xSltV/yx0Hh7XGuKDC5c9Ga2C1g=">AAACKHicbVDLTsMwEHR4U95w5GJRIXFAVZKKwrEqBzgCaqGojZDjbKhVO4lsBxFF+Qqu8AN8DTfElS/BaXughZEszc7uasfjJ5wpbdtf1tz8wuLS8spqZW19Y3Nre2f3VsWppNChMY9l1ycKOIugo5nm0E0kEOFzuPOH52X/7gmkYnHU1lkCniCPEQsZJdpI93lfhbg9gOJhu2rX7BHwX+JMSBVNcPWwY632g5imAiJNOVGq59iJ9nIiNaMciko/VZAQOiSP0DM0IgKUl48cF/jQKAEOY2lepPFI/b2RE6FUJnwzKYgeqNleKf7X66U6PPNyFiWphoiOD4UpxzrG5fdxwCRQzTNDCJXMeMV0QCSh2oRUmTrzPPZqxABCE++ozEVGi/zmolXkTsM5rrvHbr0Mz5mN6i+5dWtOo3Zy7VabrUmMK2gfHaAj5KBT1ESX6Ap1EEUCvaBX9Ga9Wx/Wp/U1Hp2zJjt7aArW9w8KOqRp</latexit> 
+
+> The  <latexit  sha1_base64="WBqwSnPh57R0mNWwrBiETWJ9n1I=">AAACKXicbVDLTgIxFO3gC/AFunTTSExcEDIDEV0SXOgSjTwiENLpdKCh05m0HeNkMn/hVn/Ar3Gnbv0RO8BCwJM0Offce3NPjx0wKpVpfhmZjc2t7Z1sLr+7t39wWCgedaQfCkza2Ge+6NlIEkY5aSuqGOkFgiDPZqRrT6/TfveJCEl9/qCigAw9NObUpRgpLT3GA+lCiaiTjAols2LOANeJtSAlsEBrVDRyA8fHoUe4wgxJ2bfMQA1jJBTFjCT5QShJgPAUjUlfU448IofxzHICz7TiQNcX+nEFZ+rfjRh5UkaerSc9pCZytZeK//X6oXKvhjHlQagIx/NDbsig8mH6f+hQQbBikSYIC6q9QjxBAmGlU8ovnXmee9WiQ1yd76yMvQgn8f1NM4mtulWuVcvVWhqetRrVOulUK1a9cnFXLTWaixiz4AScgnNggUvQALegBdoAAw5ewCt4M96ND+PT+J6PZozFzjFYgvHzCxE5pPM=</latexit>
+> said  <latexit  sha1_base64="YvxzWYejW5g/BGDNd3HZvsb20O0=">AAACKXicbVDLTsMwEHTKuzwLRy4WFRIHVCVBPI4VHOAIiAKijSrHcVoLx4nsDSKK8hdc4Qf4Gm7AlR/BSXuAwkiWZmd3tePxE8E12PaHVZuanpmdm1+oLy4tr6yuNdavdZwqyjo0FrG69YlmgkvWAQ6C3SaKkcgX7Ma/Pyn7Nw9MaR7LK8gS5kVkIHnIKQEj3eU9HWIYEij6a027ZVfAf4kzJk00xnm/YS30gpimEZNABdG669gJeDlRwKlgRb2XapYQek8GrGuoJBHTXl5ZLvC2UQIcxso8CbhSf27kJNI6i3wzGREY6sleKf7X66YQHnk5l0kKTNLRoTAVGGJc/h8HXDEKIjOEUMWNV0yHRBEKJqX6rzOPI69GDFho8q3KPMpokV+eHhe5c+Ds7rm77l4ZnjMZ1V9y7bacg9b+hdtsH49jnEebaAvtIAcdojY6Q+eogyiS6Ak9oxfr1Xqz3q3P0WjNGu9soF+wvr4BLRKlAw==</latexit>
+> that
+
+<latexit sha1_base64="cdVFP8fwNidPdvRQvPpOCj474pc=">AAACN3icbVBNT8IwGO7wC/ALNPHipZGYeCBkg4geCR70iEaQBAjpug4a2m1pO+My+TNe9Q/4Uzx5M179B3awg4BP0uTp834/dsCoVKb5YWTW1jc2t7K5/PbO7t5+oXjQkX4oMGljn/miayNJGPVIW1HFSDcQBHGbkQd7cpXEHx6JkNT37lUUkAFHI4+6FCOlpWHhKO5LFyKliJcIkPtOyMh0WCiZFXMGuEqslJRAitawaOT6jo9DrvtghqTsWWagBjESimLdMN8PJQkQnqAR6WnqIU7kIJ4dMIWnWnGg6wv9PAVn6t+KGHEpI27rTI7UWC7HEvG/WC9U7uUgpl4Q6gPxfJAbMqh8mLgBHSoIVizSBGFB9a4Qj5FAWGnP8gtjnua7atEhrnZ79o15hKfx3XVzGlt1q1yrlqu1xDxr2apV0qlWrHrl/LZaajRTG7PgGJyAM2CBC9AAN6AF2gCDZ/ACXsGb8W58Gl/G9zw1Y6Q1h2ABxs8vBP6qdw==</latexit> 
+
+attention module <latexit sha1_base64="314aQcQyBq5aDyhDbkMD1e/3Wik=">AAACMXicbVDLTgIxFO3gC/AFunTTSExcEDIDEV0SXOhCEzTySGBCOp0ONLQzk7ZDnEz4E7f6A34NO+PWn7A8FgKepMnpOfeV44SMSmWaUyO1tb2zu5fOZPcPDo+Oc/mTlgwigUkTBywQHQdJwqhPmooqRjqhIIg7jLSd0e3Mb4+JkDTwX1QcEpujgU89ipHSUj+XS3rSg48PDcgDN2Jk0s8VzJI5B9wk1pIUwBKNft7I9NwAR5z4CjMkZdcyQ2UnSCiK9cBsL5IkRHiEBqSrqY84kXYyP30CL7TiQi8Q+vkKztW/HQniUsbc0ZUcqaFc92bif143Ut6NnVA/jBTx8WKRFzGoAjjLAbpUEKxYrAnCgupbIR4igbDSaWVX1rwubtWiSzyd8/yb8BhPkue7+iSxqlaxUi6WK7PwrPWoNkmrXLKqpauncqFWX8aYBmfgHFwCC1yDGrgHDdAEGIzBG3gHH8anMTW+jO9FacpY9pyCFRg/v+C5p04=</latexit> 
+
+MLP module <latexit sha1_base64="pAGYW7bigFJCJPc/01j+SeRGVaY=">AAACNHicbVDLSsNAFJ34tr6qLt0MFsGFlKTF6rLoQpcq1hbaUiaTGzs4mYSZGzGEfItb/QH/RXAnbv0Gp4+FrwMDZ865l3s4fiKFQdd9dWZm5+YXFpeWSyura+sb5c2tGxOnmkOLxzLWHZ8ZkEJBCwVK6CQaWORLaPt3pyO/fQ/aiFhdY5ZAP2K3SoSCM7TSoLyd90xIhyIIQFGDDMEUg3LFrbpj0L/Em5IKmeJisOks94KYpxEo5JIZ0/XcBPs50yi4hKLUSw0kjN+xW+haqlgEpp+P0xd0zyoBDWNtn0I6Vr9v5CwyJot8OxkxHJrf3kj8z+umGB73c6GSFEHxyaEwlRRjOqqCBkIDR5lZwrgWNivlQ6YZR1tY6ceZh0lWKwYQ2qrH3zzKeJFfnZ0UudfwDuq1g1p9VJ73u6q/5KZW9RrVw8tapXkyrXGJ7JBdsk88ckSa5JxckBbhJCOP5Ik8Oy/Om/PufExGZ5zpzjb5AefzCx9XqP0=</latexit> 
+
+hidden states 
+
+> <latexit  sha1_base64="xSltV/yx0Hh7XGuKDC5c9Ga2C1g=">AAACKHicbVDLTsMwEHR4U95w5GJRIXFAVZKKwrEqBzgCaqGojZDjbKhVO4lsBxFF+Qqu8AN8DTfElS/BaXughZEszc7uasfjJ5wpbdtf1tz8wuLS8spqZW19Y3Nre2f3VsWppNChMY9l1ycKOIugo5nm0E0kEOFzuPOH52X/7gmkYnHU1lkCniCPEQsZJdpI93lfhbg9gOJhu2rX7BHwX+JMSBVNcPWwY632g5imAiJNOVGq59iJ9nIiNaMciko/VZAQOiSP0DM0IgKUl48cF/jQKAEOY2lepPFI/b2RE6FUJnwzKYgeqNleKf7X66U6PPNyFiWphoiOD4UpxzrG5fdxwCRQzTNDCJXMeMV0QCSh2oRUmTrzPPZqxABCE++ozEVGi/zmolXkTsM5rrvHbr0Mz5mN6i+5dWtOo3Zy7VabrUmMK2gfHaAj5KBT1ESX6Ap1EEUCvaBX9Ga9Wx/Wp/U1Hp2zJjt7aArW9w8KOqRp</latexit>
+> The  <latexit  sha1_base64="WBqwSnPh57R0mNWwrBiETWJ9n1I=">AAACKXicbVDLTgIxFO3gC/AFunTTSExcEDIDEV0SXOgSjTwiENLpdKCh05m0HeNkMn/hVn/Ar3Gnbv0RO8BCwJM0Offce3NPjx0wKpVpfhmZjc2t7Z1sLr+7t39wWCgedaQfCkza2Ge+6NlIEkY5aSuqGOkFgiDPZqRrT6/TfveJCEl9/qCigAw9NObUpRgpLT3GA+lCiaiTjAols2LOANeJtSAlsEBrVDRyA8fHoUe4wgxJ2bfMQA1jJBTFjCT5QShJgPAUjUlfU448IofxzHICz7TiQNcX+nEFZ+rfjRh5UkaerSc9pCZytZeK//X6oXKvhjHlQagIx/NDbsig8mH6f+hQQbBikSYIC6q9QjxBAmGlU8ovnXmee9WiQ1yd76yMvQgn8f1NM4mtulWuVcvVWhqetRrVOulUK1a9cnFXLTWaixiz4AScgnNggUvQALegBdoAAw5ewCt4M96ND+PT+J6PZozFzjFYgvHzCxE5pPM=</latexit>
+> said  <latexit  sha1_base64="YvxzWYejW5g/BGDNd3HZvsb20O0=">AAACKXicbVDLTsMwEHTKuzwLRy4WFRIHVCVBPI4VHOAIiAKijSrHcVoLx4nsDSKK8hdc4Qf4Gm7AlR/BSXuAwkiWZmd3tePxE8E12PaHVZuanpmdm1+oLy4tr6yuNdavdZwqyjo0FrG69YlmgkvWAQ6C3SaKkcgX7Ma/Pyn7Nw9MaR7LK8gS5kVkIHnIKQEj3eU9HWIYEij6a027ZVfAf4kzJk00xnm/YS30gpimEZNABdG669gJeDlRwKlgRb2XapYQek8GrGuoJBHTXl5ZLvC2UQIcxso8CbhSf27kJNI6i3wzGREY6sleKf7X66YQHnk5l0kKTNLRoTAVGGJc/h8HXDEKIjOEUMWNV0yHRBEKJqX6rzOPI69GDFho8q3KPMpokV+eHhe5c+Ds7rm77l4ZnjMZ1V9y7bacg9b+hdtsH49jnEebaAvtIAcdojY6Q+eogyiS6Ak9oxfr1Xqz3q3P0WjNGu9soF+wvr4BLRKlAw==</latexit>
+> that <latexit  sha1_base64="dJWFx2EFXOBwjDJJkaLq8eUFiB8=">AAAB8HicdVDLSgMxFM34rPVVdekmWARXQ6bS2u6KblxWsA9ph5JJM21okhmSjFCGfoUbF4q49XPc+Tdm2hFU9MCFwzn3cu89QcyZNgh9OCura+sbm4Wt4vbO7t5+6eCwo6NEEdomEY9UL8CaciZp2zDDaS9WFIuA024wvcr87j1VmkXy1sxi6gs8lixkBBsr3aUDHUKB5XxYKiO31kA17xwiFy2QEa9abyDo5UoZ5GgNS++DUUQSQaUhHGvd91Bs/BQrwwin8+Ig0TTGZIrHtG+pxIJqP10cPIenVhnBMFK2pIEL9ftEioXWMxHYToHNRP/2MvEvr5+YsO6nTMaJoZIsF4UJhyaC2fdwxBQlhs8swUQxeyskE6wwMTajog3h61P4P+lUXK/mVm8q5eZlHkcBHIMTcAY8cAGa4Bq0QBsQIMADeALPjnIenRfnddm64uQzR+AHnLdPCe6QlQ==</latexit>
+> man
+> <latexit  sha1_base64="cbMKvdJ0U0cEkj1BoS+Clb/bWM0=">AAAB8nicbVBNS8NAEJ34WetX1aOXxSJ4KknBj2PRi8cK9gPSUDbbSbt0swm7G6GE/gwvHhTx6q/x5r9x2+agrQ8GHu/NMDMvTAXXxnW/nbX1jc2t7dJOeXdv/+CwcnTc1kmmGLZYIhLVDalGwSW2DDcCu6lCGocCO+H4buZ3nlBpnshHM0kxiOlQ8ogzaqzk5z0dEZkpjdN+perW3DnIKvEKUoUCzX7lqzdIWBajNExQrX3PTU2QU2U4Ezgt9zKNKWVjOkTfUklj1EE+P3lKzq0yIFGibElD5urviZzGWk/i0HbG1Iz0sjcT//P8zEQ3Qc5lmhmUbLEoygQxCZn9TwZcITNiYgllittbCRtRRZmxKZVtCN7yy6ukXa95V7XLh3q1cVvEUYJTOIML8OAaGnAPTWgBgwSe4RXeHOO8OO/Ox6J1zSlmTuAPnM8fg2KRag==</latexit>
+> nurse
+
+<latexit sha1_base64="wPNgJGPuUltfng+3z43ihn3QID4=">AAACQHicbVC7TsMwFHXKs+VVYGTAokJiQFXSSoURwQAjIPqQ2qpy3GuwcJzIdoAqysjXsMIP8Bf8ARtiZcJpO9CWI1k6Pvd9/EhwbVz3w8nNzS8sLi3nCyura+sbxc2thg5jRaFOQxGqlk80CC6hbrgR0IoUkMAX0PTvz7J48wGU5qG8MYMIugG5lZxxSoyVesXdpKMZ5tKAegCZaRgYA2o0ZiJ8THvFklt2h8CzxBuTEhrjsrfp5Dv9kMaB7UYF0brtuZHpJkQZTgWkhU6sISL0ntxC21JJAtDdZHhJivet0scsVPZJg4fq34qEBFoPAt9mBsTc6elYJv4Xa8eGHXcTLqPYgKSjQSwW2IQ4swX3ubJHi4ElhCpud8X0jihCrTG6MDHmabSrFfvArO3DbxIMaJpcn5+miVfzDquVw0o1M8+btmqWNCplr1auXVVKJ6djG5fRDtpDB8hDR+gEXaBLVEcUPaMX9IrenHfn0/lyvkepOWdcs40m4Pz8Asc6rlM=</latexit> 
+
+intervention e ↵ects flow 
+
+<latexit sha1_base64="bvGd8njXndo+XWhz4SWS/f6srQ8=">AAACOXicbVDLTgIxFO34BHyBbkzcNBITF4bMQIIuCS50iUbABAjplDvQ2OlM2g6RTMavcas/4Je4dGfc+gN2gIWgJ2lyes69vbfHDTlT2rbfrZXVtfWNzUw2t7W9s7uXL+y3VBBJCk0a8EDeu0QBZwKammkO96EE4rsc2u7DZeq3xyAVC8SdnoTQ88lQMI9Roo3Uzx/GXeVhJjTIMYhUIxzLSCT9fNEu2VPgv8SZkyKao9EvWNnuIKCRb56hnCjVcexQ92IiNaMcklw3UhAS+kCG0DFUEB9UL55+IcEnRhlgL5DmCI2n6u+OmPhKTXzXVPpEj9Syl4r/eZ1Iexe9mIkw0iDobJAXcawDnOaBB0wC1XxiCKGSmV0xHRFJqElE5RbGPM52NeIAPJP39Br7E5rEt1f1JHaqzlmlfFaupOE5y1H9Ja1yyamWqjflYq0+jzGDjtAxOkUOOkc1dI0aqIkoekLP6AW9Wm/Wh/Vpfc1KV6x5zwFagPX9A/t+q3c=</latexit> 
+
+interventional run <latexit sha1_base64="ZNkMyZrkKjghPg1T6NG9K1CbksY=">AAACOXicbZDJSgNBEIZ74pbELdGL4KUxCB5CmIkQPUo86DGKWSAJoadTExt7eoZexDCMT+NVX8An8ehNvPoCdpaDUQsa/vqriqr+/JgzpV33zcksLa+srmVz+fWNza3tQnGnpSIjKTRpxCPZ8YkCzgQ0NdMcOrEEEvoc2v7d+aTevgepWCRu9DiGfkhGggWMEm2tQWEv6akA08gIDTIgVBvCsTQiHRRKbsWdBv4rvLkooXk0BkUn1xtG1IQgNOVEqa7nxrqfEKkZ5ZDme0ZBTOgdGUHXSkFCUP1k+oUUH1pniINI2ic0nro/JxISKjUOfdsZEn2rftcm5n+1rtHBaT9hIjYaBJ0tCgzHOsITHnjIJFDNx1YQKpm9FdNbIi0JSy2/sOZhdqs1hxBY3tM0Ccc0Ta4v6mni1bzycbVcPZ7A836j+ita1YpXq9SuqqWz+hxjFu2jA3SEPHSCztAlaqAmougRPaFn9OK8Ou/Oh/M5a80485ldtBDO1zfbaqtl</latexit> 
+
+counterfactual run Figure 2: Counterfactual intervention in LLMs. 
+
+We denote the subset of components selected for treatment by H ⊆ C . To specify the com-ponents selected for treatment, we define {mi :
+
+i ∈ [N ]} such that mi ≜ 1{ci ∈ H} , where 1
+
+is the indicator function. Accordingly, we define 
+
+m ≜ (mi, . . . , m N ). In this context, a treatment involves intervening in these components by replac-ing specific attention weights or neuron activations with counterfactual ones obtained from a separate experiment. This procedure is described next. 
+
+Intervention via Mixture Forward. We formalize and perform a process referred to as a mixture for-ward pass to analyze how an intervention on the set 
+
+H propagates throughout the rest of the model com-ponents and eventually influences a target metric. This process is demonstrated in Figure 2 and it is similar to activation patching when applied only to activations (Davies et al., 2023). For this purpose, we specify the following two word-generation pro-cesses. 1. Counterfactual Run: Corresponding to a given 
+
+s, we create a counterfactual prompt, denoted by s′, by modifying some of the elements of the prompt s (e.g., altering a word in the prompt or adding noise to word embeddings). This modi-fied prompt generates a new set of hidden states 
+
+g′ and h′, which are related according to (5). 2. Interventional Run: Given a prompt s and its associated counterfactual s′ and a set of com-ponents H, we create an intervention by replac-ing the hidden states {hi : mi = 1 , i ∈ [N ]}
+
+with those associated with s′, i.e., {h′
+
+i : mi =1, i ∈ [N ]}. These changes, in turn, induce changes in all the downstream component states, distinct from those associated with s and s′. To emphasize this, we define ¯gi and ¯hi as the post-intervention hidden states of the components. We note that the state transformation functions 
+
+{fi : i ∈ [N ]} remain unchanged. Hence, 
+
+¯hi ≜ (1 − mi) · fi(¯ gi) + mi · h′
+
+i , (6) Finally, similarly to vt and vt, we define ut and 
+
+ut as the sequence generated by the interventional run and denote the associated conditional PMF in the interventional run and the average conditional PMF over the interval {t, . . . , t + d} by 
+
+Pu
+
+t (ut) ≜ Pθ(ut | ut−1, m) , (7) 
+
+¯Pu
+
+t:d(ut+d) ≜ 1
+
+d + 1 
+
+dX
+
+i=0 
+
+Pu
+
+t+i(ut+i) . (8) Throughout the rest of the paper, we refer to Pv
+
+t
+
+and Pu
+
+t as the observational and interventional dis-tributions, respectively. 
+
+Example 1 (Gender bias.) Consider the example of gender bias similar to the one in Figure 2, in which we have the prompt s =“The technician told the customer that she” . The counterfactual intervention replaces “ she ” with “ he ”, producing the counterfactual prompt s′ =“The technician told the customer that he ”. A model without a gender bias is desired to treat the two profession-related candidates, a stereotypical one x =“could pay with cash. ” and an anti-stereotypical one y = “ had completed the repair. ”, equally in completion prob-abilities. Specifically, it is desirable to have 
+
+¯Pv
+
+t:d(x) = ¯Pv
+
+t:d(y) . (9) In this context, to quantify the bias, one can use the conditional likelihood ratio of generating x ver-sus y (Vig et al., 2020b), i.e., 
+
+Pθ(y | s)  Pθ(x | s) . (10) When this ratio is smaller (larger) than 1, the model behaves stereotypically (anti-stereotypically), and when the ratio is 1, it is considered unbiased. Lever-aging this notion of unbiasedness, we can set the metric ℓ as follows       
+
+> ℓv,u(s,x,y) = ¯Pu
+> |s|+1: |y|(y)/¯Pu
+> |s|+1: |x|(x)¯Pv
+> |s|+1: |y|(y)/¯Pv
+> |s|+1: |x|(x)−1.(11)
+
+The value ℓv,u(s, x, y) = 0 means that the selected components do not affect gender bias; 
+
+ℓv,u(s, x, y) > 0 indicates that they store stereo-type information; and ℓv,u(s, x, y) < 0 indicates that they store anti-stereotype information. 
+
+Example 2 (Knowledge Localization.) Con-sider the setting in which we seek to identify the critical components that enable the LLM to answer knowledge-based questions. For example, consider the prompt s = “Steve Jobs was the founder of” with the desired output being that the model assigns full probability to x =“Apple” :
+
+Pθ(x | s) = 1 . (12) For this example, the counterfactual run is gener-ated by adding a large of noise to the embedding layer, disrupting knowledge retrieval. Hence, an objective can be to measure how well the model an-swers the question based on the stored knowledge in its components, and the metric ℓv,u(s, x, y) can be used to do so. Apart from the ratio metric used in Example 1, another alternative is 
+
+ℓv,u(s, x, y) = ¯Pv
+
+> |s|+1:0
+
+(x) − ¯Pu
+
+> |s|+1:0
+
+(x) . (13) In this case, we only have one continuation x.Higher values of ℓv,u(s, x, y) indicate that the com-ponents intervened in H are crucial for knowledge retention, while a low ℓv,u(s, x, y) suggests that these components do not store factual information. 
+
+Causal Tracing Objective. The objective is to identify a set of at most S ∈ Z+ components that have the highest joint contribution to a metric of interest. To formalize, denote the available dataset by D ≜ {si, xi, yi}Mi=1 , where each si is an origi-nal input sentence, and xi and yi are two possible continuations for it. Given D, the set of intervened components specified by m, and the associated ob-servational and interventional distributions Pv 
+
+> t
+
+and 
+
+Pu 
+
+> t
+
+, we define the average metric 
+
+ℓ(D, m) ≜ 1
+
+M
+
+> M
+
+X
+
+> i=1
+
+ℓv,u(si, xi, yi) . (14) Hence, the objective of causal tracing is 
+
+max  
+
+> m∈{ 0,1}N
+
+ℓ(D, m) s.t. ∥m∥0 ≤ S , (15) where the sparsity parameter S ∈ Z+ is a pre-specified constraint chosen by the user, which can be set according to the user’s practical needs and constraints. This constraint ensures greater inter-pretability by isolating a small, meaningful subset of model components for targeted analysis and for later knowledge editing or fine-tuning. We note that when S = 1 , the problem reduces to a single-component causal tracing problem that has already been investigated. We define SN as the sparsity level 
+
+of an intervention. The problem can also be cast as selecting a minimum-cardinality subset achieving a target performance, and our algorithm can handle both formulations. 
+
+Theorem 1 (Search Complexity) Given positive integer N and S, the size of the search space in 
+
+(15) , denoted by CN (S), scales as follows. 1. S is a fixed constant: CN (S) grows polynomi-ally in N , i.e., CN (S) = O N S  .2. S is proportional to N : when S = αN for a constant α ∈ (0 , 1) , CN (S) grows asymptoti-cally on the order of O 2N /√N  .
+
+4 Penalized Gradient-based Causal Tracing ( PGB-CT )
+
+As specified by Theorem 1, the discrete search space for the problem defined in (15) is prohibitive even for the smallest models, in which N can be in the order of 10 4. To circumvent this search com-plexity, we design the Penalized Gradient-Based 
+
+Causal Tracing (PGB-CT) algorithm. At its core, this algorithm converts the discrete problem into a continuous one, incorporates an appropriate reward transformation to prevent exploding gradients, and adds a regularization function. The algorithm stops when the desired sparsity parameter S is achieved. Next, we describe the key ideas of the algorithm. The algorithm is summarized in Algorithm 1 in Appendix B. 
+
+Continuous Relaxation. To circumvent the com-binatorial complexity of the search space, we relax the original subset selection into a soft subset se-lection framework. That is, the masking vector m
+
+falls in the continuous space [0 , 1] N . Under this re-laxation, mi = 1 specifies full intervention on com-ponent ci, where the hidden states are replaced by the counterfactual ones. In contrast, mi = 0 speci-fies no intervention on ci, and the post-intervention hidden states of ci is computed as ¯hi = fi(¯ gi). Be-sides these extreme cases, mi ∈ (0 , 1) indicates a linear mixing of two states using (6) , and we use the same set of notations for conditional probabili-ties and metrics. 
+
+Transformed Reward. Based on the discussion above, the penalized counterpart of the original problem in (14) with a continuous relaxation be-comes 
+
+max  
+
+> m∈[0 ,1] N
+
+ℓ(D, m) − reg (m) , (16) where reg (m), specified in the next paragraph, is a penalty term that encourages binary and sparse solutions. We note that, in practice, the met-ric ℓ(D, m) can be unbounded (e.g., in (11) ), which can lead to unbounded gradients and is not amenable to gradient-based optimization. To ad-dress this, we apply an inverse transformation to the metric to maintain stable gradient behavior and solve the following problem.          
+
+> min
+> m∈[0 ,1] NL(D,m)≜11 + ℓ(D,m) +reg (m).
+
+(17) 
+
+Scheduled Penalty Function. A standard regular-ization approach involves penalizing the ℓ0 norm to control the sparsity. However, the ℓ0 norm is not differentiable and often yields values between 
+
+0 and 1, causing performance degradations when binarized. To address this, we introduce the follow-ing penalty term, which encourages binary mask-ing: 
+
+reg (m) = λ1∥m∥1 + λ2m⊤(1 − m) , (18) where λ1, λ 2 ∈ R+ are regularization parameters and 1 is an all-one vector. The first term serves as an approximation for the ℓ0 norm, while the second term penalizes non-binary values. This term is maximized when m = 0 .5 · 1 and becomes zero when m is binary. The choice of the penalty term is motivated by the behavior of its gradient. As we restrict the values of each {mi} to be within 
+
+[0 , 1] , the gradient of the regularization term takes the form 
+
+∇reg (m) = λ2
+
+ 1 − λ1
+
+λ2
+
+1 − 2m
+
+
+
+. (19) This gradient involves a directional force imposed by the term −2m: if 2mi > 1 − λ1 
+
+> λ2
+
+, it encourages 
+
+mi to move toward 1; and if 2mi < 1 − λ1 
+
+> λ2
+
+, it en-courages mi to move toward 0. Hence, the encour-aged direction is specified by λ1/λ 2. To prevent early convergence to suboptimal local minima, we adopt a dynamic scheduling strategy for the regular-ization parameters λ1 and λ2, gradually increasing their values throughout training. Desired sparsity and binarity are guaranteed when both regulariza-tion parameters are large enough. This encourages the optimizer to explore more broadly in the early stages and remove the components gradually. We note that the penalty function we design does not include S.
+
+Gradient Descent and Discretization. Finally, we adopt gradient descent to minimize L(D, m) in (17) . We denote the value of m in iteration t of gradient descent with truncation by mt, and it is computed as follows: 
+
+mt+1 = mt − ηt∇L t(D, mt) , (20) 
+
+mt+1 = min {max {mt+1 , 0}, 1} , (21) where ηt is the learning rate in iteration t and Lt
+
+is the loss function calculated based on mt and mini-batch. We apply truncation to obtain a binary mask by a threshold τ and check the sparsity after each epoch: 
+
+Ht+1 = {ci ∈ [N ] : mt+1 ,i > τ } , (22) where mt+1 = ( mt+1 ,1 . . . , m t+1 ,N ). The algo-rithm then measures the sparsity of H and stops when |H t+1 | ≤ S. In our experiments, we observe that setting τ = 0 .5 gives good performance across various datasets. We note that the Desiderata-based Component Masking (DCM) algorithm (Davies et al., 2023) also relies on soft masking and gradient-based opti-mization, but differs from our approach in both its reward formulation and regularization design. 
+
+Reward: DCM uses the raw metric ℓ(D, m) di-rectly as the reward, without any transformation such as 11+ ℓ(D,m) , and is applied only to activation-layer components with respect to next-token tar-get probabilities. Using raw metrics can make optimization harder to calibrate, since different metrics may have very different scales, and even the same metric may vary in scale across training stages (e.g., when considering MLP neuron ratios in Figures 4 and 5). As a result, it becomes more difficult to choose and interpret a consistent regu-larization strength across settings. In contrast, our transformed reward 11+ ℓ(D,m) keeps the objective within a more stable numerical range, which em-pirically makes regularization tuning more robust across metrics and experiments. 
+
+Penalty function: DCM adopts the ℓ0.5 regulariza-tion of Louizos et al. (2018), a continuous approx-imation to an ℓ0 penalty that encourages sparsity by penalizing nonzero values. However, it does not explicitly penalize “binary violation” (mask values near 0.5). In PGB-CT, our penalty combines an 
+
+ℓ1 term with a term proportional to m(1 − m),which directly penalizes values away from {0, 1}
+
+and thus encourages masks to be close to binary throughout optimization. We later demonstrate the effectiveness of our design in PGB-CT. 
+
+5 Experimental Results 
+
+We present our experimental setup and compare PGB-CT against several baseline approaches. The detailed description of datasets, baselines, and pa-rameter selections is relegated to Appendix C, and the additional experiments with further discussions to Appendix D. 
+
+5.1 Experiment Setup Models. Following the causal tracing study in Vig et al. (2020b), we focus on the GPT2 family of LLMs (Radford et al., 2019) and consider the fol-lowing model sizes (Wolf et al., 2019): small, medium, large, and xl, and a distilled GPT model trained by Sanh et al. (2019). In addition, we report results for more modern architectures with a com-parable number of parameters: Qwen3-1.7B (Yang et al., 2025) and Llama3.2-1B (Llama Team, 2024). We also use LLaMA-7B and LLaMA-13B (Tou-vron et al., 2023) to compare to DCM in their ex-periment setting. 
+
+Datasets. Following previous studies (Vig et al., 2020b; Meng et al., 2022), we evaluate our algo-rithm on four datasets: two with attention weights as the candidate components and two with MLP neurons. We include further details about each dataset in Appendix C.2. We also include experi-ments on the Variable Binding Desiderata (VBD) dataset (Davies et al., 2023) to demonstrate the effectiveness of our algorithm in simultaneously identifying attention heads and MLPs. 
+
+Baselines. We compare PGB-CT against three baseline algorithms (details in Appendix C.3.): 
+
+top-k selection and greedy selection algorithms, used by Vig et al. (2020b) to generalize single-component S = 1 algorithms to the same multi-component problem in (15) . We also include ran-dom selection , which identifies the best one among randomly sampled 1000 candidates of sparsity S,to serve as a baseline for execution time. We addi-tionally evaluate the Desiderata-based Component Masking (DCM) algorithm (Davies et al., 2023), but we found that it consistently failed in practice; further details are provided in Appendix D.5. All experiments are run on a single NVIDIA A6000 GPU, and we report the execution time for each al-gorithm. All algorithms have well-defined stopping criteria, except for the greedy algorithm, for which execution time is measured when the algorithm achieves 40% sparsity. In some settings, the run-times of the top-k and greedy algorithms become excessively large. We omit these results when the runtimes exceed 2 days. 
+
+5.2 Numerical Results on Attention Heads Attention Heads. Table 1 summarizes the results on the WinoGender and WinoBias datasets when intervening on attention heads at various sparsity levels. To provide a more meaningful and compa-rable measure of “what fraction of the model” is being used across architectures and model sizes, we use the sparsity level S/N , where N is the total number of components. We report the average per-formance metric ℓ(D, m) and the execution time in minutes. The best and second-best results are highlighted in bold and underlined , respectively. Figure 3 shows how the performance metric varies with the number of attention heads selected by three algorithms on GPT2-small (left) and highlights the heads selected at 20% sparsity (right). Our main observations from these results are as follows: • Averaged metric. Across all models and spar-sity levels, PGB-CT yields higher ℓ(D, m) val-ues compared to the top-k algorithm and is com-parable to the greedy algorithm, demonstrating its ability to find the influential attention heads. Furthermore, as the model size grows, the gap between the top-k and greedy or our method in-creases, showing that top-k does not scale well. • Execution time. PGB-CT significantly reduces the execution time compared to both the greedy and random selection algorithms and becomes faster than top-k as the model size increases (larger than GPT2-medium). This performance advantage holds because the top-k algorithm requires a forward pass for every component across all samples, and the greedy algorithm is even worse in this sense. In contrast, PGB-CT’s execution time does not explicitly depend on the size of the search space; its only additional cost is due to the longer forward and backward passes inherent in larger LLMs. However, it still uses fewer samples than the random algorithm. Model Dataset WinoGender WinoBias Sparsity S/N Time Sparsity S/N Time 10% 20% 30% 40% minutes 10% 20% 30% 40% minutes DistilGPT2 random 0.0082 0.0093 0.0091 0.0100 2.23 0.0128 0.0146 0.0146 0.0160 6.55 top-k 0.0100 0.0117 0.0123 0.0128 0.18 0.0157 0.0171 0.0178 0.0181 0.47 
+
+greedy 0.0103 0.0122 0.0134 0.0140 3.57 0.0159 0.0176 0.0186 0.0192 10.62 PGB-CT 0.0103 0.0118 0.0130 0.0137 0.43 0.0159 0.0174 0.0181 0.0190 1.44 GPT2-small random 0.027 0.032 0.036 0.037 3.54 0.080 0.096 0.100 0.103 10.25 top-k 0.037 0.041 0.042 0.044 0.50 0.108 0.111 0.113 0.114 1.49 
+
+greedy 0.040 0.045 0.049 0.050 23.03 0.111 0.116 0.119 0.120 68.42 PGB-CT 0.039 0.044 0.048 0.049 0.79 0.109 0.115 0.117 0.119 2.61 GPT2-medium random 0.138 0.153 0.165 0.173 7.23 0.190 0.247 0.305 0.336 21.45 top-k 0.191 0.201 0.203 0.205 2.76 0.374 0.378 0.389 0.388 8.18 greedy 0.208 0.224 0.232 0.237 357.28 0.391 0.406 0.415 0.420 1001.50 PGB-CT 0.203 0.218 0.227 0.233 1.56 0.381 0.394 0.401 0.404 5.32 
+
+GPT2-large random 0.085 0.099 0.111 0.128 13.43 0.164 0.216 0.262 0.297 36.8 top-k 0.146 0.159 0.165 0.168 9.46 0.353 0.357 0.361 0.364 26.07 PGB-CT 0.152 0.171 0.184 0.192 2.43 0.356 0.370 0.375 0.383 8.10 
+
+GPT2-xl random 0.047 0.078 0.094 0.098 24.83 0.221 0.393 0.442 0.460 64.98 top-k 0.155 0.175 0.186 0.188 29.38 0.523 0.531 0.536 0.539 62.85 PGB-CT 0.159 0.190 0.205 0.212 3.45 0.546 0.563 0.567 0.576 11.32 
+
+Qwen3-1.7B random 0.032 0.035 0.041 0.038 29.36 0.064 0.073 0.077 0.085 75.38 top-k 0.041 0.042 0.045 0.044 13.01 0.089 0.090 0.091 0.092 31.97 PGB-CT 0.042 0.046 0.048 0.050 3.21 0.090 0.094 0.096 0.097 9.39 
+
+Llama-3.2-1B random 0.326 0.383 0.387 0.418 20.71 0.322 0.326 0.325 0.351 51.16 top-k 0.450 0.416 0.400 0.366 10.31 0.279 0.358 0.386 0.415 26.57 PGB-CT 0.366 0.444 0.477 2.449 1.90 0.752 1.007 1.766 2.747 5.82 
+
+Table 1: Averaged metric ℓ(D, m) and execution time on the WinoGender and WinoBias datasets for selecting attention heads across different sparsity levels, algorithms, and LLMs. The best and second-best results are highlighted in bold and underlined, respectively. 0 50 100 150 
+
+Number of attention heads 
+
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> Gender bias measure
+> PGB-CT
+> top-k
+> greedy
+> model level
+
+0 3 6 9
+
+Heads 
+
+> 0246810
+> Layers
+
+PGB-CT 
+
+0 3 6 9
+
+Heads 
+
+top-k
+
+0 3 6 9
+
+Heads 
+
+greedy 
+
+Figure 3: Results of attention heads from GPT2-small on the WinoBias dataset. Left: Gender bias measure vs. number of attention heads. Right: Selected attention heads with 20% sparsity. 
+
+• Components selection. The attention heads se-lected by PGB-CT have a higher Jaccard simi-larity to those chosen by the greedy algorithm (0.64) than to those selected by the top -k algo-rithm (0.44). Also, both PGB-CT and the greedy algorithm favor the first layer while avoiding layer 10, and differ only in 3 components. 
+
+MLP Neurons. Figures 4 and 5 extend these find-ings to interventions on MLP neurons using the Professions and CounterFact datasets. Our key findings are as follows. • Averaged metric. PGB-CT achieves signifi-cantly higher metric values ℓ(D, m) compared to both random and top-k baseline algorithms across different models and sparsity levels. Furthermore, under PGB-CT, the metric in-creases almost exponentially after top-k reaches a plateau. (Figure 4 left). Complete compar-isons are provided in Table 4 and Table 5 in Ap-pendix D.2. This demonstrates a superior ability to identify critical sets of MLP neurons. • Execution time. Figure 5 (right) shows that the PGB-CT algorithm reduces the execution time from several hours in the baseline algorithms to only a few minutes, thereby enabling efficient exploration for multi-component causal tracing in large LLMs. • Components selection. Figure 4 (right) shows the difference in selected neurons for top-k and PGB-CT. PGB-CT tends to select more in the first layer, while top-k relies more on later layers. 0 5000 10000 15000 20000 25000 
+
+Number of neurons 
+
+> 10 −2
+> 10 1
+> 10 4
+> 10 7
+> 10 10
+> Gender bias measure
+> PGB-CT
+> top-k
+> model level 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+
+Layers 
+
+PGB-CT 
+
+top-k
+
+0.0 
+
+0.2 
+
+0.4 Figure 4: Results of selecting MLP neurons on the Professions dataset with GPT2-medium. Left: Gender bias vs. number of neurons. Right: Fraction of Selected neurons in each layer with 5% sparsity. 0 1000 2000 3000 4000 
+
+Number of neurons 
+
+> 10 −2
+> 10 0
+> 10 2
+> 10 4
+> Factual measure  PGB-CT
+> top-k
+> model level DistilGPT2
+> GPT2-small
+> GPT2-medium
+> GPT2-large
+> GPT2-xl
+> 0
+> 10 0
+> 10 1
+> Time (hours)
+> Professions
+> random
+> top-k
+> PGB-CT
+> DistilGPT2
+> GPT2-small
+> 0
+> 10 0
+> 10 1
+> Time (hours)
+> CounterFact
+
+Figure 5: Left: Results of Factual locating measure vs. number of MLP neurons on the CounterFact dataset with distilGPT2. Right: Execution time for different algorithms on Professions and CounterFact datasets. 0.0 2.5 5.0 7.5 10.0 12.5 15.0 17.5 20.0 
+
+> Number of Components
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Value
+> Opration
+
+Figure 6: Results on the VBD dataset under two com-peting accuracy with LLaMA-13B. 
+
+Attention Heads with MLP Neurons. 
+
+We find that a straightforward joint analysis is challenging because when all attention heads and MLP neurons are treated as a single pool of com-ponents, the model tends to select MLPs almost exclusively, even at extremely low sparsity. This effect arises due to two factors: • The number of MLP neurons is far larger than the number of attention heads (e.g., 24,576 versus 384 in GPT2-medium); • The combined effect of MLP neurons is much stronger than that of attention heads (i.e., MLP interventions dominate). To gain better insight and move beyond the dom-inance of MLP neurons, we perform group inter-ventions as in Davies et al. (2023). Specifically, we group the neurons in each layer into a single com-ponent. This results in a number of neuron groups that is comparable to the number of attention heads. In this setting, the algorithm can effectively find the combination of attention heads and MLP blocks. Following this insight, we conducted experiments jointly analyzing attention heads and whole MLP blocks , and scaled them up to LLaMA-13B, which contains 1,400 attention heads and 40 blocks. The results are presented in Figure 6 (see a similar re-sult on LLaMA-7B in Appendix D.8). Importantly, our algorithm successfully identifies effective com-binations of attention heads and MLPs. When the sparsity level is S = 10 , we find the following combination: Attention Heads 11.11, 12.7, 15.11, 15.25, 16.1, 18.18, 19.25, 21.13, and MLP blocks 5, 6. 
+
+6 Discussion and Conclusion 
+
+In this paper, we presented a unified framework for causal tracing across multiple components within LLMs. To tackle the combinatorial search space, we proposed a method that reduces the compu-tational burden while achieving high metric val-ues, providing empirical insights into how key model components collectively influence perfor-mance. Taken together, our results illuminate sig-nificant patterns in how LLMs process information, setting a new foundation for future research. Limitations 
+
+While our approach efficiently handles a wide range of scenarios and metrics, it currently as-sumes that a single fixed target metric or objec-tive is specified in advance for the finite dataset. In addition, our algorithm requires hyperparame-ter tuning to ensure the desired sparsity. Finally, due to the limitation of computational resources and the inefficiency of baselines, our experiments focus primarily on English datasets and the GPT architecture and other architectures like Llama and Qwen of similar size; further research is needed to validate the generalizability of our methods across different languages, model families, param-eter sizes, and tasks with highly specialized or domain-specific objectives. The PGB-CT algo-rithm uses gradient-descent-based modules, and the optimization method can be replaced with other methods of interest in a modular way. Gradient descent has many hyperparameters, such as batch size, learning rate schedule, and optimizer choice, which typically require tuning. Although gradient descent has been highly successful in practice, it does not guarantee convergence to a global mini-mum. 
+
+Acknowledgments 
+
+This work was supported in part by the Rensselaer-IBM Future of Computing Research Collaboration (FCRC) and the US National Science Foundation Center for Research toward Advancing Financial Technologies. 
+
+References 
+
+Isabelle Augenstein, Timothy Baldwin, Meeyoung Cha, Tanmoy Chakraborty, Giovanni Luca Ciampaglia, David Corney, Renee DiResta, Emilio Ferrara, Scott Hale, Alon Halevy, Eduard Hovy, Heng Ji, Filippo Menczer, Ruben Miguez, Preslav Nakov, Dietram Scheufele, Shivam Sharma, and Giovanni Zagni. 2024. Factuality challenges in the era of large lan-guage models and opportunities for fact-checking. 
+
+Nature Machine Intelligence , 6(8):852–863. Tolga Bolukbasi, Kai-Wei Chang, James Y Zou, Venkatesh Saligrama, and Adam T Kalai. 2016. Man is to computer programmer as woman is to home-maker? debiasing word embeddings. In Proc. Ad-vances in Neural Information Processing Systems ,Barcelona, Spain. Trenton Bricken, Adly Templeton, Joshua Batson, Brian Chen, Adam Jermyn, Tom Conerly, Nick Turner, Cem Anil, Carson Denison, Amanda Askell, Robert Lasenby, Yifan Wu, Shauna Kravec, Nicholas Schiefer, Tim Maxwell, Nicholas Joseph, Zac Hatfield-Dodds, Alex Tamkin, Karina Nguyen, and 6 others. 2023. Towards monosemanticity: Decompos-ing language models with dictionary learning. Trans-former Circuits Thread. Yuchen Cai, Ding Cao, Rongxi Guo, Yaqin Wen, Gui-quan Liu, and Enhong Chen. 2024. Locating and mitigating gender bias in large language models. In 
+
+Proc. International Conference on Intelligent Com-puting , Tianjin, China. Canyu Chen, Baixiang Huang, Zekun Li, Zhaorun Chen, Shiyang Lai, Xiongxiao Xu, Jia-Chen Gu, Jin-dong Gu, Huaxiu Yao, Chaowei Xiao, Xifeng Yan, William Yang Wang, Philip Torr, Dawn Song, and Kai Shu. 2026. Can editing LLMs inject harm? In 
+
+Proc. AAAI Conference on Artificial Intelligence , Sin-gapore, Singapore. Hanjie Chen, Guangtao Zheng, and Yangfeng Ji. 2020. Generating hierarchical explanations on text classifi-cation via feature interaction detection. In Proc. An-nual Meeting of the Association for Computational Linguistics , Online. Bilal Chughtai, Lawrence Chan, and Neel Nanda. 2023. A toy model of universality: Reverse engineering how networks learn group operations. In Proc. Inter-national Conference on Machine Learning , Honolulu, HI. Kevin Clark, Urvashi Khandelwal, Omer Levy, and Christopher D. Manning. 2019. What does BERT look at? an analysis of BERT‘s attention. In Proc. ACL Workshop BlackboxNLP: Analyzing and Inter-preting Neural Networks for NLP , Florence, Italy. Arthur Conmy, Augustine Mavor-Parker, Aengus Lynch, Stefan Heimersheim, and Adrià Garriga-Alonso. 2023. Towards automated circuit discovery for mech-anistic interpretability. In Proc. Advances in Neural Information Processing Systems , New Orleans, LA. Hoagy Cunningham, Aidan Ewart, Logan Riggs, Robert Huben, and Lee Sharkey. 2024. Sparse autoencoders find highly interpretable features in language mod-els. In Proc. International Conference on Learning Representations , Vienna, Austria. Xander Davies, Max Nadeau, Nikhil Prakash, Tamar Rott Shaham, and David Bau. 2023. Discov-ering variable binding circuitry with desiderata. In 
+
+Proc. International Conference on Machine Learning Workshop on Challenges in Deployable Generative AI , Honolulu, HI. Nelson Elhage, Neel Nanda, Catherine Olsson, Tom Henighan, Nicholas Joseph, Ben Mann, Amanda Askell, Yuntao Bai, Anna Chen, Tom Conerly, and 1 others. 2021. A mathematical framework for trans-former circuits. Transformer Circuits Thread. Javier Ferrando, Gabriele Sarti, Arianna Bisazza, and Marta R Costa-jussà. 2024. A primer on the in-ner workings of transformer-based language models. 
+
+Preprint , arXiv:2405.00208. Atticus Geiger, Hanson Lu, Thomas Icard, and Christo-pher Potts. 2021. Causal abstractions of neural net-works. In Proc. Advances in Neural Information Processing Systems , Online. Atticus Geiger, Kyle Richardson, and Christopher Potts. 2020. Neural natural language inference models par-tially embed theories of lexical entailment and nega-tion. In Proc. BlackboxNLP Workshop on Analyzing and Interpreting Neural Networks for NLP , Online. Atticus Geiger, Zhengxuan Wu, Hanson Lu, Josh Rozner, Elisa Kreiss, Thomas Icard, Noah Good-man, and Christopher Potts. 2022. Inducing causal structure for interpretable neural networks. In Proc. International Conference on Machine Learning , Bal-timore, MD. Mor Geva, Avi Caciularu, Kevin Ro Wang, and Yoav Goldberg. 2022. Transformer feed-forward layers build predictions by promoting concepts in the vocab-ulary space. In Proc. Conference on Empirical Meth-ods in Natural Language Processing , Abu Dhabi, United Arab Emirates. Mor Geva, Roei Schuster, Jonathan Berant, and Omer Levy. 2021. Transformer feed-forward layers are key-value memories. In Proc. Conference on Empiri-cal Methods in Natural Language Processing , Punta Cana, Dominican Republic. Michael Hanna, Sandro Pezzelle, and Yonatan Belinkov. 2024. Have faith in faithfulness: Going beyond cir-cuit overlap when finding model mechanisms. In 
+
+Proc. Conference on Language Modeling , Philadel-phia, PA. Peter Hase, Mohit Bansal, Been Kim, and Asma Ghan-deharioun. 2023. Does localization inform editing? surprising differences in causality-based localization vs. knowledge editing in language models. In Proc. Advances in Neural Information Processing Systems ,New Orleans, LA. Xue Jiang, Yihong Dong, Lecheng Wang, Zheng Fang, Qiwei Shang, Ge Li, Zhi Jin, and Wenpin Jiao. 2024. Self-planning code generation with large language models. ACM Transactions on Software Engineering and Methodology , 33(7):1–30. Amir-Hossein Karimi, Gilles Barthe, Bernhard Schölkopf, and Isabel Valera. 2022. A survey of algorithmic recourse: contrastive explanations and consequential recommendations. ACM Computing Surveys , 55(5):1–29. Kenneth Li, Oam Patel, Fernanda Viégas, Hanspeter Pfister, and Martin Wattenberg. 2023. Inference-time intervention: Eliciting truthful answers from a lan-guage model. In Proc. Advances in Neural Informa-tion Processing Systems , New Orleans, LA. AI @ Meta Llama Team. 2024. Llama 3.2: Revolution-izing edge AI and vision with open, customizable models. ai.meta.com. Christos Louizos, Max Welling, and Diederik P. Kingma. 2018. Learning sparse neural networks through L0
+
+regularization. In Proc. International Conference on Learning Representations , Vancouver, Canada. Kaiji Lu, Piotr Mardziel, Fangjing Wu, Preetam Aman-charla, and Anupam Datta. 2020. Gender bias in neural natural language processing. In Logic, lan-guage, and security: Essays dedicated to Andre Sce-drov on the occasion of his 65th birthday , volume 12300, pages 189–202. Springer, Switzerland. Haoyan Luo and Lucia Specia. 2024. From understand-ing to utilization: A survey on explainability for large language models. Preprint , arXiv:2401.12874. Kevin Meng, David Bau, Alex Andonian, and Yonatan Belinkov. 2022. Locating and editing factual associa-tions in GPT. In Proc. Advances in Neural Informa-tion Processing Systems , New Orleans, LA. Kevin Meng, Arnab Sen Sharma, Alex Andonian, Yonatan Belinkov, and David Bau. 2023. Mass-editing memory in a transformer. In Proc. Inter-national Conference on Learning Representations ,Kigali, Rwanda. Ali Modarressi, Mohsen Fayyaz, Yadollah Yaghoobzadeh, and Mohammad Taher Pile-hvar. 2022. GlobEnc: Quantifying global token attribution by incorporating the whole encoder layer in transformers. In Proc. Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies , Seattle, WA. Hosein Mohebbi, Willem Zuidema, Grzegorz Chrupała, and Afra Alishahi. 2023. Quantifying context mixing in transformers. In Proc. Conference of the European Chapter of the Association for Computational Lin-guistics , Dubrovnik, Croatia. Catherine Olsson, Nelson Elhage, Neel Nanda, Nicholas Joseph, Nova DasSarma, Tom Henighan, Ben Mann, Amanda Askell, Yuntao Bai, Anna Chen, and 1 oth-ers. 2022. In-context learning and induction heads. 
+
+Preprint , arXiv:2209.11895. Lucas Monteiro Paes, Dennis Wei, Hyo Jin Do, Hendrik Strobelt, Ronny Luss, Amit Dhurandhar, Manish Na-gireddy, Karthikeyan Natesan Ramamurthy, Prasanna Sattigeri, Werner Geyer, and Soumya Ghosh. 2025. Multi-level explanations for generative language models. In Proc. Annual Meeting of the Association for Computational Linguistics , Vienna, Austria. Judea Pearl. 2022. Direct and indirect effects. In Prob-abilistic and causal inference: the works of Judea Pearl , pages 373–392. Association for Computing Machinery, New York, NY. Fabio Petroni, Tim Rocktäschel, Patrick Lewis, An-ton Bakhtin, Yuxiang Wu, Alexander H Miller, and Sebastian Riedel. 2019. Language models as knowl-edge bases? In Proc. Conference on Empirical Methods in Natural Language Processing and In-ternational Joint Conference on Natural Language Processing , Hong Kong, Hong Kong. Nikhil Prakash, Tamar Rott Shaham, Tal Haklay, Yonatan Belinkov, and David Bau. 2024. Fine-tuning enhances existing mechanisms: A case study on en-tity tracking. In Proc. International Conference on Learning Representations , Vienna, Austria. Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, and Ilya Sutskever. 2019. Language models are unsupervised multitask learners. OpenAI technical report. Rachel Rudinger, Jason Naradowsky, Brian Leonard, and Benjamin Van Durme. 2018. Gender bias in coreference resolution. In Proc. Conference of the North American Chapter of the Association for Com-putational Linguistics: Human Language Technolo-gies , New Orleans, LA. Victor Sanh, L Debut, J Chaumond, and T Wolf. 2019. DistilBERT, a distilled version of BERT: Smaller, faster, cheaper and lighter. Preprint ,arXiv:1910.01108. Harshay Shah, Andrew Ilyas, and Aleksander Madry. 2024. Decomposing and editing predictions by mod-eling model computation. In Proc. International Con-ference on Machine Learning , Vienna, Austria. Emily Sheng, Kai-Wei Chang, Premkumar Natarajan, and Nanyun Peng. 2021. Societal biases in language generation: Progress and challenges. In Proc. An-nual Meeting of the Association for Computational Linguistics and International Joint Conference on Natural Language Processing , Online. Sandipan Sikdar, Parantapa Bhattacharya, and Kieran Heese. 2021. Integrated directional gradients: Fea-ture interaction attribution for neural NLP models. In 
+
+Proc. Annual Meeting of the Association for Compu-tational Linguistics and International Joint Confer-ence on Natural Language Processing , Online. Aaquib Syed, Can Rager, and Arthur Conmy. 2023. Attribution patching outperforms automated circuit discovery. In Proc. Advances in Neural Information Processing Systems Workshop on Attributing Model Behavior at Scale , New Orleans, LA. Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timothée Lacroix, Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal Azhar, Aurelien Rodriguez, Armand Joulin, Edouard Grave, and Guillaume Lample. 2023. LLaMA: Open and efficient foundation language models. Preprint ,arXiv:2302.13971. Dave Van Veen, Cara Van Uden, Louis Blanke-meier, Jean-Benoit Delbrouck, Asad Aali, Christian Bluethgen, Anuj Pareek, Malgorzata Polacin, Ed-uardo Pontes Reis, Anna Seehofnerová, Nidhi Ro-hatgi, Poonam Hosamani, William Collins, Neera Ahuja, Curtis P. Langlotz, Jason Hom, Sergios Ga-tidis, John Pauly, and Akshay S. Chaudhari. 2024. Adapted large language models can outperform med-ical experts in clinical text summarization. Nature Medicine , 30(4):1134–1142. Jesse Vig, Sebastian Gehrmann, Yonatan Belinkov, Sharon Qian, Daniel Nevo, Simas Sakenis, Jason Huang, Yaron Singer, and Stuart Shieber. 2020a. Causal mediation analysis for interpreting neu-ral NLP: The case of gender bias. Preprint ,arXiv:2004.12265. Jesse Vig, Sebastian Gehrmann, Yonatan Belinkov, Sharon Qian, Daniel Nevo, Yaron Singer, and Stuart Shieber. 2020b. Investigating gender bias in language models using causal mediation analysis. In Proc. Ad-vances in Neural Information Processing Systems ,Online. Sandra Wachter, Brent Mittelstadt, and Chris Russell. 2017. Counterfactual explanations without opening the black box: Automated decisions and the gdpr. 
+
+Harvard Journal of Law & Technology , 31:841. Kevin Wang, Alexandre Variengien, Arthur Conmy, Buck Shlegeris, and Jacob Steinhardt. 2023. In-terpretability in the wild: a circuit for indirect ob-ject identification in GPT-2 small. In Proc. Inter-national Conference on Learning Representations ,Kigali, Rwanda. Youze Wang, Wenbo Hu, Yinpeng Dong, Jing Liu, Han-wang Zhang, and Richang Hong. 2025. Align is not enough: Multimodal universal jailbreak attack against multimodal large language models. IEEE Transactions on Circuits and Systems for Video Tech-nology .Thomas Wolf, Lysandre Debut, Victor Sanh, Julien Chaumond, Clément Delangue, Anthony Moi, Pier-ric Cistac, Tim Rault, Rémi Louf, Morgan Funtow-icz, Joe Davison, Sam Shleifer, Patrick von Platen, Clara Ma, Yacine Jernite, Julien Plu, Canwen Xu, Teven Le Scao, Sylvain Gugger, and 3 others. 2019. HuggingFace’s transformers: State-of-the-art natural language processing. Preprint , arXiv:1910.03771. Zhiheng Xi, Wenxiang Chen, Xin Guo, Wei He, Yiwen Ding, Boyang Hong, Ming Zhang, Junzhe Wang, Sen-jie Jin, Enyu Zhou, Rui Zheng, Xiaoran Fan, Xiao Wang, Limao Xiong, Yuhao Zhou, Weiran Wang, Changhao Jiang, Yicheng Zou, Xiangyang Liu, and 10 others. 2025. The rise and potential of large lan-guage model based agents: A survey. Science China Information Sciences , 68(2):121101. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, Chujie Zheng, Day-iheng Liu, Fan Zhou, Fei Huang, Feng Hu, Hao Ge, Haoran Wei, Huan Lin, Jialong Tang, and 41 others. 2025. Qwen3 technical report. Preprint ,arXiv:2505.09388. Biao Zhang, Barry Haddow, and Alexandra Birch. 2023. Prompting large language model for machine transla-tion: A case study. In Proc. International Conference on Machine Learning , Honolulu, HI. Fred Zhang and Neel Nanda. 2024. Towards best prac-tices of activation patching in language models: Met-rics and methods. In Proc. International Conference on Learning Representations , Vienna, Austria. Jieyu Zhao, Tianlu Wang, Mark Yatskar, Vicente Or-donez, and Kai-Wei Chang. 2018. Gender bias in coreference resolution: Evaluation and debiasing methods. In Proc. Conference of the North Amer-ican Chapter of the Association for Computational Linguistics: Human Language Technologies , New Orleans, LA. 
+
+A Difference from Circuit Analysis 
+
+Most circuit analysis methods (e.g., Chughtai et al. (2023); Wang et al. (2023); Conmy et al. (2023)) are designed for mechanism discovery on small, hand-crafted tasks , in which the goal is to recover a specific circuit and evaluate overlap with a ground-truth subgraph. In contrast, our goal is to optimize a dataset-level causal objective (e.g., a bias or fac-tuality metric), and there is no ground-truth circuit to compare against. Furthermore, the recent studies on efficient cir-cuit finding (e.g., (Syed et al., 2023; Hanna et al., 2024)) still typically operate at a much finer gran-ularity (e.g., edges or neuron-position pairs) and focus on metrics such as normalized faithfulness of the recovered circuit. Applying these methods as baselines in our setting would require substantial adaptation in the algorithm and would not yield a clean comparison to our metric. 
+
+B Pseudocode 
+
+Algorithm 1 presents the pseudocode for the pro-posed PGB-CT. This pseudocode outlines the key steps and training process of our approach. 
+
+C Additional experiment details 
+
+C.1 Model Dimension 
+
+Table 2 shows the configurations of various GPT and other models and specifies the corresponding number of components N used for attention heads and MLP neuron experiments. We notice that the Qwen model uses Grouped Query Attention (GQA), so we use the number of attention heads for Q as the number of attention heads in the model. 
+
+Algorithm 1 PGB-CT algorithm  
+
+> 1:
+
+Inputs: Language model f , dataset D, target metric ℓv,u(·), time steps T , sparsity level S,scheduler for λ1 and λ2 
+
+> 2:
+
+Initialization: Initialize weight vector m0, 
+
+> 3:
+
+set t = 0  
+
+> 4:
+
+while t ≤ T do  
+
+> 5:
+
+Sample a mini-batch Bt = {si, xi, yi}Bi=1 
+
+from the dataset D 
+
+> 6:
+
+Get hidden states {hi, ∈ [B]} using the prompts {si, i ∈ [B]} according to (5)  
+
+> 7:
+
+Get hidden states h′ using counterfactual prompts {s′
+
+> i
+
+, i ∈ [B]} according to (5)  
+
+> 8:
+
+Perform an interventional run to obtain ¯h
+
+according to (6)  
+
+> 9:
+
+Calculate the loss function L(D, mt) ac-cording to (17)  
+
+> 10:
+
+Update mt+1 according to (20)  
+
+> 11:
+
+Form the discretized set Ht+1 using (22)  
+
+> 12:
+
+Break if |H t+1 | ≤ S 
+
+> 13:
+
+end while 
+
+We note that GPT models are under the modified MIT License; DistilGPT2 and Qwen3 are under Apache 2.0; Llama 3.2 is under Llama 3.2 Commu-nity License; Llama is research-only, and there is no non-commercial license. 
+
+C.2 Dataset Details 
+
+Table 3 presents examples and the corresponding sample counts for each dataset. Additional details are summarized below. • WinoGender dataset. (Rudinger et al., 2018), under MIT license. Originating from the Winograd Schema Challenge, this dataset fea-tures sentences designed to test a model’s abil-ity to resolve ambiguous pronouns. For ex-ample, in the sentence “The trophy doesn’t fit in the suitcase because it is too small,” the pronoun “it” correctly refers to “suitcase.” The dataset extends this idea by incorporat-ing sentences where gendered pronouns (e.g., “he,” “she”) are linked to occupations or roles. Consider these examples: “The nurse finished their shift, and he went home” and “The doc-tor prescribed the medication, and she en-sured the patient took it.” This setup helps assess whether a model’s coreference reso-lution is influenced by pronoun gender. We follow the preprocessing protocol from Vig Model Layers Heads per layer Neurons per layer Total heads Total neurons                                              
+
+> DistilGPT2 612 768 72 4608 GPT2-small 12 12 768 144 9216 GPT2-medium 24 16 1024 384 24576 GPT2-large 36 20 1280 720 46080 GPT2-xl 48 25 1600 1200 76800 Qwen3-1.7B 28 16 2048 448 57344 Llama3.2-1B 16 32 2048 512 32768 LLaMA-7B 32 32 1 block 1024 32 blocks LLaMA-13B 40 40 1 block 1600 40 blocks
+
+Table 2: Specifications of LLMs on the number of attention heads and MLP neurons.                         
+
+> Dataset Name Example Entry Example Output # Samples
+> WinoGender s: The technician told the customer that she x: could pay with cash. 44
+> s′: The technician told the customer that he y: had completed the repair. WinoBias s: The chief gave the housekeeper a tip because she x: was helpful. 160/130
+> s′: The chief gave the housekeeper a tip because he y: was satisfied. Professions s: The nurse said that x: she 2873
+> s′: The man said that y: he CounterFact s: The Space Needle lies in downtown x: Seattle 200 ––VBD
+> s: x = 5, y = 2, x + y = –50/50 s′
+> 1: x = 4, y = 2, x + y = y1:6:
+> s′
+> 2: x = 5, y = 2, x - y = y2:7
+
+Table 3: Examples and Sample Counts for different datasets 
+
+et al. (2020b): omitting filtering and using the 
+
+bergsma start, yielding a total of 44 samples. • WinoBias. (Zhao et al., 2018), under MIT license. Like WinoGender, the WinoBias dataset examines gender bias in coreference resolution. However, it shifts the focus from mere pronoun probability predictions to ver-ifying that models correctly associate gen-dered pronouns with stereotypically linked professions. For instance, when presented with a sentence that mentions a typically male-associated profession (e.g., “doctor”) along-side a typically female-associated one (e.g., “nurse”), the model should assign “he” or “she” appropriately without bias. After ap-plying filtering criteria, the development split contains 160 samples and the test split con-tains 130 samples. Our experiments use the development set, as its stability has been noted in Vig et al. (2020b). • Professions dataset. (Vig et al., 2020b), un-der MIT License. This dataset is built on an expanded set of templates from Lu et al. (2020), combined with a list of professions from Bolukbasi et al. (2016), and is intended for neuron-level intervention analysis. The templates—formatted like “The [occupation] [verb] because”—were filtered following the approach in (Vig et al., 2020b) to avoid is-sues with sub-word tokenization. The result is a collection of 17 templates and 169 profes-sions, which together form 2,873 examples. • CounterFact. Following (Meng et al., 2022), this dataset comprises factual assertions repre-sented as tuples (s, r, o ), where s is a subject entity (e.g., Paris ), r denotes a binary relation (e.g., is located in ), and o is the corresponding object (e.g., France ). Each tuple encapsulates a specific fact about the world. To ensure that baseline models can run efficiently, we randomly subsample 200 examples from the full set to obtain a suitable sized dataset for evaluation. • Variable Binding Desiderata. (Davies et al., 2023), under MIT License. The Variable Binding Desiderata (VBD) dataset consists of 3-tuples (s, s′, y), where s is the original prompt, s′ is the counterfactual prompt, and 
+
+y is the target. Each prompt has the form “x = a, y = b, x {op} y =”, where a and b are random numbers and {op} is one of the op-erators in {+, −, ×, ÷} . The dataset encodes two competing desiderata: value dependence and operation invariance. Under value depen-dence, intervention should change the output to match that of the counterfactual; under op-eration invariance, intervention should leave the output unchanged. Hence, the metric will be the accuracy of predicting the next token. 
+
+C.3 Baselines 
+
+To assess the performance of our algorithm, we compare PGB-CT against the following baselines. • random. This approach first randomly selects 
+
+1000 of such combinations (i.e., 1000 sets each with S components), evaluates the entire set to-gether, and identifies the best set among the M
+
+chosen ones. • top-k. This approach individually examines each of the N components, evaluates the metric 
+
+ℓ(D, m) after intervening on each individually, and then sorts the resulting scores to pick the best S components. • greedy. Components are added iteratively by se-lecting, at each step, the component that has the maximum metric ℓ(D, m) after intervening on the selected set plus each individually remaining component. The process ends when the sparsity requirement is met. We also considered the Desiderata-based Com-ponent Masking (DCM) algorithm proposed by Davies et al. (2023), which adopts a similar idea of soft masking and gradient descent. However, as we show later in Appendix D.5, its loss function and penalty function design lead to suboptimal results. 
+
+Complexity of Baselines. We compare methods by the number of interventional runs (the dominant cost). • Random: fixed at 1000 interventional runs. • top-k: N interventional runs. • greedy (select S components): To add each component, it needs to run through all remain-ing components, and hence has complexity 
+
+> S
+
+X
+
+> s=1
+
+(N −s) = N S − S(S + 1) 2 = O(N S ) .
+
+When the model is small ( N < 1000 ), top-k is typically the fastest; for larger models ( N > 1000 ), 
+
+random becomes more efficient than top-k and greedy due to its fixed budget. We also note that 
+
+DCM has a sample complexity similar to PGB-CT, as both are gradient-based methods, which are fastest in large models. 0 20 40 60 80 
+
+> Number of attention heads
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> Gender bias measure
+> DCM
+> PGB-CT
+> PGB-CT w/o reg2
+> PGB-CT w/o reg1
+> Figure 7: Results of an ablation study when removing the first and second penalty term on WinoGender dataset with GPT2-small.
+
+C.4 Hyperparameter 
+
+To allow exploration on both sides, we initialize the masking vector m with a value of 0.5. Since the regularization parameters control the gradient’s push toward sparsity and binarization, we found that setting them too high at the beginning hurts per-formance. Consequently, we adopt a linear schedul-ing strategy for the initial regularization parameters 
+
+λ1 and λ2, where the initial value increases linearly with the number of epochs. We performed a grid search for both λ1 and λ2 in the range [0 , 0.1] , as our transformed metric lies in the range (0 , 1) and we do not need large values. We set the number of epochs to 30 for the Professions dataset and 15 for the other three datasets. For the attention head ex-periments, we tuned the learning rate to 0.1, and for the MLP neuron experiments, we set it to 0.5 to en-sure faster convergence. Finally, we employed the Adam optimizer with its default parameters. We also do truncation after each epoch for PGB-CT to evaluate its performance. In the VBD dataset used in the Attention Heads with MLP Neurons paragraph and D.8, we use a learning rate of 0.01 and the Adam optimizer with default parameters. The number of epochs is set to be 1000 .
+
+C.5 Details for toy examples 
+
+Figure 1 illustrates the deviation from linearity when intervening on two components simultane-ously. Using the notations defined in Section 2 and Section 3, we first compute the average metric 
+
+ℓ(D, m) for all combinations of intervention target 
+
+(i, j ) for i, j ∈ [N ], where N = 36 is the number of attention heads in three layers (left figure), and 0 50 100 150 
+
+Number of attention heads 
+
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> Gender bias measure
+> PGB-CT
+> top-k
+> greedy
+> model level
+
+0 3 6 9
+
+Heads 
+
+> 0246810
+> Layers
+
+PGB-CT 
+
+0 3 6 9
+
+Heads 
+
+top-k
+
+0 3 6 9
+
+Heads 
+
+greedy Figure 8: Results of selecting attention heads from GPT2-small on the WinoGender dataset. Left: Gender bias vs. number of attention heads. Right: Selected attention heads with 20% sparsity. 0 100 200 300 400 
+
+Number of attention heads 
+
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> Gender bias measure
+> PGB-CT
+> top-k
+> greedy
+> model level
+
+0 4 8 12 
+
+Heads 
+
+> 04812 16 20
+> Layers
+
+PGB-CT 
+
+0 4 8 12 
+
+Heads 
+
+top-k
+
+0 4 8 12 
+
+Heads 
+
+greedy 
+
+Figure 9: Results of selecting attention heads from GPT2-medium on the WinoGender dataset. Left: Gender bias vs. number of attention heads. Right: Selected attention heads with 20% sparsity. 0 100 200 300 400 
+
+Number of attention heads 
+
+> 0.25
+> 0.30
+> 0.35
+> 0.40
+> Gender bias measure
+> PGB-CT
+> top-k
+> greedy
+> model level
+
+0 4 8 12 
+
+Heads 
+
+> 04812 16 20
+> Layers
+
+PGB-CT 
+
+0 4 8 12 
+
+Heads 
+
+top-k
+
+0 4 8 12 
+
+Heads 
+
+greedy 
+
+Figure 10: Results of selecting attention heads from GPT2-medium on the WinoBias dataset. Left: Gender bias vs. number of attention heads. Right: Selected attention heads with 20% sparsity. 0 100 200 300 400 
+
+Number of attention heads      
+
+> 0.01
+> 0.02
+> 0.03
+> 0.04
+> 0.05
+> Gender bias measure
+> PGB-CT
+> top-k
+> model level 0100 200 300 400 500
+
+Number of attention heads 
+
+> 1
+> 2
+> 3
+> Gender bias measure
+> PGB-CT
+> top-k
+> model level
+
+Figure 11: Results of selecting attention heads on the WinoGender dataset Left: with Qwen3-1.7B. Right: with Llama-3.2-1B. 0 100 200 300 400      
+
+> Number of attention heads
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> 0.10
+> Gender bias measure
+> PGB-CT
+> top-k
+> model level 0100 200 300 400 500
+> Number of attention heads
+> 2
+> 4
+> Gender bias measure
+> PGB-CT
+> top-k
+> model level
+
+Figure 12: Results of selecting attention heads on the Winobias dataset: Gender bias measure vs. number of neurons. 
+
+Left: with Qwen3-1.7B. Right: with Llama-3.2-1B. 
+
+Model / Algorithm Sparsity Time 
+
+≤2.5% ≤5% ≤10% ≤15% hours DistilGPT2 random 0.36 0.72 1.59 3.02 0.21 top-k 14.86 47.23 103.79 149.28 0.97 PGB-CT 11.76 58.33 313.17 2308.08 0.02 
+
+GPT2-small random 0.34 0.56 1.54 2.87 0.32 top-k 30.23 84.71 127.32 140.80 2.97 PGB-CT 47.54 146.40 1320.25 8654.82 0.03 
+
+GPT2-medium random 0.25 0.48 1.35 2.77 0.71 top-k 61.63 103.18 125.45 125.03 17.37 PGB-CT 1311.80 6.8e7 6.8e7 6.8e7 0.07 
+
+GPT2-large random 0.24 0.39 0.85 1.57 1.35 PGB-CT 437.33 1.7e6 6.9e9 6.9e9 0.14 
+
+GPT2-xl random 0.28 0.63 1.46 3.12 2.52 PGB-CT 18852 1.9e5 6.1e10 6.6e11 0.25 
+
+Qwen3-1.7B random 2.15 2.88 3.54 3.55 2.04 PGB-CT 6.1e10 2.1e11 2.1e11 2.1e11 0.20 
+
+Llama3.2-1B random 1.13 1.51 1.94 2.03 0.80 PGB-CT 3470.68 1.1e4 2.2e4 2.5e4 0.09 
+
+Table 4: Averaged metric ℓ(D, m) and execution time on the Professions dataset for selecting MLP neurons across different sparsity levels, algorithms, and LLMs. The best results are highlighted in bold .
+
+N = 12 is the number of MLP layers in GPT2-small. Then the value at (i, j )-th position in the figure is calculated by subtracting the effects of individual components from their combined effect. 
+
+ℓ(D, m{i,j }) − ℓ(D, m{i}) − ℓ(D, m{j}) , (23) where the vector mS ∈ { 0, 1}N defined over a set 
+
+S takes value 1 at the k-th component when k ∈ S ,and 0 otherwise. 
+
+D Additional Experimental Results 
+
+Additional experiments are organized as follows. Appendix D.4 presents an ablation study on the penalty terms λ1 and λ2. Appendices D.1 and D.2 report supplementary results for attention heads and MLP neurons, respectively. Appendix D.3 in-cludes more discussion. Furthermore, we include the ablation study in the Appendix D.4 and com-parison to DCM in the Appendix D.5. Section D.6 discusses the binarization of m and the associated sparsity analysis. Finally, Section D.7 discusses the comparison of our algorithm to baselines when 
+
+S = 1 .
+
+D.1 Attention heads 
+
+Figures 10-12 show the additional figures for the experiments on the attention heads. Specifically, Figure 8 shows the results with GPT2-small on the WinoGender dataset; Figure 9 shows the results with GPT2-medium on the WinoGender dataset; Figure 10 shows the results with GPT2-medium on the WinoBias dataset. Figure 11 extends to Qwen3 - 1.7B and Llama -3.2 -1B models, where we omit the greedy algorithm because it is too time-consuming. Figure 12 shows the results with Model / Algorithm Sparsity Time 
+
+≤2.5% ≤5% ≤10% ≤15% hours DistilGPT2 random 2.35 18.07 111.89 37.67 1.98 top-k 5.72 24.77 24.99 22.45 10.08 PGB-CT 15.63 62.22 286.34 1141.76 0.07 
+
+GPT2-small random 3.88 13.75 239.06 122.11 3.99 top-k 27.49 66.02 107.60 197.02 32.35 PGB-CT 755.95 1790.33 8376.24 21155.90 0.13 
+
+Table 5: Averaged metric ℓ(D, m) and execution time on the Factual (CounterFact) dataset for selecting MLP neurons across different sparsity levels, algorithms, and LLMs. The best results are highlighted in bold .0 2000 4000 6000 8000 
+
+> Number of neurons
+> 10 −2
+> 10 1
+> 10 4
+> 10 7
+> Gender bias measure
+> PGB-CT
+> top-k
+> model level
+
+0 1 2 3 4 5 6 7 8 9 10 11 
+
+Layers 
+
+PGB-CT 
+
+top-k 0.1 
+
+0.2 
+
+Figure 13: Results of selecting MLP neurons on the Professions dataset with GPT2-small. Left: Gender bias measure vs. number of neurons. Right: Fraction of Selected neurons in each layer with 15% sparsity. 0 500 1000 1500 2000      
+
+> Number of neurons
+> 10 −2
+> 10 1
+> 10 4
+> 10 7
+> 10 10
+> Gender bias measure
+> PGB-CT 01000 2000 3000 4000 5000
+> Number of neurons
+> 10 −2
+> 10 0
+> 10 2
+> 10 4
+> Gender bias measure
+> PGB-CT
+
+Figure 14: Results of selecting MLP neurons on the Professions dataset: Gender bias measure vs. number of neurons. 
+
+Left: with Qwen3-1.7B. Right: with Llama-3.2-1B. 
+
+Qwen and Llama on the WinoBias dataset. We find that, in all cases, PGB-CT outperforms the top-k,and is close to greedy when applicable. 
+
+D.2 Neurons 
+
+The results for the Professions dataset are summa-rized in Table 4 and the results for the CounterFact dataset are summarized in Table 5. In addition, Figure 13 shows the results with GPT2-small in the Professions dataset; Figure 15 shows the re-sults with distilGPT2 in the CounterFact dataset. Figure 14 shows the results with Qwen and Llama models. It is evident that PGB-CT shows an ex-ponential increase in metric with the number of components, whereas the other algorithms cannot. 
+
+D.3 Other findings 
+
+We list some additional findings below. • Model structure and size. Consistent with the single - component causal -tracing results in (Vig et al., 2020b), we find that larger models gen-erally display stronger gender bias. More in-triguingly, bias patterns vary across architectures: e.g., the bias on Llama-3.2-1B is larger than Qwen3-1.7B. As illustrated in Figure 11 (right), the top -k baseline fails on this architecture, high-lighting the need for multi-component causal tracing. • Highly Non-Linear Effect of MLP Neurons. We observe a surprising non-linearity in the effect of MLP neurons (unlike attention heads). Specifi-cally, the target metric increases at varying ex-ponential rates as the sparsity of the selected set changes. •“Half-half” rule: Across all evaluated models, we observe that about 50% of the attention heads or neurons collectively boost the target metric and the other 50% negatively impact it. 0 1000 2000 3000 4000 
+
+> Number of neurons
+> 10 −2
+> 10 0
+> 10 2
+> 10 4
+> Factual measure  PGB-CT
+> top-k
+> model level
+> Figure 15: Results of Factual locating measure vs. num-ber of MLP neurons on the CounterFact dataset with GPT2-small.
+
+D.4 Ablation study 
+
+Figure 7 presents the ablation results in the Wino-Gender dataset using GPT2-small, with all other hyperparameters and grid search settings remain-ing the same. The figure shows that removing the first ℓ1 penalty term prevents the algorithm from achieving a sparse solution, while removing the second penalty term degrades its performance. Besides, we also include the DCM algo-rithm (Davies et al., 2023), which can find some intervention combinations that are close to those found by our algorithm PGB-CT but converges only to certain sparsity levels, making the algo-rithm harder to tune and less practical. We discuss this further in Appendix D.5. 
+
+D.5 Why DCM Fails 
+
+As shown in Appendix D.4, Desiderata-based Com-ponent Masking (DCM) can identify some sub-sets of components whose performance is close to that of PGB-CT at a certain sparsity level. How-ever, in practice, DCM often fails to find subsets that satisfy the desired sparsity or metric level, resulting in suboptimal solutions. We attribute this behavior to its penalty function, which does not effectively binarize the mask weights. Fig-ure 16 compares the sparsity ratio S/N and the binary violation term m(1 − m) for PGB-CT (with λ1 = 0 .0001 , λ 2 = 0 .001 ) and DCM (with 
+
+λ = 10 −5). The left panel of Figure 16 shows that both methods achieve similar sparsity after truncation. However, the right panel shows that the binary violation for DCM does not converge to zero, and when it attempts to approach zero, the sparsity increases further. This is because, although DCM rounds the fi-nal mask weights to binary (similar to (22) ), the amount of “binary violation” m(1 − m) before truncation is still crucial. A larger average value of m(1 − m) indicates that many mask entries are closer to 0.5 at the end of training. When such a mask is truncated to a binary one, many compo-nents undergo large changes, which can cause a significant drop in the metric compared to the soft mask. Therefore, the higher binary violation ob-served for DCM in the right panel suggests a larger potential loss in the metric after the final truncation step. 
+
+D.6 Distribution of weights m in training 
+
+The PGB-CT algorithm encourages the values in 
+
+m to be exactly 0 or 1, resulting in binary selec-tions. Experimentally, we found that binarization is achieved after the last epoch by choosing an appro-priate λ2, and λ1 controls sparsity more strongly. Figure 17 shows results from trials on different types of GPT -2 models with λ1 = λ2 = 1e −3.We observe that all models behave similarly: larger models exhibit slightly larger binary violations be-cause they contain more parameters, yet they ulti-mately converge to higher sparsity since the penalty parameter does not scale with model size. Fur-thermore, Figure 18 shows how sparsity changes when varying λ1 on the WinoGender dataset with GPT2-small. We can vary from low sparsity to high sparsity with tuning λ1.
+
+D.7 Performance on single-component S = 1 
+
+When S = 1 , our method reduces to traditional single-component causal tracing (likewise for top-k
+
+and greedy baselines). Empirically, its performance is nearly identical to single-component methods. In the main paper, for attention-head selection on GPT-2-small with WinoBias (leftmost point in Figure 3) and MLP-neuron selection on GPT-2-medium with Profession (leftmost point in Fig-ure 4), our algorithm selects the same optimal com-ponent as both top-k and greedy. For larger models and harder settings (e.g., CounterFact), optimiza-tion can struggle to converge exactly to S = 1 ,leading to slight suboptimality. We note that the DCM algorithm cannot meet these sparsity require-ments. See Table 6 for detailed results. 
+
+D.8 Additional results on VBD dataset 
+
+Figure 19 further shows the experiment results on jointly analyzing attention heads and whole MLP blocks on LLaMA-7B. 0 10 20 30 
+
+Epoch 
+
+0
+
+20 
+
+40 
+
+60 
+
+> Sparsity
+
+PGB-CT 
+
+DCM 0 10 20 30 
+
+Epoch 
+
+0
+
+10 
+
+20 
+
+30 
+
+> Binary Violation
+
+PGB-CT 
+
+DCM Figure 16: Comparison of properties of m of attentions on WinoGender dataset. 0 10 20 30 
+
+Epoch    
+
+> 0
+> 25
+> 50
+> 75
+> 100
+> Sparsity
+> GPT2 Small
+> GPT2 Medium
+> GPT2 Large
+> GPT2 XL 010 20 30
+
+Epoch 
+
+> 0
+> 100
+> 200
+> 300
+> Binary Violation  GPT2 Small
+> GPT2 Medium
+> GPT2 Large
+> GPT2 XL
+
+Figure 17: Properties of m of attentions on WinoGender dataset. Left: Sparsity S/N . Right: Violation of binary 
+
+m(1 − m).10 −6 10 −5 10 −4 10 −3 
+
+λ1
+
+> 0.6
+> 0.8
+> Final sparsity
+
+Figure 18: Results of sparsity vs. λ1 on the WinoGender dataset with GPT2-small. 0 10 20 30 40 50 
+
+> Number of Components
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Accuracy
+> Value
+> Opration
+
+Figure 19: Results of accuracy on the VBD dataset on two competing accuracies with LLaMA-7B. 
+
+When the sparsity level is S = 15 , we find the following combination for LLaMA-7B: Attention Heads 8.1, 12.11, 13.0, 13.15, 13.19, 14.19, 15.9, 15.23, 17.25, 18.12, 19.1, 19.6, 21.12, 25.2, and MLP block 10. 
+
+E Proof of theorem 1 
+
+Proof: We notice CN (S) takes the form 
+
+CN (S) ≜
+
+> S
+
+X
+
+> c=1
+
+Nc
+
+
+
+. (24) We prove each regime separately. 
+
+1. S is a fixed constant. When S does not depend on N , the sum CN (S) in (24) has exactly S terms. Each term  Nc
+
+ is a polynomial in N of degree c.Indeed, for fixed c,
+
+Nc
+
+
+
+= N (N − 1) · · · (N − c + 1) 
+
+c! (25) 
+
+= O N c . (26) Therefore, 
+
+CN (S) = 
+
+> S
+
+X
+
+> c=1
+
+Nc
+
+
+
+(27) 
+
+=
+
+N
+
+1
+
+
+
++
+
+N
+
+2
+
+
+
++ · · · +
+
+NS
+
+
+
+(28) 
+
+= O(N ) + O(N 2) + · · · + O(N c) (29) 
+
+= O(N S ) . (30) 
+
+2. S = αN for some α ∈ (0 , 1) . Consider the sum defined in 
+
+SN (αN ) =  
+
+> ⌊αN ⌋
+
+X
+
+> c=1
+
+Nc
+
+
+
+. (31) Model / Algorithm Dataset WinoGender WinoBias Professions DistilGPT2 Optimal 0.0059 0.013 0.049 PGB-CT 0.0059 0.012 0.049 GPT2-small Optimal 0.019 0.105 0.037 PGB-CT 0.019 – 0.037 GPT2-medium Optimal 0.189 0.377 0.023 PGB-CT – – 0.023  
+
+> Table 6: Performance comparison in the single-component setting ( S= 1 ): PGB-CT and the optimum.
+
+The binomial coefficients  Nc
+
+ are unimodal in c,achieving their maximum around c = N/ 2. If α ≤
+
+1/2, the largest term in the sum up to c = ⌊αN ⌋
+
+is near c = ⌊αN ⌋. If α > 1/2, by symmetry, the main contribution is instead near the central region but still of the same exponential scale. 
+
+(a) Dominant term and Stirling’s approximation. 
+
+Using Stirling’s approximation 
+
+n! ∼ √2π n 
+
+ ne
+
+n
+
+as n → ∞ , (32) for k = ⌊αN ⌋, we have 
+
+Nk
+
+
+
+= N !
+
+k! ( N − k)! (33) 
+
+≈√2πN   Ne
+
+N
+
+√2πk   ke
+
+k p2π(N − k)   N −ke
+
+N −k . (34) Canceling common factors, we obtain the ap-proximation 
+
+Nk
+
+
+
+≈ N N
+
+kk (N − k)N −k
+
+× 1
+
+p2π k (N − k)/N (35) 
+
+= 1
+
+p2π α (1 − α) N
+
+× 1
+
+ αα (1 − α)1−αN . (36) Noting that αα (1 − α)1−α = 2−H2(α), where 
+
+H2(α) is the binary entropy function 
+
+H2(α) = −α log 2(α)−(1 −α) log 2
+
+ 1−α . (37) Hence, we get 
+
+ NαN 
+
+
+
+≈ 2N
+
+p2π α (1 − α) N . (38) For α = 1 /2, this is the classical 
+
+ NN/ 2
+
+
+
+∼ 2N
+
+pπN/ 2 . (39) 
+
+(b) Sum of binomial coefficients. Because the bi-nomial coefficients are unimodal and dominated by those around the central region, the single term   NαN 
+
+ already has order Θ 2N /√N . Con-sequently, the entire sum remains on this same exponential scale. This completes the proof of both claims in the theorem.
