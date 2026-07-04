@@ -1,0 +1,992 @@
+Title: Decision-Value Attribution in Predict-then-Optimize Systems
+
+URL Source: https://arxiv.org/pdf/2606.29878v1
+
+Published Time: Tue, 30 Jun 2026 02:34:23 GMT
+
+Number of Pages: 27
+
+Markdown Content:
+## Decision-Value Attribution in Predict-then-Optimize Systems 
+
+Konstantinos Ziliaskopoulos a, Alexander Vinel a, ∗, Alice E. Smith b    
+
+> aAuburn University, Industrial &Systems Engineering, 36849, Auburn, AL, USA
+> bUniversity of Alabama, Mechanical Engineering &Computer Science, 35487, Tuscaloosa, AL, USA
+
+Abstract 
+
+Predictive models are increasingly embedded in operational decision-making, yet standard explanation methods typically explain forecasts rather than the decisions those forecasts induce. This distinction is important in predict-then-optimize systems: large forecast changes may leave the optimizer’s ac-tion unchanged, while small changes can alter the selected decision and its realized value. We pro-pose Decision-Value Attribution (DVA), a Shapley-based framework for attributing the value of a fixed prediction–optimization pipeline. The framework defines cooperative games whose payo ff is the down-stream decision value, allowing the players to be information sources, optimization or design parameters, or both. We present three variants: InfoDVA attributes value to features, DesignDVA attributes value to operational configurations, and Decision-Value Interactions (DVI) quantifies how information and design jointly create value. We further distinguish post-DVA, which evaluates decisions using realized outcomes, from pre-DVA, which evaluates decisions under the model’s full prediction. This separation turns attribution into a decision-level diagnostic of whether the model’s operational beliefs align with realized performance. The resulting attributions are expressed in the units of the operational objec-tive and decompose the gain or loss relative to a baseline. Case studies in electricity storage arbitrage and emergency medical service coverage show that predictive explanations can be poor proxies for op-erational value, that DVA can guide targeted information-control interventions, and that optimization configurations determine when predictive information is decision-relevant. 
+
+Keywords: Artificial intelligence in OR, Decision analysis, Predict-then-optimize, Shapley values, Explainable artificial intelligence 
+
+1. Introduction 
+
+In many applications a critical prediction is not the final object of interest. For example, a battery operator forecasts electricity prices to schedule charging and discharging, a logistics planner forecasts travel times to select routes, or a retailer forecasts demand to set inventory levels or assortment decisions. These are predict-then-optimize (PtO) systems, as shown in Fig. 1 where a predictive model estimates uncertain parameters and an optimization model selects an optimal decision based on the upstream model’s prediction (Bertsimas and Kallus, 2020; Sadana et al., 2025). In these systems, the value of information is primarily determined by how much it improves the decision induced by that prediction. This can create a mismatch for standard explanation methods. Popular feature attribution tools such as LIME and SHAP explain the mapping from input features to model output (Ribeiro et al.,       
+
+> ∗Corresponding author
+> Email addresses: kzz0034@auburn.edu (Konstantinos Ziliaskopoulos), alexander.vinel@auburn.edu (Alexander Vinel), alice.smith@ua.edu (Alice E. Smith)
+> arXiv:2606.29878v1 [cs.LG] 29 Jun 2026
+
+2016; Lundberg and Lee, 2017). This is useful for auditing the forecasting model, but it does not necessarily explain the PtO system. A feature may substantially change a prediction while leaving the optimizer’s selected decision unchanged. Conversely, a small predictive change can be opera-tionally decisive if it moves the prediction across a decision boundary and changes the selected ac-tion. In operational settings, therefore, predictive importance and decision importance can diverge. decision      
+
+> value
+> U(w⋆)
+> input features x
+> predict f(x)̂
+> y
+> optimize
+> w⋆(̂y)
+> decision
+> max g(̂y)
+> Figure 1: Overview of the Predict-then-Optimize (PtO) pipeline.
+
+We devise Decision-Value Attribution (DVA), a Shapley-based framework for attributing the value of a PtO pipeline to the components that generate, or shape, the downstream decision. The main idea, following the Shapley method, is to define a cooperative game whose payo ff is downstream deci-sion value. The players may be information sources, design parameters, or both. The resulting attribution decomposes the gain or loss from using a given information set or design configuration, expressed directly in the units of the opera-tional objective. The first component of this approach is Information DVA 
+
+(InfoDVA), where the players are features or feature groups. InfoDVA answers the question of which information sources improve or degrade the value of the decision induced by the PtO pipeline. The second component is DesignDVA , where the players are design or optimization parameters such as storage capacity, power limits, fleet size, or coverage radius. DesignDVA is a form of sensitivity anal-ysis that allows comparison of configurations against a chosen reference. Its main role is to support 
+
+JointDVA , where both information sources and design parameters are players in the same cooperative game. JointDVA answers the question of how the decision value is jointly created by the data available to the predictive model and by the parameters of the optimization model. We then introduce Decision-Value Interactions (DVI), which extend interaction attribution methods to DVA games using Faith-Shap interaction indices (Tsai et al., 2023). DVI measures whether groups of players create decision value nonlinearly, meaning the value function over player contributions cannot be expressed as a linear ex-pression of individual e ff ects, as PtO, by design, requires consideration of the interaction between in-formation and design. For example, for an energy system, weather information may be valuable only when a battery has su ffi cient capacity to exploit temporal price arbitrage, or spatial demand informa-tion may matter only when a facility location budget makes alternative deployments feasible. These feature–parameter interactions are di ffi cult to detect with predictive explanations alone. For each of these games, we define two evaluation modes. Post-DVA evaluates the decision using the realized outcome and is therefore an ex-post diagnostic of realized operational value. Pre-DVA replaces the realized outcome, or actual observation, with the full model prediction and asks how a feature a ff ects decision value from the model’s own point of view. Pre-DVA is useful before realized outcomes are observed and thus can be used during inference, while post-DVA is useful for auditing the performance of PtO pipelines and can identify useful interventions. This paper makes three contributions. First, we adapt Shapley value attribution to predict-then-optimize systems, attributing downstream decision value rather than predictive output, and develop this 2into the Decision Value Attribution (DVA) framework. DVA unifies information, design, and joint at-tributions and separates model-implied from realized usefulness. Second, we extend this framework to Decision-Value Interactions (DVI), which identify complementarities and substitutes among information sources and optimization parameters. Third, we demonstrate the framework in two case studies, that of electricity storage arbitrage and emergency medical services (EMS) coverage. We show that predictive explanations can be poor proxies for operational value, and that DVA can guide targeted information-control interventions and that optimization design determines when information is decision-relevant. To support replication and reuse, we share all necessary implementations. 1
+
+The remainder of the paper is organized as follows. Section 2 positions the paper within prescrip-tive analytics, explainable AI, explainable optimization, and value-of-information research. Section 3 presents the DVA framework. Section 4 presents the two case studies which demonstrate our method. Finally, Section 5 discusses managerial implications and limitations, and concludes. 
+
+2. Related Work 
+
+Predict-then-optimize and prescriptive analytics. This paper is related to the areas of prescriptive an-alytics and contextual optimization, where data are used to improve decisions under uncertainty. The main takeaway of this literature is that predictive models should be evaluated through the decisions they support rather than through prediction error alone (Bertsimas and Kallus, 2020). Therefore, decision-focused learning and PtO methods develop training procedures that account for downstream optimiza-tion performance (Donti et al., 2017; Mandi et al., 2024). Related work also shows that in optimization problems with structured feasible sets, downstream performance may depend more on the ranking of feasible decisions than on pointwise accuracy (Mandi et al., 2022). Our paper addresses a di ff erent question. Instead of aiming to propose a new training method or an optimizer, we take a trained pre-dictive model, an optimization configuration, and a decision rule, and ask how the value of the resulting decision should be attributed. As a result, DVA complements decision-focused learning in that it ex-plains which information sources and design choices contribute to the operational value of its decisions, once processed by the preferred PtO approach. 
+
+Shapley explanations and predictive feature attribution. An established body of literature studies post-hoc explanations of black-box predictive models. Of the two most popular approaches, LIME constructs local surrogate models around a prediction (Ribeiro et al., 2016), while SHAP uses Shapley values to attribute a model output to input features (Lundberg and Lee, 2017; Shapley et al., 1953). Extensions of Shapley-based explanations address feature dependence, alternative value functions, local and global explanations, and interaction e ff ects (Aas et al., 2021; Borgonovo et al., 2024). This paper builds on the insight that Shapley explanations are defined by a value function. Existing Shapley-based methods typically choose value functions that explain the predictive model itself, which describe how input fea-tures a ff ect the model output. In contrast, DVA chooses a value function defined on the downstream decision problem. It therefore attributes changes in the value generated by the decision that uses the prediction. This shift is important because prediction errors and decision consequences need not align.  
+
+> 1All code and data used in this paper are publicly available at github.com/kziliask/DVA .
+
+3Large prediction changes may have no operational e ff ect if they leave the optimal decision unchanged, while small changes near a decision boundary may substantially change decision value. 
+
+Explainable optimization and explainable OR. A growing stream of work studies explainability for op-timization and operations research. Recent work on explainable AI for operational research emphasizes the need to connect predictive models, optimization models, and decision support systems (De Bock et al., 2024). Other papers explain data-driven optimization decisions through counterfactual contexts, interpretable surrogate models, or feature-based optimization models (Kurtz et al., 2025; Forel et al., 2023; Goerigk and Hartisch, 2023; Goerigk et al., 2026). These approaches are valuable when the goal is to explain an optimization decision and construct an interpretable decision rule. DVA, however, as-sumes fixed predictive and downstream optimization models, and the analyst aims to attribute the value of the decision returned by this pipeline. The attribution is therefore pipeline-aware. A change in the predictive model, the optimization formulation, the reference design, or the evaluation mode can alter the DVA game and a ff ect the resulting explanation. 
+
+Interactions, value of information, and data valuation. DVA is also connected to value-of-information and data-valuation ideas. Classical value-of-information theory evaluates information by its e ff ect on decisions (Howard, 1966). Data valuation methods, such as Data Shapley, allocate model-performance value to training observations (Ghorbani and Zou, 2019). In our analysis, in contrast, DVA attributes the value of an implemented PtO decision to information sources and design parameters for a particu-lar decision instance or evaluation set. Interaction attribution (across features, design parameters, and feature-design pairs) is important for this purpose. Shapley interaction methods, including the Shapley– Taylor index and Faith-Shap, extend feature attribution from individual players to groups of players (Sundararajan et al., 2020; Tsai et al., 2023). We apply these ideas to decision-value games in our approach. 
+
+3. Decision-Value Attribution 
+
+3.1. Prediction–optimization pipeline 
+
+Consider a PtO system with an input vector x ∈ X , a trained predictive model f : X → Θ, and a downstream optimization model. The prediction ˆ yN = f (x) is a vector of estimated problem parameters. The subscript N denotes the full information set. Let ρ ∈ D denote an operational design or optimization configuration. Examples include the energy capacity of a battery, the coverage radius of a field operator, or the chosen heuristic. Given a prediction ˆ y and design ρ, the optimizer or decision rule returns 
+
+gρ(ˆ y) ∈ arg max  
+
+> w∈W (ρ)
+
+H(w, ˆy; ρ), (1) where W(ρ) is the feasible set and H is the chosen optimization objective. Assume that ties are resolved by a fixed rule, i.e., gρ is deterministic. If the downstream problem is written as a cost minimization problem, it can be expressed in the form above by taking H to be a negative cost. To streamline the presentation, we will denote as ˜ ym the true realized outcome in the post-DVA setting, and the full model prediction in the pre-DVA setting. This allows us to use the same DVA construction to conduct either an ex-post diagnostic or an ex-ante model belief evaluation. Recall that Post-DVA answers, which model 4Table 1: Decision-value attribution games and characteristic functions. 
+
+Game Players Characteristic function †
+
+InfoDVA Information players S ⊆ N vInfo  
+
+> m
+
+(S ) = ˜y⊤
+
+> m
+
+wS − ˜y⊤
+
+> m
+
+w∅, wS = g(ˆ yS ).
+
+Attributes decision value to features or feature groups. 
+
+DesignDVA Design players T ⊆ D vDesign  
+
+> m
+
+(T ) = ˜y⊤
+
+> m
+
+wT − ˜y⊤
+
+> m
+
+w∅, wT = gρ(T )(ˆ yN ).
+
+Attributes decision value to design or optimization parameters. 
+
+JointDVA Information and design players S ⊆ N, T ⊆ DvJoint  
+
+> m
+
+(S , T ) = ˜y⊤
+
+> m
+
+wS T − ˜y⊤
+
+> m
+
+w∅, wS T = gρ(T )(ˆ yS ).
+
+Attributes value jointly to information and design components. 
+
+DVI Player groups G ⊆ N ∪ D,
+
+|G| ≥ 2
+
+Ψm(G) = FaithShap( vm, G),
+
+where vm is any of InfoDVA, DesignDVA, or JointDVA games. Attributes interaction value among DVA players.            
+
+> †For modes m∈ { pre ,post }˜ymrepresents either the model prediction ˜ ypre =ˆyNor the ground truth observation ˜ ypost =y.
+
+components improve or degrade the realized decision value, while Pre-DVA answers, which model components improve the decisions according to the model’s predicted outcome. 
+
+3.2. Coalition predictions 
+
+Let N = {1, . . . , p} denote the set of information players, usually input features or feature groups. For a coalition S ⊆ N, the coalition prediction ˆ yS (x) is the prediction obtained when only the features in S
+
+are available. In our case studies we use empirical background marginalization. Given a background set 
+
+B, define −S = N \ S . For any x, b ∈ X , let xS denote the hybrid input vector that keeps the components of x corresponding to players in S and fills all remaining components using the background observation 
+
+b. We define ˆyS (x) = 1
+
+|B|
+
+X
+
+> b∈B
+
+f (xS , b−S ). (2) Thus ˆ y∅ = Ex∼B[ f (x)] is the model’s average prediction over the background set and ˆ yN = f (x) is the full information prediction. Other coalition constructions, including conditional versions that account for feature dependence, can be substituted without changing the DVA framework. We show a high-level overview of the games we define, the players they contain, their value functions and a description of what they attribute in Table 1. These are discussed in more detail in the sections that follow. 
+
+3.3. InfoDVA 
+
+InfoDVA attributes decision value to information players while holding the operational design fixed. Fix a configuration ρ. For an evaluation mode m ∈ { post , pre }, define the InfoDVA game as 
+
+vInfo  
+
+> m
+
+(S ; ρ) = Ugρ(ˆ yS ), ρ ; ˜ ym
+
+ − Ugρ(ˆ y∅), ρ ; ˜ ym
+
+ , S ⊆ N. (3) The null coalition corresponds to the baseline prediction ˆ y∅ = Ex∼B[ f (x)] which is the model’s average prediction over the background dataset B, and the baseline decision is the decision that ˆ y∅ induces. Thus vInfo  
+
+> m
+
+(S ; ρ) measures the decision value gain or loss from using the coalition prediction ˆ yS over the baseline prediction. 5For an information player i ∈ N , the InfoDVA attribution is the Shapley value of the game in Eq. (3): 
+
+ϕInfo  
+
+> i,m
+
+=
+
+X 
+
+> S⊆N\{ i}
+
+|S |!( p − | S | − 1)! 
+
+p!
+
+hvInfo  
+
+> m
+
+(S ∪ { i}) − vInfo  
+
+> m
+
+(S )i . (4) Because Eq. (4) applies the standard Shapley value to the decision-value game in Eq. (3), InfoDVA in-herits the usual Shapley properties for that fixed game. In particular, each feature is credited with its average marginal contribution to downstream decision value over all possible feature orderings, and the resulting attributions exactly sum to the full information decision value gain relative to the baseline. Fig. 2 gives a geometric interpretation of the marginal term in Eq. (4). A feature can have a large pre-dictive but zero decision-value e ff ect when the induced prediction remains inside the same optimization decision region. A positive value means that, on average over the order in which features are added, fea-ˆy1
+
+> ˆy2
+> w1
+> w2
+> w3
+> C(w1)
+> C(w2)
+> C(w3)
+
+ˆyS
+
+ˆyS ∪{ i}
+
+> No decision change
+
+ˆyS ′
+
+ˆyS ′∪{ i}              
+
+> Decision change
+> Figure 2: Decision regions induced by the downstream optimization problem. The axes ˆ y1,ˆy2are the coordinates of the model prediction. In the center, the feasible set is defined by vertices w1,w2,w3with each colored region C(wk) being the normal cone of predictions that induce the corresponding decision wk. While adding one feature to the coalition Sproduces a change in the predicted vector ˆ yS, that change does not cross any decision boundaries, whereas for another coalition S′it does. The decision value game isolates only the latter, namely those features that contribute to changes that shift between decision regions, and therefore impact the downstream policy.
+
+ture i improves decision value relative to the current coalition. A negative value means that the feature tends to induce decisions with lower value. In post-InfoDVA, this statement refers to realized outcomes, i.e., the actually realized gain /loss, while in the pre-InfoDVA it is taken with respect to the model’s full prediction. Shapley e ffi ciency ensures that the attributions sum to the total value (Shapley et al., 1953), so X
+
+> i∈N
+
+ϕInfo  
+
+> i,m
+
+= Ugρ(ˆ yN ), ρ ; ˜ ym
+
+ − Ugρ(ˆ y∅), ρ ; ˜ ym
+
+ . (5) Thus InfoDVA exactly decomposes the decision-value gain or loss from using the full information pre-diction instead of the baseline prediction. 63.4. DesignDVA 
+
+DesignDVA attributes decision value to design or optimization parameters, the configurable elements of the optimization model g. Let D = {1, . . . , q} denote a set of design players. We consider a reference design ρ0 and a target design ρ1. For example, ρ0 might represent the current system, and ρ1 might represent a proposed alternative (larger battery, more vehicles, alternative routing). For a coalition T ⊆
+
+D, define the hybrid design, 
+
+ρ j(T ) =
+
+
+
+ρ1 
+
+> j
+
+, j ∈ T
+
+ρ0 
+
+> j
+
+, j < T,
+
+where the design coordinates in ρ are set to their target values and the remaining coordinates are kept at their reference values. If a design coordinate has more than two levels, the player represents the move from a specified reference level to a specified target level. Multi-level sensitivity analyses can be conducted by repeating the construction across reference–target pairs. Holding the full prediction fixed, the DesignDVA game is 
+
+vDesign  
+
+> m
+
+(T ) = Ugρ(T )(ˆ yN ), ρ (T ); ˜ ym
+
+ − Ugρ0 (ˆ yN ), ρ 0; ˜ ym
+
+ , T ⊆ D. (6) The Shapley value of this game allocates the value of moving from the reference design to the target design across design coordinates. DesignDVA is useful for comparing operational configurations, but in this paper it primarily serves as a component of the joint information–design attribution developed next. 
+
+3.5. JointDVA 
+
+JointDVA attributes decision value jointly to information and design players. The player set is 
+
+P = N ∪ D. For any coalition A ⊆ P , evaluate the joint value function at S = A ∩ N, T = A ∩ D.
+
+The coalition A therefore induces both a coalition prediction ˆ yS and a hybrid design ρ(T ). The latter is a hybrid of the reference design ρ0 and ρ1, where coordinates corresponding to design players in T are set to their target values, while the remaining stay at their reference values. For evaluation mode m, define the JointDVA game 
+
+vJoint  
+
+> m
+
+(S , T ) = Ugρ(T )(ˆ yS ), ρ (T ); ˜ ym
+
+ − Ugρ0 (ˆ y∅), ρ 0; ˜ ym
+
+ . (7) The JointDVA attribution for player a ∈ P is 
+
+ϕJoint  
+
+> a,m
+
+=
+
+X
+
+> A⊆P\{ a}
+
+|A|!( |P| − | A| − 1)! 
+
+|P| !
+
+hvJoint  
+
+> m
+
+(A ∪ { a}) − vJoint  
+
+> m
+
+(A)i . (8) JointDVA decomposes the full decision-value gain when moving from the baseline information–design pair (ˆ y∅, ρ 0) to the target information–design pair (ˆ yN , ρ 1): 
+
+X
+
+> a∈P
+
+ϕJoint  
+
+> a,m
+
+= Ugρ1 (ˆ yN ), ρ 1; ˜ ym
+
+ − Ugρ0 (ˆ y∅), ρ 0; ˜ ym
+
+ . (9) While the construction is simple, it is useful because it places information and design on a common operational scale. For example, the same decomposition can compare the decision value of a weather feature with the decision value of increasing battery capacity, or compare a demand-lag feature with the decision value of adding an EMS staging location. Further, it enables analyzing the interaction e ff ect. 73.6. Decision-value interactions (DVI) 
+
+Individual DVA scores allocate value to single players. In many PtO systems, however, the oper-ational value of a player depends on the presence of another player. A feature may be valuable only under a su ffi ciently flexible design, or a design parameter may become valuable only when the predic-tive model has access to specific information. For our purposes, we refer to these as Decision-Value Interactions (DVI). For two players a, b ∈ P , coalition-specific pairwise interaction in coalition A ⊆ P \ { a, b} is 
+
+∆(2)  
+
+> ab
+
+v(A) = v(A ∪ { a, b}) − v(A ∪ { a}) − v(A ∪ { b}) + v(A). (10) A positive value means that the incremental value of adding a and b together to A exceeds the sum of their separate incremental values relative to A. A negative value means that their combined incremental value is less than that sum, indicating substitution or redundancy. To aggregate such e ff ects across coalitions, we apply Faith-Shap interaction attribution to the relevant DVA game (Tsai et al., 2023). Faith-Shap provides a way to turn coalition interaction terms in Eq. (10) into a single interaction score. In the pairwise case, it compares the value of using two players together with the value of using each one separately, across possible coalitions, and averages these comparisons using the Shapley framework. Applied to a DVA game, the resulting score measures the extra decision value created by the pair itself, beyond the value attributed to the two players individually. For an interaction group G ⊆ P , |G| ≥ 2, define 
+
+Ψm(G) = FaithShap G(vm) , G ⊆ P, |G| ≥ 2, (11) where vm may be the InfoDVA, DesignDVA, or JointDVA characteristic function, depending on the question. In the case studies, we focus on pairwise interactions. We refer to Ψm(G) as DVI score. When 
+
+G contains both an information player and a design player, we refer to it as cross-DVI score. Cross-DVI is the most relevant interaction object in this paper. It identifies when the usefulness of information is conditional on an operational design. For example, a solar-irradiance feature may interact positively with battery capacity if the information becomes valuable only when the battery can store enough energy to exploit midday price depressions. In an EMS coverage problem, a historical demand feature may interact positively with the staging location budget. When only a few ambulances can be staged, the optimizer may select the same high demand zones regardless of the input data. As the budget increases, however, the system has more deployment flexibility, so local demand information can help decide where the additional staging locations should be placed. It is worth noting that DVI is not tied to any specific interaction attribution method. While we present it based on Faith-SHAP, since it appears to improve over other existing methods, such as the Shapley Interaction Index, the Banzhaf Interaction Index, Shapley-Owen, or Shapley-Taylor (Grabisch and Roubens, 1999; Sundararajan et al., 2020; Owen, 1972; Lundberg et al., 2020), any other Shapley-based interaction indices can be substituted without changing the DVA value function, only the allocation method of the interaction terms. 
+
+3.7. Computation 
+
+As defined, DVA requires evaluating the characteristic function for all coalitions of the relevant player set. For player set Pv with |P v| players, this requires 2 |P v| coalition evaluations. Each evaluation 8consists of constructing a coalition prediction, solving the downstream optimization problem under the corresponding design, and computing the decision value under the chosen evaluation mode. In the case studies, we choose feature groups and design groups so that exact enumeration is feasible. At the same time, for the traditional Shapley method, there exists an active research into designing more computationally e ffi cient approximations. By design, DVA can directly take advantage of many of such implementations (Lundberg and Lee, 2017; Strumbelj and Kononenko, 2010; Mitchell et al., 2022). For example, permutation sampling estimates Shapley values by sampling orderings and evaluating marginal changes along each order. Kernel-style estimators sample coalitions and fit a weighted additive surrogate to the characteristic function. These approximations are directly applicable to DVA and are, in fact, quite e ff ective. We present some of the results from our experimentation in Section 4.5 and in Appendix B. 
+
+4. Empirical Evaluation 
+
+4.1. Overview and Setup 
+
+We use two diverse PtO demonstration cases, energy arbitrage presented in Eq. (12) and EMS max-imum coverage in Eq. (13). Energy arbitrage is a classic problem in operations research (Jiang and Powell, 2015; Löhndorf and Wozabal, 2023). The specific case study of the day-ahead California mar-ket is especially popular due to the abundance of data and the potential impact a successful policy can have on overall profit (Byrne et al., 2018; Krishnamurthy et al., 2017). Emergency medical service (EMS) systems are also a natural setting for PtO decision support. Ambulance deployment and reloca-tion decisions are important because emergency response resources are limited, demand is spatially and temporally heterogeneous, and small changes in staging decisions can a ff ect whether calls are reachable within a target response radius. Prior work has studied ambulance dispatching, relocation, and coverage optimization in both real-time and strategic settings (Nasrollahzadeh et al., 2018; Boutilier and Chan, 2020; Hashtarkhani et al., 2023; Frichi et al., 2025).                
+
+> Table 2: Overview of the PtO pipelines for the two empirical case studies.
+> Setting Prediction ˆyDecision Features Design parameters Objective
+> CAISO arbitrage 24-hour price battery dispatch weather & calendar battery capacity, bat-tery e ffi ciency profit ($ /MWh) EMS coverage ZIP-hour demand staging areas demand, weather, time groups budget and radius covered demand (%)
+
+Table 2 provides a high-level overview of the input features, design parameters, model outputs, and objectives of the two case studies. For both cases, we use a set of extreme gradient boosting tree models (XGBoost) as the predictors (Chen and Guestrin, 2016). Tree-based models have been shown to be state-of-the-art for tabular datasets, often outperforming their deep learning counterparts (Grinsztajn et al., 2022; McElfresh et al., 2023). To assess whether the findings are sensitive to hyperparameter choices, we evaluate on 25 models, chosen through a L25 (5 6) orthogonal array experimental design with six factors across five levels (Montgomery, 2017). Implementation and dataset details are provided in Appendix A in the online supplement. 
+
+Energy Arbitrage Model. For each day, let the predictive model output a next-day hourly price vector ˆp1, . . . , ˆp24 . The energy arbitrage experiment uses hourly day ahead locational marginal prices from the 9CAISO OASIS system (California Independent System Operator, 2026) for the SP15 trading hub with daily weather data from the Open-Meteo Historical Weather API (Zippenfenig, 2024) using LAX as a proxy weather location for the SP15 region. Each observation corresponds to one operating day, and the predictive model maps weather and calendar features to a 24-dimensional vector of next-day prices, which is then passed to the battery dispatch model in Eq. (12). We solve the following problem max 
+
+> 24
+
+X
+
+> t=1
+
+ˆpt (dt − ct) − λ
+
+> 24
+
+X
+
+> t=1
+
+(ct + dt) (12a) s.t. st+1 = st + ηc ct − 1
+
+ηd
+
+dt ∀ t (12b) 0 ≤ st ≤ E ∀ t (12c) 0 ≤ ct ≤ Pmax zt ∀ t (12d) 0 ≤ dt ≤ Pmax (1 − zt) ∀ t (12e) 
+
+zt ∈ { 0, 1} ∀ t, (12f) where ct is the charge power at hour t, dt is the discharge power at hour t, st is the state of charge at hour t, zt is a binary variable selecting charge ( zt = 1) or discharge ( zt = 0) mode, ηc, η d are the charging and discharging e ffi ciencies, λ is a regularization parameter penalizing total throughput, E is the energy capacity of the storage system, and Pmax is the power limit (maximum charge /discharge rate). For this case study, we use λ = 5, η c = ηd = 0.95 , Pmax = 1, s1 = s25 = 2, E = 4 unless stated otherwise. 
+
+EMS Maximum Coverage. For each explained hour t, let the predictive model output a nonnegative next-hour EMS demand score vector ˆ qti , i ∈ I t, and let ˆ Qt = Pi∈I t ˆqti denote the total citywide EMS demand at hour t. The EMS coverage experiment uses New York City EMS incident dispatch records from NYC Open Data (NYC Fire Department, 2026), aggregated to hourly incident counts by Manhattan ZIP code zones. The prediction task is then to forecast hourly EMS demand across these 45 zones using time, weather, lagged demand, neighboring-zone demand, and historical zone-hour baseline features. Then we solve the budgeted maximum coverage problem max 
+
+Pi∈I t ˆqti yi
+
+ˆQt
+
+(13a) s.t. yi ≤
+
+X
+
+> j∈J t
+
+ai j x j ∀ i ∈ I t (13b) 
+
+X
+
+> j∈J t
+
+x j ≤ p (13c) 
+
+x j ∈ { 0, 1} ∀ j ∈ J t (13d) 
+
+yi ∈ { 0, 1} ∀ i ∈ I t, (13e) where x j is a binary variable indicating whether candidate staging location j is selected, yi is a binary variable indicating whether demand zone i is covered, ˆ qti is the predicted next-hour EMS demand score for zone i at hour t, It is the set of demand zones considered at hour t, Jt is the set of candidate EMS staging locations considered at hour t, ai j is a binary coverage parameter denoting if staging location j
+
+can cover demand zone i, and p is the maximum number of staging locations that may be selected. The 10 coverage parameter is defined by 
+
+ai j =
+
+
+
+1, if the distance from staging location j to demand zone i is at most τ away ,
+
+0, otherwise, where τ is the response-time threshold radius in km. 
+
+4.2. Metrics & Baseline Performance 
+
+The case studies compare DVA with predictive feature-attribution baselines. Predictive SHAP is computed on the predictive model output and then aggregated to a scalar score when the model output is vector-valued. Decision-aware baselines include leave-one-feature-out (LOFO) decision ablation, downstream permutation feature importance, and greedy decision insertion. LOFO scores each feature i
+
+by the decision value loss from removing it from the full feature set and ranks features by this resulting loss (Covert et al., 2021). Downstream permutation feature importance shu ffl es each feature in the evaluation set, recomputes the decision value loss, and ranks features by the average drop in decision value (Fisher et al., 2019). Greedy decision insertion constructs a feature ordering sequentially, starting from the empty set and repeatedly adding features with the largest average improvement in decision value over the evaluation set (Petsiuk et al., 2018). We use two metrics. First, decision infidelity measures whether an attribution vector approximates the decision-value loss associated with removing or perturbing information. Lower values indicate a more faithful magnitude explanation (Yeh et al., 2019). Second, decision insertion AUC (area under the curve) evaluates the ranking induced by an attribution method. Starting from the null coalition, players are added in attribution order, and we record how quickly decision value is recovered. Higher insertion AUC indicates that the attribution ranking identifies better rankings of decision-relevant players (Wang and Wang, 2024; Rong et al., 2022). First, to establish predictive and prescriptive model quality, in Table 3 we show the aggregate per-formance of the XGBoost models in terms of the predictive power and realized downstream decisions (compared to the perfect information solution, referred to as oracle). Next, in Table 4, we compare the quality of DVA attributions, specifically post-InfoDVA, to traditional SHAP and the decision-aware methods introduced in Section 4.2 in both ranking quality and magnitude. Observe that DVA outper-forms or is competitive with all baselines in ranking quality on average, represented by the decision insertion AUC scores. Through decision infidelity we also show that DVA provides reliable approxi-mations for downstream objectives across feature coalitions. Since prediction SHAP is based on model outputs, it cannot reliably approximate the downstream objective, whereas DVA is a much more faith-ful approximator. In fact, in terms of decision infidelity, Prediction SHAP is entirely uninformative, performing orders of magnitude worse, while DVA scores well. Note that since the decision-aware baselines (LOFO, permutation, and greedy insertion) only o ff er rankings of features, we cannot use them to compute the decision infidelity metric. 
+
+4.3. Design parameters drive information value 
+
+We next present results of an experiment aimed at answering whether predictive information remains operationally useful under di ff erent problem parameters. Here, we focus on the EMS design problem. 11 Table 3: Aggregate predictive and realized objective performance across 25 models with 95% bootstrap confidence intervals for the case studies. Here the oracle represents the objective value with perfect information. 
+
+Case study RMSE Objective gap vs Oracle †
+
+CAISO 24.066 [23.431, 24.695] 10.858 [9.983, 11.805] EMS ( τ = 1, p = 3) 1.024 [1.019, 1.031] 12.134% [11.876%, 12.392%] EMS ( τ = 1, p = 5) 1.024 [1.019, 1.031] 15.445% [14.957%, 15.965%] EMS ( τ = 1, p = 8) 1.024 [1.019, 1.031] 17.054% [16.686%, 17.469%] EMS ( τ = 2, p = 5) 1.024 [1.019, 1.031] 5.437% [5.369%, 5.507%] 
+
+† CAISO: $ /MWh; EMS: percentage-point coverage gap. 
+
+Table 4: Attribution metric comparison across methods for CAISO and EMS with 95% paired bootstrap confidence intervals on 30 evaluation samples. Values are mean [CI]. 
+
+Metric Method CAISO EMS 
+
+Decision insertion AUC ↑
+
+Post-InfoDVA 0.631 [0.508, 0.744] 0.801 [0.750, 0.845] 
+
+Prediction SHAP 0.475 [0.375, 0.578] 0.656 [0.557, 0.749] Leave-one-feature-out 0.599 [0.490, 0.699] 0.675 [0.567, 0.765] Greedy decision insertion 0.544 [0.429, 0.658] 0.699 [0.602, 0.780] Permutation feature importance 0.292 [0.179, 0.404] 0.481 [0.363, 0.586] Decision infidelity ↓ Post-InfoDVA 36.04 [27.22, 48.19] 0.0003 [0.0002, 0.0004] 
+
+Prediction SHAP 34,195.79 [24,750.40, 46,003.04] 38.22 [25.43, 51.89] 
+
+A conventional sensitivity analysis can compare realized coverage across di ff erent optimization parame-ters, but it cannot determine whether input information is being used for downstream decision value, nor which feature–design combinations create that value. We evaluate our EMS maximum coverage dataset on 9 regimes in a 3x3 design, for coverage radii τ ∈ { 1, 2, 3}, and a facility budget p ∈ { 3, 5, 8}. These regimes allow us to distinguish three types of downstream behavior. We call a regime decision-active 
+
+when changes in the input features frequently change the selected EMS staging policy and its realized coverage value. A regime is decision-stable when the policy is insensitive to input features, even though the resulting coverage remains below the best attainable level. A regime is saturated when the policy is insensitive because the design constraints are relaxed enough that the system already achieves close to complete coverage. Thus, the experiment identifies whether predictive information is useful, ignored by the PtO pipeline, or rendered unnecessary by the design. 3 5 8                             
+
+> Facility budget p
+> 1
+> 2
+> 3
+> Coverage radius  ¿ (km)
+> 26.7% 39.5% 55.4%
+> 71.4% 90.1% 100.0%
+> 94.1% 100.0% 100.0%
+> A. Actual Realized Coverage
+> 358
+> Facility budget p
+> 1
+> 2
+> 3
+> 21.4%
+> active
+> 30.6%
+> active
+> 47.1%
+> active
+> 0.3%
+> stable
+> 23.8%
+> active
+> 0.0%
+> sat.
+> 0.5%
+> sat.
+> 0.0%
+> sat.
+> 0.0%
+> sat.
+> B. DVA Coalition Activity
+> 358
+> Facility budget p
+> 1
+> 2
+> 3
+> 1.4%
+> ZH baseline
+> 2.0%
+> ZH £budget
+> 2.8%
+> ZH £budget
+> 1.4%
+> ZH £radius
+> 1.7%
+> ZH £radius
+> 1.7%
+> ZH £radius
+> 1.4%
+> ZH £radius
+> 1.6%
+> ZH £radius
+> 1.7%
+> ZH £radius
+> C. Top Terms
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Mean covered demand (%)
+> 0%
+> 10%
+> 20%
+> 30%
+> 40%
+> 50%
+> Active InfoDVA coalitions (%)
+> 0.0
+> 0.5
+> 1.0
+> 1.5
+> 2.0
+> 2.5
+> Top term value (%)
+
+Figure 3: EMS decision regime heatmaps. Panel A reports realized covered demand across nine budget-radius regimes. Panel B reports the fraction of InfoDVA coalition evaluations with nonzero realized decision-value change. Panel C reports the dominant information–design interaction in each regime using post-JointDVI, with values expressed in percentage points of realized coverage. 
+
+In Fig. 3A, we present the conventional performance view of realized coverage across budgets and 12 radii, which can be interpreted as traditional sensitivity analysis. Panel B presents the DVA perspec-tive, which measures how often feature coalitions in the InfoDVA game produce nonzero decision-value changes. Several regimes have near-zero decision-active coalition rates, but for di ff erent reasons. When 
+
+τ = 3 or τ = 2, p = 8, the near-zero activity coincides with near-complete coverage. By contrast, when τ = 2 and p = 3, the decision-value change is also near zero, but the realized coverage is below saturation. This is referred to as decision-stable regime, where the design maps many di ff erent feature coalitions to the same realized coverage outcome, even though substantial demand remains uncovered. This coincides with actual decision changes across coalitions. In regime τ = 2, p = 3, both the policy (0 .44%) and the value (0 .3%) remain near-constant, meaning the PtO pipeline has identified three spe-cific staging areas as optimal choices regardless of any input features, i.e., these three areas are optimal for all likely demand realizations. Fig. 3C explains where the decision-active behavior comes from. The dominant post-JointDVI terms show that the key feature is the zone-hour baseline (ZH): a rolling average of incidents for each zone-hour pair. ZH does not have a fixed value across designs. Instead, its value is mediated by budget and coverage radius. In low radius regimes additional budget makes spatial information more actionable. In larger radius regimes radius interactions dominate, and the overall impact of input features decreases (JointDVI 5 .8% → 2.4%) as saturation increases. A more detailed view can be found in Fig. 7 in the Appendix. DesignDVA and DVI corroborate these findings, as shown in Table 5. The change from 
+
+τ = 1 → 2 results in the largest coverage gain of 44 .72%, with diminishing gains at τ = 3. In the case of τ = 2, p = 5 the decision gain interaction is complementary, with an additional 5 .94% coverage with both parameters improved, but negative otherwise, due to saturation.                  
+
+> Table 5: EMS DesignDVA and DVI decomposition of actual realized coverage. Values are signed percentage points relative to the baseline design τ=1,p=3 with a baseline coverage of ϕ∅=26 .72%, averaged across 25 models. ϕτrepresents the percentage coverage attributed to radius τ,ϕpthe attribution to number of staging areas p, and Iτ, pthe DVI interaction attribution.
+
+p = 3 p = 5 p = 8
+
+τ = 1
+
+ϕτ 0.00 0.00 0.00 
+
+ϕp 0.00 12 .74 28 .69 
+
+Iτ, p 0.00 0.00 0.00 
+
+τ = 2
+
+ϕτ 44 .72 47 .69 44 .65 
+
+ϕp 0.00 15 .71 28 .62 
+
+Iτ, p 0.00 +5.94 -0.14 
+
+τ = 3
+
+ϕτ 67 .34 63 .94 55 .96 
+
+ϕp 0.00 9.34 17 .31 
+
+Iτ, p 0.00 -6.80 -22.75 
+
+Overall, we can observe that, in this case, DVA can allow the decision maker to identify which regimes are worth explaining and which design parameter combinations result in input insensitivity. While regular regret comparison can identify where the model does not add decision value, DVA allows the user to connect that loss to specific input features and design parameters, and show, through pre /post-DVA comparison, which harmful policy changes are improvements under the model’s prediction. In our case, the regimes with τ = 1 and τ = 2, p = 5 have downstream policies that are responsive to di ff erent inputs. 13 4.4. Identifying disruptive features 
+
+DVA can help diagnose failures in PtO pipeline that classic interpretation frameworks may miss. We begin with a comparison of pre- and post-InfoDVA in the CAISO case study, shown in Table 6. Pre-InfoDVA represents the feature importance attribution under the model’s prediction. Post-InfoDVA                                      
+
+> Table 6: Comparison of pre-InfoDVA and post-InfoDVA. We report the mean absolute values for both, the mean absolute value of their di ff erence as disagreement, and the percentage of samples where pre-InfoDVA had a positive value but post-InfoDVA had a negative value. Results are reported with 95% paired bootstrap confidence intervals.
+> Feature Mean abs Pre-DVA Mean abs Post-DVA Disagreement Pre +/ Post −rate Mean wind speed 2.64 [2.55, 2.73] 2.31 [2.26, 2.36] 4.03 [3.91, 4.15] 44.3% [43.3, 45.4] Day of week 1.77 [1.70, 1.83] 2.40 [2.33, 2.47] 2.75 [2.66, 2.83] 29.7% [28.8, 30.7] Mean humidity 1.91 [1.85, 1.98] 1.74 [1.70, 1.78] 2.58 [2.51, 2.66] 29.1% [28.2, 30.0] Max temp 4.19 [4.06, 4.34] 2.92 [2.86, 2.97] 4.88 [4.74, 5.03] 27.8% [26.9, 28.7] Max solar irradiance 2.36 [2.28, 2.45] 2.04 [1.99, 2.08] 3.10 [3.01, 3.20] 24.7% [23.8, 25.6] Mean temp 7.12 [6.87, 7.37] 4.32 [4.24, 4.40] 7.66 [7.38, 7.94] 24.6% [23.8, 25.5] Mean solar irradiance 3.77 [3.69, 3.85] 3.34 [3.28, 3.40] 3.94 [3.85, 4.03] 24.2% [23.3, 25.1] Min temp 3.20 [3.01, 3.41] 2.22 [2.18, 2.27] 3.83 [3.61, 4.06] 16.5% [15.8, 17.3]
+
+represents the feature importance attribution after observing the actual result. If pre-DVA believes a feature to be a positive source of information for downstream decision value, but post-DVA shows it is actually consistently detrimental, that can help diagnose a flaw in the predictive model, especially if that feature is influential (represented by a high absolute value). Here we see that mean wind speed has a Pre +/ Post- disagreement rate of 44.3%, significantly higher than other features. This means that for 44.3% of the explained samples, mean wind speed was detrimental to decision value, even though pre-DVA identified it as positive and influential. Therefore, across the set of 25 models, the estimation error that mean wind speed is associated with leads to dispatch decisions that have lower realized value. To visualize this disagreement, Fig. 4 shows pre-InfoDVA against post-InfoDVA for each feature over the validation set. Each panel represents a two-dimensional decision value beeswarm plot, where points to the right of zero are features that improve decision value under the model’s own prediction, and points below zero are features that reduce the realized decision value. The highlighted lower-right quadrant therefore identifies cases where a feature appears useful under the model’s prediction but induces deci-sions with negative decision value. We also present a traditional beeswarm in Fig. 5 in the Appendix. Based on this finding, we devise an automated criterion for identifying disruptive features in models based on post-InfoDVA, and use it to guide a post hoc intervention aimed at improving downstream regret, which we call Guided DVA intervention (GDVA). We train each model on the 24-month training set, and compute InfoDVA values on the 364-day validation set (one day removed due to missing data). We then identify up to three features as potentially disruptive using the following criteria: 
+
+• The feature must be detrimental to the model’s realized decision gain. The mean InfoDVA value of the feature over the validation set must be negative. 
+
+• The feature must be influential to downstream decisions. The mean absolute InfoDVA value must be greater than 1% of the maximum validation mean absolute InfoDVA value across features. 
+
+• The feature must be consistently disruptive to the full model. The 95% bootstrap upper confidence interval of the feature’s InfoDVA value must also be negative. 14 −10 0 10                       
+
+> −15
+> −10
+> −5
+> 0
+> 5
+> 10
+> 15
+> Post-DVA value
+> Mean wind speed
+> Pre+/Post- 44.3%
+> −10 010
+> −15
+> −10
+> −5
+> 0
+> 5
+> 10
+> 15
+> Day of week
+> Pre+/Post- 29.7%
+> −10 −5 0510
+> −10
+> −5
+> 0
+> 5
+> 10
+> Mean humidity
+> Pre+/Post- 29.1%
+> −20 −10 010 20
+> −20
+> −10
+> 0
+> 10
+> 20
+> Max temp
+> Pre+/Post- 27.8%
+> −10 010
+> Pre-DVA value
+> −10
+> −5
+> 0
+> 5
+> 10
+> Post-DVA value
+> Max solar irradiance
+> Pre+/Post- 24.7%
+> −40 −20 020 40
+> Pre-DVA value
+> −40
+> −20
+> 0
+> 20
+> 40
+> Mean temp
+> Pre+/Post- 24.6%
+> −10 010
+> Pre-DVA value
+> −15
+> −10
+> −5
+> 0
+> 5
+> 10
+> 15
+> Mean solar irradiance
+> Pre+/Post- 24.2%
+> −20 −10 010 20
+> Pre-DVA value
+> −20
+> −10
+> 0
+> 10
+> 20
+> Min temp
+> Pre+/Post- 16.5%
+> Low
+> High
+> Relative Feature Value
+
+Figure 4: Pre-InfoDVA / Post-InfoDVA value comparison across features in the validation set. The highlighted quadrant is the set of points where the feature provides positive decision value according to the model predictions (pre-DVA) but negative realized decision value (post-DVA). 
+
+For each qualifying feature, we compute the mean actual daily regret improvement on the validation set when that feature is masked from the model. The feature with the largest improvement is then chosen to be masked on the test set of 101 days, and compared with the full model (FM). We compare against random feature masking, where a random feature that does not fulfill the GDVA criteria is masked instead. Finally, we also compare with SAGE, which uses Shapley values to attribute model loss (here MSE) to individual features, and use the same procedure to identify features that are disruptive to the predictive power of the model (Covert et al., 2020). The results are shown in Table 7. We see that through this process and across di ff erent model specifications, a feature was chosen 23 /25 times, and mean wind speed was chosen 22 times, while max temperature was chosen once. GDVA outperformed the full model 21 /23 times, with a decision gain of 1.63 $ /MWh. GDVA also outperformed random masking 19 /23 times, and outperformed SAGE 18 /23 times. SAGE masking resulted in a more accurate model ( ∆ RMSE of −1.67) but that did not translate to better decision value. Overall, we conclude that through analysis on a holdout validation set, DVA was able to identify disruptive features across the entire PtO pipeline on a test set where other methods could not. 
+
+4.5. SHAP Approximation Methods 
+
+Exact DVA is exponential in the number of players or features, and therefore, approximation meth-ods are often required for large real-world datasets. Here, we adapt two popular approximation methods, Kernel SHAP and Permutation SHAP, discussed in Section 3.7. We report the Kendall tau-b similarity of the global rankings produced and the agreement percent of the global top-1 feature with the exact DVA attribution (Kendall, 1938, 1945). We also compute a normalized MAE (NMAE) of the DVA values from the exact values, to test how well the exact values are approximated by each method. We report the results in Table 8. First, observe that the approximation methods substantially reduce the computational 15 Table 7: Out-of-sample e ff ect of the Guided DVA (GDVA) intervention. For each of the 25 models, the feature to mask is selected using validation-period post-InfoDVA only. The selected feature is then replaced by its background expectation and evaluated once on the held-out test period. Positive ∆ DV (decision value) and ∆ RMSE indicate improvement over the comparison methods. Uncertainty intervals are 95% bootstrap confidence intervals. 
+
+Aggregate test-period intervention performance 
+
+Comparison Test Wins Mean ∆ DV Mean ∆ RMSE GDVA vs. FM 21 /23 1.63 [1.06, 2.24] 1.98 [1.35, 2.65] GDVA vs. random 19 /23 1.50 [0.85, 2.20] 0.70 [-0.30, 1.75] GDVA vs. SAGE 18 /23 1.10 [0.54, 1.72] -1.67 [-2.09, -1.23] 
+
+Features selected by the GDVA validation rule 
+
+Selected feature Test Wins Mean ∆ DV Mean ∆ RMSE Mean wind speed 20 /22 1.68 [1.08, 2.30] 2.03 [1.38, 2.73] Max temperature 1/1 0.72 [0.72, 0.72] 0.88 [0.88, 0.88] 
+
+cost of DVA. Next, note that Permutation SHAP recovers the global ranking well even at small budgets (Kendall tau ≈ 0.93 with 96% top-1 agreement at 16 sampled orderings), and both estimators reach near-exact recovery (Kendall tau ≈ 0.97) at 73–76% of the exact runtime. Full results are reported in Table 10 in the Appendix.       
+
+> Table 8: Approximation quality for EMS InfoDVA in the decision-active design ( p=8, τ =1), where exact InfoDVA enumer-ates all 2 8=256 coalitions per explained hour. Time is the percentage of exact runtime, and Top-1 is % agreement with the exact method on the most important feature per sample. Values are averaged over 50 runs per method per budget.
+
+Estimator B Time (% exact) NMAE Kendall τ Top-1 Exact 256 100.0% — — —Kernel 16 7.0% 1.441 0.749 76% Kernel 192 75.8% 0.222 0.966 100% Permutation 16 32.5% 0.473 0.929 96% Permutation 64 73.2% 0.238 0.967 100% 
+
+5. Discussion & Conclusions 
+
+We introduced Decision-Value Attribution, a Shapley-based framework for explaining PtO systems by decomposing downstream decision value rather than predictive output. By defining games over information sources, design parameters, and their interactions, DVA places features, operational choices, and solvers on a common objective scale. Across electricity arbitrage and EMS coverage, DVA identifies when predictive explanations are poor proxies for decision value, when information should be controlled or simplified, and when design choices determine whether information is useful. These results suggest that explanations for operational AI systems should be judged by whether they clarify and improve the decisions those systems produce, rather than based on the quality of the predictions. Our results suggest that explanations for PtO systems should take into account the entire PtO pipeline to be reliable. Predictive attribution methods identify variables that move the model output, but the op-timizer can filter the value of those changes. DVA addresses this gap by attributing realized or model-implied decision value in the units of the downstream objective. This distinction is demonstratively important in both case studies, where features that are influential for prediction are not necessarily valu-able for realized dispatch or coverage decisions, while simple baseline signals can dominate the value 16 of the induced policy. In fact, our experiments show that pre-DVA is most valuable when complement-ing post-DVA. Since it represents the decision value based on the model prediction, large disagreement between pre- and post-DVA values can reveal opportunities for interventions or highlight flaws in the predictive model. The results also illustrate how DVA can be used in diagnosis. In the CAISO case, post-DVA identifies features that are influential but consistently harmful to realized decision value, leading to a targeted GDVA intervention that improves held-out decision performance. In the EMS case, the comparison between pre- and post-DVA reveals that the full model often changes staging decisions in ways the model regards as nearly equivalent but that are materially di ff erent (and often deleterious) under realized demand. This diagnosis motivates a simpler baseline-driven policy, which performs as well as or better than the full model out of sample. Thus, DVA can support both feature-control interventions and the discovery of simpler interpretable policies. A second implication is that DVA can reveal when predictive information is operationally useful. In the EMS study, the same predictive model and feature set have di ff erent decision value depending on the budget, coverage radius, and solution procedure. DVA identifies regimes in which the PtO pipeline is decision-active, where information can meaningfully change the selected policy. This distinction is useful because it tells the analyst whether poor performance should be addressed by improving the pre-dictive model, changing the optimization design, or simplifying the policy. DVI extends this diagnostic by showing which information sources become valuable only under particular design choices, such as specific budget-radius combinations. The framework has important limitations. First, DVA inherits the dependence of Shapley-based ex-planations on the definition of missing information. In this paper we use empirical background marginal-ization, which is standard in SHAP attribution, but di ff erent coalition constructions, especially condi-tional constructions that preserve feature dependence, may produce di ff erent attributions. Therefore, DVA score interpretations depend on the distribution of the chosen background dataset. Second, the choice of players matters. Feature grouping and design-parameter grouping are often necessary for in-terpretability and computation, but di ff erent groupings answer di ff erent managerial questions and may redistribute value across components. Third, exact DVA scales exponentially in the number of players because each coalition requires a prediction, an optimization solve, and a value evaluation. Approxima-tion methods can reduce this computational burden, but then the attributions inherit sampling error and may be less reliable for small or unstable e ff ects. Finally, DVA is a diagnostic tool and does not imply causality. Post-DVA can identify features or design choices that were associated with higher or lower realized decision value for a PtO pipeline, but it does not by itself prove that a specific intervention will improve future performance. Several directions remain open for future research. First, although exact DVA is feasible for the grouped player sets studied here, larger PtO systems will require scalable approximation methods. Fu-ture work could develop solver-aware DVA estimators that utilize both quicker heuristics and exact solvers to provide reliable DVA value approximations. Another interesting direction is extending the framework to analyze di ff erent aspects of the PtO pipeline. Evaluating the impact of di ff erent heuristics on decision value, and their interactions with input information relative to an exact baseline can provide useful insights into the decision-making process of heuristics and approximate solvers. Another possi-bility is to shift the focus from diagnosis to intervention. The GDVA results show that post-DVA can 17 identify features that are harmful for a fixed pipeline, but further work is needed to understand when DVA-guided interventions remain e ff ective after retraining. More generally, DVA could be integrated into model-selection and decision-focused learning procedures, so that prediction models are trained to both improve downstream value but also to avoid misleading decisions. 
+
+6. Appendices & Supplementary Data 
+
+We provide detailed implementation details in Appendix A and additional figures, compute time comparisons, and detailed SHAP approximation results in Appendix B. Both Appendices are submitted for review as a separate supplementary file. We provide the code for reproducing our results, along with the processed datasets, in github.com/kziliask/DVA .
+
+Acknowledgements 
+
+This work was made possible in part by a grant of high performance computing resources and tech-nical support from the Alabama Supercomputer Authority. 
+
+References 
+
+Aas, K., Jullum, M., Løland, A., 2021. Explaining individual predictions when features are dependent: More accurate approximations to Shapley values. Artificial Intelligence 298, 103502. Bertsimas, D., Kallus, N., 2020. From predictive to prescriptive analytics. Management Science 66, 1025–1044. Borgonovo, E., Plischke, E., Rabitti, G., 2024. The many shapley values for explainable artificial intel-ligence: A sensitivity analysis perspective. European Journal of Operational Research 318, 911–926. Boutilier, J.J., Chan, T.C., 2020. Ambulance emergency response optimization in developing countries. Operations Research 68, 1315–1334. Byrne, R.H., Nguyen, T.A., Copp, D.A., Concepcion, R.J., Chalamala, B.R., Gyuk, I., 2018. Opportu-nities for energy storage in caiso: Day-ahead and real-time market arbitrage, in: 2018 International Symposium on Power Electronics, Electrical Drives, Automation and Motion (SPEEDAM), IEEE. pp. 63–68. California Independent System Operator, 2026. CAISO OASIS Locational Marginal Prices, Day-Ahead Market, 2021-2026. https://oasis.caiso.com/ . Open Access Same-Time Information System (OASIS); accessed: 2026-05-08. California Independent System Operator (CAISO), Department of Market Monitor-ing, 2025. 2024 Special Report on Battery Storage. Technical Report. Califor-nia Independent System Operator. URL: https://www.caiso.com/documents/ 2024-special-report-on-battery-storage-may-29-2025.pdf . accessed: June 8, 2026. Chen, T., Guestrin, C., 2016. XGBoost: A scalable tree boosting system, in: Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, pp. 785–794. 18 Cole, W., Ramasamy, V., Turan, M., 2025. Cost Projections for Utility-Scale Battery Storage: 2025 Update. Technical Report NREL /TP-6A40-93281. National Renewable Energy Laboratory. Golden, CO. URL: https://www.nrel.gov/docs/fy25osti/93281.pdf . accessed: June 8, 2026. Covert, I., Lundberg, S., Lee, S.I., 2021. Explaining by removing: A unified framework for model explanation. Journal of Machine Learning Research 22, 1–90. Covert, I., Lundberg, S.M., Lee, S.I., 2020. Understanding global feature contributions with additive importance measures. Advances in Neural Information Processing Systems 33, 17212–17223. De Bock, K.W., Coussement, K., De Caigny, A., Słowi´ nski, R., Baesens, B., Boute, R.N., Choi, T.M., Delen, D., Kraus, M., Lessmann, S., et al., 2024. Explainable AI for operational research: A defining framework, methods, applications, and a research agenda. European Journal of Operational Research 317, 249–272. Donti, P., Amos, B., Kolter, J.Z., 2017. Task-based end-to-end model learning in stochastic optimization. Advances in Neural Information Processing Systems 30. Fisher, A., Rudin, C., Dominici, F., 2019. All models are wrong, but many are useful: Learning a variable’s importance by studying an entire class of prediction models simultaneously. Journal of Machine Learning Research 20, 1–81. Forel, A., Parmentier, A., Vidal, T., 2023. Explainable data-driven optimization: From context to deci-sion and back again, in: International Conference on Machine Learning, PMLR. pp. 10170–10187. Frichi, Y., Aboueljinane, L., Jawab, F., 2025. Ambulance location and relocation under budget con-straints: investigating coverage-maximization models and ambulance sharing to improve emergency medical services performance: Y. frichi et al. Health Care Management Science 28, 274–297. Ghorbani, A., Zou, J., 2019. Data Shapley: Equitable valuation of data for machine learning, in: Inter-national Conference on Machine Learning, PMLR. pp. 2242–2251. Goerigk, M., Hartisch, M., 2023. A framework for inherently interpretable optimization models. Euro-pean Journal of Operational Research 310, 1312–1324. Goerigk, M., Hartisch, M., Merten, S., 2026. Towards robust interpretable surrogates for optimization. Annals of Operations Research , 1–30. Grabisch, M., Roubens, M., 1999. An axiomatic approach to the concept of interaction among players in cooperative games. International Journal of Game Theory 28, 547–565. Grinsztajn, L., Oyallon, E., Varoquaux, G., 2022. Why do tree-based models still outperform deep learning on typical tabular data? Advances in Neural Information Processing Systems 35, 507–520. Hashtarkhani, S., Matthews, S.A., Yin, P., Mohammadi, A., Ebrahimi, S.M., Tara, M., Kiani, B., et al., 2023. Where to place emergency ambulance vehicles: use of a capacitated maximum covering loca-tion model with real call data. Geospatial Health 18. Howard, R.A., 1966. Information value theory. IEEE Transactions on Systems Science and Cybernetics 2, 22–26. 19 Jiang, D.R., Powell, W.B., 2015. Optimal hour-ahead bidding in the real-time electricity market with battery storage using approximate dynamic programming. INFORMS Journal on Computing 27, 525–543. Kendall, M.G., 1938. A new measure of rank correlation. Biometrika 30, 81–93. Kendall, M.G., 1945. The treatment of ties in ranking problems. Biometrika 33, 239–251. Krishnamurthy, D., Uckun, C., Zhou, Z., Thimmapuram, P.R., Botterud, A., 2017. Energy storage arbitrage under day-ahead and real-time price uncertainty. IEEE Transactions on Power Systems 33, 84–93. Kurtz, J., Birbil, ¸ S.˙ I., den Hertog, D., 2025. Counterfactual explanations for linear optimization. Euro-pean Journal of Operational Research . Lamp, S., Samano, M., 2022. Large-scale battery storage, short-term market outcomes, and arbitrage. Energy Economics 107, 105786. Löhndorf, N., Wozabal, D., 2023. The value of coordination in multimarket bidding of grid energy storage. Operations Research 71, 1–22. Lundberg, S.M., Erion, G., Chen, H., DeGrave, A., Prutkin, J.M., Nair, B., Katz, R., Himmelfarb, J., Bansal, N., Lee, S.I., 2020. From local explanations to global understanding with explainable ai for trees. Nature Machine Intelligence 2, 56–67. Lundberg, S.M., Lee, S.I., 2017. A unified approach to interpreting model predictions. Advances in Neural Information Processing Systems 30. Mandi, J., Bucarey, V., Tchomba, M.M.K., Guns, T., 2022. Decision-focused learning: Through the lens of learning to rank, in: International Conference on Machine Learning, PMLR. pp. 14935–14947. Mandi, J., Kotary, J., Berden, S., Mulamba, M., Bucarey, V., Guns, T., Fioretto, F., 2024. Decision-focused learning: Foundations, state of the art, benchmark and future opportunities. Journal of Arti-ficial Intelligence Research 80, 1623–1701. Mandl, C., Nadarajah, S., Minner, S., Gavirneni, S., 2022. Data-driven storage operations: Cross-commodity backtest and structured policies. Production and Operations Management 31, 2438–2456. McElfresh, D., Khandagale, S., Valverde, J., Prasad C, V., Ramakrishnan, G., Goldblum, M., White, C., 2023. When do neural nets outperform boosted trees on tabular data? Advances in Neural Information Processing Systems 36, 76336–76369. Mitchell, R., Cooper, J., Frank, E., Holmes, G., 2022. Sampling permutations for Shapley value estima-tion. Journal of Machine Learning Research 23, 1–46. Montgomery, D.C., 2017. Design and analysis of experiments. John Wiley & Sons. Nasrollahzadeh, A.A., Khademi, A., Mayorga, M.E., 2018. Real-time ambulance dispatching and relo-cation. Manufacturing & Service Operations Management 20, 467–480. 20 NYC Department of Health and Mental Hygiene, 2020. Modified ZIP code tabulation ar-eas (MODZCTA). NYC Open Data. URL: https://data.cityofnewyork.us/Health/ Modified-Zip-Code-Tabulation-Areas-MODZCTA-/pri4-ifjk . accessed: May 16 2026. NYC Fire Department, 2026. EMS incident dispatch data. NYC Open Data. URL: https: //data.cityofnewyork.us/Public-Safety/EMS-Incident-Dispatch-Data/76xm-jjuj . ac-cessed: May 16 2026. Owen, G., 1972. Multilinear extensions of games. Management Science 18, 64–79. Petsiuk, V., Das, A., Saenko, K., 2018. Rise: Randomized input sampling for explanation of black-box models, in: Proceedings of the British Machine Vision Conference (BMVC), pp. 1–13. Ribeiro, M.T., Singh, S., Guestrin, C., 2016. "Why should I trust you?" explaining the predictions of any classifier, in: Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining, pp. 1135–1144. Rong, Y., Leemann, T., Borisov, V., Kasneci, G., Kasneci, E., 2022. A consistent and e ffi cient evalua-tion strategy for attribution methods, in: International Conference on Machine Learning, PMLR. pp. 18770–18795. Sadana, U., Chenreddy, A., Delage, E., Forel, A., Frejinger, E., Vidal, T., 2025. A survey of contex-tual optimization methods for decision-making under uncertainty. European Journal of Operational Research 320, 271–289. Shapley, L.S., et al., 1953. A value for n-person games. Princeton University Press Princeton. Strumbelj, E., Kononenko, I., 2010. An e ffi cient explanation of individual classifications using game theory. The Journal of Machine Learning Research 11, 1–18. Sundararajan, M., Dhamdhere, K., Agarwal, A., 2020. The Shapley Taylor interaction index, in: Inter-national Conference on Machine Learning, PMLR. pp. 9259–9268. Tsai, C.P., Yeh, C.K., Ravikumar, P., 2023. Faith-SHAP: The faithful Shapley interaction index. Journal of Machine Learning Research 24, 1–42. US Energy Information Administration, 2026. Today in Energy: Daily Prices. https://www.eia. gov/todayinenergy/prices.php .Wang, Y., Wang, X., 2024. Benchmarking deletion metrics with the principled explanations, in: Forty-first International Conference on Machine Learning, pp. 51569–51595. Wankmüller, F., Thimmapuram, P.R., Gallagher, K.G., Botterud, A., 2017. Impact of battery degradation on energy arbitrage revenue of grid-level energy storage. Journal of Energy Storage 10, 56–66. Yeh, C.K., Hsieh, C.Y., Suggala, A., Inouye, D.I., Ravikumar, P.K., 2019. On the (in)fidelity and sensitivity of explanations, in: Advances in Neural Information Processing Systems, pp. 1–12. Zippenfenig, P., 2024. Open-Meteo.com Weather API. URL: https://doi.org/10.5281/zenodo. 14582479 , doi: 10.5281/zenodo.14582479 .21 Appendix A. Implementation Details 
+
+XGBoost experimental setup 
+
+To assess whether the findings were sensitive to hyperparameter choices, we evaluated 25 model specifications. The specifications were generated using an L25 (5 6) orthogonal array design with six factors, each evaluated at five levels. Through this setup, each level of each hyperparameter appears five times, and every pairwise combination of levels across any two hyperparameters appears once. The considered factors are as follows. 
+
+• Number of trees controls how many sequential decision trees are added to the ensemble, with more trees generally allowing more complex fitted patterns. 
+
+• Maximum tree depth controls how many splits each tree can make, with deeper trees capturing more detailed interactions but increasing the risk of overfitting. 
+
+• Learning rate controls how strongly each new tree updates the model, with smaller values making learning more gradual and often requiring more trees. 
+
+• Row subsampling rate controls the fraction of training observations used to fit each tree, which can reduce overfitting by adding randomness. 
+
+• Column subsampling rate controls the fraction of predictors considered when fitting each tree, which can reduce reliance on any single feature and improve generalization. 
+
+• L2 regularization strength penalizes large leaf weights, making the model more conservative and helping reduce overfitting. The six varied hyperparameters chosen and their corresponding levels are shown in Table 9. The first level in each hyperparameter represents the default XGBoost configuration. All other preprocessing, training, and evaluation choices were held fixed across the 25 specifications.         
+
+> Table 9: Hyperparameter levels used in the XGBoost robustness design
+> Hyperparameter Levels
+> Number of trees 100, 50, 150, 250, 350 Maximum tree depth 3, 2, 4, 5, 6 Learning rate 0.05, 0.01, 0.03, 0.10, 0.15 Row subsampling rate 0.90, 0.60, 0.75, 0.95, 1.00 Column subsampling rate 0.90, 0.60, 0.75, 0.95, 1.00
+> L2regularization strength 1.0, 0.3, 3.0, 10.0, 30.0
+
+Feature Engineering and Preprocessing CAISO Case Study 
+
+The CAISO dataset contains hourly day-ahead market prices for the SP15 pricing region, sourced from CAISO Open Access Same-Time Information System (OASIS) (California Independent System Operator, 2026). SP15, or South of Path 15, is a CAISO aggregated trading hub associated with the re-gion south of the Path 15 transmission corridor, a major north–south transmission interface in California, 22 and is representative of wholesale energy prices in Southern California (US Energy Information Admin-istration, 2026). The processed dataset spans 1,194 usable daily rows from January 26, 2023 through May 7, 2026. The calendar split is January 26, 2023 through January 25, 2025 for training, January 26, 2025 through January 25, 2026 for validation, and January 26, 2026 through May 7, 2026 for testing, yielding 729 training days, 364 validation days, and 101 test days after missing-price days are removed. Four rows are removed because pricing data is missing on March 12, 2023, March 10, 2024, March 9, 2025, and March 8, 2026. The CAISO price data points are operating-hour LMP energy prices for SP15 in the day-ahead mar-ket. Following prior work showing that weather covariates are informative for energy-price prediction (Lamp and Samano, 2022; Mandl et al., 2022), the model covariates are daily minimum, mean, and maximum temperature, daily mean humidity, daily mean wind speed, day of the week, and daily mean and maximum solar irradiance. The weather data are daily summaries from the Open-Meteo Histor-ical Weather API (Zippenfenig, 2024). The weather point is LAX, which we use as a proxy for the SP15 zone. The code uses one weather vector for the SP15 hub because the SP15 target is an aggregate trading-hub price and the Open-Meteo LAX record covers the CAISO sample dates. The day of the week feature is coded with Monday equal to 0. The daily price target is a 24-dimensional vector, so the model output ˆ pt ∈ R24 represents the predicted day-ahead prices over the 24 operating hours of day t. The XGBoost model is trained with squared-error loss, histogram trees, under the experimental design shown in Table 9. DVA values are computed on the 364-day validation set, and predictive and downstream decision metrics are reported on the 101-day test holdout set. The CAISO background set is the last 365 calendar days in the training frame. As per the Shapley method, for a coalition, the implementation copies the background feature matrix, replaces included feature columns by the explained day’s values, predicts all background rows, and averages the resulting 24-hour price vectors. For our default setup, we use 4-hour capacity batteries, which align with large scale CAISO oper-ations (California Independent System Operator (CAISO), Department of Market Monitoring, 2025). According to Cole et al. (2025), typical battery e ffi ciency values ranges from 80-90% round trip, which aligns with our choice of ηd = ηc = 95%, 0 .95 2 ≈ 0.9. Finally, a throughput penalty is used in model-ing as a battery degradation proxy, as degradation has been shown to materially a ff ect energy arbitrage profitability (Wankmüller et al., 2017). 
+
+Manhattan EMS Maximum Coverage 
+
+The empirical setting is an hourly ZIP-level EMS demand prediction and coverage problem in Man-hattan. The pipeline counts all EMS rows by hour for the citywide lag feature. It then filters to the Manhattan borough, extracts five-digit ZIP codes, and counts incidents by hour and ZIP. The EMS inci-dent data are sourced from NYC Open Data (NYC Fire Department, 2026). The ZIP geography is built from modified ZIP code tabulation area (MODZCTA) fields from geo-datafiles available online (NYC Department of Health and Mental Hygiene, 2020). Alias ZIPs are mapped to a canonical MODZCTA ZIP and incident counts are summed after mapping. The dataset contains 45 ZIP zones and 5,832 hourly observations from January 1, 2025 through August 31, 2025, for 262,440 ZIP-hour rows. Missing incident counts in the dense ZIP-hour grid are set to zero. The prediction target is the vector of next-hour EMS incident counts across the 45 ZIP zones. The target sum over the output window is 252,665 incidents, corresponding to approximately 43.3 incidents per 23 hour citywide. The processed shared features are hour, day of the week, temperature, precipitation, city-wide incidents lagged by one hour, ZIP-level incidents lagged by one hour, mean neighboring incidents lagged by one hour, and the zone-hour historical baseline, calculated over the past 8 weeks for each row. The model uses 140 covariates grouped into eight players: hour of day, day of week, temperature, pre-cipitation, citywide lag-1 EMS demand, ZIP-level lag-1 EMS demand, neighboring-zone lag-1 demand, and the zone-hour historical baseline. The training period is January 1, 2025 through July 31, 2025, with 5,088 training hours. The hold-out period is August 1, 2025 through August 31, 2025, with 744 holdout hours and 33,480 ZIP-hour predictions. The explanation sample contains 100 holdout hours sampled without replacement with ran-dom seed 0. The EMS background set contains 100 training hours sampled without replacement with random seed 0. For each coalition, included feature-group columns are set to the explained hour’s val-ues, excluded columns remain at sampled background values, XGBoost predictions are averaged over background rows, and negative predictions are truncated to zero. For each holdout hour, the predicted 45-dimensional demand vector is passed to a downstream maximum coverage problem that selects a limited number of EMS staging zones. A selected staging zone covers a demand zone if the distance between their ZIP centroids is within a specified coverage radius. We evaluate three coverage radii, 1, 2, and 3 km, and three facility budgets, 3, 5, and 8 staging locations. 
+
+Appendix B. Additional Figures & Results −10 −5 0 5 10 
+
+> SHAP value
+> Min Temperature
+> Max Solar Irradiance
+> Day of the Week
+> Mean Humidity
+> Mean Temperature
+> Mean Solar Irradiance
+> Mean Wind Speed
+> Max Temperature
+> Feature
+> Decision SHAP beeswarm, first 71 holdout days
+> Low
+> High
+> Feature value
+
+Figure 5: A beeswarm plot for the post-InfoDVA values on the test dataset. Each point corresponds to a single day’s SHAP value for the corresponding feature, with the color denoting the relative value of the feature at that point. We see that the mean wind speed has the lowest post-InfoDVA values with very few positive instances. 
+
+24 A. Incidents covered by Full Model - Oracle 
+
+> Oracle
+> Full model
+> Oracle
+> Full model
+
+B. Incidents covered by Full Model - Baseline 
+
+> Baseline
+> Full model
+> Selection rate
+> 100%
+> 70%
+> 40%
+> 10%
+
+C. Incidents covered by Full Model - Neutralized Model 
+
+> Without Zone-hour baseline
+> Full model
+> Without Zone-hour baseline
+> Full model
+> −0.75
+> −0.50
+> −0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> FM Covered - Oracle Covered
+> −0.75
+> −0.50
+> −0.25
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> FM Covered - Baseline Covered
+> −0.2
+> −0.1
+> 0.0
+> 0.1
+> 0.2
+> FM Covered - Neutralized Covered
+
+Figure 6: Spatial distribution of decision value di ff erence between di ff erent predictors for the p = 5, τ = 1 design. In (A), we compare the full model with the oracle, which has access to perfect information. In (B), we compare the full model ˆ yN with the uninformed baseline ˆ y∅. In (C), we compare the full model ˆ yN with ˆ yN\{ ZH }, where ZH is the zone-hour baseline feature. The points show the frequency that a zone was chosen as a staging area by each predictor. This shows how the perfect information can change the policy (A), how input features can induce changes in the downstream policy (B), and how the most influential feature, ZH, can change the policy when introduced to the model. 
+
+25 ZH baseline 
+
+> lagged demand main effect
+> neighboring demand main effect
+> time-of-day main effect
+> citywide demand main effect
+> temperature main effect
+> day-of-week main effect
+> precipitation main effect
+> Total main effect: 5.8%, total interaction: 0.0%
+> 1.36
+> 1.06
+> 0.98
+> 0.94
+> 0.75
+> 0.37
+> 0.25
+> 0.07
+> ¿ = 1  km,  p = 3  (active)
+> ZH  £ budget
+> ZH baseline
+> neighboring demand  £ budget
+> time-of-day  £ budget
+> lagged demand  £ budget
+> citywide demand  £ budget
+> neighboring demand main effect
+> lagged demand main effect
+> Total main effect: 5.8%, total interaction: 8.0%
+> 2.04
+> 1.57
+> 1.44
+> 1.31
+> 1.15
+> 1.10
+> 1.03
+> 0.97
+> ¿ = 1  km,  p = 5  (active)
+> ZH  £ budget
+> ZH baseline
+> time-of-day  £ budget
+> neighboring demand  £ budget
+> lagged demand  £ budget
+> citywide demand  £ budget
+> lagged demand main effect
+> neighboring demand main effect
+> Total main effect: 5.9%, total interaction: 10.1%
+> 2.81
+> 1.71
+> 1.53
+> 1.50
+> 1.49
+> 1.41
+> 0.95
+> 0.95
+> ¿ = 1  km,  p = 8  (active)
+> ZH  £ radius
+> lagged demand  £ radius
+> neighboring demand  £ radius
+> time-of-day  £ radius
+> citywide demand  £ radius
+> ZH baseline
+> lagged demand main effect
+> neighboring demand main effect
+> Total main effect: 2.6%, total interaction: 5.8%
+> 1.38
+> 1.07
+> 1.00
+> 0.96
+> 0.73
+> 0.64
+> 0.52
+> 0.46
+> ¿ = 2  km,  p = 3  (stable)
+> ZH  £ radius
+> ZH  £ budget
+> neighboring demand  £ radius
+> time-of-day  £ radius
+> lagged demand  £ radius
+> ZH baseline
+> neighboring demand  £ budget
+> citywide demand  £ radius
+> Total main effect: 2.9%, total interaction: 10.5%
+> 1.67
+> 1.16
+> 1.06
+> 0.99
+> 0.98
+> 0.80
+> 0.78
+> 0.76
+> ¿ = 2  km,  p = 5  (active)
+> ZH  £ radius
+> ZH  £ budget
+> neighboring demand  £ radius
+> lagged demand  £ radius
+> time-of-day  £ radius
+> neighboring demand  £ budget
+> lagged demand  £ budget
+> time-of-day  £ budget
+> Total main effect: 2.4%, total interaction: 10.6%
+> 1.67
+> 1.38
+> 0.90
+> 0.90
+> 0.80
+> 0.74
+> 0.74
+> 0.71
+> ¿ = 2  km,  p = 8  (sat.)
+> 0.0  0.5  1.0  1.5  2.0  2.5  3.0
+> ZH  £ radius
+> lagged demand  £ radius
+> neighboring demand  £ radius
+> time-of-day  £ radius
+> citywide demand  £ radius
+> ZH baseline
+> lagged demand main effect
+> neighboring demand main effect
+> Total main effect: 2.6%, total interaction: 5.8%
+> 1.38
+> 1.06
+> 0.99
+> 0.95
+> 0.74
+> 0.64
+> 0.52
+> 0.46
+> ¿ = 3  km,  p = 3  (sat.)
+> 0.0  0.5  1.0  1.5  2.0  2.5  3.0
+> ZH  £ radius
+> ZH  £ budget
+> neighboring demand  £ radius
+> lagged demand  £ radius
+> time-of-day  £ radius
+> citywide demand  £ radius
+> neighboring demand  £ budget
+> ZH baseline
+> Total main effect: 2.4%, total interaction: 9.5%
+> 1.56
+> 1.02
+> 0.99
+> 0.92
+> 0.85
+> 0.72
+> 0.71
+> 0.67
+> ¿ = 3  km,  p = 5  (sat.)
+> 0.0  0.5  1.0  1.5  2.0  2.5  3.0
+> ZH  £ radius
+> ZH  £ budget
+> lagged demand  £ radius
+> neighboring demand  £ radius
+> time-of-day  £ radius
+> lagged demand  £ budget
+> neighboring demand  £ budget
+> citywide demand  £ radius
+> Total main effect: 2.4%, total interaction: 10.5%
+> 1.67
+> 1.37
+> 0.90
+> 0.90
+> 0.80
+> 0.74
+> 0.73
+> 0.71
+> ¿ = 3  km,  p = 8  (sat.)
+> Absolute post-JointDVI value (percentage points of realized coverage) Figure 7: Each panel reports the largest post-JointDVI main or interaction terms for one budget-radius regime, with values expressed in mean percentage points of realized coverage for each design. The figure shows that the zone-hour baseline feature group is consistently the largest contributor, but that its contribution appears primarily through interactions with budget in low-radius regimes and with radius in higher-radius regimes.
+
+26 SHAP Approximation Methods 
+
+We implement two popular approximation methods for recovering SHAP values and apply them to DVA: Kernel SHAP and Permutation SHAP, which we introduced in Section 3.7. The goal of this analysis is to quantify the performance of these methods in estimating the exact SHAP values with substantially less compute time. For each method, we test 5 di ff erent budgets: {16 , 32 , 64 , 128 , 192 },where 256 are the number of coalitions the exact DVA attribution method must evaluate. For each method-budget combination, we test across 50 di ff erent seeds to account for variety in sampling. We report the Kendall tau similarity of the global rankings produced and the agreement % of the global top-1 feature with the exact InfoDVA attribution. We also compute a normalized MAE (NMAE) of the InfoDVA values from the exact values, to test how well the exact values are approximated by each method. Formally, let T be the number of explained EMS hours, d = 8 the number of feature groups, 
+
+ϕexact  
+
+> ti
+
+the exact InfoDVA value for hour t and feature i, and ˆ ϕ(r,B) 
+
+> it
+
+the approximate InfoDVA value for random seed r and budget B. We compute NMAE as NMAE (r,B) =
+
+PTt=1
+
+Pdi=1| ˆϕ(r,B) 
+
+> it
+
+− ϕexact  
+
+> ti
+
+|
+
+PTt=1
+
+Pdi=1|ϕexact  
+
+> ti
+
+| .
+
+All results are accompanied by 95% confidence intervals across 10,000 bootstrap sets for the 50 seeded runs. We report the results in Table 8. 
+
+Table 10: Approximation quality for EMS InfoDVA in the decision-active configuration ( p = 8, τ = 1). Exact DVA enumerates all 2 8 = 256 coalitions per explained hour. Kernel budgets (B) represent sampled orderings, while permutation budgets (B) denote sampled feature orderings. Oracle calls and runtimes (in seconds) use cached unique decision-value evaluations and are averaged over 50 approximation runs per method per budget, and reported with 95% bootstrap CI.                                                                         
+
+> Estimator BCalls Time (% exact) NMAE Kendall tau Top-1 Exact 256 25,600 25 .44 (100.0%) ———Kernel 16 1,800 1.79 (7.0%) 1.441 [1.413, 1.472] 0.749 [0.717, 0.779] 76% Kernel 32 3,400 3.38 (13.3%) 0.935 [0.919, 0.954] 0.851 [0.833, 0.870] 90% Kernel 64 6,600 6.56 (25.8%) 0.655 [0.644, 0.666] 0.887 [0.871, 0.903] 92% Kernel 128 13,000 12 .92 (50.8%) 0.400 [0.395, 0.404] 0.946 [0.933, 0.959] 100% Kernel 192 19,400 19 .28 (75.8%) 0.222 [0.217, 0.228] 0.966 [0.956, 0.976] 100% Permutation 16 8,324 8.27 (32.5%) 0.473 [0.468, 0.480] 0.929 [0.916, 0.940] 96% Permutation 32 13,118 13 .03 (51.2%) 0.337 [0.332, 0.341] 0.940 [0.933, 0.949] 100% Permutation 64 18,735 18 .62 (73.2%) 0.238 [0.235, 0.241] 0.967 [0.957, 0.977] 100% Permutation 128 23,324 23 .19 (91.1%) 0.169 [0.167, 0.172] 0.959 [0.949, 0.969] 100% Permutation 192 24,805 24 .67 (97.0%) 0.139 [0.138, 0.141] 0.963 [0.953, 0.973] 100%
+
+Our results in Table 10 show that approximation SHAP is an e ff ective solution for mitigating the computational complexity of DVA. Permutation SHAP is shown to be very strong at rank recovery. Even 16 sampled orderings reaches a Kendall tau of 0.929 and 96% top-1 agreement. Kendall SHAP on the other hand converges smoothly with budget. While weaker at smaller budgets, it recovers the global ranking successfully at around 128-192 sampled coalitions. Furthermore, at comparable cached oracle call budgets, both methods are highly reliable. At around 18k-19k calls, both methods reach a Kendall tau of ≈ 0.966 with NMAE around 0.22-0.24. Some good choices for approximations are Permutation-16, with a strong ranking recovery at only 32.5% the runtime, Kernel-128, with 100% top-1 recovery and a Kendall tau of 0.946 at half the total oracle calls, and Permutation-64 or Kernel-192, with near-exact global rank recovery at 73-76% the total time budget. 27
