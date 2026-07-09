@@ -6,29 +6,119 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-06
-- 运行时间：2026-07-06 21:39:38 UTC
+- 最新运行日期：2026-07-09
+- 运行时间：2026-07-09 10:54:48 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：1
-- 速读区：2
+- 本次总论文数：33
+- 精读区：20
+- 速读区：13
 
 ### 今日简报（AI）
-今日精读1篇高分论文（9.0分），速读2篇，涵盖因果推断与反事实解释。重点推荐《Causal Inference for All: Marginal Estimands for Outcomes Truncated by Death》，探讨死亡截断下的边际估计量。建议关注因果推断方法在缺失数据场景的应用，可深入阅读该文的技术细节。
-- 详情：[/202607/06/README](/202607/06/README)
+今日共收录33篇论文，精读20篇，核心聚焦共形预测与因果推断前沿方法。最值得关注的是满分论文《Robust Bayes-Assisted Conformal Prediction》及9分论文《Conformalized Lee Inference》，前者提出稳健贝叶斯共形预测，后者给出无分布假设的个体处理效应区间。建议普通读者优先精读这两篇以掌握最新推断框架。
+- 详情：[/202607/09/README](/202607/09/README)
 
 ### 精读区论文标签
-1. [Causal Inference for All: Marginal Estimands for Outcomes Truncated by Death](/202607/06/2607.00222v1-causal-inference-for-all-marginal-estimands-for-outcomes-truncated-by-death)  
+1. [Robust Bayes-Assisted Conformal Prediction](/202607/09/2607.04236v2-robust-bayes-assisted-conformal-prediction)  
+   标签：评分：10.0/10、query:cp
+   evidence：鲁棒贝叶斯辅助共形预测，提供分布自由的覆盖保证
+2. [Conformalized Lee Inference: Distribution-Free Individual Treatment Effect Intervals under Monotone Sample Selection](/202607/09/2607.02898v1-conformalized-lee-inference-distribution-free-individual-treatment-effect-intervals-under-monotone-sample-selection)  
+   标签：评分：9.0/10、query:cp
+   evidence：保形预测框架用于无分布不确定性量化
+3. [Proximal Mediation Analysis with Unmeasured Treatment-Induced Confounding](/202607/09/2607.02901v1-proximal-mediation-analysis-with-unmeasured-treatment-induced-confounding)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：因果推断方法用于存在未测量混杂的中介分析
+4. [CaSPECT: Discovering Causally Homogeneous Subgroups via Directed Spectral Clustering](/202607/09/2607.03364v1-caspect-discovering-causally-homogeneous-subgroups-via-directed-spectral-clustering)  
    标签：评分：9.0/10、query:causal-infer
-   evidence：针对死亡截断结果的新因果估计量，利用纵向数据
+   evidence：因果谱聚类发现因果同质子群
+5. [Personalized Causal Recourse: A Human-In-The-Loop Approach](/202607/09/2607.03425v1-personalized-causal-recourse-a-human-in-the-loop-approach)  
+   标签：评分：9.0/10、query:causal-infer
+   evidence：个性化因果反事实解释方法
+6. [What is the Causal Effect of a Conversation? Estimands and Inference in AI Mediated Conversations](/202607/09/2607.03597v1-what-is-the-causal-effect-of-a-conversation-estimands-and-inference-in-ai-mediated-conversations)  
+   标签：评分：9.0/10、query:causal-infer
+   evidence：大语言模型中介对话中的因果推断
+7. [Significance-First Splitting: Aligning Treatment Heterogeneity Detection with Honest Estimation](/202607/09/2607.03999v1-significance-first-splitting-aligning-treatment-heterogeneity-detection-with-honest-estimation)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：估计异质处理效应（CATE）并保证诚实推断
+8. [B-CALM: Bias-Limited Bayesian Borrowing for RCT-Anchored Treatment Effects under Covariate Mismatch](/202607/09/2607.04036v1-b-calm-bias-limited-bayesian-borrowing-for-rct-anchored-treatment-effects-under-covariate-mismatch)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：利用贝叶斯借用在观察性研究中估计处理效应
+9. [MDL Meets Latent Confounders: LNML-based Causal Discovery](/202607/09/2607.04133v1-mdl-meets-latent-confounders-lnml-based-causal-discovery)  
+   标签：评分：9.0/10、query:causal-infer
+   evidence：含隐混淆的因果发现
+10. [Robust Bayes-Assisted Conformal Prediction](/202607/09/2607.04236v1-robust-bayes-assisted-conformal-prediction)  
+   标签：评分：9.0/10、query:cp
+   evidence：鲁棒的贝叶斯辅助共形预测
+11. [Fixed-Confidence Best-Arm Identification for Causal Mediation Analysis](/202607/09/2607.04315v1-fixed-confidence-best-arm-identification-for-causal-mediation-analysis)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：因果中介分析与最佳臂识别
+12. [Uncertainty-Aware Abstention in Large Language Models with Provable Alignment Guarantees](/202607/09/2607.04430v1-uncertainty-aware-abstention-in-large-language-models-with-provable-alignment-guarantees)  
+   标签：评分：9.0/10、query:cp
+   evidence：基于置信区间的校准方法实现大型语言模型的风险可控选择性回答
+13. [Causal ASCEND: Scalable Two-tier Causal Discovery on High Dimensional Multi-omics Data](/202607/09/2607.04527v1-causal-ascend-scalable-two-tier-causal-discovery-on-high-dimensional-multi-omics-data)  
+   标签：评分：9.0/10、query:causal-infer
+   evidence：基于数据的因果发现，利用两层结构
+14. [Probably Correct Optimal Stable Matching under Two-Sided Uncertainty](/202607/09/2607.04824v1-probably-correct-optimal-stable-matching-under-two-sided-uncertainty)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：双边市场不确定性下的稳定匹配学习
+15. [CanniUplift: A Holistic Framework for Mitigating Seller and Incentive Cannibalization in E-commerce Uplift Modeling](/202607/09/2607.05242v1-canniuplift-a-holistic-framework-for-mitigating-seller-and-incentive-cannibalization-in-e-commerce-uplift-modeling)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：双边市场中处理蚕食效应的提升建模
+16. [SafeImpute: Reliable Clinical Data Imputation via Conformal Selection](/202607/09/2607.05613v1-safeimpute-reliable-clinical-data-imputation-via-conformal-selection)  
+   标签：评分：9.0/10、query:cp
+   evidence：使用共形选择进行可靠插值并提供统计保证
+17. [Estimating Causal Effects from Data Generated by Stochastic Algorithms](/202607/09/2607.05792v1-estimating-causal-effects-from-data-generated-by-stochastic-algorithms)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：估计平台市场中随机算法产生的内容特征的因果效应
+18. [Learning Sparsest Linear Causal DAGs with Latent Confounders via Higher-Order Cumulants](/202607/09/2607.05984v1-learning-sparsest-linear-causal-dags-with-latent-confounders-via-higher-order-cumulants)  
+   标签：评分：9.0/10、query:causal-infer
+   evidence：有限样本恢复具有潜在混淆变量的最稀疏因果DAG的方法
+19. [Causal Inference for Case Studies in Behavioral Health](/202607/09/2607.06912v1-causal-inference-for-case-studies-in-behavioral-health)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：未测量混杂下的病例研究因果推断
+20. [Distributed Sparse Interventions in Language Models](/202607/09/2607.07128v1-distributed-sparse-interventions-in-language-models)  
+   标签：评分：9.0/10、query:causal-infer
+   evidence：使用稀疏神经元级干预的语言模型因果干预方法
 
 ### 速读区论文标签
-1. [Beyond But-for Test: Counterfactual Explanation in Abstract Argumentation via Actual Causality (Extended Version)](/202607/06/2606.31080v1-beyond-but-for-test-counterfactual-explanation-in-abstract-argumentation-via-actual-causality-extended-version)  
+1. [MindEdit-Bench: Benchmarking Object-Level Counterfactual Spatial Reasoning in VLMs from In-the-Wild Photos](/202607/09/2607.00491v1-mindedit-bench-benchmarking-object-level-counterfactual-spatial-reasoning-in-vlms-from-in-the-wild-photos)  
+   标签：评分：8.0/10、query:causal-infer
+   evidence：机器学习模型中的反事实推理
+2. [Coordinated Sniper Cohorts on Pump.fun: Detection of 1,012 Persistent Wallet Rings and the Limits of Naive Causal Inference for First-Hour Buyer Flow](/202607/09/2607.02795v1-coordinated-sniper-cohorts-on-pumpfun-detection-of-1012-persistent-wallet-rings-and-the-limits-of-naive-causal-inference-for-first-hour-buyer-flow)  
+   标签：评分：8.0/10、query:two-sided
+   evidence：将朴素因果推断应用于双边市场买家流分析
+3. [Denoised Conformal Alignment for Reliable Selection of Conditional Average Treatment Effect Predictions](/202607/09/2607.03161v1-denoised-conformal-alignment-for-reliable-selection-of-conditional-average-treatment-effect-predictions)  
+   标签：评分：8.0/10、query:cp
+   evidence：去噪共形对齐用于可靠CATE选择
+4. [Outcome-adapted Automatic Debiased Machine Learning](/202607/09/2607.03351v1-outcome-adapted-automatic-debiased-machine-learning)  
+   标签：评分：8.0/10、query:two-sided
+   evidence：用于因果推断的自动去偏机器学习
+5. [Disentangling Causal Mechanisms in Conjoint Experiments Using Mediation](/202607/09/2607.03508v1-disentangling-causal-mechanisms-in-conjoint-experiments-using-mediation)  
+   标签：评分：8.0/10、query:two-sided
+   evidence：中介分析用于揭示联合实验中的因果机制
+6. [Optimizing Large Language Models for Causality Assessment in Pharmacovigilance: Developing a Performance Metric as Objective for Bayesian Hyperparameter Optimization](/202607/09/2607.03704v1-optimizing-large-language-models-for-causality-assessment-in-pharmacovigilance-developing-a-performance-metric-as-objective-for-bayesian-hyperparameter-optimization)  
+   标签：评分：8.0/10、query:causal-infer
+   evidence：利用大语言模型进行药物警戒中的因果关系评估
+7. [NormWorlds-CF: Solver-Verified Counterfactual Normative Reasoning with Metamorphic-Relation GRPO](/202607/09/2607.03957v1-normworlds-cf-solver-verified-counterfactual-normative-reasoning-with-metamorphic-relation-grpo)  
+   标签：评分：8.0/10、query:causal-infer
+   evidence：语言模型输出的反事实评估在规范推理中
+8. [Adaptive Group-Based Counterfactual Explanations for Time-Series Rehabilitation Data](/202607/09/2607.01838v1-adaptive-group-based-counterfactual-explanations-for-time-series-rehabilitation-data)  
+   标签：评分：7.0/10、query:causal-infer
+   evidence：面向康复时间序列的反事实解释
+9. [A Differentiable Covariance Calculus for Linear Gaussian Bayesian Networks](/202607/09/2607.04578v1-a-differentiable-covariance-calculus-for-linear-gaussian-bayesian-networks)  
+   标签：评分：7.0/10、query:causal-infer
+   evidence：为线性高斯贝叶斯网络提供可微协方差演算以估计因果效应
+10. [A General Exposure-Mapping-Agnostic Framework for Causal Inference under Interference](/202607/09/2607.04644v1-a-general-exposure-mapping-agnostic-framework-for-causal-inference-under-interference)  
+   标签：评分：7.0/10、query:two-sided
+   evidence：针对干扰下的网络实验的通用因果推断框架
+11. [Heckman-Corrected Epistemic Uncertainty: Selection on Unobservables Defeats Importance Weighting](/202607/09/2607.05806v1-heckman-corrected-epistemic-uncertainty-selection-on-unobservables-defeats-importance-weighting)  
+   标签：评分：7.0/10、query:causal-infer
+   evidence：赫克曼修正选择偏差用于机器学习不确定性量化
+12. [Continuous-Time Bayesian Networks with Structured Shrinkage Priors for Modelling Multimorbidity Trajectories in Large-Scale Electronic Health Records](/202607/09/2607.01549v1-continuous-time-bayesian-networks-with-structured-shrinkage-priors-for-modelling-multimorbidity-trajectories-in-large-scale-electronic-health-records)  
    标签：评分：6.0/10、query:causal-infer
-   evidence：抽象论证中基于干预的反事实推理
-2. [Measuring Opportunity Cost with Stock Lifetime Value](/202607/06/2607.01905v1-measuring-opportunity-cost-with-stock-lifetime-value)  
+   evidence：使用连续时间贝叶斯网络学习疾病依赖网络
+13. [Strategic Information Disclosure in Algorithmic Pricing](/202607/09/2607.04345v1-strategic-information-disclosure-in-algorithmic-pricing)  
    标签：评分：6.0/10、query:two-sided
-   evidence：测量电商A/B测试中干预措施的长期机会成本
+   evidence：算法定价中的信息设计，涉及双边市场特征
 
 
 <div class="dpr-home-promo-card">

@@ -1,0 +1,720 @@
+Title: Significance-First Splitting: Aligning Treatment Heterogeneity Detection with Honest Estimation
+
+URL Source: https://arxiv.org/pdf/2607.03999v1
+
+Published Time: Tue, 07 Jul 2026 02:26:28 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# Significance-First Splitting: Aligning Treatment Heterogeneity Detection with Honest Estimation 
+
+# Pantelis Z. Hadjipantelis, Josephine Chiang, Karthik Nagesh 
+
+TripAdvisor, UK 
+
+Abstract 
+
+Estimating heterogeneous treatment effects (CATE) requires simultaneously detecting effect modification and quantify-ing estimation uncertainty. Existing tree-based methods make an uneasy trade-off: significance-based approaches (Radcliffe and Surry 2011) identify subgroup interactions directly but lack valid inference; honest causal trees (Athey and Im-bens 2016) deliver nominal confidence interval coverage but use outcome-agnostic splitting criteria that sacrifice interac-tion sensitivity. We introduce a hybrid algorithm that fuses significance-based splitting with honest sample-splitting and cross-validation. Our splitting criterion uses the squared t-statistic for the treatment × side interaction ( t2), which is shown to be directly aligned with the honest EMSE τ crite-rion when the interaction is strong. Post-hoc honest cross-validation selects the cost-complexity penalty, giving a single principled estimator with nominal CI coverage at the leaf level. For forests, we retain bootstrap count vectors to enable an in-finitesimal jackknife (IJ) variance estimate of Monte-Carlo convergence rather than formal pointwise inference. On the three synthetic designs from (Athey and Imbens 2016) the single tree achieves approximately 90% leaf-average CI cov-erage at the 90% nominal level across all three designs (200 replications each); on the Criteo and Starbucks uplift datasets we match Qini coefficient performance of S- and T-learner baselines. An open-source Python package with reproducible seeds, sklearn-compatible API, and full test coverage accom-panies this work (https://codeberg.org/hadjipantelis/rattus). 
+
+# 1 Introduction 
+
+Uplift modelling is central to decision-making in clinical tri-als, marketing, and public policy; it allows one to estimate the individual-level causal effect of a treatment. The fundamen-tal object of interest is the Conditional Average Treatment Effect (CATE): 
+
+τ (x) = E[Y (1) − Y (0) | X = x]
+
+where Y (d) denotes the potential outcome under treat-ment arm d ∈ { 0, 1}. Accurate estimation of τ (x) enables targeting of interventions toward those most likely to benefit, and exclusion of subgroups for whom the treatment is non-beneficial. This is therefore a problem with direct financial as well as ethical implications. 
+
+Preprint. Under review. 
+
+Tree-based methods are the dominant practical approach because they produce interpretable partitions of the covariate space, each with an associated treatment effect estimate. Two influential lines of work define the current state of the art, but neither fully addresses the joint problem of interaction detection and valid inference. 
+
+Significance-based uplift trees (Radcliffe and Surry 2011) score each candidate split by the t2-statistic for the null hypothesis that the treatment effect is equal in both child nodes. This directly tests for effect modification and is robust to imbalanced treatment assignment (Radcliffe and Simpson 2008; Devriendt, Berrevoets, and Verbeke 2021). However, these trees use the same data for tree construction and leaf estimation, which inflates in-sample CATE estimates and renders confidence intervals invalid. 
+
+Honest causal trees (Athey and Imbens 2016) address this by splitting the data so that tree structure and leaf estimates are computed on independent samples. This eliminates adap-tive bias and delivers nominal CI coverage without sparsity assumptions. However, the splitting criterion (goodness-of-fit in the EMSE τ sense) does not directly test for effect mod-ification and can split on covariates that predict the outcome level rather than treatment heterogeneity. Currently, no existing method simultaneously: (i) uses a statistically principled test for effect modification as the split criterion, (ii) delivers honest, unbiased leaf estimates with nominal CI coverage, and (iii) scales to forests with variance estimation via the infinitesimal jackknife. We introduce a hybrid algorithm that closes this gap. Our key contributions are: 1. Algorithmic fusion. We show that the t2 interaction statistic and the honest EMSE τ criterion are aligned when treatment heterogeneity drives the split, and incompati-ble only when a covariate affects mean outcomes but not treatment effects. We use t2 for splitting and honest CV for pruning, exploiting each criterion where it has com-parative advantage. 2. Honest significance forests. We extend the single-tree al-gorithm to an ensemble with feature subsampling, where each tree undergoes an internal honest sample split. Boot-strap count vectors are retained per tree, enabling efficient IJ variance estimation via a single matrix multiply. 3. IJ Monte-Carlo diagnostic. We implement the Wager, 
+
+> arXiv:2607.03999v1 [stat.ME] 4 Jul 2026
+
+Hastie & Efron (2014) IJ estimator adapted to the honest bootstrap structure, computed in O(B2(n + ntest )) via the Gram matrix G = CC ⊤ (derived in §4.4), which is up to ntest /B times faster than the naive O(B · n ·
+
+ntest ) matrix multiply. Importantly, the IJ measures the 
+
+Monte-Carlo variance of the forest prediction, how much 
+
+ˆτforest (x) would change under a different bootstrap seed, and not the error ˆτforest (x) − τ (x). Valid pointwise CIs for τ (x) are provided at the leaf level by the single honest tree. 4. Open-source implementation. The rattus package provides a reproducible, tested, sklearn -compatible implementation with seeded RNG chains that guaran-tee identical results across n_jobs values. Parallel tree fitting via joblib , support for categorical features, and native NaN handling are included. 
+
+# 2 Background and Related Work 
+
+Table 1 positions rattus relative to the methods reviewed below; the key distinction is that the IJ intervals are a con-vergence diagnostic rather than pointwise inference on τ (x).
+
+2.1 CATE Estimation 
+
+We adopt the Rubin causal model (Rubin 1974) with potential outcomes (Yi(0) , Y i(1)) , binary treatment Di ∈ { 0, 1}, and covariates Xi ∈ Rp. Under SUTVA and unconfoundedness (Di ⊥ (Yi(0) , Y i(1)) | Xi), the CATE is identified from observational data. A wide range of methods estimate τ (x): meta-learners (S-, T-, X-learner; (Künzel et al. 2019)), Bayesian additive regression trees (Chipman, George, and McCulloch 2010), and tree-based direct estimators. We focus on the latter, which produces a partition Π of the covariate space with a constant CATE estimate ˆτℓ per leaf ℓ ∈ Π.
+
+Notation Let ω = {(Xi, Y i, D i)}ni=1 be an i.i.d. sam-ple under SUTVA and unconfoundedness. We write p =Pr( Di = 1) for the marginal treatment probability. A parti-tion Π of the covariate space X consists of leaves ℓ1, . . . , ℓ |Π|.The honest leaf CATE estimator given estimation sample 
+
+Sest is: 
+
+ˆτ (x; Sest , Π) = ¯Y1(ℓ(x)) − ¯Y0(ℓ(x)) 
+
+where ¯Yw(ℓ) is the mean outcome for arm w in leaf ℓ
+
+computed on Sest . We write Str for the training split (used for tree structure and cross-validation), Ntr = |Str |, and 
+
+N est = |Sest |.
+
+2.2 Significance-Based Uplift Trees 
+
+(Radcliffe and Surry 2011) score each candidate split by the squared t-statistic for the treatment × side interaction in the linear model: 
+
+Y = μ + αD + β · side + γ · D · side + ε
+
+where γ = 0 under the null that the split does not create uplift heterogeneity. The test statistic is then: 
+
+t2{ˆγ} = (n − 4)( UR − UL)2
+
+C44 × SSE where UL, U R are the estimated uplifts on each side, 
+
+C44 = N −1 
+
+> T L
+
++ N −1 
+
+> T R
+
++ N −1 
+
+> CL
+
++ N −1
+
+> CR
+
+, and SSE is the pooled within-cell sum of squares (eq. 16–17, (Radcliffe and Surry 2011)). The key weakness is adaptive estimation: leaf means are computed on the same data used to select the parti-tion. For that reason, we use cost-complexity pruning with cross-validated α selection on the training half. The α path is derived from the full tree grown on Str ; α is then selected by cross-validation that holds the partition fixed and scores honest EMSE τ on held-out folds. This is a fixed-structure simplification of Breiman’s per-fold re-growing, chosen for computational cost and lower selection variance. 
+
+2.3 Honest Causal Trees and Forests 
+
+(Athey and Imbens 2016) introduce honesty : a model is hon-est if it does not use the same information for selecting the partition as for estimating effects within the partition. In practice, the dataset is split 50/50; one half builds the tree, the other estimates leaf CATEs. This renders leaf estimates asymptotically unbiased and leaf-level confidence intervals valid without sparsity assumptions. Their splitting criterion is the honest EMSE τ :
+
+− \EMSE τ (Str , N est , Π) = 1
+
+Ntr 
+
+X
+
+> i
+
+ˆτ 2(Xi; Str , Π) 
+
+−
+
+ 1
+
+Ntr 
+
++ 1
+
+N est 
+
+ X
+
+> ℓ
+
+ S2
+
+> treat
+
+(ℓ)
+
+p + S2
+
+> control
+
+(ℓ)1 − p
+
+
+
+(1) (Wager and Athey 2018) extend this to random forests (causal forests) using subsampling without replacement, which enables asymptotic normality of forest predictions and pointwise CIs via the IJ. 
+
+2.4 Infinitesimal Jackknife for Random Forests 
+
+(Wager, Hastie, and Efron 2014) show that for a bootstrap forest with predictions Tb(x) and bootstrap counts Nbi , the IJ variance estimator is: 
+
+cVar IJ (x) = 
+
+> n
+
+X
+
+> i=1
+
+dCov b [Nbi , T b(x)] 2
+
+This estimates the Monte-Carlo variance of the forest pre-diction due to bootstrap randomness, computable from the retained counts without refitting. Crucially, this is not the variance of ˆτforest (x) − τ (x): the dominant source of pre-diction error is the approximation error (finite depth, honest sample split, tree bias), not the bootstrap randomness. As 
+
+B → ∞ the Monte-Carlo variance shrinks to zero regard-less of n or model quality. The implementation uses the Gram matrix G = CC ⊤ ∈
+
+RB×B , precomputed once in O(B2n); each test point then requires a single O(B2) quadratic form, giving O(B2(n +
+
+ntest )) total (derived in §4.4). Method Split criterion Honest estimation Valid CIs Forest CIs Radcliffe & Surry (2011) t2 interaction × × ×
+
+Athey & Imbens (2016) EMSE τ ✓ Leaf-level ×
+
+Wager & Athey (2018) EMSE gradient ✓ × IJ (subsampling) 
+
+rattus (this work) t2 interaction ✓ Leaf-level IJ diagnostic (bootstrap) 
+
+Table 1: Comparison of tree-based heterogeneous treatment effect methods. The IJ in rattus estimates Monte-Carlo variance (convergence diagnostic); it does not produce pointwise inference on τ (x).
+
+# 3 Methodology 
+
+3.1 Three-Phase Fitting 
+
+The dataset is randomly partitioned into a training fraction 
+
+Str (used for tree growing and cross-validation) and an es-timation fraction Sest (used for leaf CATE estimation and standard errors). The split fraction is configurable (default: 50/50). This split is the foundation of all validity guarantees. The three phases rely on two criteria defined in the following sections: the t2 interaction statistic (§3.2) for growing, and the honest EMSE τ (§3.3) for pruning. 
+
+• Phase 1 — Tree growing. Starting from the root, we recursively find the best split of each leaf using the t2 criterion (§3.3), subject to: (i) aminimum cell size constraint per treatment arm per candidate leaf (min_samples_leaf , default 20); (ii) a separate minimum for estimation leaves (min_samples_leaf_est , default 5; smaller leaves return NaN); (iii) an optional pre-pruning significance gate p < α on the t2 statistic; and (iv) a maximum depth 
+
+dmax .
+
+• Phase 2 — Honest CV pruning. We perform k-fold cross-validation on Str alone, scoring each candidate cost-complexity penalty λ by the honest EMSE τ crite-rion (§3.4). The best λ is selected from the set of effective gains present in the tree, with ties broken by choosing the largest penalty (simplest tree). This step is enabled by default ( use_honest_cv=True ) but can be disabled for faster prototyping. 
+
+• Phase 3 — Honest estimation. The pruned tree structure (i.e. a fixed partition Π) is applied to Sest . Leaf CATEs and standard errors are computed on Sest only, so parti-tion and estimates are independent. 
+
+3.2 Significance-Based Splitting Criterion 
+
+At each candidate split of a leaf, we partition the leaf into four cells by treatment status D ∈ { 0, 1} and side side ∈ { L, R }.We fit the linear model: 
+
+E[Yij ] = μ+αT ·1[i = D]+ βR·1[j = R]+ γT R ·1[i = D, j = R]
+
+The interaction coefficient ˆγT R = ( UR − UL): the dif-ference in estimated uplifts on the two sides of the split. Its squared t-statistic is: 
+
+t2 = (n − 4) ˆ γ2
+
+> T R
+
+C44 × SSE Under H0 : γT R = 0 , the statistic follows χ21 asymptoti-cally (§4.2). Candidate splits are evaluated on Str ; the best split maximises t2.The search is performed in two stages for each feature. Stage 1 finds the best threshold using only non-NaN rows, keeping the criterion uncontaminated. Stage 2 evaluates whether NaN observations should be assigned to the left or right child, choosing the direction that maximises t2; this 
+
+nan_direction is stored on the node and applied deter-ministically at prediction time. If a feature had no missing values during training, any test-time NaN is routed to the right child by default (i.e., nan_direction = None ). This deterministic fallback ensures prediction stability without requiring missing-value imputation. High-cardinality fea-tures use quantile-based binning ( max_candidates =20 thresholds, default). Categorical features are supported via set-based partitioning with categories sorted by empirical CATE. We note that the search strategy is configurable via 
+
+split_search . The default ’greedy’ mode evaluates all features and all candidate thresholds exhaustively- subject to quantile-based binning. The alternative ’gi’ mode im-plements the GUIDE Gi two-step approach of (Loh, He, and Man 2015) to reduce variable selection bias: for each feature, a nested linear model: y ∼ treatment + H + treatment ×H
+
+is fitted, where H is a binarised version of the feature (split at its mean for continuous features, or using category values directly). An F -test for the interaction term yields a lack-of-fit p-value, which is transformed to a 1-df χ2 quantile via the Wilson–Hilferty approximation for fair comparison across features with different numbers of categories. The feature with the largest transformed statistic is selected; only then is a threshold search performed on that feature. This decou-ples variable selection from threshold search, eliminating the bias that gives high-cardinality features more opportunities to appear significant by chance. 
+
+Relationship to EMSE τ . (Athey and Imbens 2016) (§A.3) show that the change in honest EMSE τ from a split decom-poses as: 
+
+\EMSE τ (Π N )− \EMSE τ (Π S ) =  t2 − 4 ˜S2 − F/n p(1 − p)
+
+| {z }
+
+> (⋆)
+
++ 2 ˜S2
+
+p(1 − p)
+
+| {z }
+
+> (⋆⋆ )
+
+where ˜S2 is the variance of treatment-effect estimates across the two child nodes, F/n is a finite-sample correc-tion, and p is the marginal treatment probability. Term (⋆) is proportional to t2 −4 and captures the interaction signal: it is positive only when the split creates meaningful treatment het-erogeneity (large t2), and it grows with ˜S2, the between-child spread of effect estimates. Term (⋆⋆ ) is always non-negative and rewards any reduction in outcome variance, regardless of whether treatment effects differ. The two criteria therefore diverge in exactly one scenario: when a covariate predicts the outcome level but not the treat-ment effect ( ˜S2 ≈ 0, t2 ≈ 0, but the split reduces within-cell SSE). In that case (⋆⋆ ) is positive and EMSE τ endorses the split, while t2 correctly rejects it. Conversely, when treat-ment heterogeneity drives the split, (⋆) dominates and both criteria agree. This decomposition is the central justification for using t2 for splitting and EMSE τ only for pruning: the splitting phase benefits from t2’s specificity to treatment het-erogeneity, while the pruning phase benefits from EMSE τ ’s global complexity penalty. 
+
+3.3 Honest Cross-Validation Pruning 
+
+After growing a tree to maximum depth, we apply cost-complexity pruning. A candidate pruned tree Π( λ) collapses any split where: 
+
+ˆτ 2
+
+> train
+
+(split ) − ˆVtrain (split ) < λ 
+
+where ˆτ 2 
+
+> train
+
+is the EMSE τ improvement from the split and ˆVtrain is the scaled variance increase, both computed on 
+
+Str with the (1 /N tr + 1 /N est ) scaling. The penalty grid is constructed from the actual gains present in the tree (the effective alphas ), rather than a fixed geometric sequence. In particular, each value in the effective-alpha grid is the net gain: ˆτ 2
+
+> train
+
+(split ) − ˆVtrain (split ) of one internal node; as λ collapses a split exactly when the gain falls below it, these are the only values of λ at which the pruned tree structure changes, so evaluating any other value is redundant. In addition to the effective alphas, the grid in-cludes a large penalty (10.0 × variance of y) to guarantee that a fully pruned tree (a single leaf) is always examined too. As a whole, this ensures the CV evaluates exactly the distinct tree structures reachable by pruning and avoids redundant evaluations. The optimal λ∗ is then selected by maximis-ing the sum of validation EMSE τ scores across folds; ties are broken by choosing the largest λ (simplest tree). Pruned trees are pre-computed once outside the fold loop to avoid redundant traversals. 
+
+3.4 Categorical Variable Partitioning 
+
+For unordered categorical features with cardinality C,searching across all 2C−1 − 1 possible binary combinations becomes computationally prohibitive. To maintain scalabil-ity, the optimization engine adopts a one-pass greedy se-quencing heuristic. Prior to split evaluation, the distinct categorical levels present in the node are isolated. For each category level c,the local average treatment effect difference is computed di-rectly from the non-missing training observations in the cur-rent node, requiring at least min_samples_category 
+
+observations in each treatment arm per category (default 5): 
+
+¯τc = ¯Y (1) c − ¯Y (0) c (2) The categories are then sorted monotonically such that 
+
+¯τ(1) ≤ ¯τ(2) ≤ · · · ≤ ¯τ(C), reducing the multi-way optimisa-tion to C − 1 contiguous binary cuts. While this in-sample ordering introduces a minor greedy selection bias during Phase 1, the structural integrity of leaf estimates is preserved because leaf parameters are populated entirely out-of-sample on Sest during Phase 3. For features with high cardinality (many distinct levels), this bias is more pronounced. Two mit-igations are available: reducing max_candidates (which limits the number of evaluated thresholds via quantile bin-ning, coarsening the sort and reducing overfitting to the in-sample ordering), and switching to the gi split-search mode, which avoids in-sample ordering entirely via exhaustive bi-nary partition search. 
+
+3.5 Honest Significance Forest 
+
+We grow B honest significance trees (default: B = 50 ), each on a bootstrap resample Db of D. Within each sample the honest 50/50 split is applied. Feature subsampling at each split (default: ⌊√p⌋ features per node) decorrelates the trees. The forest prediction is: 
+
+ˆτforest (x) = 1
+
+B
+
+> B
+
+X
+
+> b=1
+
+ˆτb(x)
+
+Each tree b retains its bootstrap count vector Nb ∈ Zn
+
+> ≥0
+
+,where Nbi is the number of times observation i appears in bootstrap sample b. These are stored as a (B ×n) integer ma-trix and used for IJ variance estimation. To evaluate the for-est’s continuous predictions within the honest EMSE frame-work, score_binned groups observations into n_bins 
+
+quantiles of predicted CATE (default 10). The bin labels define a discrete partition, and _honest_emse_tau is applied to this partition. This provides a conservative lower bound on forest performance while staying faithful to the Athey & Imbens criterion. 
+
+3.6 IJ Monte-Carlo Variance 
+
+What the IJ estimates. The IJ estimates Monte-Carlo con-vergence, not prediction error. Following (Wager, Hastie, and Efron 2014), the IJ variance estimate is: 
+
+cVar IJ (x) = 
+
+> n
+
+X
+
+> i=1
+
+dCov b [Nbi , ˆτb(x)] 2
+
+This estimates the Monte-Carlo variance of ˆτforest (x) cap-ture the variance due to bootstrap randomness, i.e. how much the forest prediction would change under a different random seed. It does not estimate the error ˆτforest (x) − τ (x). The total prediction error is dominated by approximation error (finite depth, honest sample split, tree bias) rather than bootstrap randomness; as B → ∞ the IJ SE approaches zero regardless of n. We therefore recommend interpreting these intervals as a convergence diagnostic : narrow IJ intervals confirm that B
+
+is sufficient for the forest mean to have stabilised. Let C ∈ RB×n be the centred count matrix ( Cbi = Nbi −1
+
+under bootstrap, where E[Nbi ] = 1 ) and T ∈ RB×ntest be the prediction matrix. The vectorised computation is: cVar IJ (x) = 1
+
+n2B2
+
+> n
+
+X
+
+> i=1
+
+(C⊤T)ix 
+
+2
+
+whose naive evaluation via the matrix product C⊤ ˜T costs 
+
+O(B · n · ntest ). The Gram matrix reduction below reduces this to O(B2(n + ntest )) .
+
+Valid leaf-level CIs. For valid pointwise CIs on τ (x),use the single honest tree’s predict_interval , which achieves nominal leaf-level coverage by construction (Propo-sition 1). The forest predict provides a lower-variance point estimate; the IJ provides a convergence diagnostic. Combining both is recommended: use forest.predict 
+
+for the point estimate and tree.predict_interval for the CI. 
+
+3.7 Feature Importance 
+
+For each tree, we record three quantities per feature j:(i) feature_usage_[j] : the number of splits on fea-ture j; (ii) feature_t2_mean_[j] : the mean t2 statis-tic across splits on feature j (a signal-strength diagnos-tic); (iii) feature_importances_[j] : the normalised split count, summing to 1 across features, following the 
+
+sklearn convention. Forest-level importances average these across trees and re-normalise. The t2 field is preserved through the pruning step by explicitly copying t2_split 
+
+in the node reconstruction. Unlike split-count importances, 
+
+feature_t2_mean_ measures the magnitude of treat-ment heterogeneity captured at each split: a feature used rarely but with high t2 is a stronger driver of differential treatment response than one used frequently with low t2.
+
+3.8 Observational Studies 
+
+The core algorithm assumes randomised treatment assign-ment. For mildly confounded settings we recommend using the transformed outcome Y ∗ = Y · (D − e(X)) /(e(X)(1 −
+
+e(X))) , where e(X) is an externally estimated propensity score. Since E[Y ∗ | X] = τ (X) under unconfounded-ness, passing Y ∗ as the outcome to fit() recovers consis-tent CATE estimates without modifying the core algorithm. 
+
+Warning: the IPW transform can be numerically unstable when e(X) is close to 0 or 1; we would recommend propen-sity trimming (e.g. dropping observations with e(X) < 0.05 
+
+or e(X) > 0.95 ) before constructing Y ∗, as extreme weights inflate the variance of the outcome and can corrupt the t2
+
+splitting criterion. All theoretical guarantees (Propositions 1–2) apply in full under randomisation; in the observational setting they carry over only insofar as the propensity model is correctly specified. A doubly-robust extension with IPTW weighting is left for future work (see §6). 
+
+# 4 Theoretical Properties 
+
+4.1 Honest Unbiasedness 
+
+Proposition 1. As in (Athey and Imbens 2016), let Π be any partition of X constructed on Str , independent of Sest . Then 
+
+E[ˆ τℓ | Π] = τℓ for every leaf ℓ, where τℓ = E[τ (Xi) | Xi ∈
+
+ℓ].Proof sketch. ˆτℓ = ¯Y1(ℓ) − ¯Y0(ℓ) is a difference of sample means on Sest , which is independent of Π by construction. Under unconfoundedness, E[ ¯Yw(ℓ) | Π] = μ(w, ℓ ), giving 
+
+E[ˆ τℓ | Π] = τℓ. □
+
+Corollary 2. Standard confidence intervals ˆτℓ ± c1−α/ 2 · ˆσℓ
+
+achieve nominal coverage for τℓ without any sparsity assump-tion on Π, where c1−α/ 2 uses the Welch t-distribution when either arm has fewer than 30 observations and the standard normal otherwise. Proof sketch. Because Π is fixed and Sest is independent of 
+
+Π by construction, the observations within each leaf ℓ are an i.i.d. sample from the conditional distribution of (Xi, Y i, D i)
+
+given Xi ∈ ℓ. ˆτℓ is therefore a two-sample mean differ-ence on a fixed stratum, and (ˆ τℓ − τℓ)/ˆσℓ converges in distribution to N (0 , 1) by the CLT. For small estimation samples ( min( nℓ
+
+> 1
+
+, n ℓ
+
+> 0
+
+) < 30 ), the Welch–Satterthwaite t-approximation accounts for unequal variances across arms. No assumption on the size or shape of Π is required because the honesty condition ensures Sest behaves as an indepen-dent sample regardless of how the partition was chosen. 
+
+4.2 Asymptotic Distribution of t2 Under H0
+
+Proposition 3. Under the null hypothesis of no treatment effect heterogeneity within the node, H0 : γT R = 0 , as the local node sample size nℓ → ∞ with the treatment assign-ment probability p ∈ (0 , 1) bounded away from 0 and 1: 
+
+t2 = ˆγ2
+
+> T R
+
+C44 ·
+
+ SSE 
+
+> nℓ−4
+
+ d
+
+−→ χ21 (3) 
+
+Proof sketch. By the Gauss-Markov theorem applied to the four-cell saturated regression framework, the ordinary least squares estimator satisfies ˆγT R /√ˆσ2C44 ∼ t(nℓ − 4) under 
+
+H0. Squaring this pivotal quantity yields a Wald-type statistic distributed as t2 ∼ F (1 , n ℓ − 4) . By Slutsky’s theorem, as the denominator degrees of freedom diverge ( nℓ − 4 → ∞ ), the central F -distribution converges weakly to a standard chi-squared distribution with one degree of freedom: F (1 , n ℓ −
+
+4) d
+
+−→ χ21.Despite this individual statistic being asymptotically well-behaved, using an unadjusted critical value from the 
+
+F (1 , n ℓ − 4) distribution as a hard significance gate ( α) to halt tree growth is structurally anti-conservative. Because the optimization engine selects the maximal split metric (t2max = max j,k t2
+
+> j,k
+
+) across multiple highly correlated can-didate features and thresholds, the distribution of the maxi-mum possesses a significantly heavier right tail than a stan-dalone F -variate. This multiple-testing inflation is a well-documented phenomenon in recursive partitioning literature (see e.g., (Loh, He, and Man 2015) for a discussion of vari-able selection bias). Consequently, we explicitly advise users to deactivate this pre-pruning constraint (by setting α = 1 .0)and rely instead on honest cross-validation post-pruning for objective complexity control. 4.3 IJ Validity for Honest Forests 
+
+The standard IJ theory (Wager, Hastie, and Efron 2014) applies to forest predictions under two conditions: (C1) tree predictions are square-integrable, and (C2) the covari-ance between bootstrap counts and tree predictions is well-approximated by the Hájek projection. (C1) is satisfied when-ever the outcome Y has finite variance, as each tree predic-tion ˆτb(x) is a difference of bounded sample means on a finite estimation half. Similarly, in (C2) the Hájek projection provides a linear approximation to the dependence of Tb(x)
+
+on the bootstrap counts Nbi ; this approximation is accurate when the tree prediction is smooth in its dependence on the training data, i.e. when no single observation has dispropor-tionate influence on the partition or the leaf estimate. In the honest setting, (C2) is strengthened: 
+
+Proposition 4. Let ˆτ honest b (x) be the prediction of honest tree b. Because ˆτ honest b (x) uses only Sest b , which is indepen-dent of the tree structure, the first-order adaptive bias term Bias 1 = E[ˆ τb(x) · ∂Πb/∂N bi ] vanishes. This gives: 
+
+cVar IJ (x) − Var (ˆ τforest (x)) = Op(B−1/2n−1/2)
+
+compared to Op(B−1/2) for adaptive forests. 
+
+Remark. The above proposition concerns the accuracy of the IJ as an estimator of the Monte-Carlo variance Var (ˆ τforest )
+
+due to bootstrap randomness. It does not imply that IJ inter-vals achieve nominal coverage for τ (x), since the dominant error component, which is the approximation error from the tree partition, is not captured by the IJ. 
+
+4.4 Computational Complexity 
+
+Tree growing costs O(p k n log n) per tree; honest CV prun-ing O(K |eff-λ| n); and IJ variance estimation O(B2(n +
+
+ntest )) via the Gram matrix G = CC ⊤ (independent of test points), which is roughly four orders of magnitude faster than the naive O(B n n test ) formulation at B = 50 ,
+
+n = ntest = 10 6. Full derivations and a component-level complexity table are given in Appendix A.1. 
+
+# 5 Experiments 
+
+We evaluate rattus on synthetic benchmarks designed to verify the coverage guarantee of Proposition 1, and on three public uplift datasets to benchmark Qini coefficient against strong metalearner baselines. 
+
+5.1 Synthetic Benchmarks 
+
+We evaluate on the three simulation designs from (Athey and Imbens 2016). Potential outcomes follow Yi(w) = η(Xi) +  
+
+> 12
+
+(2 w − 1) κ(Xi) + εi with εi ∼ N (0 , 0.01) , p = 0 .5, and 
+
+Xi ∼ Uniform ([0 , 1] K ). We use Ntrain = 1000 (50/50 honest split internally), Nte = 8000 , and nreps = 200 . Coverage is reported at the leaf-average level, the quantity for which Proposition 1 provides a guarantee. 
+
+• Design 1 : K = 2 , η(x) = 12 (x1 + x2), κ(x) = 12 x1. No noise covariates. 
+
+• Design 2 : K = 10 , η(x) = 12
+
+P6 
+
+> k=1
+
+xk, κ(x) =
+
+P2 
+
+> k=1
+
+1[xk > 0.5] · xk. 4 noise covariates. 
+
+• Design 3 : K = 20 , η(x) = 12
+
+P12  
+
+> k=1
+
+xk, κ(x) =
+
+P2 
+
+> k=1
+
+1[xk > 0.5] · xk. 8 noise covariates. 
+
+Design K MSE τ 90% Coverage 
+
+Design 1 2 0.0037 (0.0022) 0.903 (0.134) Design 2 10 0.0372 (0.0099) 0.894 (0.114) Design 3 20 0.0573 (0.0169) 0.900 (0.112) Table 2: Synthetic benchmark results ( nreps = 200 , Ntrain =1000 , Nte = 8000 ). Arithmetic means over 200 replications, standard deviations in parentheses. Coverage is the fraction of leaves whose 90% CI contains the true leaf-average τℓ;nominal level is 0.90. 
+
+5.2 Real-World Benchmarks 
+
+We evaluate on three public uplift datasets. The Criteo ,
+
+Starbucks and Hillstrom datasets. The Criteo uplift dataset (Diemert et al. 2018) contains approximately 14 million ob-servations with 12 features, a binary treatment, and two bi-nary outcomes (visit and conversion). The Starbucks dataset contains approximately 126 thousand observations with 7 features from a promotional campaign (Rößler, Tilly, and Schoder 2021). The Hillstrom dataset contains approxi-mately 64 thousand observations with 8 features (recency, history, mens, womens, zip_code, newbie, channel, his-tory_segment) from an email marketing campaign (Hillstrom 2008; Rößler, Tilly, and Schoder 2021). For each dataset, we use 50% of it for training and 50% for testing, stratified by treatment. Models are compared using the Qini coefficient (area un-der the Qini curve). Baselines are an S-Learner and T-Learner each using HistGradientBoostingRegressor as their base learner, and a GRF Causal Forest (Wager and Athey 2018) implemented via econml.grf.CausalForest 
+
+(B = 52 , max_depth=6 ). Aside from the GRF Causal Forest, all models are used with default hyperparameters, i.e. no hyperparameter tuning is performed and the same hyperparameters are used across datasets. Baseline models do not provide valid uncertainty quantification by construc-tion. EMSE τ results are therefore given separately in the Appendix. The forest gain over the single tree varies substantially across datasets: modest on Criteo (0.0887 vs. 0.0814), mod-erate on Hillstrom (0.0346 vs. 0.0298), and large on Star-bucks (0.2141 vs. 0.1954). This pattern aligns with the IJ convergence diagnostic: on Criteo, where the signal-to-noise ratio is low and the dataset is very large, a single tree grown on 50% of the data already captures most of the predictable heterogeneity, so bagging adds little. On Starbucks and Hill-strom, where treatment effects are more concentrated in a smaller feature space, variance reduction from the forest en-semble is more beneficial. The rattus honest forest outperforms the GRF Causal Forest baseline on all three datasets (Criteo: 0.0887 vs. 0.0859; Starbucks: 0.2141 vs. 0.2112; Hillstrom: 0.0346 vs. Dataset Model Qini AUC 
+
+Criteo Single Tree 0.0814 (0.006) Honest Forest 0.0887 (0.005) S-Learner (HGB) 0.0877 (0.004) T-Learner (HGB) 0.0806 (0.005) GRF Causal Forest 0.0859 (0.004) Starbucks Single Tree 0.1954 (0.019) Honest Forest 0.2141 (0.015) S-Learner (HGB) 0.2070 (0.014) T-Learner (HGB) 0.1940 (0.018) GRF Causal Forest 0.2112 (0.015) Hillstrom Single Tree 0.0298 (0.011) Honest Forest 0.0346 (0.005) S-Learner (HGB) 0.0267 (0.006) T-Learner (HGB) 0.0192 (0.009) GRF Causal Forest 0.0214 (0.007) Table 3: Model performance on Criteo, Starbucks, and Hill-strom datasets (hold-out test set). Arithmetic means over 36 runs, standard deviations in parentheses. Statistical compar-isons vs. Honest Forest are in Table 6. 0.0214), despite GRF using an MSE-gradient splitting crite-rion (Wager and Athey 2018). The gap is most pronounced on Hillstrom, consistent with the theoretical prediction in §3.2: when a dataset contains covariates that affect outcome levels without driving treatment heterogeneity, t2 splitting avoids those splits while EMSE τ rewards them, yielding cleaner partitions and better Qini performance. Two-sided Wilcoxon signed-rank tests across all 36 runs confirm that these differ-ences are statistically significant in all cases ( p < 0.05 ); full results are in Table 6. 
+
+# 6 Limitations and Future Work 
+
+• Propensity score extension. The transformed-outcome approach (§3.7) extends to observational settings but re-quires an external propensity score model. A doubly-robust version combining IPTW with direct estimation would strengthen applicability to heavily confounded set-tings. 
+
+• Variable selection bias. The default ’greedy’ mode retains a mild selection bias toward high-cardinality fea-tures despite quantile binning. The ’gi’ mode (§3.3) addresses this; a formal characterisation of the residual bias under the ’greedy’ mode and a power comparison between the two modes across feature-cardinality settings is left for future work. 
+
+• Asymptotic theory. A full asymptotic normality result for the honest significance forest, analogous to Theorem 4.1 of (Wager and Athey 2018), requires additional regularity conditions on the t2 criterion and the CV pruning step. We leave the formal proof to future work. 
+
+• Computational scaling. The per-tree cost is O(n log n ·
+
+p · k) where: k ≤ max_candidates (default 20). Quantile-based binning via max_candidates already approximates histogram-based splitting, and the package has been demonstrated on datasets of up to millions obser-vations (Criteo). For extremely large datasets, a globally pre-computed bin structure (as in LightGBM) rather than per-node quantile estimation could yield further speedups while preserving the honest estimation structure. 
+
+# 7 Conclusion 
+
+We have introduced rattus , a hybrid causal tree and forest estimator that combines the interaction-focused splitting cri-terion of (Radcliffe and Surry 2011) with the honest sample-splitting and cross-validation of (Athey and Imbens 2016), extended to forests with an efficient IJ Monte-Carlo variance diagnostic. The key insight is that the t2 splitting criterion and the EMSE τ pruning criterion are complementary: t2 excels at detecting treatment effect modification; EMSE τ excels at controlling complexity. Each criterion is used where it has comparative advantage, combining the strengths of both ap-proaches. Direct comparison against honest causal forests and significance-only uplift trees as standalone baselines is left for future work. The open-source implementation is re-producible, tested, and designed with responsible inference as a first-class concern. Valid leaf-level CIs with nominal coverage are provided by the single honest tree; the forest provides a lower-variance point estimate and an IJ conver-gence diagnostic. 
+
+# Ethical Statement 
+
+• Preventing harmful subgroup overclaiming. In clinical trials and policy evaluations, adaptive methods that over-fit heterogeneous treatment effects can lead researchers to incorrectly identify beneficial subgroups and recommend targeted interventions that cause harm in deployment. The honest estimation guarantee, i.e. that leaf CATEs and con-fidence intervals are unbiased, is not merely a statistical nicety: it is a precondition for responsible reporting of subgroup analyses. Our library is designed with this in mind: the API encourages honest estimation by default, warns users when pre-pruning and CV pruning are com-bined in ways that may be counterproductive, and pro-vides clear documentation of when CIs are and are not valid. 
+
+• Negative effects and retention. The significance-based splitting criterion is particularly valuable in retention ap-plications, where treatment can backfire for some cus-tomers (Radcliffe and Simpson 2008). By directly testing for effect modification, rattus identifies subgroups with negative treatment effects that would be missed by re-sponse models. 
+
+• Open-source reproducibility. All results in this paper are reproducible from the rattus package with fixed random seeds. 
+
+# References 
+
+Athey, S.; and Imbens, G. 2016. Recursive partitioning for heterogeneous causal effects. Proceedings of the National Academy of Sciences , 113(27): 7353–7360. Chipman, H. A.; George, E. I.; and McCulloch, R. E. 2010. BART: Bayesian additive regression trees. The Annals of Applied Statistics , 4(1): 266 – 298. Devriendt, F.; Berrevoets, J.; and Verbeke, W. 2021. Why you should stop predicting customer churn and start using uplift models. Information Sciences , 548: 497–515. Diemert, E.; Betlei, A.; Renaudin, C.; and Amini, M.-R. 2018. A large scale benchmark for uplift modeling. In KDD .Hillstrom, K. 2008. The MineThatData E-Mail Analytics and Data Mining Challenge. https://blog.minethatdata.com/ 2008/03/minethatdata-e-mail-analytics-and-data.html. Ac-cessed: 2025. Künzel, S. R.; Sekhon, J. S.; Bickel, P. J.; and Yu, B. 2019. Metalearners for estimating heterogeneous treatment effects using machine learning. Proceedings of the national academy of sciences , 116(10): 4156–4165. Loh, W.-Y.; He, X.; and Man, M. 2015. A regression tree approach to identifying subgroups with differential treatment effects. Statistics in medicine , 34(11): 1818–1833. Radcliffe, N. J.; and Simpson, R. 2008. Identifying who can be saved and who will be driven away by retention activity. 
+
+Journal of Telecommunications Management , 1(2). Radcliffe, N. J.; and Surry, P. D. 2011. Real-world uplift modelling with significance-based uplift trees. Stochastic Solutions , White Paper TR-2011-1: 1–33. Rößler, J.; Tilly, R.; and Schoder, D. 2021. To treat, or not to treat: Reducing volatility in uplift modeling through weighted ensembles. In Proceedings of the 54th Hawaii International Conference on System Sciences | HICSS , 1601– 1610. Rubin, D. B. 1974. Estimating causal effects of treatments in randomized and nonrandomized studies. Journal of edu-cational Psychology , 66(5): 688. Wager, S.; and Athey, S. 2018. Estimation and inference of heterogeneous treatment effects using random forests. Jour-nal of the American Statistical Association , 113(523): 1228– 1242. Wager, S.; Hastie, T.; and Efron, B. 2014. Confidence inter-vals for random forests: The jackknife and the infinitesimal jackknife. The journal of machine learning research , 15(1): 1625–1651. 
+
+# A Additional Details 
+
+A.1 Computational Complexity 
+
+Table 4 summarises the cost of each component. We derive each bound below, treating k ≤ max_candidates as the number of candidate thresholds per feature, dmax as the tree depth, B as the number of trees, and K as the number of CV folds. 
+
+Tree growing. Consider a node holding m observations. For a single feature, the t2 search maintains running counts, sums, and sums of squares of Y for each of the four treatment ×side cells. Sorting the m values (or extracting 
+
+k quantile cut-points) costs O(m log m), after which each candidate threshold is scored in O(1) by incrementing the cumulative sufficient statistics, for O(k) per feature. Search-ing all p features therefore costs O(p (m log m + k)) at the node. Summing over all nodes at a fixed depth, the node sizes partition n, so by subadditivity of m 7 → m log m the per-level cost is O(p n log n). Over dmax = O(log n) levels this yields the upper bound O(p k n log n) reported in Ta-ble 4; the bound is loose, and pre-sorting each feature once (so that per-node work is an O(m) scan rather than a re-sort) removes a log n factor in practice. 
+
+Honest CV pruning. The effective-λ grid contains one entry per internal node, so |eff-λ| = O(# internal nodes ).The nested sequence of pruned trees is materialised once, outside the fold loop. For each fold k ∈ { 1, . . . , K } and each candidate λ, scoring routes the fold’s n/K validation points to their leaves in O(( n/K ) dmax ) and accumulates the honest EMSE τ . Summed over folds and penalties this is O(|eff-λ| n d max ); Table 4 absorbs dmax into the stated 
+
+O(K |eff-λ| n) upper bound. 
+
+Forest fitting and prediction. Each of the B trees is grown on a bootstrap resample with feature subsampling, replacing p by ⌊√p⌋ in the per-tree bound and giving 
+
+O B n log n ⌊√p⌋ k, trivially parallel across trees. Predic-tion routes each of the ntest points through all B trees, each routing in O(dmax ), for O(B n test dmax ).
+
+Infinitesimal jackknife: exact algebra. The empirical co-variance over the B bootstrap replicates is 
+
+dCov b[Nbi , T b(x)] = 1
+
+B
+
+> B
+
+X
+
+> b=1
+
+(Nbi − 1)  Tb(x) − ¯T (x)
+
+(4) where ¯T (x) = 1
+
+> B
+
+PBb=1 Tb(x) and we use E[Nbi ] = 1 to centre the counts. Collect the centred counts into C ∈ RB×n
+
+with Cbi = Nbi − 1, and the centred predictions into ˜T ∈
+
+RB×ntest with ˜Tbj = Tb(xj ) − ¯T (xj ). Then (4) is the (i, j )
+
+entry of a matrix product, dCov b[Nbi , T b(xj )] = 1 
+
+> B
+
+(C⊤ ˜T )ij ,and the IJ variance is the column-wise sum of squares 
+
+dVar IJ (xj ) = 
+
+> n
+
+X
+
+> i=1
+
+dCov b[Nbi , T b(xj )] 2 = 1
+
+B2
+
+> n
+
+X
+
+> i=1
+
+ C⊤ ˜T 2 
+
+> ij
+
+.
+
+(5) The naive triple loop over (b, i, j ) evaluates (4) for every training–test pair, costing O(B n n test ).
+
+Infinitesimal jackknife: efficient computation. Expand-ing the square in (5) and exchanging the order of summation reveals that the dependence on the training index i enters only through a Gram matrix of the counts: 
+
+dVar IJ (xj ) = 1
+
+B2
+
+> n
+
+X
+
+> i=1
+
+X 
+
+> b
+
+Cbi ˜Tbj 
+
+X 
+
+> b′
+
+Cb′i ˜Tb′j
+
+
+
+= 1
+
+B2
+
+X
+
+> b,b ′
+
+˜Tbj ˜Tb′jnX
+
+> i=1
+
+Cbi Cb′i
+
+| {z }
+
+> Gbb ′
+
+= 1
+
+B2 ˜t⊤ 
+
+> j
+
+G ˜tj , G = CC ⊤ ∈ RB×B , (6) where ˜tj is the j-th column of ˜T . The Gram matrix G is 
+
+independent of the test points and is formed once in O(B2n).Each test point then requires a single B × B quadratic form, 
+
+O(B2), for O(B2ntest ) across all test points. The total cost is 
+
+O B2n + B2ntest 
+
+ = O B2(n + ntest ) , (7) which improves on the naive O(B n n test ) triple loop by a factor of order n n test  
+
+> B(n+ntest )
+
+; for B = 50 and n = ntest = 10 6
+
+this is a speed-up of roughly four orders of magnitude. This formulation is implemented in rattus .
+
+Finite-B bias correction. The estimator (5) carries an up-ward Monte-Carlo bias of order n/B (Wager, Hastie, and Efron 2014). We apply the bias-corrected variant 
+
+dVar IJ -U (xj ) = dVar IJ (xj ) − nB2
+
+> B
+
+X
+
+> b=1
+
+ Tb(xj ) − ¯T (xj )2,
+
+(8) whose additional cost is O(B n test ) and therefore does not change the bound (7). Operation Complexity Single tree growing O(n log n · p · k)
+
+Honest CV pruning O(K · | eff-λ| · n)
+
+Forest fitting (parallelisable) O(B · n log n · ⌊ √p⌋ · k)
+
+Forest prediction O(B · ntest · dmax )
+
+IJ variance (Gram matrix) O(B2(n + ntest )) 
+
+Table 4: Computational complexity of rattus components. 
+
+k ≤ max_candidates ; |eff-λ| is the number of distinct gains in the grown tree (replaces a fixed geometric grid). 
+
+A.2 Proof of Proposition 3 
+
+In an adaptive forest, ˆτb(x) depends on Str b for both parti-tion selection and leaf estimation, making tree predictions jointly dependent on bootstrap counts in a complex way that introduces a first-order bias in the IJ approximation. In the honest setting, the partition Πb depends on Str b and the es-timate depends only on Sest b . Since Sest b and Str b are inde-pendent within each bootstrap sample, the partial derivative 
+
+∂ ˆτ honest b (x)/∂N bi splits cleanly across the two halves, and the problematic first-order term is zero. The remaining error is O(n−1/2) from the Hájek approximation itself, giving the stated Op(B−1/2n−1/2) rate. 
+
+A.3 Computing Infrastructure 
+
+All experiments were run with Python 3.12 us-ing rattus 0.1.9, numpy 2.2.6, scipy 1.17.1, 
+
+scikit-learn 1.6.1, and econml 0.16.0. Each of the 36 independent runs uses a distinct random seed. 
+
+A.4 EMSE τ Results A.5 Wilcoxon Signed-Rank Tests 
+
+Table 6 reports two-sided Wilcoxon signed-rank tests com-paring the Honest Forest against each baseline across all 36 
+
+Dataset Model EMSE τ
+
+Criteo Single Tree 5.3 × 10 −4
+
+Honest Forest 4.9 × 10 −4
+
+Starbucks Single Tree 1.4 × 10 −4
+
+Honest Forest 1.0 × 10 −4
+
+Hillstrom Single Tree 3.5 × 10 −3
+
+Honest Forest 3.1 × 10 −3
+
+Table 5: Honest EMSE τ on Criteo, Starbucks and Hillstrom datasets on a hold-out test set. Arithmetic means over 36 runs. S- and T-Learner baselines do not produce EMSE τ es-timates by construction. GRF uses an internal MSE-gradient criterion (Wager and Athey 2018) rather than EMSE τ ; ap-plying our leaf-based metric to its predictions would be non-comparable. independent runs. The null hypothesis is that the median per-run difference in Qini AUCis ; a two-sided test is used because we make no directional claim, we wish to establish that rattus is at least non-inferior. 
+
+Dataset Baseline Mean ∆ p (two-sided) 
+
+Hillstrom Single Tree +0 .0048 0.042 
+
+S-Learner (HGB) +0 .0079 <0.001 T-Learner (HGB) +0 .0154 <0.001 GRF Causal Forest +0 .0132 <0.001 Starbucks Single Tree +0 .0187 <0.001 S-Learner (HGB) +0 .0071 0.001 
+
+T-Learner (HGB) +0 .0201 <0.001 GRF Causal Forest +0 .0029 0.043 
+
+Criteo Single Tree +0 .0073 <0.001 S-Learner (HGB) +0 .0010 0.013 
+
+T-Learner (HGB) +0 .0081 <0.001 GRF Causal Forest +0 .0028 <0.001 Table 6: Two-sided Wilcoxon signed-rank tests: Honest For-est vs. each baseline, n = 36 runs. Mean ∆ is the per-run mean difference in Qini AUC (Honest Forest minus baseline). All 12 comparisons are statistically significant ( p < 0.05 ), with positive mean differences throughout.

@@ -1,0 +1,685 @@
+Title: A Differentiable Covariance Calculus for Linear Gaussian Bayesian Networks
+
+URL Source: https://arxiv.org/pdf/2607.04578v1
+
+Published Time: Tue, 07 Jul 2026 02:39:31 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# A Differentiable Covariance Calculus for Linear Gaussian Bayesian Networks 
+
+Tadashi Wadayama 
+
+Department of Computer Science, Nagoya Institute of Technology, Nagoya 466-8555, Japan Email: wadayama@nitech.ac.jp 
+
+Abstract —Linear Gaussian Bayesian networks, equivalently linear Gaussian structural equation models, recur across statistics, control, and communications; in the vector-valued setting that motivates this work, their nodes are vectors and their edges are matrices. Every quantity of interest is a function of sub-blocks of the joint covariance, which is itself a classical, differentiable map (the K-recursion) from the local edge and innovation parameters. Yet the resulting inference and estimation tasks are usually derived and implemented separately, per task and per topology. Taking this covariance chart as a single backend, we build on it a unified, differentiable covariance calculus in which each task reduces to a few linear-algebra primitives on the one covariance, and automatic differentiation returns every gradient in a single backward sweep, over arbitrary vector-valued directed acyclic graphs and parametrizations, including tied and structured ones. The calculus covers conditioning, conditional-independence testing through mutual information, maximum-likelihood estimation with hidden nodes, and the Slepian–Bangs Fisher information with the local identifiability and Cram ´er–Rao reliability it induces. It is validated on a linear Gaussian state-space model and a skip-connected (non-chain) extension against the Kalman recursions, d-separation, and the Cram´ er–Rao bound. 
+
+Keywords —Linear Gaussian Bayesian networks, structural equation models, covariance recursion, automatic differentiation, conditional independence, Fisher information, identifiability, Cram ´er– Rao bound, forward sampling. 
+
+I. INTRODUCTION 
+
+Linear Gaussian models on directed acyclic graphs (DAGs) recur across statistics, control, and communications. They are linear structural equation models (SEMs) and Gaussian graphical models in statistics [ 7], [ 3], linear state-space models in control and signal processing, and cascaded linear channels with additive Gaussian noise in communications, as in MIMO transceivers, multi-hop amplify-and-forward relays, and coop-erative sensor arrays. In each case a node carries a Gaussian variable, an edge applies a linear map, and an independent Gaussian innovation enters at every non-root node. In the applications that motivate this work, the nodes are vectors and the edges are matrices : an antenna array, a latent feature vector, or a dynamical state at each node, and a MIMO channel or processing matrix on each edge. The joint distribution of such a network is zero-mean Gaussian and is therefore determined entirely by its covariance, and essentially every quantity of interest (marginals and conditionals, mutual information, likelihoods, and Fisher information) is a function of sub-blocks of that covariance. The covariance is, in turn, a function of the local conditional parameters: the edge matrices and the innovation covariances. Mapping the local parameters to the global covariance is thus the computational hub on which all downstream analysis rests. This local-to-global covariance map is classical; its evalua-tion as a differentiable, inverse-free forward operator, together with its relation to the classical Gaussian-network, path-analysis, and state-space literature, is developed in the companion paper [ 1]. We take that covariance backend as given: the object of this paper is the inference and estimation framework built on it, not the covariance recursion itself. What is missing is not another formula but an organizing one. Taken individually, each downstream operation (condi-tioning by a Schur complement, a log-determinant mutual information, a node-wise regression for maximum likelihood) is elementary; assembling all of them, over arbitrary vector-valued DAGs and in a form that differentiates end to end, is not. This paper provides that organization: it treats the local-to-global covariance map as a differentiable chart and expresses inference, likelihood-based estimation, and Fisher-based identifiability as compositions of a few block-matrix primitives with it. Concretely, we adopt a single representation of the covariance map, the K-recursion , that (i) is differentiable : built from matrix products, sums, and transposes only, it is a smooth computation graph, so reverse-mode automatic differentiation (AD) [ 18 ] returns the gradient of any downstream scalar with respect to every edge parameter in a single backward sweep, with no per-topology gradient derivation; (ii) is vector/matrix-valued , treating MIMO nodes and matrix edges natively rather than vectorizing them away; and (iii) returns all node-pair covariance blocks (including the non-adjacent cross-covariances that branching and merging topologies require at a shared descendant) in one inverse-free, topological forward pass. On this single operator we build a differentiable covariance calculus for linear Gaussian Bayesian networks: a unified inference and estimation framework in which every query is a composition of a few block operations with the chart. It is summarized in the following contributions. 
+
+• A covariance-chart view of Gaussian BN inference. 
+
+We use the differentiable covariance backend of [ 1 ] as a covariance chart (an explicit, differentiable map from the local parameters to the covariance family a fixed DAG realizes) and make it the organizing object for inference, estimation, and identifiability (Section II-C). 
+
+• A unified calculus on one backend. Marginalization and conditioning; mutual information, conditional mutual infor-mation, and conditional-independence testing; maximum-likelihood estimation for fully and partially observed net-
+
+> arXiv:2607.04578v1 [cs.IT] 6 Jul 2026
+
+works, including hidden nodes; and the Slepian–Bangs Fisher information, with the local-identifiability test and Cram ´er–Rao reliability it induces, each of which reduces to differentiating a scalar through the same operator, so all are obtained from one backend (Sections III to V). 
+
+• Validation against classical references. On a linear Gaus-sian state-space model and a skip-connected (non-chain) extension whose merging nodes defeat first-order recursions, the calculus is validated end to end against the Kalman filter and smoother, d-separation, a companion-form covariance recursion, and the Cram´ er–Rao bound (Section VI). The calculus is realized in an open-source reference implemen-tation, gaussian-bn , publicly available at https://github.com/ wadayama/gaussian-bn; every number and figure of Section VI is produced by it. 
+
+Relation to companion papers. This paper is complementary to [ 1], [ 2]: those papers optimize information objectives (mutual information and its multi-terminal conditional variants) through the same backend, whereas the present paper develops its inference, estimation, and identifiability side; mutual infor-mation appears here only as an information and conditional-independence measure, not as an optimization objective. 
+
+Organization. Section II fixes notation, states the model, briefly reviews the K-recursion, and positions the work within Gaussian-network inference. Sections III to V build inference, estimation, identifiability, and reliability on the covariance chart. Section VI validates the calculus on a linear Gaussian state-space model and its skip-connected extension, and Section VII concludes. II. PRELIMINARIES 
+
+This section sets the stage for the calculus. Section II-A fixes notation, Section II-B states the vector-valued linear Gaussian Bayesian network model and its (possibly tied and structured) parametrization, Section II-C reviews the K-recursion that maps the local parameters to the covariance chart on which everything else is built, and Section II-D places the framework in the Gaussian-network literature. 
+
+A. Notation 
+
+Uppercase italic letters (e.g., X, V j ) denote random vectors, and boldface letters (e.g., A, Σ, K) denote deterministic matrices and vectors. The transpose of A is AT. We write 
+
+Σ ≻ 0 for symmetric positive definite and Σ ⪰ 0 for positive semidefinite, and A ⪰ B when A − B is positive semidefinite (the Loewner order); Id is the d×d identity matrix; tr( ·), det( ·),
+
+rank( ·), and E[·] are trace, determinant, rank, and expectation; and log is the natural logarithm. For a directed acyclic graph (DAG) G = (V, E) on the node set V = {V1, . . . , V M },
+
+Pa( j) = {i : ( Vi → Vj ) ∈ E} denotes the parent index set of node j. For an index set A ⊆ { 1, . . . , M }, VA is the subvector formed by stacking {Vj }j∈A, and KAB is the block of a covariance matrix indexed by the row set A and column set 
+
+B; O ⊆ { 1, . . . , M } denotes the set of observed nodes. 
+
+B. Linear Gaussian Bayesian Network Model 
+
+The model is that of the companion paper [ 1 ], which states it over complex vectors for its wireless applications; we state it over the reals, the convention of the statistical literature, and nothing essential changes: Remark 3 records the dictionary between the two cases. We consider a linear Gaussian Bayesian network on a DAG G whose nodes are topologically ordered, meaning i < j for every edge (Vi → Vj ) ∈ E , equivalently 
+
+Pa( j) ⊆ { 1, . . . , j − 1}. Each node is a Gaussian random vector Vj ∈ Rdj governed by the linear structural equation 
+
+Vj = X
+
+> i∈Pa( j)
+
+Aji Vi + Zj , Zj ∼ N (0, Σj ), (1) where Aji ∈ Rdj ×di is the edge transform from parent i to node j, Σj ⪰ 0 is the innovation (conditional) covariance, and the innovations {Zj }Mj=1 are mutually independent. A root is a parentless node, for which (1) reduces to Vr = Zr ∼ N (0, Σr );we allow any number of roots. The model is described by the local conditional parameters {Aji } and {Σj }, which need not all be free. Following the edge factorization of the companion paper [1], each edge matrix is a product of factors, 
+
+Aji = A(1)  
+
+> ji
+
+A(2)  
+
+> ji
+
+· · · A(Lji ) 
+
+> ji
+
+, (2) each of which is either learnable (for example a controllable precoder, relay gain, or phase profile) or fixed (a known channel), and factors may be shared across edges. We write η
+
+for the collection of learnable factors, together with any free innovation covariances; it is the target of estimation (Section IV). The case in which every edge matrix and innovation covariance is itself free, 
+
+η = {Aji : ( Vi → Vj ) ∈ E} ∪ { Σj : j ∈ V} , (3) is the extreme with all Lji = 1 and every factor learnable. Because the K-recursion composes with any such construction, every quantity below is differentiable in η regardless of the parametrization. 
+
+Remark 1 (Tied and structured parameters) . The free pa-rameters η need not be the edge matrices themselves. Each 
+
+Aji may be an arbitrary differentiable function of η: a factor shared across several edges (weight tying, Aji = Hji Fi with a common Fi), a low-rank edge A = U V T, a known factor multiplying a learnable one, or any other structural constraint. Since the K-recursion is differentiable, automatic differentiation back-propagates through this construction, so the gradient with respect to a tied parameter is the sum of its contributions over all edges on which it appears, in a single backward sweep and with no per-parametrization derivation. Tying lowers the effective parameter count q, and hence the size of the Fisher information (Section V); imposing a tie is therefore also a way to eliminate a gauge and restore identifiability. Stacking the nodes, V = ( V T 
+
+> 1
+
+, . . . , V T 
+
+> M
+
+)T is an invert-ible linear image of the stacked independent innovations 
+
+(ZT 
+
+> 1
+
+, . . . , Z T 
+
+> M
+
+)T, so the nodes are jointly Gaussian : V ∼N (0, K) with K = E[V V T]. The DAG and its local parame-ters are thus one graphical representation of this single joint distribution, factoring N (0, K) into the node conditionals (1) ,and every quantity studied in this paper is a function of sub-blocks of K. We denote the node-pair covariance blocks by 
+
+Kjk = E[Vj V T 
+
+> k
+
+]; Section II-C constructs them from η.Two features distinguish this setting from the scalar Gaus-sian Bayesian networks of classical graphical-model theory. First, nodes are vectors and edges are matrices (Aji need not be square), as required by MIMO links, sensor arrays, and latent or state vectors. Second, the innovation covariance is allowed to be merely PSD, Σj ⪰ 0, which admits deterministic (noiseless) nodes such as exact state updates or other deterministic mechanisms; the measure-theoretic status of such degenerate nodes is addressed in Remark 4. 
+
+Remark 2 (Zero mean without loss of generality) . Adding a per-node offset cj , so that Vj = cj + P 
+
+> i∈Pa( j)
+
+Aji Vi + Zj ,only shifts the means and leaves the covariance K unchanged; the two moments decouple. Every quantity studied in this paper (mutual information, conditional independence, and the Fisher metric) is a function of K alone and is therefore mean-invariant. We accordingly adopt the zero-mean model ( cj = 0) throughout. The affine mean and the value-level operations that require it (atomic interventions to a fixed value, and counterfactuals) are left to separate work. 
+
+Remark 3 (Complex case) . We state the formulation for real vectors, Vj ∈ Rdj . It carries over verbatim to circular (proper) complex Gaussian networks, such as arise in modeling MIMO channel statistics: replace the transpose (·)T by the conjugate (Hermitian) transpose (·)H and N by the circular complex Gaussian CN , under which the Hermitian covariance E[ · (·)H]
+
+fully specifies the distribution [ 17 ]. The only quantitative change is the constant in the information and Fisher measures (Sections III-C and V-A ), where the factor 12 becomes 1,reflecting the real versus circular-complex degrees of freedom. 
+
+C. K-Recursion: A Brief Review 
+
+The node-pair covariance blocks Kjk = E[Vj V T 
+
+> k
+
+] follow from the local parameters η by a single topological forward pass. Substituting the structural equation (1) and using independence of the innovations gives, in topological order, 
+
+Kjk = X
+
+> i∈Pa( j)
+
+Aji Kik (k < j ),
+
+Kjj = X
+
+> i,i ′∈Pa( j)
+
+Aji Kii ′ AT 
+
+> ji ′
+
++ Σj ,
+
+(4) with Krr = Σr at a root r and Kkj = KT
+
+> jk
+
+, so only the blocks with j ≥ k need be stored. The self-block carries the 
+
+parent cross-covariances Kii ′ (i̸ = i′), which are what make the construction correct at a node that merges several parents. Collecting the edge transforms into the strictly block-lower-triangular matrix A, whose (j, i ) block is Aji for 
+
+i ∈ Pa( j) and zero otherwise, and the innovation covariances into Σ = diag( Σ1, . . . , ΣM ), the recursion (4) evaluates the closed form K = ( I − A)−1Σ(I − A)−T by topological forward substitution, without ever forming the inverse. The two routes agree, but not in cost: a direct evaluation of the closed form inverts (or solves with) the full D × D matrix I − A, with 
+
+D = P 
+
+> j
+
+dj , regardless of the graph, whereas the recursion touches only the blocks the edges make nonzero, spending a few small matrix products per edge, and keeps every intermediate quantity an explicit covariance block; this is why the recursion, rather than the closed form, is the backend used throughout. Since it uses only matrix products, sums, and transposes, the map ΦG : η 7 → K is a smooth computation graph, and reverse-mode AD returns the gradient of any downstream scalar with respect to every entry of η in one backward sweep. In other words, when the forward recursion (4) is executed in an AD framework, every intermediate block it forms is recorded, together with the elementary operation that produced it, as a node of one connected computation graph running from η
+
+to K. A scalar built afterwards from blocks of K therefore sits at the end of an unbroken chain of operations with known derivatives, and the backward sweep is nothing more than the chain rule applied along that chain in reverse, so no gradient formula is ever derived by hand. We regard ΦG as a covariance chart , an explicit dif-ferentiable parametrization of the covariances a fixed DAG realizes, and build the inference, estimation, and identifiability framework of the sequel on it. Its derivation, numerical treatment, and relation to prior covariance constructions are detailed in the companion paper [ 1]; here we use it as a given backend. 
+
+Remark 4 (Degenerate noise) . With Σj ⪰ 0 (Section II-B ), (4) remains valid on the whole PSD cone, since it expresses only the bilinearity of covariance under linear maps; a deter-ministic node ( Σj = 0) is then the noiseless linear function 
+
+Vj = P 
+
+> i∈Pa( j)
+
+Aji Vi of its parents. Whether such nodes are admissible depends on the query, not on the model. Every operation on the covariance itself (the recursion, marginal covariances, forward sampling) tolerates them; a quantity defined through a density (a likelihood, a Fisher information, or a mutual information across a deterministic link) instead requires the covariance block it touches to be positive definite. The requirement falls on the block of K, not on Σj : a noiseless node whose parents carry enough noise still has a positive-definite marginal covariance, and hence a density. We note the condition where it arises. 
+
+D. Related Work 
+
+The differentiable covariance backend used here (the K-recursion) and its lineage in the Gaussian-influence-diagram, path-analysis, and state-space literatures are established in the companion paper [ 1]; we do not repeat that discussion, and instead position the present framework within Gaussian-network inference. 
+
+Inference and estimation in Gaussian graphical models. 
+
+Exact inference in Gaussian Bayesian networks and graphical models (marginals, conditionals, and conditional independence) is classical [ 3], [ 4], [ 8], with Gaussian influence diagrams and recursive belief-network constructions providing early algorithmic treatments [ 5 ], [ 6 ]. The same conditioning identities drive Gaussian process regression [ 9], which differs only in the origin of the covariance: a kernel evaluated on inputs there, the covariance chart of a parametrized DAG here (Section III-A ). Parameter estimation from data, including the latent-variable case, proceeds classically by maximum likelihood and the expectation–maximization algorithm [ 10 ]; here we maximize the Gaussian likelihood directly by gradient descent through the differentiable covariance map. The linear structural-equation-model viewpoint [7] underlies that Gaussian likelihood. 
+
+Identifiability and conditional independence. Which parame-ters of a linear Gaussian model are recoverable from a given set of observed nodes is an identifiability question; trek separation and the algebraic-statistics view of Gaussian graphical models characterize the covariance structure and the associated con-ditional independences [ 12 ], [ 13 ]. We treat identifiability and reliability operationally, through the rank and inverse of a Fisher information pulled back to the parameters [ 11 ] (Section V). This rank test touches two classical strands: the pulled-back metric is the Fisher–Rao metric of the Gaussian family in the sense of information geometry [ 14 ], and a parameter at which it loses rank is a singular point of the statistical model in the sense of singular learning theory [ 15 ], hidden-node Gaussian networks being canonical examples. We use only the local verdict, the rank and null space at the parameter at hand, and none of the asymptotic machinery of the singular case. 
+
+This work. These operations are usually developed one at a time, and often per topology. We obtain all of them (inference, estimation, and Fisher-based identifiability and Cram ´er–Rao reliability) for arbitrary vector-valued Gaussian Bayesian networks from one differentiable covariance backend, with gradients supplied by automatic differentiation and no per-topology derivation. The complementary use of the same backend for mutual-information optimization is developed in the companion paper [1]. III. INFERENCE 
+
+Inference is the first layer of the calculus. Section III-A casts every probabilistic query about the network as block algebra on the single covariance K; Sections III-B and III-C record the basic queries, from marginals and conditionals to mutual information and conditional-independence tests; and Section III-D adds their generative counterpart, forward sampling. 
+
+A. Overview: Inference as Block Algebra on the Covariance Chart 
+
+A linear Gaussian Bayesian network is a probabilistic model, and inference means answering probabilistic questions about its nodes: what is the distribution of some variables of interest, and how does that distribution change once other variables are observed? Because the joint law is the zero-mean Gaussian 
+
+V ∼ N (0, K) of Section II-B , both questions have closed-form answers that involve only sub-blocks of the single covariance matrix K produced by the K-recursion. Let A be a set of query nodes, B a set of observed nodes, and R the remaining nodes (neither queried nor observed). Before any observation, the prior (marginal) law of VA is read directly off the diagonal block, 
+
+VA ∼ N (0, KAA ). (5) After observing VB = b, the posterior law of VA is again Gaussian, 
+
+VA | (VB = b) ∼ N  KAB K−1 
+
+> BB
+
+b
+
+| {z }
+
+> mean
+
+, KA|B
+
+| {z } 
+
+> cov.
+
+, (6) whose covariance is the Schur complement of the observed block, 
+
+KA|B = KAA − KAB K−1 
+
+> BB
+
+KBA . (7) This is Bayesian updating in closed form: observing B pulls the mean toward the data through the gain KAB K−1 
+
+> BB
+
+and shrinks the covariance from the prior KAA to the posterior KA|B ⪯KAA KAB KAR                                              
+
+> KBA KBB KBR
+> KRA KRB KRR
+> A
+> B
+> R
+> ABR
+> (a) marginal KAA
+> (block selection)
+> KAA KAB KAR
+> KBA KBB KBR
+> KRA KRB KRR
+> A
+> B
+> R
+> ABR
+> (b) conditional KA|B
+> =KAA −KAB K−1
+> BB KBA
+> Fig. 1. Inference reads sub-blocks of the single covariance matrix K. (a) The prior (marginal) covariance of the query nodes Ais the diagonal block KAA
+> (green); no other block is touched. (b) The posterior covariance after observing
+> Bis the Schur complement KA|B=KAA −KAB K−1
+> BB KBA , built from the anchor block KAA (green) and the blocks coupling the query Awith the observation B, namely KAB ,KBA ,KBB (blue). The remaining nodes R
+> (grey), neither queried nor observed, are marginalized out, i.e. their rows and columns are simply dropped.
+
+KAA , the Schur complement of the observed block KBB 
+
+in the joint covariance. These are precisely the conditioning identities that underlie Gaussian process (GP) regression [ 9 ]; the only difference is the origin of the covariance, which the K-recursion generates from the network parameters rather than from a kernel evaluated on inputs. Because the K-recursion (Section II-C ) has already produced 
+
+every node-pair block Kjk , the set-indexed blocks used above are simply gathered from it ( KAA stacks the blocks Kjk 
+
+with j, k ∈ A, and KAB , KBB likewise), so no per-query recomputation is needed. Figure 1 reads the two formulas off this assembled matrix. In panel (a) the marginal of VA is the green diagonal block KAA . In panel (b) the posterior covariance 
+
+KA|B combines the anchor block KAA (green) with the blocks 
+
+KAB , KBA that couple the query to the observation and the observed block KBB (blue); the unrelated nodes R (grey) are dropped. Conditioning therefore shrinks KAA by exactly the information that the observation B carries about A.Every inference quantity in this paper is built the same way, from a handful of operations on sub-blocks of the one matrix K:
+
+block selection (marginals, Equation (5)), the Schur complement 
+
+(conditioning, Equation (7)), the log-determinant of a block (entropies, mutual information, and Gaussian log-likelihoods, Section III-C ), and the linear solve K−1 
+
+> BB
+
+(·) (posterior means and node-wise regressions). We call this block algebra on the covariance chart. The chart supplies the object and the four primitives the operations; together they constitute the covariance calculus of the title, and Sections III-B and III-C develop it for the basic queries. Two properties make this the organizing principle of the paper. First, each operation is a smooth map (evaluated in practice by one Cholesky factorization per solve and log-determinant), so composing it with the chart ΦG : η 7 → K
+
+makes any inference quantity a single differentiable function of the learnable parameters η; one reverse-mode AD sweep then returns its gradient with respect to every entry of η,with no query- or topology-specific derivation. Second, the same operations, over the same chart, drive the later sections: a marginal log-likelihood is a log-determinant plus a trace (Section IV); the Fisher information is built from derivatives of an observed block KOO (Section V). A query that conditions on, or takes the density of, a node set requires the corresponding block of K to be positive definite (Remark 4). 
+
+B. Marginalization and Conditioning 
+
+We now record the two basic queries of Section III-A in the form used by the rest of the paper. 
+
+Marginalization. For a query set A, the marginal law is 
+
+VA ∼ N (0, KAA ), (8) whose covariance is the diagonal block KAA , read off the blocks of Section II-C with no further computation. 
+
+Conditioning. Let B be an observed set with KBB ≻ 0.Given VB = b, the query VA is Gaussian with 
+
+E[VA | VB = b] = KAB K−1 
+
+> BB
+
+b, (9) 
+
+Cov[ VA | VB ] = KA|B = KAA − KAB K−1 
+
+> BB
+
+KBA . (10) The posterior mean (9) is the minimum-mean-square-error estimate of VA from the observation b and is linear in b;although the model is zero-mean, conditioning on a specific value yields this nonzero data-driven mean. The posterior covariance (10) , by contrast, does not depend on b: the observed value relocates the distribution, but the reduction in uncertainty is fixed by the model alone. The condition KBB ≻ 0 is the density-level requirement of Remark 4: it is what makes K−1 
+
+> BB
+
+, and hence the conditional law, well-defined, and it holds automatically whenever the observed nodes carry a positive-definite innovation. Numerically we never form K−1 
+
+> BB
+
+. A Cholesky factor KBB = LL T is computed once; the gain KAB K−1 
+
+> BB
+
+and the mean (9) follow from triangular solves against L, and the Schur complement (10) is re-symmetrized as 12 (KA|B + KT 
+
+> A|B
+
+) to discard the anti-symmetric part introduced by finite-precision arithmetic. The log-determinants of the information measures in Section III-C are evaluated by the same Cholesky route. 
+
+C. Mutual Information and Conditional Independence 
+
+The information measures follow from the same conditional covariances by a log-determinant [ 16 ]. For disjoint node sets 
+
+A, B, C , the mutual information and the conditional mutual information (CMI) are 
+
+I(VA; VB ) = 12
+
+  log det KAA − log det KA|B
+
+, (11) 
+
+I(VA; VB | VC ) = 12
+
+  log det KA|C − log det KA|BC 
+
+, (12) in nats, where each conditional covariance KA|· is the Schur complement of Equation (10); for circular-complex networks the factor 12 becomes 1 (Remark 3). Both measures require the conditioned blocks to be positive definite (Remark 4), and both are evaluated from Cholesky log-determinants of blocks already assembled in Section III-B. Because K is a smooth function of η, so are (11) and (12) ;the differentiable optimization of the mutual information over the controllable parameters is the subject of the companion paper [ 1], with conditional-mutual-information objectives for multi-terminal networks in [ 2]. Here the CMI serves instead as a test of conditional independence : for jointly Gaussian variables, 
+
+VA ⊥ VB | VC ⇐⇒ I(VA; VB | VC ) = 0 , (13) which holds exactly when the conditional cross-covariance 
+
+KAB |C = KAB − KAC K−1 
+
+> CC
+
+KCB is the zero matrix. Testing conditional independence is therefore a zero-test on a single Schur-complement block. The test is a basic primitive in several roles: constraint-based structure learning queries exactly such a CI oracle, model diagnostics check the independences a hypothesized structure implies (for instance, whether a first-order Markov model suffices, Section VI-F ), and a vanishing CMI certifies a sensor as redundant given those already selected, or an observable as leakage-free given the public variables. 
+
+Relation to the graph. Two notions of conditional indepen-dence should be kept apart. The test (13) is parameter-specific :it concerns the particular η at hand. A structural independence, by contrast, holds for all parameter values and is read from the graph by d-separation [ 3 ], equivalently by trek separation [ 12 ]in the Gaussian case. A structural independence implies the numerical test (13) identically in η; the converse can fail only on a measure-zero set of parameters, where a CMI vanishes without a graphical reason. In the vector-valued setting the test is also finer-grained than the graph: d-separation is all-or-nothing at the node level, whereas a low-rank edge can leave 
+
+KAB |C nonzero but rank-deficient, so that only certain linear combinations of VA are conditionally independent of VB , a sub-block structure the Schur-complement test resolves and trek separation characterizes [ 12 ]. The K-recursion supplies the covariance blocks for the numerical test, complementing the graphical criterion. 
+
+D. Forward Sampling 
+
+The topological forward pass that propagates second mo-ments in the K-recursion also draws samples from the network. Traversing the nodes in topological order, we simulate the structural equation (1) directly: at each node we draw a standard normal ξj ∼ N (0, Idj ) and set 
+
+Vj = X
+
+> i∈Pa( j)
+
+Aji Vi + Lj ξj , (14) where Lj is any factor of the innovation covariance, Σj =
+
+Lj LT 
+
+> j
+
+, so that Lj ξj realizes the innovation Zj of (1) . One such pass produces one draw of the full vector V ∼ N (0, K),and N independent runs give N i.i.d. samples. A Cholesky factor serves when Σj ≻ 0, and an eigendecomposition factor when Σj is singular, so that a deterministic node ( Σj = 0)simply propagates its parents. The pass is linear in the size of the graph and, like the covariance recursion, forms neither K
+
+nor any inverse: it realizes the joint law node by node. Sampling is the generative counterpart of the inference queries above and the data source for the estimators of Section IV. The sample covariance of the draws converges to the analytic K of Section II-C , which both cross-checks the backend and enables Monte-Carlo evaluation of quantities that lack a closed form, for example nonlinear statistics of V or empirical mutual-information and estimator-variance studies. In the complex case the innovations are circularly symmetric (Remark 3). IV. ESTIMATION 
+
+So far the parameters have been given, and the covariance chart has run forward , from η to K to the queries of Section III. Estimation is the inverse problem: from data, recover the learnable parameters η that generated it. We treat two regimes, full observation by maximum likelihood (Section IV-A ) and partial observation with hidden nodes by the marginal likelihood (Section IV-B ); both minimize one differentiable objective through the chart. 
+
+A. Full Observation: Maximum Likelihood 
+
+From N independent realizations v(1) , . . . , v(N ) of the full node vector V , form the sample covariance 
+
+ˆK = 1
+
+N
+
+> N
+
+X
+
+> n=1
+
+v(n)(v(n))T. (15) Up to an additive constant and a positive factor, the negative log-likelihood is 
+
+L(η) = log det K + tr  K−1 ˆK, (16) a function of the parameters through the covariance chart 
+
+η 7 → K; the maximum-likelihood estimate is exactly its minimizer, ˆη = arg min η L(η). This objective is natural on two counts. First, maximum likelihood is consistent and asymptotically efficient. Second, it is a Kullback–Leibler projection: minimizing L is the same as minimizing the divergence KL  N (0, ˆK) ∥ N (0, K), so the estimate is the covariance closest to the empirical ˆK within the family the DAG can realize. Since that chart is a differentiable computation graph (Section II-C ), so is L: one reverse-mode AD sweep returns the exact gradient ∇η L, propagated through both the K-recursion and the construction of the edges from η, so L is minimized by gradient descent in a positive-definite-preserving parametrization, with no per-node or per-topology gradient derivation. One caveat is in order: L is convex in the precision 
+
+K−1 but not, in general, in η, since the chart is polynomial. With free per-node parameters the full-observation MLE is available in closed form by node-wise regression, but under the tied, structured, or hidden-node parametrizations of interest here, gradient descent is guaranteed a stationary point only; random initializations sufficed in Section VI, and the Fisher analysis of Section V flags the flat gauge directions along which minimizers form orbits. This is the estimator the framework provides; unchanged, it handles hidden nodes (Section IV-B )and any structured parametrization of the edges (Section II-B ). A nonzero data mean, when present, is removed by centering before forming (15) , which leaves (16) unchanged (Remark 2). 
+
+B. Partial Observation: Marginal Likelihood 
+
+In many networks not every node can be measured. A hidden common cause, an unmeasured relay or state node, or a latent factor is seen only through its effect on the rest of the network. Writing O for the observed nodes, we must recover 
+
+η from data on O alone. The difficulty is statistical rather than procedural: a hidden node cannot be fitted by its own regression, and marginalizing it out couples the observed nodes, so no node-wise closed form survives. On the chart, however, marginalization is mere block selection (Section III-B ), and the estimator is the one of Section IV-A unchanged: minimize the likelihood of the observed subvector by gradient descent. Since VO ∼ N (0, KOO ), the observed-data negative log-likelihood is, up to an additive constant and a positive factor, 
+
+L(η) = log det KOO + tr  K−1
+
+> OO
+
+S, (17) where S is the sample covariance of the observed nodes and 
+
+KOO is the observed block of K from the K-recursion. This is (16) restricted to O; with per-sample missing data it averages the per-pattern terms log det KOnOn + yT 
+
+> n
+
+K−1 
+
+> OnOn
+
+yn over the patterns, where On and yn are the observed set and observed values of sample n. Forming KOO with its Cholesky log-determinant and solve costs O(D3 
+
+> O
+
+) in the observed dimension 
+
+DO = P 
+
+> j∈O
+
+dj , and one AD sweep through the K-recursion again returns the exact gradient ∇η L, for any parametrization including the tied and structured parameters of Remark 1. This direct route complements expectation–maximization [ 10 ]rather than replacing it: where closed-form E- and M-steps exist, EM remains effective, but every tied or structured parametrization requires its own M-step derivation, whereas (17) is differentiated through the covariance chart with no such per-parametrization work. V. IDENTIFIABILITY AND RELIABILITY 
+
+Estimation raises two further questions: identifiability ,whether η can be recovered from the observed nodes at all or whether different parameters produce the same observed distribution, and reliability , how precisely an identifiable η
+
+can be estimated, that is, how much the estimate scatters around the truth. Both are answered by one object, the Fisher information, which measures how sensitively the observed distribution responds to a change in η; a direction of η that barely moves the distribution is hard to estimate, and one that moves it sharply is easy. Section V-A constructs this metric on the covariance chart, and Section V-B reads local identifiability off its rank and Cram´ er–Rao reliability off its inverse. 
+
+A. The Pullback (Slepian–Bangs) Fisher Metric 
+
+Because the observed nodes are zero-mean Gaussian, 
+
+VO ∼ N (0, KOO ), all of that sensitivity is carried by how the observed covariance moves with η. Identify η with the real vector (η1, . . . , η q )T of its q free scalar coordinates: by Section II-B these are exactly the parameters to be estimated, whereas any fixed, known factors (a known channel, a fixed structure) enter KOO only as constants and are held fixed in the derivatives below. Recall the general definitions. For a parametric family of densities pη , the per-observation Fisher information matrix is the covariance of the score, Gab (η) = E[sasb], where 
+
+sc = ∂ log pη (v)/∂η c is the score with respect to the cth coor-dinate. Information geometry reads G as a Riemannian metric on the parameter space, the Fisher–Rao metric [ 14 ]: between neighboring models, KL  pη ∥ pη+δ
+
+ = 12 δTG(η)δ + o(∥δ∥2),so G is exactly the local distinguishability of parameters from data. For the zero-mean Gaussian family at hand the parameters enter only through KOO , and the expectation evaluates in closed form, giving the per-observation Fisher metric G = ( Gab ) ∈ Rq×q on the parameters, whose (a, b )
+
+entry is 
+
+Gab (η) = 12 tr 
+
+h
+
+K−1
+
+> OO
+
+∂KOO 
+
+∂η a
+
+K−1
+
+> OO
+
+∂KOO 
+
+∂η b
+
+i
+
+, (18) for a, b ∈ { 1, . . . , q }: the Slepian–Bangs formula [ 11 ], the closed form the general definition takes for a zero-mean Gaussian family (the factor 12 becomes 1 in the circular-complex case, Remark 3; Section B gives the derivation). Every ingredient comes from the K-recursion: KOO is a forward pass and its Jacobian ∂KOO /∂η a follows by automatic differentiation, one sweep per parameter, so G is obtained 
+
+analytically , with no sampling, in O(q) AD sweeps. Since the derivative computation can itself be retained as part of the computation graph, the same construction also supports nested AD: smooth scalar criteria built from G, such as Cram ´er–Rao design objectives based on G−1 or a regularized inverse, can be differentiated again with respect to the underlying parameters or design variables. In this sense G is not a new model-specific object but the pullback of the Fisher–Rao metric of the Gaussian family along the covariance chart, summarizing exactly the parameter directions visible through the observed distribution. It is the common root of what follows (Section V-B): its rank decides identifiability and its (pseudo-)inverse bounds the estimation error. 
+
+B. Local Identifiability, Gauges, and Reliability 
+
+The parameters are locally identifiable from O exactly when the Fisher metric has full rank, rank G = q, with q the number of parameters. A rank deficiency exposes a gauge : a null direction u with Gu = 0 is a change of η that leaves KOO ,and hence the observed distribution, unchanged to first order. Motion along such a direction is invisible in the data, so the parameters it mixes cannot be told apart; ker G is the tangent space of these gauge orbits, and its dimension q − rank G
+
+counts the undetermined directions. Such a point is, in the terminology of statistical learning theory, a singular point of the model [ 15 ]: the map from parameters to distributions fails to be locally one-to-one, so distinct parameters realize the same observed law, as the following example shows exactly. The canonical example is the latent scale gauge. Let a hidden node H of variance σ2 feed two observed nodes, 
+
+Y1 = aH and Y2 = bH . The observed covariance depends on (a, b, σ 2) only through the products a2σ2, b2σ2, and ab σ 2,so the reparametrization (a, b, σ 2) 7 → (a/t, b/t, t 2σ2) leaves 
+
+KOO invariant for every t̸ = 0 . Its generator lies in ker G:the latent scale is unidentifiable, and only gauge-invariant combinations (here aσ and bσ ) can be recovered. Reporting 
+
+rank G, the smallest eigenvalues of G (which flag near-degeneracy), and the null eigenvectors mapped back to the parameters therefore diagnoses exactly which parameters, or which combinations, the observed nodes leave undetermined. In numerical use this verdict is read from the spectrum of G rather than by an exact symbolic rank test: exact zeros mark gauges of the covariance chart, whereas small but nonzero eigenvalues mark near-gauges, with correspondingly large Cram ´er–Rao standard errors. The same metric also quantifies how well the identifiable parameters can be estimated. Since G is the per-observation x1 x2 x3 · · · xN
+
+y1 y2 y3
+
+· · · 
+
+yN
+
+A A A A
+
+I I I I                   
+
+> Fig. 2. The running example as a Bayesian network: a linear Gaussian state-space model. Latent states x1, . . . , xN(white) form a chain with the transition A=ST tied across every step; each state emits a noisy observation
+> yn=xn+wn(shaded). The first state has covariance P0; process noise of covariance Qenters each subsequent state, and observation noise of covariance
+> Reach yn(Equation (20)).
+
+Fisher information, the Cram ´er–Rao bound states that any unbiased estimator ˆη obeys 
+
+Cov( ˆ η) ⪰ G−1. (19) The maximum-likelihood estimator of Section IV attains this bound asymptotically: for N independent observations its error covariance approaches 1 
+
+> N
+
+G−1, so standard errors shrink as 
+
+1/√N . The per-parameter standard errors are the square roots of the diagonal of G−1, obtained analytically from the K-recursion Jacobian with no Monte Carlo; because they are read from the diagonal of the full inverse, each already accounts for jointly estimating the remaining parameters rather than treating them as known. When G is rank-deficient (a gauge, as above), the bound is infinite along ker G: a parameter whose unit vector has a component in the null space has unbounded variance and is flagged non-identifiable, with an infinite standard error, while on the identifiable subspace the bound is the Moore–Penrose pseudo-inverse of G and its diagonal gives finite standard errors. One Fisher object thus serves both roles at once: its null space is the identifiability verdict, and its (pseudo-)inverse is the reliability of the estimates. VI. NUMERICAL EXPERIMENTS 
+
+We exercise the whole framework on two examples: a linear Gaussian state-space model (a first-order vector autoregression observed in noise), whose chain structure admits validation against the classical Kalman recursions, and a skip-connected extension of the same model, whose merging nodes make the parent cross-covariances essential (Section VI-F ). The purpose is validation rather than application benchmarking: each task carries either a classical reference computation or a Monte-Carlo quantity against which the covariance-chart result is checked. All numbers below are produced by the reference implementation; where a closed form exists, we report the agreement with it. The exact fitting settings and seeds are recorded in Section C. 
+
+A. Setup 
+
+The model has d-dimensional latent states x1, . . . , xN and noisy observations y1, . . . , yN ,
+
+xn = Ax n−1 + un, yn = xn + wn, (20) with x1 ∼ N (0, P0), process noise un ∼ N (0, Q), and observation noise wn ∼ N (0, R), all independent; following state-space convention, these random vectors are written as boldface lowercase. As a Bayesian network (Figure 2) this is a 
+
+2N -node DAG: the state chain xn−1 → xn carries the transition 
+
+A, tied across every step, and each xn → yn carries the identity. The transition is itself structured as A = ST with S afixed, known matrix and T the learnable parameter, a concrete instance of the tied/structured parametrization of Remark 1. We take d = 2 , N = 8 , S = [ 1 0 .50 1 ], T =  0.4 −0.60.2 0.6
+
+ (so 
+
+A =  0.5 −0.30.2 0.6
+
+, with spectral radius 0.6), P0 = I, Q = 0 .1 I,and R = 0.2 I. This is the chain special case in which the K-recursion reduces to the Kalman covariance recursion, which makes it an ideal validation target rather than a new method. Throughout this section M denotes the number of i.i.d. trajectories, each a realization of the full 2N -node network; 
+
+M plays the role of the sample count N of Sections IV to V, since N here is reserved for the chain length. 
+
+B. Inference and Conditional Independence 
+
+The framework assembles the joint covariance by the K-recursion and answers each query by block algebra on it (Section III). We check three facts against the classical recursions. Prior state covariance: the marginal Cov[ xn] read from the chart matches the open-loop covariance recursion 
+
+Σn = AΣn−1AT + Q (the Kalman prediction step, applied with no measurement updates) to machine precision (maximum block error 6.9 × 10 −18 over n), and Σn approaches the fixed point of that recursion, the unique solution ¯Σ of the discrete Lyapunov (Stein) equation ¯Σ = A ¯ΣAT + Q, equivalently 
+
+¯Σ = P∞ 
+
+> k=0
+
+AkQ(AT)k, which exists because the spectral radius of A is 0.6 < 1; at n = N = 8 the gap is ∥ΣN − ¯Σ∥ =9.6 × 10 −4. Smoothing: conditioning the states on all observa-tions, Cov[ xn | y1: N ], is the Schur complement (10) ; it matches the Rauch–Tung–Striebel smoother covariance to 1.5 × 10 −16 .Conditioning on the observations is therefore exactly Kalman smoothing, obtained here as a special case of Section III-B .
+
+Conditional independence: the Markov property surfaces as a vanishing CMI. For a representative triple, I(xn−1; xn+1 | xn)
+
+evaluates to exactly zero in double precision, as (13) predicts, whereas conditioning off the separating node leaves the two states dependent, I(xn−1; xn+1 | xn+2 ) = 0 .156 nats. 
+
+C. Forward Sampling 
+
+Drawing trajectories by the forward pass of Section III-D and forming the sample covariance reproduces the analytic K:the relative error ∥ ˆK − K∥/∥K∥ is 7.4 × 10 −2, 3.4 × 10 −2,
+
+7.1 × 10 −3, 2.7 × 10 −3 at M = 10 3, 10 4, 10 5, 10 6 trajectories, the 1/√M Monte-Carlo rate. 
+
+D. Estimation of the Tied Factor 
+
+The data are M = 2 × 10 5 trajectories drawn from the true model of Section VI-A by the forward sampling of Section VI-C ; the hidden states are then discarded, so the estimator sees only the observations y1: N of each trajectory. From these observations alone, and starting from a random initialization, we estimate the shared factor T by minimizing the negative marginal log-likelihood (17) through the differentiable chart, with A = ST tied across all N − 1 transitions; the true T enters only the data generation and the final error evaluation. The negative log-likelihood falls from 5.99 to 0.99 500 1000 2000 4000 8000 
+
+0.00316 
+
+0.01 
+
+sample size M
+
+> standard error
+> (a) CRB vs. empirical SE
+> T11
+> T12
+> T21
+> T22
+
+0.37 0.38 0.39 0.4 0.41 0.42 0.43 
+
+0.18 
+
+0.2
+
+0.22 
+
+ˆT11                    
+
+> ˆT21
+> (b) scatter, 95% CRB ellipse ( M=2000)
+> MLE estimates
+> 95% CRB ellipse
+> truth
+> Fig. 3. Reliability of the tied factor Testimated from noisy observations of the hidden states. (a) Per-parameter standard error versus the number of trajectories M(log-log): the analytic Cram ´er–Rao bound pdiag(( M G )−1)
+> (lines) and the empirical scatter of the maximum-likelihood estimate over
+> 400 trials (markers) agree and follow the 1/√Mslope. (b) The M= 2000
+> estimates ( ˆT11 ,ˆT21 )(gray) with the analytic 95% Cram ´er–Rao ellipse and the true value (red).
+
+and the estimate recovers the truth, ∥ ˆT −T ∥ = 8 .5×10 −4 (and 
+
+∥ ˆA − A∥ = 7 .4 × 10 −4): a single 2 × 2 factor is identified from the whole trajectory ensemble, with the gradient accumulated over its shared occurrences by one AD sweep (Remark 1). 
+
+E. Identifiability and Reliability 
+
+The Slepian–Bangs Fisher information over T (a q = 4 pa-rameter vector), pulled back through T 7 → KOO (18) , has full rank 4 with eigenvalues {4.6, 6.7, 13 .2, 17 .0}, so T is locally identifiable from the observations (Section V-B ), and its inverse sets the reliability of the estimator. Over 400 Monte-Carlo trials at each sample size M , the empirical standard deviation of the maximum-likelihood estimate tracks the analytic Cram ´er– Rao standard error pdiag(( M G )−1) and follows the 1/√M
+
+law (Figure 3). At M = 2000 the (analytic, empirical) per-parameter standard errors are (8 .7, 8.9) , (8 .4, 8.3) , (7 .5, 7.4) ,and (7 .0, 7.0) for T11 , T 12 , T 21 , T 22 respectively, in units of 
+
+10 −3: the analytic bound predicts the observed estimator scatter to within the Monte-Carlo error. x1 x2 x3 x4 · · · xN                          
+
+> y1y2y3y4
+> · · ·
+> yN
+> AAAAA
+> CCC
+> IIIIIFig. 4. The skip-connection extension of the running example (Section VI-F ): the chain of Figure 2 plus tied skip edges xn−2→xn, each carrying the same matrix C. Every state with n≥3merges two correlated parents, so the parent cross-covariances of (4) are essential and no first-order chain recursion applies to the graph as given.
+
+F. Beyond the Chain: Skip Connections 
+
+The second experiment takes the running example beyond the chain: a tied skip connection is added to (20), 
+
+xn = Ax n−1 + Cx n−2 + un, n ≥ 3, (21) with the n = 2 step unchanged from (20) , A = ST and all other settings as in Section VI-A , and the known skip matrix C = [ 0.15 00.05 0 .1 ] shared across all skip edges (Figure 4). Every state with n ≥ 3 now merges two correlated parents, so the parent cross-covariances in the self-blocks of (4) become essential and the first-order recursions of Section VI-B no longer apply to the graph as given; the classical route is a per-model reformulation, stacking (xn, xn−1) into a first-order companion state. The framework needs no such reformulation: the chart is simply re-run on the extended graph, and its marginals Cov[ xn]
+
+agree with the hand-augmented companion-form prediction recursion to machine precision (maximum error 8.6 × 10 −17 ). The information queries track the new structure. The first-order Markov CMI, which vanished in Section VI-B , is now 
+
+I(xn−1; xn+1 | xn) = 0 .023 nats, since the skip edge keeps a path open around the conditioned node, while the second-order CMI I(xn−1; xn+2 | xn, xn+1 ) is zero to double precision, exactly as d-separation predicts on Figure 4. The estimation and reliability pipeline then runs unchanged. Repeating Section VI-D verbatim on the extended graph, with the states hidden and M = 2 ×10 5 trajectories, the tied factor is recovered from a random initialization to ∥ ˆT −T ∥ = 5 .5×10 −4;the Fisher metric over T retains full rank 4, and at M = 2000 
+
+the analytic Cram ´er–Rao standard errors (7 .5, 7.3, 6.6, 6.2) , in units of 10 −3, match the empirical scatter (7 .7, 7.8, 6.8, 6.4) 
+
+of 400 maximum-likelihood trials. The same metric also prices observation patterns with no further derivation: observing only the odd-indexed half of the sensors (the observation nodes), 
+
+y1, y3, y5, y7, keeps T identifiable (again full rank) but inflates the bound to (10 .0, 9.6, 8.5, 7.9) , matched by the empirical 
+
+(10 .1, 10 .1, 8.6, 7.7) . Figure 5 overlays the two 95% ellipses with their estimate clouds, the counterpart of Figure 3(b) on the extended graph: the cost of halving the sensors is read off analytically, before any data are collected. Nothing in the code or the derivations refers to the topology: the same chart, likelihood, and Fisher pullback serve the chain and its skip-connected extension alike. 0.37 0.38 0.39 0.4 0.41 0.42 0.43                           
+
+> 0.18
+> 0.2
+> 0.22
+> ˆT11
+> ˆT21
+> MLE ( y1,y3,y5,y7)95% ellipse (partial) MLE (all y)
+> 95% ellipse (all) truth
+> Fig. 5. Reliability of the tied factor Ton the skip-connected model of Figure 4, for two observation patterns: all sensors observed (gray, solid 95% Cram ´er–Rao ellipse) and only the odd-indexed half y1,y3,y5,y7(blue, dashed ellipse). Each cloud shows the M= 2000 estimates ( ˆT11 ,ˆT21 )over 400 maximum-likelihood trials and the red cross the true value; each analytic ellipse matches its own scatter, and the inflation of the dashed ellipse is the information lost by halving the sensors.
+
+VII. CONCLUSION 
+
+We have developed inference, estimation, and identifiability for linear Gaussian Bayesian networks as one differentiable covariance calculus on a single backend, the K-recursion covariance chart ΦG : η 7 → K. Every operation reduces to block algebra on the covariance it produces (block selec-tion, a Schur complement, a log-determinant, and a linear solve): marginals and conditionals, mutual information and conditional-independence tests, forward sampling, maximum-likelihood estimation under full and partial (hidden-node) observation, and the Slepian–Bangs Fisher information with the local identifiability and Cram ´er–Rao reliability it induces. Because the chart is a smooth computation graph, automatic differentiation supplies every gradient in one backward sweep, over arbitrary vector-valued DAGs and arbitrary (including tied and structured) parametrizations, with no per-query or per-topology derivation. On a linear Gaussian state-space running example the framework reproduces the Kalman filter and Rauch– Tung–Striebel smoother to machine precision, certifies the Markov conditional independences as vanishing conditional mutual informations, recovers a tied transition factor from noisy observations of hidden states, and yields an analytic Cram ´er–Rao bound that matches the empirical scatter of the maximum-likelihood estimator. On a skip-connected extension of the same example, whose merging nodes take the graph beyond the chain, the identical pipeline runs unchanged: the marginals match a hand-augmented companion-form recursion, the conditional mutual information tracks d-separation, and the tied factor is again recovered with Cram ´er–Rao-validated reliability. The covariance map and its statistical ingredients are classi-cal; the contribution is their differentiable, unified formulation, realized in an open-source reference implementation. The same backend drives mutual-information optimization in a companion paper [ 1 ]. Natural extensions include intervention and formal observation design on the same chart, and a symbolic evaluation of the recursion for machine-checked proofs of conditional independence and identifiability. APPENDIX 
+
+The derivation of the K-recursion itself is given in the companion paper [ 1 ]. This appendix proves the two identities the paper rests on, the log-determinant information formulas and the Slepian–Bangs pullback, and records the settings behind the numbers of Section VI. 
+
+A. Log-Determinant Identities (11) –(13) The differential entropy of a real Gaussian vector VA ∼N (0, KAA ) is h(VA) = 12 log det(2 πe KAA ) [ 16 ]. Because the conditional covariance (10) does not depend on the observed value, the conditional entropy is h(VA | VB ) =  
+
+> 12
+
+log det(2 πe KA|B ), and I(VA; VB ) = h(VA) − h(VA | VB )
+
+gives (11) , the 2πe factors canceling. Conditioning every entropy on VC gives (12). For (13) , condition the pair (VA, V B ) on VC : the joint conditional covariance has diagonal blocks KA|C , KB|C and off-diagonal block KAB |C , and conditioning further on VB
+
+gives the nested Schur complement KA|BC = KA|C −
+
+KAB |C K−1 
+
+> B|C
+
+KBA |C . Substituting into (12), 
+
+I(VA; VB | VC ) = − 12 log det  I − RR T, (22) with R = K−1/2 
+
+> A|C
+
+KAB |C K−1/2 
+
+> B|C
+
+. The singular values ρi of R
+
+are the canonical correlations of VA and VB given VC and lie in [0 , 1) , so I(VA; VB | VC ) = − 12
+
+P 
+
+> i
+
+log(1 − ρ2 
+
+> i
+
+) ≥ 0, with equality if and only if every ρi = 0 , that is, KAB |C = 0. This proves (13) , and nonnegativity along the way. In the circular-complex case the entropy is log det( πe K), which is where the factor 12 of (11)–(12) becomes 1 (Remark 3). 
+
+B. The Slepian–Bangs Pullback (18) Write K ≡ KOO (η) ≻ 0 (Remark 4) and ∂a ≡
+
+∂/∂η a. The log-density of one observation v ∼ N (0, K)
+
+is log p(v) = − 12 log det(2 πK) − 12 vTK−1v. The matrix identities ∂a log det K = tr( K−1∂aK) and ∂aK−1 =
+
+−K−1(∂aK)K−1 give the score in centered quadratic-form shape, 
+
+sa(v) = 12
+
+ vTWav − tr( WaK), Wa = K−1(∂aK)K−1,
+
+(23) using E[vTWav] = tr( WaK). Each Wa is symmetric, and for a zero-mean Gaussian the covariance of two quadratic forms is Cov( vTWav, v TWbv) = 2 tr( WaKW bK) (Isserlis’ theorem). Hence Gab = E[sasb] = 12 tr( WaKW bK), and expanding Wa, Wb,
+
+Gab = 12 tr  K−1∂aK K −1∂bK,
+
+which is (18) . The parameters enter only through KOO , so this is the Fisher information of the Gaussian family pulled back along η 7 → KOO by the chain rule, and the derivatives ∂aKOO 
+
+are exactly the AD Jacobian of the K-recursion. The same computation with the circular-complex density and the complex form of Isserlis’ theorem yields the factor 1 of Remark 3. 
+
+C. Experimental Details 
+
+All numbers and figure data of Section VI are produced by two scripts of the reference implementation, one per example, with fixed random seeds, so every reported digit is reproducible by one command each. Four settings deserve explicit mention. (i) In Section VI-D the tied factor is estimated by minimizing the negative marginal log-likelihood (17) with Adam (learning rate 0.02 , 1500 iterations) from a random initialization; the reported objective values are per-sample negative log-likelihoods up to the usual constant. (ii) In Section VI-E each of the 400 trials per sample size draws 
+
+M fresh trajectories, forms the observed sample covariance, and computes the maximum-likelihood estimate by Newton’s method on (17) (10 iterations, gradient and Hessian by AD), initialized at the true parameter so that every trial converges to the consistent root of the likelihood equation, the standard practice when checking Cram ´er–Rao attainment. (iii) The Fisher matrix G of (18) is evaluated at the true parameter from the AD Jacobian, and the ellipse of Figure 3(b) is the 95% level set of the Gaussian whose covariance is the corresponding 2 × 2
+
+sub-block of (M G )−1 at M = 2000 . (iv) In Section VI-F the tied factor is estimated with the same settings as (i), and the Monte-Carlo validation uses the same Newton procedure as (ii), with 400 trials of M = 2000 draws for each of the two observation patterns; the ellipses of Figure 5 are constructed as in (iii). ACKNOWLEDGMENT 
+
+This work was supported by JST, CRONOS, Japan Grant Number JPMJCS25N5. REFERENCES [1] T. Wadayama and S. Na, “Mutual information optimization via K-recursion and automatic differentiation for linear Gaussian wireless networks,” 2026, arXiv:2606.06982. [2] T. Wadayama and S. Na, “Differentiable conditional mutual infor-mation for multi-terminal linear Gaussian wireless networks,” 2026, arXiv:2606.22301. [3] D. Koller and N. Friedman, Probabilistic Graphical Models: Principles and Techniques . Cambridge, MA, USA: MIT Press, 2009. [4] S. L. Lauritzen, Graphical Models . Oxford, U.K.: Oxford Univ. Press, 1996. [5] R. D. Shachter and C. R. Kenley, “Gaussian influence diagrams,” Manage. Sci. , vol. 35, no. 5, pp. 527–550, 1989. [6] D. Geiger and D. Heckerman, “Learning Gaussian networks,” in Proc. 10th Conf. Uncertainty Artif. Intell. (UAI) , 1994, pp. 235–243. [7] K. A. Bollen, Structural Equations with Latent Variables . New York, NY, USA: Wiley, 1989. [8] C. M. Bishop, Pattern Recognition and Machine Learning . New York, NY, USA: Springer, 2006. [9] C. E. Rasmussen and C. K. I. Williams, Gaussian Processes for Machine Learning . Cambridge, MA, USA: MIT Press, 2006. [10] A. P. Dempster, N. M. Laird, and D. B. Rubin, “Maximum likelihood from incomplete data via the EM algorithm,” J. Roy. Statist. Soc. B ,vol. 39, no. 1, pp. 1–38, 1977. [11] S. M. Kay, Fundamentals of Statistical Signal Processing: Estimation Theory . Englewood Cliffs, NJ, USA: Prentice-Hall, 1993. [12] S. Sullivant, K. Talaska, and J. Draisma, “Trek separation for Gaussian graphical models,” Ann. Statist. , vol. 38, no. 3, pp. 1665–1685, 2010. [13] M. Drton, B. Sturmfels, and S. Sullivant, Lectures on Algebraic Statistics .Basel, Switzerland: Birkh¨ auser, 2009. [14] S. Amari and H. Nagaoka, Methods of Information Geometry . Providence, RI, USA: Amer. Math. Soc., 2000. [15] S. Watanabe, Algebraic Geometry and Statistical Learning Theory .Cambridge, U.K.: Cambridge Univ. Press, 2009. [16] T. M. Cover and J. A. Thomas, Elements of Information Theory , 2nd ed. Hoboken, NJ, USA: Wiley, 2006. [17] P. J. Schreier and L. L. Scharf, Statistical Signal Processing of Complex-Valued Data: The Theory of Improper and Noncircular Signals .Cambridge, U.K.: Cambridge Univ. Press, 2010. [18] A. Paszke et al. , “PyTorch: An imperative style, high-performance deep learning library,” in Adv. Neural Inf. Process. Syst. (NeurIPS) , 2019, pp. 8024–8035.
