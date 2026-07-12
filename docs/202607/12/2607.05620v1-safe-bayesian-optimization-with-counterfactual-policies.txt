@@ -1,0 +1,897 @@
+Title: Safe Bayesian Optimization with Counterfactual Policies
+
+URL Source: https://arxiv.org/pdf/2607.05620v1
+
+Published Time: Wed, 08 Jul 2026 00:12:28 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+# Safe Bayesian Optimization with Counterfactual Policies 
+
+Katherine Avery 
+
+College of Computer Science University of Massachusetts Amherst Amherst, MA 01002 
+
+kavery@cs.umass.edu 
+
+Bruno Castro da Silva 
+
+College of Computer Science University of Massachusetts Amherst Amherst, MA 01002 
+
+bsilva@cs.umass.edu 
+
+David Jensen 
+
+College of Computer Science University of Massachusetts Amherst Amherst, MA 01002 
+
+jensen@cs.umass.edu 
+
+## Abstract 
+
+In many decision-making settings, new interventions are acceptable only if they do not reduce outcomes below some established threshold. For example, in clinical medicine, new treatments are often acceptable only if they do not worsen outcomes relative to an established standard of care. Safe Bayesian optimization maximizes an objective subject to safety constraints. In the setting that we consider here, safety is defined relative to a known baseline policy whose outcomes are counterfactual and therefore unobserved. Thus, the counterfactual outcomes of the baseline policy must be estimated and those (uncertain) estimates must be used to safely optimize the objective. We address this estimation problem by using conformal prediction to construct valid uncertainty intervals for counterfactual baseline outcomes, and we show how these intervals can be integrated into safe Bayesian optimization to ensure that constraint violations occur at or below a user-specified rate. We also show how to adapt these conformal estimates to different kinds of covariate shift. We provide a safety proof, experimental evidence, and a sensitivity analysis. 
+
+## 1 Introduction 
+
+In many sequential decision-making problems, we seek to improve performance while ensuring that each action is safe. We may define safety in absolute terms, such as keeping blood pressure below a threshold, but we may instead define it relative to an established baseline. For example, when determining the effectiveness of a new drug for cancer treatment, we may not want patients’ quality of life to be substantially worse than it would have been under the pre-existing standard of care. This type of safety constraint is challenging since the patients’ quality of life when taking the standard drug is not observed and can only be estimated. We frame this problem using the framework of safe Bayesian optimization (SafeOpt), 1 which optimizes some objective function f (x), such as information gain, with respect to some constraint: 
+
+max  
+
+> x∈X
+
+f (x) s.t. q(x) ≥ 0. (1) 
+
+> 1SafeOpt sometimes refers to the specific method proposed in Sui et al. [2015] and sometimes refers to safe Bayesian optimization in general. In this work, it refers to the latter. Preprint. arXiv:2607.05620v1 [cs.LG] 6 Jul 2026
+
+SafeOpt optimizes the objective within a set of safe states S (where X ⊆ S ) and expands S as more information is gathered. We focus specifically on SafeOpt with online conformal prediction [Zhang et al., 2024], which provides distribution-free safety guarantees. Conformal SafeOpt ensures that the rate that q(x) ≥ 0 is violated over T optimization steps is at or below α, where α is user-specified. See Sec. 3.1. Potential safe x values are typically determined based on the values of q that have been seen so far. However, we are interested in safety constraints that contain counterfactuals. For example, we may want the value of a variable Y under a treatment minus the counterfactual Y under a standard-of-care treatment to be at least some value −ω. Because q depends on a counterfactual that is not observed, it is difficult to provide typical SafeOpt-style safety guarantees. Simply making a point estimate of the counterfactual can result in a violate rate above α.Therefore, we use split conformal prediction to estimate the outcome of the counterfactual x under a standard of care [Lei and Candès, 2021]. Split conformal prediction creates interval estimates, rather than point estimates. There is a 100(1 − ϵ)% chance that the true value of the counterfactual falls within the interval, where ϵ is user-specified. ϵ can be leveraged to prove the formal safety guarantee required by SafeOpt methods (proof sketch in Sec. 4.2 and full proof in Appx. A). We perform our primary experiments on two settings, both used in Zhang et al. [2024]. The first uses a chemical reaction simulator [Kang et al., 2019], which gives us access to the true counterfactual outcomes. The second is the MovieLens dataset [Harper and Konstan, 2015]. In both cases, we use the method in Sec. 4 to estimate the constraint values for different constraints with counterfactuals. Our baselines include standard (non-safe) Bayesian optimization and an oracle with full knowledge of the counterfactual. We find that our method optimizes the objective while meeting the safety requirement that is provided in Sec. 4.2. In summary, our contributions include the following. We create a method that ensures that the actions taken by safe Bayesian optimization do not perform ω worse than some known, safe policy for 100(1 − α)% of samples, where ω and α are user-specified. In Sec. 4 and Appx. C, we show that the method is robust to different kinds of covariate shifts when re-weighting the calibration set. We prove that the method meets safety guarantees under minimal assumptions, and we bound the conformal coverage gap under assumption violations in Appx. B. Sec. 6 and Appx. E provide experimental evidence that the safety constraint is met for 100(1 − α)% of samples and that the proposed method can adapt to different kinds of covariate shifts. We show this for constraints with one and two estimated terms. Finally, we provide a sensitivity analysis to examine how the method performs under different kinds and amounts of mis-specification. 
+
+1.1 Motivating example 
+
+Suppose you are running a clinical trial that tests a new drug for reducing systolic blood pressure. You give patients treatments one after the other for T timesteps. One of the many safety constraints in your study compares the reduction in blood pressure under the new treatment Y (xt) at time t with the reduction under the standard-of-care policy Y (xsoc,t ). You want Y (xt) to be at least as good as 
+
+Y (xsoc,t ) with some tolerance level ω. Because you cannot ensure that the constraint will never be violated, you specify a small violation rate α = 0 .01 . That is, the safety constraint can be violated 
+
+1% of the time over T timesteps. You first gather data from the standard-of-care policy. The data includes your treatment, any covariates, and the blood pressure outcome under the treatment. You split the data into a training set Dtrain and a calibration set Dcal . Dtrain is used to get a point estimator for Y (xsoc ), and Dcal is used to create quantiles. You then start generating new treatments subject to the safety constraint using SafeOpt. For every new treatment that you generate, you estimate the upper bound of the counterfactual Y (xsoc )
+
+and use that to compute your safety constraint at each timestep q(xt).Sec. 4 lays out the methodology in more detail. We also describe how to adapt the method to different scenarios by re-weighting the calibration data to look like it came from the standard-of-care policy with the test covariates observed during SafeOpt. For example, if the training and calibration data are observational, the calibration data can be re-weighted to look like it came from the standard-of-care policy (Scenario 1). Alternatively, suppose there is covariate shift. The training and calibration data are collected at Hospital A. SafeOpt is run at Hospital B, which serves an older population. By observing the ages of the people in the study, we can re-weight the calibration data (Scenario 2). 22 Related work 
+
+2.1 Safe Bayesian optimization under noisy constraint observations 
+
+Safe Bayesian optimization [Sui et al., 2015, Berkenkamp et al., 2023, Zhang et al., 2024] imposes safety constraints on standard Bayesian optimization, as in Eq. 1. Our work considers safety constraints with estimated components, implying that the true value of the safety constraint is never actually observed. Bergmann and Graichen [2020] considers SafeOpt with constraint observations that may be corrupted by a known amount of Gaussian measurement noise and reformulates the safety constraint to be probabilistic. In addition to the deterministic setting laid out in Sec. 5, Zhang et al. [2024] considers the case when observations of the constraint have been corrupted by a known amount of measurement noise. They reformulate their probabilistic constraint to account for the noise. Other work in constrained Bayesian optimization reformulates hard constraints as probabilistic constraints under noisy constraint observations [Gelbart et al., 2014] or deals with the noise through better modeling of the constraint [Letham et al., 2019, Wang and Li, 2024]. Our work is distinct since we specifically consider safety constraints under estimation error for a variety of settings. 
+
+2.2 Constrained multi-armed bandits 
+
+Safe Bayesian optimization is similar to constrained bandits. For example, Amani et al. [2019] and Moradipari et al. [2021] learn a policy while taking actions subject to a safety constraint by maintaining a safe set, which is similar to SafeOpt. Other kinds of constraints include budget constraints [Zhou and Tomlin, 2018, Agrawal and Devanur, 2016, 2014, Wu et al., 2015] and expectation constraints [Pacchiano et al., 2021]. In contrast to other work, our setting uses partially observed constraints. 
+
+## 3 Background 
+
+In safe Bayesian optimization, we maximize an objective function f (x) while obeying a safety constraint, as in Eq. 1. We assume that an optimal solution to Eq. 1 exists, and we assume that the initial set of safe candidate solutions S0 is not empty. All decisions made by the system fall within the safe set, so S0 needs to be nonempty: S0 ⊆ { x ∈ X : q(x) ≥ 0}.Both the safe set and the Bayesian posterior for the objective function are updated at each timestep 
+
+t. We can do this by creating credible intervals for f and q, which use Bayesian priors to estimate the ranges of possible values for f and q [Zhang et al., 2024, Sui et al., 2015]. Zhang et al. [2024] defines the intervals using Gaussian processes with mean μ and standard deviation σ as follows: 
+
+If (x|O t) =[ fl(x|O t), f u(x|O t)] =[ μf (x|Xt, ft) − βt+1 σf (x|Xt, ft), μ f (x|Xt, ft) + βt+1 σf (x|Xt, ft)] (2) 
+
+Iq (x|O t) =[ ql(x|O t), q u(x|O t)] =[ μq (x|Xt, qt) − βt+1 σq (x|Xt, qt), μ q (x|Xt, qt) + βt+1 σq (x|Xt, qt)] (3) where Ot = ( Xt, ft, qt) is the history up until time t. Xt is the decision history (x1, ..., xt). ft is the history of f (x): (f (x1), ..., f (xt)) . Similarly, qt is the history of q(x): (q(x1), ..., q (xt)) . βt+1 
+
+controls the width of the interval and is defined in Sec. 3.1. We then choose an xt that optimizes the objective function and/or expands the safe set by shrinking the credible interval of either f or q. We do this by finding the action most decreases our uncertainty about f or q (whichever is more uncertain) while maximizing f or expanding the safe set. Mt+1 is the set of actions that maximizes f , and Gt+1 is the set of actions that could expand the safe set: 
+
+xt+1 = arg max 
+
+> x∈M t+1 ∪G t+1
+
+max {σf (x|O t), σ q (x|O t)}. (4) The set of optimizers Mt+1 includes all safe solutions that could perform better than the best known pessimistic estimate: 
+
+Mt+1 = {x ∈ S t+1 |fu(x|O t) ≥ max 
+
+> x′∈S t+1
+
+fl(x′|O t)}. (5) 3Gt+1 is the set of solutions that could expand the safe set. That is, we define Gt+1 such that our optimistic prediction of the next safe set ˜St+2 is larger than St+1 . ˜St+2 includes both the current history Ot and the optimistic observation (x, q u(x|O t)) : ˜St+2 (x) = S(Ot ∪ (x, q u(x|O t)) |βt+1 ).
+
+Gt+1 = {x ∈ S t+1 : | ˜St+2 (x)\S t+1 | > 0} (6) 
+
+3.1 Safe optimization with conformal prediction 
+
+Zhang et al. [2024] shows how to apply online conformal prediction [Gibbs and Candes, 2021, Feldman et al., 2023] to safe Bayesian optimization. In short, the parameter βt+1 in Eq. 2 and 3 is used to define the scale of the safe set so that it becomes more conservative when the safety constraint violation rate is too high. The violation rate is violation-rate (T ) := 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+err t ≤ α, (7) where α is the acceptable, user-defined violation rate, and the error at each t is defined as err t = 𝟙 (q(xt) < 0) . (8) 
+
+β is updated as follows: 
+
+βt+1 = φ(∆ αt+1 ), (9) where ∆αt+1 is the excess violation rate, which measures the average number of errors above the allowed violation rate αalgo . ∆αt+1 is defined as follows and can be rewritten in terms of the violation rate: 
+
+∆αt+1 = ∆ αt + η(err t − αalgo ) = ∆ α1 + η · (
+
+> t
+
+X
+
+> t′=1
+
+err t′ − αalgo · t)= ∆ α1 + η · t · (violation-rate (t) − αalgo ),
+
+(10) where η is an update rate hyperparameter; αalgo is the per-step violation rate; and α is the user-defined violation rate. αalgo is defined as 
+
+αalgo = 1
+
+T − 1 (T α − 1 − 1
+
+η + ∆α1
+
+η ). (11) Finally, φ(∆ αt) from Eq. 9 can be defined in a variety of ways, though the following method used in Zhang et al. [2024] allows for fast adaptation of β:
+
+φ(∆ αt) = F −1(( clip (∆ αt) + 1) /2) , (12) where clip (·) is a function that clips the endpoints of the input between 0 and 1, and F −1 is the inverse cumulative distribution function of a standard Gaussian. βt increases slowly for low values of ∆αt and quickly as ∆αt approaches 1. See Fig. 3 of Zhang et al. [2024] for an illustration and Feldman et al. [2023] for a discussion of adaptation functions. 
+
+## 4 Methodology 
+
+Rather than creating constraints using the observed values of an outcome (or post-treatment covariate), we may wish to create constraints using counterfactuals. Specifically, we may want to ensure that the output of Bayesian optimization is not too much worse than a safe, standard-of-care policy πsoc 
+
+at every timestep t. In our setting, x is observed after every timestep. However, the outcome of the standard-of-care policy is not observed since that policy was not applied. To perform valid conformal prediction, we need to specify a probability of failure ϵ in addition to α.For example, we might want to ensure that a constraint of the form Y (xt) − Y (xsoc,t ) is at least −ω
+
+for 95% of the samples ( α = 0 .05 ). However, if ϵ = 0 .01 , then there is a 1% chance of an uncaught constraint violation. Therefore, we need to adjust α to be slightly lower to account for this potential violations. Suppose that xt is the output of Bayesian optimization at time t and xsoc,t is chosen by the standard of care policy πsoc .4Algorithm 1 SafeOpt with Counterfactual Policy Constraints (SafeOpt-CPC) 
+
+Input: data D, prior models for f and q, initial safe set S0, initial decision x0, total iterations T ,total observation iterations T0, target rate α, target rate ϵ, update rate η > 0
+
+Split data D into Dtrain and Dcal 
+
+Train estimator ˆY on Dtrain 
+
+if there may be a covariate shift between the calibration and test data then 
+
+Observe test data for T0 timesteps 
+
+end if for i = 0 to length (Dcal ) do 
+
+Compute weights wi according to Eq. 18 or Eq. 19 
+
+end for 
+
+Calculate Pnj=1 wj
+
+Calculate the scores on Dcal as in Eq. 15 or Eq. 23 Calculate the violation rate α′ according to Eq. 26 
+
+for t = 0 to T do 
+
+Observe f (xt) and Y (xt)
+
+if xt is the same as the standard(s) of care or 
+
+xt is the decision under some safe fallback policy (usually πsoc ) then 
+
+q(xt) = ω
+
+else 
+
+Compute weight wt for current xt
+
+Compute the normalized weights ˜wi and ˜wt as in Eq. 17 Form the conformal upper or lower bounds according to Eq. 16 or Eq. 21 Form q(xt) according to Eq. 13, 20, or 24 
+
+end if 
+
+xt+1 ← SAFE OPT -H ELPER () {Continue online conformal SafeOpt (Alg. 2)} 
+
+end for 4.1 SafeOpt with counterfactual policy constraints (SafeOpt-CPC) 
+
+Y (xt) − Y (xsoc,t ) + ω is not measurable due to the counterfactual Y (xsoc,t ), so we need to replace 
+
+Y (xsoc,t ) with an estimate when it is not observed. To maintain our safety guarantee (Eq. 7), we cannot simply plug in a point prediction for Y (xsoc,t ) without risking constraint violations. Rather, we will create a conformal prediction for the counterfactual. When xsoc,t is chosen by Bayesian optimization, the safety constraint is met trivially: 
+
+q(xt) = 
+
+Y (xt) − ˆU soc t (xsoc,t ) + ω if xt̸ = xsoc,t 
+
+ω if xt = xsoc,t 
+
+(13) where 
+
+P(Y (xsoc,t ) ≤ ˆU soc t (xsoc,t )) ≥ 1 − ϵ. (14) We use the upper bound ˆU soc t (xsoc,t ) in Eq. 13 since in the worst case, the outcome under the standard of care is higher than the actual outcome. Because the outcome under the counterfactual policy is not observed at every step, we cannot apply online conformal prediction based just on the error signal as in Gibbs and Candes [2021] and Feldman et al. [2023]. Rather, we will use offline, split conformal prediction to find ˆU soc t (xsoc,t ).In split conformal prediction, there is a training set Dtrain that is used to train a point predictor and a calibration set Dcal of size n that is used to create quantiles. The point prediction and quantiles can then be used to create an interval estimate for a new data point. In our setting, we will have some pre-collected data that we will split into a training set Dtrain and calibration set Dcal , and we will observe our test data sequentially. To create prediction intervals, we take the quantile of the scores for the calibration set and our new test point. Scores measure how unusual our new test point is compared to our training data. Because we are using an upper one-sided conformal prediction, we define the score S (Eq. 15) as the difference between the true Y (x)) and the predicted ˆY (x) without taking the absolute value. ˆY (x) is 5a prediction from the point predictor trained on Dtrain .
+
+S(x, Y (x)) = Y (x) − ˆY (x). (15) The scores for the calibration data are expected to be exchangeable with the score of the new test point we are predicting. If they are not exchangeable, we can use weighting to restore exchangeability. In our case the training and calibration data will ideally have been collected by our standard-of-care policy since we are predicting the outcome under the standard of care. If not, we will use weighting. 
+
+ˆU soc t (xsoc,t ) can be defined as 
+
+ˆU soc t (xsoc,t ) = ˆY (xsoc,t ) + Qsoc (1 − ϵ;
+
+> n
+
+X
+
+> i=1
+
+˜wiδSsoc i + ˜ wtδ+∞) (16) where δS is the point mass at score S; δ+∞ is a point mass at a high score corresponding to the new data point at timestep t of SafeOpt; Qsoc denotes the quantile; and ˜w are normalized weights [Tibshirani et al., 2019]: 
+
+˜wi = wi/(
+
+> n
+
+X
+
+> j=1
+
+wj + wt) and ˜wt = wt/(
+
+> n
+
+X
+
+> j=1
+
+wj + wt). (17) Note that if the calibration data was collected by the standard-of-care policy, and there is no distribu-tion shift between the calibration set and the new test point, then the weights in Eq. 17 are all set to 1. This is equivalent to unweighted conformal prediction. If our calibration data did not come from the standard-of-care policy (Scenario 1, Sec. 1.1), we will use inverse propensity scoring. Let πcal (xi) be the probability of xi under the policy that collected the calibration data. Then, propensity scoring uses weights of the form: 
+
+wi = πsoc (xi)/π cal (xi) (18) Sometimes, there is a covariate shift between the calibration and test data, but no labeled data can be collected to create a new calibration set (Scenario 2, Sec. 1.1). If unlabeled data can be collected, it can be leveraged to learn weights [Tibshirani et al., 2019]: 
+
+wi = Ptest (xi)/Pcal (xi), (19) where Ptest (xi) is the probability of xi under the test distribution, and Pcal (xi) is the probability of 
+
+xi under the calibration distribution. In Appx. C we discuss how non-stationarity affects the weights wi. We specifically examine two common covariate shift scenarios (changepoints and drift) and offer principled algorithms for both. When a changepoint in the covariates is detected, we can pause SafeOpt and re-calculate the weights before resuming. If drift is detected, we can create time-decaying weights. To avoid the calibration set becoming out-of-date, we take a standard-of-care action every other timestep. See Appx. C for details, algorithms, and experiments. 
+
+4.1.1 Extensions to different q(x) constraints 
+
+Eq. 13 assumes that higher values of Y are better, so we want Y (xt) to be higher than Y (xsoc,t ). If we instead want to minimize Y , then we can reformulate the constraint as: 
+
+q(xt) = 
+
+ ˆLsoc t (xt) − Y (xt) + ω if xt̸ = xsoc,t 
+
+ω if xt = xsoc,t 
+
+(20) where ˆLsoc t is defined as 
+
+ˆLsoc t (xt) = ˆY (xsoc,t ) − Qsoc (1 − ϵ;
+
+> n
+
+X
+
+> i=1
+
+˜wiδSsoc i + ˜ wtδ+∞) (21) 
+
+P(Y (xsoc,t ) ≥ ˆLsoc t (xt)) ≥ 1 − ϵ (22) The corresponding score function would then be 
+
+S(x, Y (x)) = ˆY (x) − Y (x). (23) 6Second, we may wish to define q(x) with more than one estimated component. Suppose we would like Y (xt) to be higher than the values of Y under two different standards of care: Y (xt) −
+
+max( Y (xsoc 1), Y (xsoc 2)) + ω. Then, we could define the constraint function as 
+
+q(xt) = 
+
+Y (xt) − max( ˆU soc 1 
+
+> t
+
+(xt), ˆU soc 2 
+
+> t
+
+(xt)) + ω if xt̸ = xsoc 1̸ = xsoc 2
+
+ω if xt = xsoc 1 = xsoc 2
+
+(24) Note that both ˆU soc 1 
+
+> t
+
+(xt) and ˆU soc 2 
+
+> t
+
+(xt) in Eq. 24 have conformal guarantees of the form in Eq. 14. We can combine them into one conformal guarantee using a union bound: 
+
+P(Y (xsoc, 1) ≤ ˆU soc, 1 
+
+> t
+
+(xt) and ... and Y (xsoc,m ) ≤ ˆU soc,m t (xt)) ≥ 1 − ϵ1 − ... − ϵm. (25) In this case m = 2 . We can then combine ϵ1 + ... + ϵm = ϵ′.
+
+4.1.2 Adapting α
+
+Because we are nesting conformal predictions, we will need to adjust the target violation rate α since the violation rate will be slightly higher than expected due to values of Y (xsoc,i ) that fall above 
+
+ˆU soc,i . 100 ϵ′% of the values are expected to cause a potential violation of the safety constraint. (We will deal with the random variation that could cause more violations in Sec. 4.2 and Appx. A.1.) Therefore, we define a practical maximum violation rate α′:
+
+α′ + ϵ(1 − α′) ≤ α ≡ α′ ≤ (α − ϵ)/(1 − ϵ). (26) After computing α′, Eq. 11 can be rewritten as αalgo = 1  
+
+> T−1
+
+(T α ′ − 1 − 1 
+
+> η
+
++ ∆α1 
+
+> η
+
+).
+
+As an example, if we want to ensure that the safety constraint is met for 95% of samples and ϵ = 0 .01 ,then (0 .05 − 0.01) /(1 − 0.01) ≈ 0.04 . In this case, we would target a violation rate of α′ ≈ 0.04 
+
+since the stricter target rate would account for the uncaught violations. Alg. 1 adapts conformal SafeOpt to use counterfactual policy constraints (SafeOpt-CPC). 
+
+4.2 Safety proof sketch 
+
+The method in Sec. 4.1 assumes weighted exchangeability (Tibshirani et al. [2019], Definition 1), which means that we assume that our weights are correctly specified for the test set. Weighted exchangeability also implies that when non-stationarity is present, it can be immediately detected and the weights can be recalculated. If weighted exchangeability is violated, there is a coverage gap bounded by Eq. 28 or Eq. 29 in Appx. B. Thm. 4.1 states the safety constraint from Eq. 7 is met by the proposed SafeOpt method laid out in Sec. 4. Because we used conformal prediction, we can leverage ϵ to guarantee safety under weighted exchangeability. See Appx. A.1 for the full proof. 
+
+Theorem 4.1. Under weighted exchangeability, Alg. 1 satisfies the safety constraint in Eq. 7 under the constraint function q(x) for user-defined violation rates α ∈ (0 , 1] and ϵ ∈ (0 , 1] with probability 
+
+PT ·ϵ′
+
+> k=0
+
+ Tk
+
+(ϵ′)k(1 − ϵ′)T −k.Proof sketch. We are performing split conformal prediction to estimate Ysoc . If the training and calibration sets come from the standard-of-care policy, then the calibration set is exchangeable with the new test point. If not, we can use weighted split conformal prediction, as described in Sec. 4.1. Therefore, P(Y (xsoc,t ) ≤ ˆU soc t (xsoc,t )) ≥ 1 − ϵ holds for each conformal estimate. If there is more than one conformal estimate, we can use a union bound to create one combined conformal guarantee, as in Eq. 25. In particular, we can combine the ϵ values to create ϵ1 + ... + ϵm = ϵ′.SafeOpt with online conformal prediction stays below the violation rate α, as proven by Thm. 2 of Zhang et al. [2024]. It is expected that about 100 ϵ′% of the time, Eq. 25 is not met. We define an “excess" as follows: excess = 𝟙 [Y (xsoc, 1) > ˆU soc, 1 
+
+> t
+
+(xt) or ... or Y (xsoc,m > ˆU soc,m t (xt))] . This means that if there are T =100 timesteps, 100 ϵ′ of the timesteps with no perceived violations are expected to actually contain a violation. We set α′ in Eq. 26 so that the violation rate is by definition less than or equal to α if the total number of excesses is less than or equal to T ϵ ′. Finally, there is a small probability that the total number of excesses is more than T ϵ ′. We can bound the total number 7of excesses using the cumulative distribution function of a binomial: 
+
+P(PTt excess t ≤ T ϵ ′) = PT ·ϵ′
+
+> k=0
+
+ Tk
+
+(ϵ′)k(1 − ϵ′)T −k.The purpose of Algs. 3 and 4 is to calculate better weights under non-stationarity. Because Thm. 4.1 assumes weighted exchangeability, Algs. 3 and 4 also satisfy the safety constraint. See Corollary A.2. 
+
+## 5 Experiments 
+
+We evaluate the proposed method on data generated by a chemical reaction simulator [Kang et al., 2019] and the MovieLens dataset [Harper and Konstan, 2015]. The advantage of the chemical reaction simulator is that we have full access to the counterfactuals. For MovieLens, we assume that the counterfactual rating is the same as the user’s rating for the standard-of-care recommendation. For both the chemical reaction simulator and the MovieLens dataset, we compare SafeOpt-CPC to Bayesian optimization without constraints, as well as to SafeOpt with full knowledge of the counterfactual (an oracle). We consider both the case where the calibration and training sets use the standard of care policy, as well as the case where the calibration and training sets use a different policy. That policy is random in the case of the simulator and is the data collection policy in the case of MovieLens. We examine constraints of the form in Eq. 13 and Eq. 24 for both datasets. For the chemical reaction experiments, f (x) is the percent yield, while Y is the percent selectivity minus the percent yield (see Kang et al. [2019]). The standard-of-care policy randomly recommends actions within the range Temperature = [100 .0, 120 .0] and pH = [0 .7, 0.9] . The second standard of care policy πsoc 2 (when relevant) recommends Temperature = 110 .0 and pH= 0.8.For the MovieLens experiment, suppose we recommend movies to specific users chosen from a pool. Each movie has a popularity score of Z, and each user gives each movie a rating Y . We wish to recommend less popular movies while receiving sufficiently high ratings. Therefore, f (x) = −Z(x),and the safety constraint q(x) is of the form Eq. 13 or Eq. 24. The standard-of-care policy randomly recommends one of the top five most popular movies in the training set. The second standard of care policy πsoc 2 (when relevant) recommends the top movie. The pool of test users consists of the five users that (1) have rated all the movies possibly recommended by the standard of care policy and (2) have the most rated movies in common. The pool of movies to recommend consists of the movies these users have in common. This ensures that we have a valid rating for the counterfactual and that the popularity score does not influence which movies are available to recommend at each step. To add realism, the training and calibration sets consist of movies from the pool and users not from the pool, so there is a covariate shift between calibration and testing. We re-weight the calibration set to account for this shift. Finally, we randomly generate synthetic datasets, as described in Appx. D.3. The purpose of the synthetic data is to generate a variety of f (x) and q(x) functions in case there are any idiosyncrasies in the MovieLens or chemical reaction settings. In short we generate two variables Z and Y using different Gaussian processes. Y is affected by a context variable. f (x) = Z(x) and q(x) is defined in Eq. 13. We run a sensitivity analysis examining the effects of the quality of ˆY (xt), the amount of noise, and weight misspecification on the results. See Appx. D for further experimental details and Appx. C for experiments in nonstationary settings. 
+
+## 6 Results 
+
+As shown in the bar plots in Fig. 1, SafeOpt-CPC identifies potential violations below the rate α.Of these potential violations caught by the algorithm, only a few end up being true violations. The oracle baseline gets the true violation rate closer to the rate α since it is not as conservative. Standard Bayesian optimization with no safety constraints has a potential and true violation rate far above the allowed violation rate α.The ω tolerance graphs in Fig. 1 show that as the tolerance term increases, SafeOpt-CPC falls back to the standard-of-care less often. ω is the tolerance term in Eq. 13 and 24. Note that for the MovieLens experiments, we can see some sharp drops near the boundary of each star rating. The maximum f (x)
+
+value found increases as the tolerance term increases. 8Figure 1: MovieLens and chemical reaction results. (Left) The number of violations and perceived violations for the oracle, standard BO, and SafeOpt-CPC ( ω = 0 .01 ). (Middle) The number of timesteps that SafeOpt-CPC reverts to the standard-of-care policy for different values of ω (tolerance levels). (Right) The maximum safe f (x) value for different values of ω. Note that the ratings for the MovieLens results are normalized between 0 and 1, so the range of ω is also [0,1]. Fig. 1 and Appx. E.1 show that these trends are the same when the training and calibration set are collected from a different policy. The top row of Fig. 1 shows the results when the training and calibration sets are collected from the standard-of-care policy. The second row shows the results when the sets are from the data collection policy. In both cases, q(x) is defined as in Eq. 13. Fig. 1 and Appx. E.2 show that the above trends hold for the constraints defined in Eq. 13 and Eq. 24. The third row of Fig. 1 corresponds to Eq. 13, and the fourth row corresponds to Eq. 24. Overall, these results support the claim that SafeOpt-CPC stays below the allowed violation rate under different data collection policies for training and calibration and under different numbers of estimated components in q(x).In Appx. E.5 we perform a sensitivity analysis and show that the quantiles in Eq. 16 become larger under noise in the data and under high-bias and high-variance estimates of Y . We also show that the coverage gap increases with the weights’ inaccuracy for covariate shift and non-stationarity. Finally, we show that coverage holds under non-stationarity with well-specified weights. 
+
+## 7 Discussion and conclusion 
+
+In our results, we found that SafeOpt-CPC consistently keeps violations below the specified rate, despite the estimated components in the constraint. We also find that the number of potential or perceived violations is generally higher than the number of true violations. As expected, the number of standard of care fallback steps decreases as the tolerance increases, and the optimized value of 
+
+f (x) increases as the tolerance increases. 9Recall that this work focuses on safety constraints that include estimates of counterfactuals. That said, the split conformal prediction method laid out in Sec. 4 can be trivially extended to any constraint that requires an estimated quantity, rather than an observed one. A limitation of our work is that if the quantiles are too large and/or the tolerance term is very low, the method may revert back to a given standard of care policy, which can be overly conservative. Further, if there are too many estimated quantities in the constraint, then α′ can become very low, allowing for very few violations. For example, if α = 0 .05 and there are four estimated quantities each at 
+
+ϵ = 0 .01 , then α′ decreases to only 0.01 .This work targets applications with strict safety constraints, which is important for high-risk appli-cations of machine learning. We would like to emphasize that controlling the violation rate alone is not sufficient for most high-risk applications, such as medical applications. Though we discuss only the violation rate, this work can be easily extended to other constraint functions. Feldman et al. [2023] discusses constraints functions other than violation rate, as well as how to control for multiple constraints simultaneously. We leave the extension of these methods to Bayesian optimization to future work. 
+
+## References 
+
+Shipra Agrawal and Nikhil Devanur. Linear contextual bandits with knapsacks. Advances in neural information processing systems , 29, 2016. Shipra Agrawal and Nikhil R Devanur. Bandits with concave rewards and convex knapsacks. In 
+
+Proceedings of the fifteenth ACM conference on Economics and computation , pages 989–1006, 2014. Sanae Amani, Mahnoosh Alizadeh, and Christos Thrampoulidis. Linear stochastic bandits under safety constraints. Advances in Neural Information Processing Systems , 32, 2019. Rina Foygel Barber, Emmanuel J Candes, Aaditya Ramdas, and Ryan J Tibshirani. Conformal prediction beyond exchangeability. The Annals of Statistics , 51(2):816–845, 2023. Daniel Bergmann and Knut Graichen. Safe bayesian optimization under unknown constraints. In 
+
+2020 59th IEEE Conference on Decision and Control (CDC) , pages 3592–3597. IEEE, 2020. Felix Berkenkamp, Andreas Krause, and Angela P Schoellig. Bayesian optimization with safety constraints: safe and automatic parameter tuning in robotics. Machine Learning , 112(10):3713– 3747, 2023. Shai Feldman, Liran Ringel, Stephen Bates, and Yaniv Romano. Achieving risk control in online learning settings. Transactions on Machine Learning Research , 2023, November 2023. Michael A Gelbart, Jasper Snoek, and Ryan P Adams. Bayesian optimization with unknown constraints. arXiv preprint arXiv:1403.5607 , 2014. Isaac Gibbs and Emmanuel Candes. Adaptive conformal inference under distribution shift. Advances in Neural Information Processing Systems , 34:1660–1672, 2021. F. Maxwell Harper and Joseph A. Konstan. The movielens datasets: History and context. ACM Trans. Interact. Intell. Syst. , 5(4), December 2015. ISSN 2160-6455. Pei-Lin Kang, Cheng Shang, and Zhi-Pan Liu. Glucose to 5-hydroxymethylfurfural: origin of site-selectivity resolved by machine learning based reaction sampling. Journal of the American Chemical Society , 141(51):20525–20536, 2019. Lihua Lei and Emmanuel J Candès. Conformal inference of counterfactuals and individual treatment effects. Journal of the Royal Statistical Society Series B: Statistical Methodology , 83(5):911–938, 2021. Benjamin Letham, Brian Karrer, Guilherme Ottoni, and Eytan Bakshy. Constrained bayesian optimization with noisy experiments. 2019. 10 Ahmadreza Moradipari, Sanae Amani, Mahnoosh Alizadeh, and Christos Thrampoulidis. Safe linear thompson sampling with side information. IEEE Transactions on Signal Processing , 69: 3755–3767, 2021. Aldo Pacchiano, Mohammad Ghavamzadeh, Peter Bartlett, and Heinrich Jiang. Stochastic bandits with linear constraints. In Arindam Banerjee and Kenji Fukumizu, editors, Proceedings of The 24th International Conference on Artificial Intelligence and Statistics , volume 130 of Proceedings of Machine Learning Research , pages 2827–2835. PMLR, 13–15 Apr 2021. Yanan Sui, Alkis Gotovos, Joel Burdick, and Andreas Krause. Safe exploration for optimization with gaussian processes. In International Conference on Machine Learning , pages 997–1005. PMLR, 2015. Ryan J Tibshirani, Rina Foygel Barber, Emmanuel Candes, and Aaditya Ramdas. Conformal prediction under covariate shift. Advances in neural information processing systems , 32, 2019. Shengbo Wang and Ke Li. Constrained bayesian optimization under partial observations: Balanced improvements and provable convergence. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 38, pages 15607–15615, 2024. Huasen Wu, Rayadurgam Srikant, Xin Liu, and Chong Jiang. Algorithms with logarithmic or sublinear regret for constrained contextual bandits. Advances in Neural Information Processing Systems , 28, 2015. Yunchuan Zhang, Sangwoo Park, and Osvaldo Simeone. Bayesian optimization with formal safety guarantees via online conformal prediction. IEEE Journal of Selected Topics in Signal Processing ,19(1):45–59, 2024. Datong Zhou and Claire Tomlin. Budget-constrained multi-armed bandits with multiple plays. In 
+
+Proceedings of the AAAI Conference on Artificial Intelligence , volume 32, 2018. 
+
+Algorithm 2 SafeOpt-Helper 
+
+Input: xt, q(xt), f (xt), T , t, α, ϵ, η, Ot−1, ∆αt, current models for f and q, current safe set S
+
+Calculate err t = 𝟙 (q(xt) < 0) 
+
+if t == 0 then 
+
+Ot = {xt, f (xt), q (xt)}
+
+else 
+
+Update Ot = Ot−1 ∪ { xt, f (xt), q (xt)}
+
+end if 
+
+Update the models (e.g., Gaussian processes) for f and q with Ot
+
+Update ∆αt+1 = ∆ αt + η(err t − αalgo )
+
+Update βt+1 = φ(∆ αt+1 )
+
+Create credible intervals If (x|O t) and Iq (x|O t)
+
+Update safe set St+1 
+
+Create set of optimizers Mt+1 and expanders Gt+1 
+
+if t == T then 
+
+xt+1 = arg max x∈St+1 fl(x|O T )
+
+else 
+
+Form decision xt+1 as in Eq. 4 
+
+end if 
+
+## A Proofs 
+
+A.1 Proof of Theorem 4.1 
+
+For this proof, we assume weighted exchangeability , defined in Definition 1 of Tibshirani et al. [2019]. Note that if the calibration and test sets are exchangeable, then this assumption is not required. Second, we will need to prove that Eq. 25 has valid conformal coverage: 11 Lemma A.1. Given that we have m different conformal guarantees of the form 
+
+P (Y (xsoc,i ) ≤ ˆU soc,i t (xt)) ≥ 1 − ϵi, then 
+
+P (Y (xsoc, 1) ≤ ˆU soc, 1 
+
+> t
+
+(xt) and ... and Y (xsoc,m ) ≤ ˆU soc,m t (xt)) ≥ 1 − ϵ1 − ... − ϵm (Eq. 25). 
+
+P (Y (xsoc, 1) ≤ ˆU soc, 1 
+
+> t
+
+(xt) and ... and Y (xsoc,m ) ≤ ˆU soc,m t (xt)) = 1 − P (Y (xsoc, 1) > ˆU soc, 1 
+
+> t
+
+(xt) or ... or Y (xsoc,m ) > ˆU soc,m t (xt)) 
+
+By the union bound, 
+
+P (Y (xsoc, 1) > ˆU soc, 1 
+
+> t
+
+(xt) or ... or Y (xsoc,m ) > ˆU soc,m t (xt)) 
+
+≤ P (Y (xsoc, 1) > ˆU soc, 1 
+
+> t
+
+(xt)) + ... + P (Y (xsoc,m ) > ˆU soc,m t (xt)) 
+
+By definition, 
+
+P (Y (xsoc, 1) > ˆU soc, 1 
+
+> t
+
+(xt)) ≤ ϵ1, ..., P (Y (xsoc,m ) > ˆU soc,m t (xt)) ≤ ϵm
+
+Therefore, 
+
+P (Y (xsoc, 1) ≤ ˆU soc, 1 
+
+> t
+
+(xt) and ... and Y (xsoc,m ) ≤ ˆU soc,m t (xt)) 
+
+≥ 1 − (ϵ1 + ... + ϵm) = 1 − ϵ1 − ... − ϵm
+
+Theorem 4.1 Under weighted exchangeability, Alg. 1 satisfies the safety constraint in Eq. 7 under the constraint function q(x) for user-defined violation rates α ∈ (0 , 1] and ϵ ∈ (0 , 1] with probability 
+
+PT ·ϵ′
+
+> k=0
+
+ Tk
+
+(ϵ′)k(1 − ϵ′)T −k.
+
+We are performing split conformal prediction to estimate Ysoc . If the training and calibration sets come from the standard-of-care policy, then the calibration set is exchangeable with the new test point. If not, we can use weighted split conformal prediction, as described in Sec. 4.1. See Sec. 2.2 of Tibshirani et al. [2019], which shows that weighted split conformal prediction satisfies Eq. 16 if the weights are well-specified. Barber et al. [2023], Thm. 2 proves the coverage gap in Eq. 28 and extends Thm. 2 to data-dependent weights in Sec. 4.5 (Eq. 29). Therefore, P (Y (xsoc,t ) ≤ ˆU soc t (xsoc,t )) ≥ 1 − ϵ holds for each conformal estimate. If there is more than one conformal estimate, we can use a union bound to create one combined conformal guarantee, as proven in Lemma A.1. In particular, we can combine the ϵ values to create ϵ1 + ... + ϵm = ϵ′.SafeOpt with online conformal prediction stays below the violation rate α, as proven by Thm. 2 of Zhang et al. [2024]. It is expected that about 100 ϵ′% of the time, Eq. 25 is not met. We define an “excess" as follows: excess = 𝟙 [Y (xsoc, 1) > ˆU soc, 1 
+
+> t
+
+(xt) or ... or Y (xsoc,m > ˆU soc,m t (xt))] . This means that if there are T =100 timesteps, 100 ϵ′ of the timesteps with no perceived violations are expected to actually contain a violation. We set α′ in Eq. 26 so that the violation rate is by definition less than or equal to α if the total number of excesses is less than or equal to T ϵ ′.Finally, there is a small probability that the total number of excesses is more than T ϵ ′. We can bound the total number of excesses using the cumulative distribution function of a binomial. 
+
+P(PTt excess t ≤ T ϵ ′) = PT ·ϵ′
+
+> k=0
+
+ Tk
+
+(ϵ′)k(1 − ϵ′)T −k
+
+In this case, we assume that each excess is drawn from a binomial distribution: excess ∼
+
+Binomial (T, ϵ ′). We believe that this assumption is reasonable given that the probability of an excess is ϵ′ at each timestep and given no dependence of the xsoc values across time. The purpose of Algs. 3 and 4 is to calculate better weights under non-stationarity. Because Thm. 4.1 assumes weighted exchangeability, Algs. 3 and 4 also satisfy the safety constraint. 
+
+Corollary A.2. Under weighted exchangeability, Algs. 3 and 4 satisfy the safety constraint in Eq. 7 under the constraint function q(x) for user-defined violation rates α ∈ (0 , 1] and ϵ ∈ (0 , 1] with probability PT ·ϵ′
+
+> k=0
+
+ Tk
+
+(ϵ′)k(1 − ϵ′)T −k.
+
+12 B Coverage gaps and analysis 
+
+When the weighted exchangeability assumption is not met, we have a coverage gap: 
+
+P (Y (xsoc,t ) ≤ ˆU soc t (xsoc,t )) ≥ 1 − ϵt + gap t (27) The gap is measured in terms of total variation distance (TV). If the weights are not data-dependent, then the gap can be bounded by 
+
+gap ≤
+
+> n
+
+X
+
+> i=1
+
+˜wi · T V (R(Dcal +1 ), R (Dical +1 )) (28) 
+
+Dcal +1 is the calibration set with the new test point appended to the end: (Dcal , xt). Dical +1 is 
+
+Dcal +1 with point i swapped for point n + 1 . R(Dcal +1 ) is the vector of residuals for Dcal +1 . Note that the residuals and the score are not necessarily the same. If the weights are data-dependent, 
+
+gap ≤ E[
+
+> n
+
+X
+
+> i=1
+
+˜wi · T V (R(Dcal +1 ), R (Dical +1 )|w1, ..., w n)] (29) Data dependent weights are computed from the observed data, rather than being fixed in advance or known from the true distribution. The weight of one point can depend on the weights of the other points, so we condition on the weights and take the expectation [Barber et al., 2023]. 2 In Eq. 18, Pcal 
+
+is usually estimated from the sample, so the weights would be data-dependent. Alternatively, if a practitioner accounts for covariate drift by deciding the decay rate for the weights in advance, then the weights would not be data-dependent. Note that we cannot calculate the coverage gap in practice because Y is not observed until after an action is taken. Further, the gap is very expensive to calculate because we need to measure the TV distance for every new test point swapped with every point i in the calibration set. In theory, you could estimate the gap based on the unlabeled data used to calculate the weights, though you would need to assume no shifts in P (Y |x) or P (x|Y ).
+
+ϵ′ 
+
+> t
+
+= ϵ + gap t
+
+P (Y (xsoc,t ) ≤ ˆU soc t (xsoc,t )) ≥ 1 − ϵ′
+
+> t
+
+(30) The overall chance that Y (xsoc ) falls outside of the interval between timesteps 1 and T0 is therefore 
+
+ϵ′ = ( PT0 
+
+> t
+
+ϵ′
+
+> t
+
+)/T 0. ϵ′ could then be substituted for ϵ in Eq. 26. 
+
+## C Non-stationarity extension 
+
+SafeOpt with online conformal prediction [Zhang et al., 2024] does not assume stationarity, and we would like to preserve this property as much as possible for safety constraints with estimated components. Not accounting for non-stationarity when it is present will result in a larger coverage gap (see Sec. B). Unfortunately, we need to know or be able to detect the kind of non-stationarity in our application. Detection is often possible for non-stationarity in the covariates, so we limit our discussion to covariate shift. We outline two common scenarios, changepoints and drift, below and provide algorithms to account for each scenario. See Barber et al. [2023] for a discussion of nonexchangeability, including nonexchangeability from non-stationarity, such as changepoints and drift. 
+
+C.1 Motivating example Scenario 3: Sudden shift. We begin running SafeOpt at Hospital A, but we move to Hospital B halfway through the study. By observing the ages of the people in the study, we can re-weight the calibration data for the second half of the study. 
+
+Scenario 4: Gradual drift. Our training and calibration sets were collected at Hospital A, and the patients recruited and scheduled for the study earlier were from Hospital A. The patients recruited 
+
+> 2Because we are doing split conformal prediction, we ignore tags.
+
+13 Algorithm 3 SafeOpt with counterfactual policy constraints (changepoint) 
+
+Input: data D, prior models for f and q, initial safe set S0, initial decision x0, total iterations T ,observation iterations T0, target overall violation rate α, target counterfactual policy violation rate 
+
+ϵ, update rate η > 0
+
+Split data D into Dtrain and Dcal 
+
+n ← length (Dcal )
+
+Train estimator ˆY on Dtrain 
+
+if there may be a covariate shift between the calibration and test data then 
+
+Observe test data for T0 timesteps 
+
+end if for i=0 to n do 
+
+Form weights wi according to Eq. 18 or Eq. 19 
+
+end for 
+
+Calculate Pnj=1 wj
+
+Calculate the scores on Dcal as in Eq. 15 or Eq. 23 Calculate violation rate α′ according to Eq. 26 
+
+for t = 0 to T do 
+
+Observe f (xt) and Y (xt)
+
+if xt is the same as the standard(s) of care or xt is the decision under the safe fallback policy then 
+
+q(xt) = ω
+
+else 
+
+Form weight wt for current xt
+
+Compute the normalized weight ˜wi as in Eq. 17 Compute the normalized weight ˜wt as in Eq. 17 Form the conformal upper or lower bounds according to Eq. 16 or Eq. 21 Form q(xt) according to Eq. 13, 20, or 24 
+
+end if if a changepoint is detected then 
+
+Observe test data for T0 timesteps 
+
+for i=0 to n do 
+
+Form weights wi according to Eq. 19 
+
+end for 
+
+Calculate Pnj=1 wj
+
+end if 
+
+xt+1 ← SAFE OPT -H ELPER () 
+
+end for 
+
+and scheduled later tended to be from Hospital B. We look at when patients are scheduled to receive treatment via SafeOpt and calculate the rate of covariate drift. We then weight each point in the calibration set such that points collected further in the past are less important. To avoid the entire calibration set being far in the past by the end of the study, we alternate between running SafeOpt and running the standard-of-care policy. The standard-of-care step is added to our calibration set. 
+
+C.2 Algorithmic description 
+
+If covariate shift is detected at a changepoint (Scenario 3), we can observe unlabeled data and recalculate the weights as in Eq. 19. After the weights have been calculated, we can create conformal predictions for Ysoc again and SafeOpt continues (Alg. 3). If there is gradual covariate drift (Scenario 4), we can observe the rate of drift before starting Bayesian optimization so that the weights are set appropriately. Each point in the calibration set is weighted such that points collected further in the past are less important. For example, we could learn a monotone function g such that 
+
+wi = exp( −g(t − ti)) · Ptest (xi)/P cal (xi) (31) 14 Algorithm 4 SafeOpt with counterfactual policy constraints (drift) 
+
+Input: data D, prior models for f and q, initial safe set S0, initial decision x0, total iterations T ,observation iterations T0, target overall violation rate α, target counterfactual policy violation rate 
+
+ϵ, update rate η > 0
+
+Split data D into Dtrain and Dcal 
+
+n ← length (Dcal )
+
+Train estimator ˆY on Dtrain 
+
+if there may be a covariate shift between the calibration and test data then 
+
+Observe test data for T0 timesteps 
+
+end if for i=0 to n do 
+
+Form time-decaying weights wi (for example, according to Eq. 31) 
+
+end for 
+
+Calculate Pnj=1 wj
+
+Calculate the scores on Dcal as in Eq. 15 or Eq. 23 Calculate violation rate α′ according to Eq. 26 
+
+for t = 0 to T do if t%2 == 0 then 
+
+Observe f (xt) and Y (xt)
+
+if xt is the same as the standard(s) of care or xt is the decision under the safe fallback policy then 
+
+q(xt) = ω
+
+else 
+
+Form weight wt for current xt
+
+Compute the normalized weight ˜wi as in Eq. 17 Compute the normalized weight ˜wt as in Eq. 17 Form the conformal upper or lower bounds according to Eq. 16 or Eq. 21 Form q(xt) according to Eq. 13, 20, or 24 
+
+end if 
+
+xt+1 ← πsoc 
+
+Add xt+1 to Dcal 
+
+else 
+
+xt+1 ← SAFE OPT -H ELPER () 
+
+end if end for 
+
+where ti is the time of data collection for point i, and t is the current timestep. To ensure that the calibration set does not become out of date, we alternate between taking a step of Bayesian optimization and taking an action from πsoc . This πsoc step is added to our calibration set (Alg. 4). 
+
+## D Additional experimental details 
+
+Part of our code is based on Berkenkamp et al. [2023], which uses an MIT License. The MovieLens 100k dataset [Harper and Konstan, 2015] is available at https://grouplens.org/datasets/movielens/100k/ with a special license listed here: https://files.grouplens.org/datasets/movielens/ml-100k-README.txt. The chemical reaction simulator [Kang et al., 2019] is available at https://github.com/VlachosGroup/Fructose-HMF-Model. It also has an MIT License. Each experiment was run on one CPU and used about 300 megabytes. Running 10 seeds took between 4 and 20 minutes, depending on the experiment. For example, experiments with no weighting ran in a few minutes, while experiments with different policies between calibration and test took about 20 minutes. For the MovieLens 100k dataset, we also wanted to include variation in the data, rather than running the algorithm on the same dataset every time. Therefore, we used bootstrap sampling on the user level to get a slightly different dataset for every random seed. 15 The results for every dataset or simulator were run on 10 random seeds each. Ninety-five percent confidence intervals were computed by multiplying the standard error of the mean by a critical t-value from scipy.stats.t.ppf(). The hyperparameter η was set to 0.2 for all experiments. In preliminary tests, we found that this was an appropriate value for 100 timesteps. We chose α = 0 .1 since that value was used in many of the Zhang et al. [2024] experiments, and it was a high enough value to accommodate a couple of estimated components. ϵ = 0 .01 since error rates in conformal prediction are usually set to some small value, and ϵ needed to be small enough that α′ was positive. Because the weights and scores are calculated and stored before the looping through each new test point, not much computational overhead is added compared to standard SafeOpt with online conformal prediction. To calculate the quantiles for each new test point, we need to iterate through at most n + 1 data points, where n is the size of the calibration set. All code can be found at [Github link redacted]. 
+
+D.1 MovieLens experiments 
+
+We use matrix factorization on the training set to describe each movie as a set of movie features and each user as a set of user features. User-item pairs from the test set are not included when creating the factorization since they would not have been observed. Each movie is a set of 20 features, and each observed user is a set of 20 features. We initialize the safe set with one decision x0 from the standard-of-care policy and its corresponding observations of f (x0) and q(x0).In contextual Gaussian processes, the context is often appended to the decision. For the MovieLens experiments, the context is appended to each decision x. The context includes the standard of care action, followed by the user features. Each decision is a set of item features. The kernels are factored linear kernels that treat the standard of care action context and the user context differently: 
+
+k(item, item ′, item soc , item ′
+
+> soc
+
+, user, user ′) = 
+
+k(item, item ′) · k(item soc , item ′
+
+> soc
+
+) + k(item, item ′) · k(user, user ′) (32) where k(a, a ′) = a⊤a′.
+
+D.2 Chemical reaction experiments 
+
+As in the MovieLens experiments, we initialize the safe set with a decision and observations from the standard-of-care policy. The context only includes the standard-of-care action in this case. The kernel is as follows: 
+
+k(item, item ′, item soc , item ′
+
+> soc
+
+) = k(item, item ′) · k(item soc , item ′
+
+> soc
+
+) (33) where k(a, a ′) = a⊤a′.
+
+D.3 Synthetic experiments 
+
+To create the synthetic functions Z and Y , we sample functions from two Gaussian processes. The process for Z has an RBF kernel with lengthscale 1.0 and variance 1.0. The process for Y has an RBF kernel variance 1.0. There is a single context variable c that affects Y . The lengthscale is 0.1 for 
+
+item , the choice that SafeOpt will make, and 1.0 for c.
+
+Z ∼ GP (0 , RBF (1 .0, 1.0)) 
+
+Y ∼ GP (0 , RBF (1 .2, (1 .0, 0.1))) + 5 · c (34) We seed the Gaussian processes with support points between 0 and 1 for item and 0 and 5 for c;sample a prior; and then solve for the weights that reconstruct the sampled GP function from the support points. See synthetic_data.py for details. We initialize the safe set with a decision and observations from the standard-of-care. 16 Figure 2: MovieLens results with standard-of-care policy training and calibration. 
+
+Figure 3: MovieLens results with data collection policy training and calibration. 
+
+The kernel we use for q is similar to the MovieLens kernel, except c is our 1D context variable: 
+
+k(item, item ′, item soc , item ′
+
+> soc
+
+, c, c ′) = 
+
+k(item, item ′) · k(item soc , item ′
+
+> soc
+
+) + k(item, item ′) · k(c, c ′) (35) where k(a, a ′) = a⊤a′.
+
+## E Additional results 
+
+Note that α = 0 .1 and ϵ = 0 .01 for all plots in this section. We create confidence bounds based on 10 random seeds. 
+
+E.1 Additional MovieLens experiments 
+
+Fig. 1 shows the results when the training and calibration data come from the standard-of-care policy or the data collection policy when q(x) is defined as in Eq. 13. Fig. 2 shows the full results for both Eq. 13 and Eq. 24 under the standard-of-care policy, and Fig. 3 shows the full results for both Eq. 13 and Eq. 24 under the data collection policy. Note that some results are repeated from Fig. 1. The results do not differ much from the results in the main text. 17 Figure 4: Reaction results with standard-of-care policy training and calibration. Safe BO BO Oracle Safe BO         
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Violation Rate
+> Y(x)  Y(x soc ) +  Violation
+> type
+> Potential
+> True
+> 0.0 0.25 0.5 0.75 1.0
+> (selectivity-yield tolerance)
+> 0
+> 25
+> 50
+> 75
+> 100
+> # of SOC fallback steps
+> 0.0 0.25 0.5 0.75 1.0
+> (selectivity-yield tolerance)
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Maximum f value
+
+Figure 5: Synthetic results. E.2 Additional chemical reaction experiments 
+
+Fig. 1 shows the chemical reaction results under a random policy for training and calibration when 
+
+q(x) is defined as in Eq. 13 and Eq. 24. Fig. 4 shows the results when the training and calibration data have been collected from the standard-of-care policy. The results do not differ much from the results in the main text. 
+
+E.3 Synthetic data results 
+
+We did not include the synthetic data experiments in the main text due to space constraints, but it is useful to include them in order to understand the later experiments in the non-stationarity experiments section and sensitivity analysis section. Because the non-stationarity experiments and sensitivity analysis use q(x) from Eq. 13 and use training and calibration data from the standard-of-care policy, Fig. 5 also uses these conditions. Note that for each seed, we randomly generate a new Z and Y .We observe the same general trends in the synthetic results as we do in the MovieLens and reaction results. The primary difference is that the synthetic results quickly reach near-zero standard-of-care fallback steps and quickly reach the maximum f value. 
+
+E.4 Non-stationarity results 
+
+We add drift to the synthetic data’s covariates so that the covariates transition from (0, 1) to (4, 5) at a rate proportional to γ∆t, where γ is a parameter plotted in Fig. 6. The left-hand plot of Fig. 6 shows the violation rate when we correctly re-weight for drift according to γ∆t. Recent observations are weighted so that they are more relevant, and past observations are less relevant. As described in Sec. C, we alternate between Bayesian optimization and taking a standard-of-care action for the calibration set. In the right-hand plot, we ignore drift altogether and run Alg. 1 as normal. 18 0.2 0.4 0.6 0.8 1.0          
+
+> Drift parameter ( (t))
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> Violation rate
+> Reweight for drift
+> Perceived
+> True
+> 0.2 0.4 0.6 0.8 1.0
+> Drift parameter ( (t))
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5 Ignore drift
+> Perceived
+> True
+
+Figure 6: Drift results. 0 20 40 60 80 100       
+
+> Changepoint time
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> Violation rate
+> Reweight for changepoint
+> Perceived
+> True
+> 020 40 60 80 100
+> Changepoint time
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5 Ignore changepoint
+> Perceived
+> True
+
+Figure 7: Changepoint results. 
+
+In Fig. 7 we examine the effects of changepoints. Before the changepoint, the covariates are between 0 and 1, while after the changepoint, they are between 4 and 5. We plot the violation rate versus the time of the changepoint. When we correctly re-weight for the changepoint, the violation rate stays below α. The violation rate is slightly higher at lower timesteps because we only observe 100 points of new calibration data after the changepoint, so we have better estimates before the changepoint since we have more old calibration data. In the right-hand plot, we ignore the changepoint. In the worst case, the changepoint occurs early. Because we are not re-weighting, conformal coverage does not hold. 
+
+E.5 Sensitivity analysis 
+
+When we have noisy data or we have a high-bias or high-variance estimator, conformal coverage still holds. Therefore, the actual and perceived violations are still below α. However, the number of standard-of-care fallback steps increases as the estimator worsens or as noise increases (Fig. 8). For these plots, ω = 0 .1 since the number of fallback steps is low under default conditions, as shown in Fig. 5. When the weights are mis-specified, conformal coverage does not hold. In Fig. 9 we plot the violation rate versus the percent overlap between the training and calibration and the testing covariates. One hundred percent overlap means that both sets have covariates between 0 and 1. Zero percent overlap means that the training and calibration data have covariates between 0 and 1, while the testing data has covariates between 1 and 2. For this plot, ω = 0 .001 since small changes to the weights have a large impact at low ω values. 19 1.0 0.5 0.0 0.5 1.0           
+
+> Estimator bias
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> # of SOC fallback steps
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Estimator variance
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> # of SOC fallback steps
+> 0.00 0.02 0.04 0.06 0.08 0.10
+> Data noise variance
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> # of SOC fallback steps
+
+Figure 8: Sensitivity analysis: estimator and variability. 0 20 40 60 80 100 
+
+Percent overlap 
+
+0.0 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+> Violation rate
+
+Perceived violation rate 
+
+True violation rate 
+
+Figure 9: Sensitivity analysis: weights. 
+
+Note that different α values will change the maximum number of fallback steps and allowed violation rate threshold. High ω values result in fewer fallback steps in general and therefore less sensitive to noise or worse ˆY estimators, while low ω values result in more fallback steps. 20
