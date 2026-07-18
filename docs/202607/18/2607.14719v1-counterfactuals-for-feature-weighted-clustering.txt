@@ -1,0 +1,717 @@
+Title: Counterfactuals for Feature-Weighted Clustering
+
+URL Source: https://arxiv.org/pdf/2607.14719v1
+
+Published Time: Fri, 17 Jul 2026 00:49:55 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Counterfactuals for Feature-Weighted Clustering 
+
+## Richard J. Fawley ∗
+
+## Renato Cordeiro de Amorim †
+
+School of Computer Science and Electronic Engineering, University of Essex, Wivenhoe, UK. 
+
+# Abstract 
+
+Counterfactual explanations provide local, interpretable insight by identifying changes to an input that would alter its assigned outcome. Although well established in supervised learning, their extension to clustering is less direct, since cluster assignments are unlabeled and governed by the geometry of the partition. This paper introduces VoICE, a Voronoi-Induced Counterfactual Explainability framework for feature-weighted 
+
+k-means clustering. Rather than treating cluster change as a crossing of a single pairwise centroid bound-ary, VoICE formulates counterfactual generation as projection onto the full weighted Voronoi region of a target cluster, incorporating feature weights directly into both the clustering geometry and the counter-factual objective to yield least-cost and parsimonious explanations under actionability constraints. Target regions are further intersected with data-derived bounds and homothetically contracted towards their cen-troids, limiting extrapolation and boundary sensitivity. VoICE consistently produces valid target-cluster membership, across several benchmark datasets, where the leading pairwise baseline does not. Software: 
+
+https://github.com/rickfawley/VoICE. 
+
+Keywords: Counterfactual explanations; explainable AI; weighted k-means clustering. 
+
+# 1 Introduction 
+
+Explainable Artificial Intelligence (XAI) aims to im-prove the transparency and interpretability of ma-chine learning models by providing insight into their outputs. Among the various explanation paradigms, 
+
+counterfactual explanations have emerged as a par-ticularly intuitive and actionable approach. Given a dataset X = {x1, . . . , x n} with each xi ∈
+
+X described over d features, a counterfactual ex-planation identifies the minimal modification to an observation xi ∈ X that changes its assigned out-come [1, 2]. This is typically formalised as finding a perturbed instance whose prediction differs from the original while remaining as close as possible under a chosen distance metric. For example, in a loan ap-proval setting, a counterfactual explanation may in-dicate the minimal changes required for an applicant to change from a rejected to an approved outcome, whereas a parsimonious counterfactual explanation may indicate a minimal increase in income alone. Explainability methods in XAI are often cate-gorised as either global or local. Global approaches aim to summarise the overall behaviour of a model, whereas local methods focus on explaining individual predictions. Counterfactual explanations belong to the latter category, providing insight into specific out-comes by identifying the minimal changes required to alter a model’s decision. Practical counterfactual explanations are often required to satisfy additional properties, such as actionability , where only certain features may be modified, and plausibility , ensuring that generated explanations lie within realistic, data-supported regions of the feature space. 1arXiv:2607.14719v1 [cs.LG] 16 Jul 2026 Clustering algorithms aim to group observations in such a way that those within the same cluster (i.e., group) are more similar to one another, according to some selected similarity measure, than those between clusters. However, not all clustering methods pro-duce strict partitions of all available data. For exam-ple, some density-based methods allow for noise that is not explicitly allocated to any cluster, fuzzy clus-tering assigns to each observation a degree of mem-bership between 0 and 1 thereby allowing multiple cluster memberships, and probabilistic mixture mod-els assign each observation a probability distribution over clusters rather than a single hard assignment [3, 4, 5, 6]. Among clustering methods, k-means [7] is one of the most widely used [8, 9], assigning each observation to the cluster whose centre (the centroid) is the nearest. This induces a geometric structure in which cluster membership changes occur when an ob-servation crosses a boundary between clusters. Coun-terfactual explanations can therefore be interpreted as minimal changes to the feature values required to cross such boundaries. Despite this geometric intuition, generating coun-terfactual explanations for clustering presents chal-lenges. First, explanations may be highly sensitive near cluster boundaries, where small perturbations can lead to qualitatively different outcomes. Sec-ond, controlling the number of features involved in a counterfactual is difficult, limiting interpretability and actionability. Third, counterfactuals can lie in regions of the feature space unsupported by the ob-served data. These challenges are further amplified in feature-weighted clustering settings as counterfactual approaches provide no mechanism for incorporating feature importance (for details, see Section 2.1). In this paper, we introduce a method for generat-ing counterfactual explanations for feature-weighted 
+
+k-means, where each feature is assigned an indepen-dent non-negative weight. We formulate counterfac-tual generation as a constrained optimisation prob-lem over the Voronoi cell (the region of space contain-ing all points closer to a given centroid than to any other) of a target cluster, enabling explicit control over both perturbation magnitude and sparsity. Fea-ture weights are incorporated directly into both the geometry and the optimisation objective, providing a principled mechanism for optimising the construc-tion of parsimonious explanations. To the best of our knowledge, counterfactual explanations have not been studied in the context of feature-weighted k-means clustering, despite the widespread use of such algorithms. To address instability, a well documented issue in clustering under small perturbations [10, 11], we in-troduce a robustness-aware mechanism based on ho-mothetic contraction, which scales a bounded tar-get Voronoi region towards its centroid. This con-traction yields a compact, empirically bounded sub-set of the decision region that reduces exposure to boundary-adjacent areas and removes unbounded di-rections. Restricting counterfactual generation to this contracted region provides explicit geometric control over boundary sensitivity and supports more locally stable explanations [12, 13]. To summarise, this paper makes the following contributions: 
+
+• To the best of our knowledge, the first mecha-nism to incorporate feature weights directly into counterfactual explanations for clustering, shap-ing both the clustering geometry and the coun-terfactual objective; 
+
+• An extension of clustering counterfactuals from pairwise source-target boundary projection to full weighted Voronoi-region projection, with counterfactual validity ensured by construction; 
+
+• A constrained optimisation framework that re-stricts counterfactual generation to the observed data under actionability constraints, with a ho-mothetic contraction mechanism providing ex-plicit geometric control over robustness; 
+
+• A parsimonious search procedure based on ranked actionable feature subsets and minimal intervention cardinality. 
+
+# 2 Background 
+
+This section reviews the key concepts and prior work that underpin our proposed method. We begin by discussing feature weighting in clustering and its role 2in shaping the geometry of cluster assignments. We then examine existing approaches to counterfactual explanations in clustering, highlighting their limita-tions. 
+
+## 2.1 Feature weighting in clustering 
+
+Clustering algorithms partition a dataset X into 
+
+k clusters C1, . . . , C k based on a similarity or dis-tance measure. In centroid-based methods such as 
+
+k-means, each cluster Cj is represented by a centroid 
+
+mj ∈ Rd. Each observation xi ∈ X is assigned to the cluster represented by the centroid that is nearest to 
+
+xi. In the case of k-means, specifically, this minimises 
+
+W =
+
+> k
+
+X
+
+> j=1
+
+X
+
+> xi∈Cj
+> d
+
+X
+
+> v=1
+
+(xiv − mjv )2,
+
+where, 
+
+mjv = 1
+
+|Cj |
+
+X
+
+> xi∈Cj
+
+xiv .
+
+The procedure itself follows three steps: (i) select k
+
+observations from X uniformly at random, and copy their values to m1, . . . , m k; (ii) for each observation 
+
+xi ∈ X identify its nearest centroid mj and assign xi
+
+to Cj ; (iii) update each centroid to the component-wise mean of the observations in its cluster. These steps are repeated until convergence. Although popular, k-means does have some known drawbacks. For instance, its final clustering strongly depends on the initial centroids (chosen at random), the number of clusters k must be known beforehand, and it assumes that all features are equally relevant. Here, we are particularly interested in the latter. In many real-world datasets, only a subset of features contributes meaningfully to the underlying cluster structure, and assigning equal importance to all fea-tures may obscure informative patterns [14, 15]. Also, even among relevant features there may be differ-ent degrees of relevance, which should be taken into account. Feature weighting extends clustering algo-rithms to account for such heterogeneous feature rel-evance. Feature weighting in clustering is a popular re-search area (see [16, 14, 17, 15]). Existing approaches aim to modify the contribution of each feature to the clustering objective, typically by incorporating weights into the distance function used to define clus-ter assignments. Formally, they assign a non-negative weight ωv to each feature v = 1 , . . . , d . Each ωv rep-resents the degree of relevance of feature v. In this work, we are concerned with the use of such weights within counterfactual generation, rather than with the specific mechanisms by which they are estimated. 
+
+## 2.2 Counterfactual explanations 
+
+Optimisation-based methods have been widely adopted to generate valid and diverse counterfac-tual explanations [2, 18]. A prominent example is DiCE [19], which formulates counterfactual genera-tion as a multi-objective optimisation problem bal-ancing proximity to the factual instance with di-versity across multiple counterfactuals. Alternative approaches generate counterfactuals by moving in-stances towards representative prototypes or along rule-based paths, trading optimality for interpretabil-ity [20, 21]. While such methods are flexible and sometimes model-agnostic, they are primarily devel-oped for supervised settings and do not explicitly ac-count for the geometric structure of clustering deci-sion regions. There has been limited research exploring coun-terfactual explanations in clustering settings, often in distinct and largely disconnected directions. For instance, counterfactual analysis has been used to quantify the cost of enforcing fairness constraints in 
+
+k-means clustering, comparing similarity-based mea-sures with counterfactual-based costs of reassigning individuals between clusters [22]. This line of work highlights how counterfactuals can reveal asymmet-ric impacts across groups and identify features acting as proxies for sensitive attributes. Counterfactuals for Clustering (CFCLUST) [23] is, to our knowledge, the first formal framework for gen-erating counterfactual explanations for clustering al-gorithms. It considers both k-means clustering and Gaussian mixture models, we focus on the former as our proposed method is grounded in k-means (for de-tails see Section 3). CFCLUST exploits the fact that cluster assignments are determined by proximity to 3centroids, so that the boundary between two clus-ters is given by the hyperplane equidistant from the corresponding centroids. Under this geometric for-mulation, the counterfactual can be obtained by pro-jecting the factual instance onto the separating hy-perplane between clusters. This framework proposes valuable practical constraints that are important in real-world settings: 
+
+• Actionability constraints , modelled as binary fea-ture masks that allow certain features to remain immutable, reflecting attributes that cannot be changed; 
+
+• Plausibility constraints , modelled as a bound-ary penetration scalar ϵ, move the counterfac-tual away from the source–target boundary and further into the target side of the pairwise model. Pairwise-boundary counterfactuals for k-means rely on the separating hyperplane between a source and target centroid. This is sufficient to describe a binary transition, but in multi-cluster settings it does not in general guarantee membership of the intended target Voronoi cell. In this paper, we extend this geometric perspective by considering the full Voronoi polytope induced by multiple neighbouring centroids, rather than a single pairwise hyperplane, and build on it with additional mechanisms for robustness and interpretability. 
+
+# 3 Proposed Method 
+
+This section presents our proposed framework, VoICE, for generating counterfactual explanations in a clustering setting using a feature-weighted ver-sion of k-means. We begin by introducing weighted Voronoi regions as target counterfactual sets, fol-lowed by the construction of bounded feasible tar-get regions and their robustness refinement via ho-mothetic contraction. We then formulate counterfac-tual generation as a constrained optimisation prob-lem over these regions, before introducing parsimo-nious counterfactual explanations. Finally, we sum-marise our proposed method. 
+
+## 3.1 Voronoi regions as target clusters 
+
+We model counterfactual generation in a feature-weighted k-means scenario as an optimisation prob-lem over the decision region of a target cluster. Here, we are not particularly interested in what exact al-gorithm is being used as long as it generates a fea-ture weight vector ω = ( ω1, . . . , ω d), where each of its components, ωv , denotes the weight associated with a feature v and ωv ≥ 0. With this we can define the weighted squared Euclidean distance 
+
+Dω (xi, m j ) = 
+
+> d
+
+X
+
+> v=1
+
+ωv (xiv − mjv )2,
+
+for any xi ∈ X and centroid mj . We can then repre-sent the decision region of a cluster Ct with centroid 
+
+mt as the Voronoi cell 
+
+V (ω) 
+
+> t
+
+= x ∈ Rd : Dω (x, m t) ≤ Dω (x, m j ) ∀j̸ = t .
+
+Expanding the inequalities and cancelling quadratic terms yields the half-space represen-tation 
+
+V (ω) 
+
+> t
+
+= \ 
+
+> j̸=t
+
+(
+
+x : (Ω( mj − mt)) ⊤x
+
+≤ 12
+
+
+
+m⊤ 
+
+> j
+
+Ωmj − m⊤ 
+
+> t
+
+Ωmt
+
+)
+
+,
+
+(1) where, Ω = diag( ω1, . . . , ω d). Thus, the target clus-ter is represented by a convex polyhedral region in feature space, and counterfactual generation can be formulated as an optimisation problem over this re-gion. The half-space representation in (1) involves k − 1inequalities. However, only those inequalities cor-responding to facet-sharing neighbours are required to define V (ω) 
+
+> t
+
+. Rather than incurring the computa-tional cost of constructing a complete diagram, the Voronoi region of a single centroid mt can be obtained by intersecting the half-spaces defined by pairwise bi-sectors with respect to a subset of relevant neighbor-ing clusters [24]. These neighbours can be efficiently identified using properties of the corresponding Delaunay triangula-tion (the dual graph of the Voronoi diagram, in which 4centroids are connected if their Voronoi cells share a boundary) [25, 26], thereby avoiding redundant com-parisons with distant centroids that do not influence the cell boundary. As a result, localised Voronoi cell construction offers a computationally efficient alter-native, with complexity that depends primarily on the number of effective neighbours rather than k.In the unweighted two-cluster case, with all fea-tures actionable, no contraction, and no additional bounded-domain restriction, projection onto the tar-get Voronoi region reduces to projection onto the source–target bisector. Thus, in this special case, the proposed formulation recovers the k-means CF-CLUST construction. For k > 2, VoICE extends the pairwise construction to the full target Voronoi re-gion. 
+
+## 3.2 Bounded feasible target regions 
+
+Voronoi cells in k-means clustering may be un-bounded, as centroids lying on the convex hull of the configuration induce regions that extend infinitely in directions where no competing centroid is closer. As a result, these regions can include parts of the feature space that are not supported by the observed data. To reduce extrapolation beyond the observed feature ranges, we first restrict the target Voronoi cell to a bounded, empirically defined feasible domain. Let 
+
+F ⊆ Rd denote a feasible region derived from ob-served data (i.e. feature-wise bounds). We define the bounded target region as ˜V (ω) 
+
+> t
+
+= V (ω) 
+
+> t
+
+∩ F .
+
+Notice that F is a polyhedron. Since V (ω) 
+
+> t
+
+is also a polyhedron by (1), their intersection ˜V (ω) 
+
+> t
+
+is a poly-hedron and admits a half-space representation of the form ˜V (ω) 
+
+> t
+
+= {x ∈ Rd : Ax ≤ b}.
+
+To improve robustness and reduce sensitivity near cluster boundaries, we apply a homothetic contrac-tion, i.e., a uniform scaling of the region towards its centre (the cluster centroid, mt), to this bounded re-gion. For α ∈ (0 , 1], define ˜V (ω,α ) 
+
+> t
+
+=
+
+n
+
+mt + α(x − mt) : x ∈ ˜V (ω)
+
+> t
+
+o
+
+.
+
+Figure 1: Homothetic contraction of a Voronoi cell. Green denotes the Voronoi region eV (ω) 
+
+> t
+
+, while the dashed blue denotes the contracted region eV (ω,α ) 
+
+> t
+
+.The red points are observations in cluster Ct.Expressing Ax ≤ b in terms of x = mt+α(y−mt) ∈
+
+˜V (ω,α ) 
+
+> t
+
+for some y ∈ ˜V (ω) 
+
+> t
+
+leads to ˜V (ω,α ) 
+
+> t
+
+= {x ∈ Rd : Ax ≤ (1 − α)Am t + αb }, (2) showing the contraction scales each constraint to-wards the centroid mt. Figure 1 illustrates this con-traction. Smaller values of α yield stronger con-traction, increasing the geometric margin from deci-sion boundaries at the cost of excluding boundary-adjacent observations, while larger values retain a greater proportion of the original Voronoi region, with α = 1 recovering the original bounded cell. For each xi ∈ Ct, define the point-wise contraction score 
+
+αi,t = inf {α ∈ [0 , 1] : xi ∈ eV (ω,α ) 
+
+> t
+
+}.
+
+This score records how much of the bounded target region must be retained in order for observation xi to remain inside the contracted region. The cluster-level full-retention factor is then 
+
+α⋆t = max 
+
+> xi∈Ct
+
+αi,t .
+
+Thus, α⋆t (the smallest contraction factor retaining all observed members of Ct) is determined by the most boundary-adjacent retained member of cluster 5Ct, while the distribution of the point-wise scores αi,t 
+
+provides a diagnostic summary of how centrally or peripherally the assigned observations lie within the bounded target region. These point-wise scores are used later as contraction diagnostics. The empirical interpretation of α depends on the metric used to construct the region. When fea-ture weights are highly concentrated, α may de-scribe compactness in a low-dimensional weighted subspace rather than compactness in the original fea-ture space. We therefore report feature-weight con-centration alongside α-based contraction statistics (see Section 5). 
+
+## 3.3 Counterfactual optimisation 
+
+Let a be a factual observation assigned to a source cluster Cs, and Ct be a target cluster with t̸ = s. Let 
+
+A ⊆ { 1, . . . , d } denote the set of actionable features. When actionability constraints are imposed, features outside A are held fixed at their factual values. We denote the corresponding affine subspace by 
+
+EA(a) = {z ∈ Rd : zj = aj ∀j / ∈ A}.
+
+The optimisation is therefore carried out over the feasible target region, eV (ω,α ⋆t ) 
+
+> t
+
+, together with the equality constraints in EA(a). To ensure uniqueness even when some feature weights are zero or negligible, we use the regularised weighted objective 
+
+Dω,δ (a, z ) = Dω (a, z ) + δ∥z − a∥22, δ > 0,
+
+where δ is chosen small enough to act only as a nu-merical tie-breaker. The counterfactual for a ∈ Cs
+
+with respect to target cluster Ct is then 
+
+z⋆t = arg min     
+
+> z∈eV(ω,α ⋆t)
+> t∩EA(a)
+
+Dω,δ (a, z ). (3) This incorporates feature weights directly into the optimisation objective while retaining a strictly con-vex projection problem. If the target cluster Ct is not specified in advance, we solve (3) for each candidate target t̸ = s and select the counterfactual with minimum cost among feasible solutions. 
+
+## 3.4 Parsimonious counterfactuals 
+
+While the optimisation problem defined in Section 3.3 identifies a feasible counterfactual explanation, prac-tical interpretability often requires explanations that modify as few actionable features as possible. To ad-dress this requirement, our proposed framework in-corporates ranked feature subsets and searches for the most parsimonious feasible counterfactual. Let Sr denote the set of the r highest-ranked ac-tionable features, ranked in descending order of ωv ,with r ≤ | A|. The set Sr represents the subset of ac-tionable features permitted to vary during optimisa-tion, with all remaining features fixed at their factual values. For a given target cluster Ct, let z(r) 
+
+> t
+
+denote the solution of the counterfactual optimisation problem when variation is restricted to features in Sr . If no feasible solution exists for a given r, the corre-sponding optimisation problem is considered infea-sible. The proposed framework searches the ranked prefixes sequentially until either a feasible counterfac-tual is obtained or all actionable prefixes have been exhausted. That is, it starts with S1, incrementing r
+
+until a feasible solution is found or r = |A| has been tested. When at least one feasible prefix exists, this yields the smallest actionable feature subset capable of producing a valid counterfactual. This allows us to define the minimal intervention cardinality 
+
+r⋆t = min {r ∈ { 1, . . . , |A|} | z(r) 
+
+> t
+
+is feasible }.
+
+If no feasible prefix exists, then no parsimonious counterfactual is returned for the corresponding factual–target pair. The quantity r⋆t , when defined, represents the smallest number of ranked actionable features re-quired to generate a feasible counterfactual expla-nation with target cluster Ct. Consequently, lower values of r⋆t correspond to more parsimonious expla-nations, while larger values indicate that the desired cluster transition requires variation across a broader set of actionable features. The associated counterfactual, 
+
+z⋆t = z(r⋆t ) 
+
+> t
+
+,
+
+6is referred to as the most parsimonious counterfactual explanation .The minimal intervention cardinality provides a natural measure of explanation complexity and forms the basis of the model-level parsimony metrics intro-duced in Section 4.5. When the target cluster is clear from context, or when results are aggregated across sampled factual–target pairs, we write this quan-tity as r⋆. Aggregated statistics such as the mean and median values of r⋆ are computed over feasible factual–target pairs and quantify the average num-ber of ranked actionable features required to obtain feasible counterfactual explanations across a dataset. 
+
+## 3.5 Directional counterfactual ranges 
+
+The optimisation problems above identify a minimal feasible counterfactual point. However, once such a point has been found, it is also useful to characterise how far one may continue to move in the same coun-terfactual direction while remaining feasible. Let z⋆t
+
+be a feasible counterfactual for factual observation a,and define the counterfactual direction 
+
+dt = z⋆t − a. 
+
+For λ ≥ 0, consider the ray 
+
+zt(λ) = a + λd t.
+
+By construction, zt(1) = z⋆t . The admissible direc-tional range is 
+
+It(a, d t) = {λ ≥ 1 : zt(λ) ∈ eV (ω,α ⋆t ) 
+
+> t
+
+∩ EA(a)}.
+
+Since eV (ω,α ⋆t ) 
+
+> t
+
+∩EA(a) is convex, this set is an interval of the form [1 , ρ t],
+
+whenever z⋆t ∈ eV (ω,α ⋆t ) 
+
+> t
+
+∩ EA(a). The value ρt is the largest admissible intervention magnitude along the same direction before the path exits the contracted feasible target region or violates the actionability con-straints. The associated directional tolerance is 
+
+τt = ρt − 1.
+
+Larger values of τt indicate that the counterfactual remains feasible over a wider range of intervention magnitudes along the same direction, while values close to zero indicate that the minimal counterfactual lies close to a limiting boundary. 
+
+## 3.6 Algorithmic summary 
+
+We now summarise the proposed framework through the following algorithms. 
+
+Counterfactuals as Voronoi projections. This baseline formulation computes counterfactuals by projecting the factual observation onto the Voronoi cell of a target cluster under Euclidean distance. 
+
+Algorithm 1 VoICE (unweighted) 
+
+Require: Factual observation a, source cluster Cs,centroids {m1, . . . , m k}, optional target cluster index t
+
+Ensure: Counterfactual z⋆ 
+
+> 1:
+
+if t is specified then  
+
+> 2:
+
+T ← { t} 
+
+> 3:
+
+else  
+
+> 4:
+
+T ← { 1, . . . , k } \ { s} 
+
+> 5:
+
+end if  
+
+> 6:
+
+Initialise candidate set Z ← ∅  
+
+> 7:
+
+for each t ∈ T do  
+
+> 8:
+
+Construct Voronoi cell Vt 
+
+> 9:
+
+Solve projection z⋆t = arg min z∈Vt ∥z − a∥2 
+
+> 10:
+
+Add z⋆t to Z 
+
+> 11:
+
+end for  
+
+> 12:
+
+return z⋆ = arg min z∈Z ∥z − a∥2
+
+Robust weighted counterfactuals. This pro-posed method extends the previous baseline by in-corporating feature weights, restricting the search to an empirically bounded feasible domain, and improv-ing robustness through homothetic contraction of the target region. 7Algorithm 2 VoICE: Robust weighted counterfac-tuals 
+
+Require: Factual observation a, source cluster Cs,centroids {m1, . . . , m k}, feature weights ω, reg-ularisation parameter δ > 0, feasible domain F,actionable feature set A, optional target cluster index t
+
+Ensure: Counterfactual z⋆ or failure  
+
+> 1:
+
+if t is specified then  
+
+> 2:
+
+T ← { t} 
+
+> 3:
+
+else  
+
+> 4:
+
+T ← { 1, . . . , k } \ { s} 
+
+> 5:
+
+end if  
+
+> 6:
+
+Initialise candidate set Z ← ∅  
+
+> 7:
+
+for each t ∈ T do  
+
+> 8:
+
+Construct the weighted Voronoi cell V (ω) 
+
+> t
+> 9:
+
+Set ˜V (ω) 
+
+> t
+
+= V (ω) 
+
+> t
+
+∩ F  
+
+> 10:
+
+Compute contracted region ˜V (ω,α ⋆t ) 
+
+> t
+> 11:
+
+Solve projection 
+
+z⋆t = arg min     
+
+> z∈˜V(ω,α ⋆t)
+> t∩EA(a)
+
+{Dω,δ (a, z )}. 
+
+> 12:
+
+if feasible then  
+
+> 13:
+
+Add z⋆t to Z 
+
+> 14:
+
+end if  
+
+> 15:
+
+end for  
+
+> 16:
+
+if Z = ∅ then  
+
+> 17:
+
+return failure  
+
+> 18:
+
+else  
+
+> 19:
+
+return z⋆ = arg min z⋆t ∈Z {Dω,δ (a, z ⋆t )} 
+
+> 20:
+
+end if 
+
+We now show that, for a fixed target cluster Ct,the regularised projection problem solved within Al-gorithm 2 admits a unique solution. 
+
+Proposition 1. Let eV (ω,α ⋆t ) 
+
+> t
+
+∩ EA(a)̸ = ∅. Then, 
+
+z⋆t = arg min     
+
+> z∈eV(ω,α ⋆t)
+> t∩EA(a)
+
+Dω,δ (a, z )
+
+admits a unique solution. Proof. The region eV (ω,α ⋆t ) 
+
+> t
+
+is the intersection of finitely many closed half-spaces and feature-wise bounds, followed by homothetic contraction. Hence, 
+
+eV (ω,α ⋆t ) 
+
+> t
+
+is compact and convex. The set EA(a) is an affine subspace, so eV (ω,α ⋆t ) 
+
+> t
+
+∩ EA(a) is also compact and convex. The objective Dω,δ (a, z ) is continuous on eV (ω,α ⋆t ) 
+
+> t
+
+∩
+
+EA(a). Since eV (ω,α ⋆t ) 
+
+> t
+
+∩ EA(a) is compact and non-empty, a minimiser exists. Furthermore, 
+
+Dω,δ (a, z ) = ( z − a)⊤(Ω + δI )( z − a).
+
+Because ωv ≥ 0 for all v and δ > 0, the matrix Ω + δI 
+
+is positive definite. Hence Dω,δ (a, z ) is strictly con-vex in z. A strictly convex function has at most one minimiser over a convex set. Therefore the minimiser is unique. 
+
+A parsimonious extension The proposed frame-work admits a natural parsimonious extension, which searches for the minimal subset of actionable fea-tures required to produce a feasible counterfactual. Starting from the single most important actionable feature, the method incrementally adds features in descending order of importance until a feasible solu-tion is found, terminating in at most |A| steps (see Section 3.4 for details). Feature importance is deter-mined by the non-negative weight, ωv , assigned to each actionable feature. 
+
+# 4 Experimental Setup 
+
+This section describes the experimental methodology we use to evaluate our proposed framework. 
+
+## 4.1 Comparison with CFCLUST 
+
+We compare VoICE (unweighted), described in Al-gorithm 1, against CFCLUST (for details, see Sec-tion 2.2), to our knowledge the only existing frame-work for counterfactual explanations in k-means clus-tering. Following the original experiments introduc-ing CFCLUST [23], we generate counterfactuals for 50 randomly selected factual observations from the source cluster, with the target cluster also selected at random. The underlying clustering model is un-weighted k-means, with ranked feature restrictions and α-contraction excluded, so that the comparison 8isolates the geometric difference between the two fea-sible regions. For each factual observation a assigned to source cluster Cs and each selected target cluster Ct, we gen-erated two counterfactuals under this shared setup, using the same squared Euclidean cost and no plau-sibility shift. The CFCLUST counterfactual was ob-tained by projecting a onto the pairwise bisecting hy-perplane between the centroids ms and mt, while the VoICE (unweighted) counterfactual was obtained by projecting a onto the full target Voronoi cell Vt.In our experiments, we measure validity. That is, the percentage of counterfactuals lying inside the tar-get Vt. Given VoICE (unweighted) optimises directly over Vt, its validity is guaranteed to be 100% by construction regardless of the number of clusters k.Our comparison therefore quantifies how often the CFCLUST counterfactual fails this same criterion. Where it does, we report repair cost, the squared distance from the invalid counterfactual to the cor-responding valid VoICE counterfactual, measuring the extent to which CFCLUST can report an appar-ently lower-cost counterfactual by stopping outside the true target Voronoi region when k > 2. 
+
+## 4.2 Clustering and weighting modes 
+
+The proposed framework operates on clustering structures induced by k-means, with feature weights optionally incorporated to reflect the relative impor-tance of each dimension in the cluster geometry. In our experiments, weights are obtained using Shapley Reweighted k-means (SHARK) [27], which decom-poses the k-means objective into per-feature within-cluster dispersion contributions and assigns weights inversely related to them, down-weighting noisy or high-variance features. These weights are incorpo-rated into the weighted distance function defined in Section 3. We adopt SHARK because it intro-duces no additional hyperparameters beyond those required by k-means, preserves the computational complexity of standard k-means, and aligns natu-rally with the geometric formulation used here. How-ever, our framework is not restricted to SHARK. Any method producing non-negative feature weights may be used, including entropy-based [17], regularisation-based [15], or adaptive weighting schemes [28]. We evaluate three modes. In Unweighted k-means, equal feature weights are used for cluster-ing, ranking, and counterfactual optimisation. In Ranked k-means, k-means centroids and equal-weight Voronoi geometry are retained, but SHARK-derived weights rank features for the parsimonious search. In Ranked + weighted SHARK, SHARK weights are used throughout, for clustering, ranking, Voronoi ge-ometry, and the counterfactual objective. Note that Unweighted k-means differs from VoICE (unweighted, Algorithm 1). The former retains the full feasibility bounds, contraction, and optimisation machinery of Algorithm 2, simply with uniform fea-ture weights, whereas the latter omits these mecha-nisms entirely. Given feature weighting can alter centroid loca-tions, Voronoi geometry, and cluster assignments, the same factual observation may be assigned to different source clusters, and the corresponding target regions may differ, across clustering formulations. Compar-isons between clustering formulations should there-fore be interpreted as comparisons between complete modelling pipelines, rather than as comparisons of explanation mechanisms applied to the same under-lying clustering. 
+
+## 4.3 Feasibility and actionability 
+
+Counterfactual generation is constrained to a fea-sible region encoding plausibility and actionabil-ity. In our experiments, F is constructed us-ing feature-wise bounds derived from the observed data, F = [min( X), max( X)], taken component-wise, which keeps counterfactuals within the empir-ical range of each feature and avoids extrapolation. This construction is simple and computationally effi-cient; alternatives such as convex hull approximations or neighbourhood-based constraints may be used de-pending on the application. Actionability is incorporated through binary fea-ture masks defined by the semantic interpretation of each feature, for example holding demographic attributes such as age immutable while allowing fi-nancial attributes to vary, formally enforced via the affine constraint EA(a) from Section 3.3. For each 9dataset we consider both fully actionable and par-tially constrained masks. For non-interventional datasets, such masks should be interpreted as re-strictions on profile-shift explanations rather than claims about real-world recourse. For mixed-type di-agnostic datasets, semantic masks are reported de-scriptively, but categorical and one-hot encoded vari-ables require additional validity constraints beyond the present weighted Euclidean formulation. 
+
+## 4.4 Datasets 
+
+We evaluate the proposed framework using a two-tier dataset strategy, summarised in Table 1 (includ-ing illustrative benchmark datasets present in the re-cent literature [23]). The first tier contains the pri-mary evaluation datasets used for the main quan-titative comparison. These datasets were selected because the weighted geometry remains sufficiently well behaved for the resulting counterfactuals, con-traction statistics, and feature-ranking behaviour to be interpreted as properties of a meaningful multi-variate clustering model. The second tier contains mixed-type diagnostic stress-test datasets. These datasets are retained to characterise failure modes of feature-weighted Euclidean geometry, particularly cases where feature weights collapse onto one or two binary or one-hot encoded indicators. The primary evaluation datasets (see Table 1) are well-understood and have low- to moderate-dimensional structure. This enables qualitative anal-ysis of Voronoi geometry, homothetic contraction, and directional counterfactual ranges. Palmer Pen-guins provides a similarly interpretable morphologi-cal dataset with partial cluster overlap. Breast Can-cer provides a higher-dimensional numerical bench-mark, making it useful for evaluating feature-normalised parsimony. Wholesale Customers pro-vides a behavioural segmentation setting based on six annual-spending variables. Channel and Region were excluded from the clustering matrix, while Region was retained separately as the ground-truth label for external evaluation. The clustering used k = 3, corre-sponding to the three Region classes. Counterfactu-als therefore represent changes in purchasing profiles rather than changes in geographical region or cus-Table 1: Dataset strategy used in the evaluation. Primary datasets are used for the main quantitative comparison, while diagnostic stress-test datasets are retained to analyse feature-weight concentration and mixed-type degeneracy.                                             
+
+> Degeneracy Dataset ndkrisk
+> Evaluation role: Primary
+> Iris [29] 150 43Low Wine [30] 178 13 3Low Palmer Penguins [31] 342 43Low Breast Cancer [32] 569 30 2Low Wholesale Cust. [33] a440 63Moderate
+> Evaluation role: Diagnostic stress test
+> Diabetes [34] 253,680 20 3High Obesity [35] 2,111 22 7High German Credit [36] 1,000 48 2High Heart Failure [37] 299 12 2High Student Perf. [38] 649 39 5High
+> aChannel and region were excluded from the data, while region was retained as the ground-truth label.
+
+Table 2: Clustering-solution diagnostics for the ex-perimental datasets. ARI is reported only where ex-ternal reference labels are available and is used as an external diagnostic rather than an optimisation cri-terion.                                                             
+
+> k-means SHARK Dataset ARI Inertia ARI Inertia
+> Iris 0.620 140.97 0.886 15.87 Wine 0.897 1,277.93 0.822 81.15 Palmer Penguins 0.793 379.39 0.609 86.41 Breast Cancer 0.654 11,595.53 0.718 341.58 Wholesale Customers 0.028 1,608.43 0.000 211.09 Diabetes 0.149 4,221,626.00 0.167 1.90 ×10 −11 a
+> Obesity 0.101 29,808.39 0.156 1.00 ×10 −11 a
+> German Credit 0.000 45,797.93 0.047 4.70 ×10 −11 a
+> Heart Failure -0.004 3,201.12 -0.005 1.10 ×10 −11 a
+> Student Performance 0.027 21,476.45 0.036 1.85 ×10 −11 a
+> aThe near-zero SHARK inertia indicates degeneracy caused by extreme feature-weight concentration, not near-perfect mul-tivariate clustering.
+
+tomer channel. The diagnostic stress-test datasets contain binary, ordinal, or one-hot encoded variables with direct se-mantic interpretation. Although such datasets are relevant to practical recourse settings, they also ex-pose an important limitation of the present weighted 10 Euclidean formulation. Under SHARK weighting, several of these datasets exhibit severe feature-weight concentration, causing the effective geometry to col-lapse onto a single binary feature or a small cate-gorical block. In such cases, near-zero contraction values should not be interpreted as evidence of com-pact multivariate cluster structure, but rather as a diagnostic indication of feature-weight degeneracy. Accordingly, primary aggregate results are re-ported on the first tier of datasets, with the diagnostic stress-test results reported separately in Section 5. 
+
+## 4.5 Evaluation metrics 
+
+We evaluate the proposed framework using metrics designed to assess validity, feasibility, intervention cost, parsimony, directional robustness, and feature-weight behaviour. 
+
+Validity. A counterfactual is considered valid if it is assigned to the intended target cluster under the clustering function used by the corresponding mode. We report the proportion of generated counterfactu-als that satisfy this condition. 
+
+Feasibility. We measure feasibility as the propor-tion of sampled factual–target pairs for which a fea-sible counterfactual can be generated under the spec-ified actionability and feasibility constraints. 
+
+Distance and cost. We evaluate perturbation magnitude using the weighted squared distance 
+
+Dω (a, z ⋆) between the factual observation a and the counterfactual z⋆, reflecting intervention cost in the weighted feature space. 
+
+Sparsity and parsimony. We evaluate explana-tion parsimony using two complementary measures: the number of feature values differing between the factual observation and the counterfactual (with a feature counted as changed when |z⋆j − aj | > ε for small tolerance ε), and the minimal intervention car-dinality r⋆ (Section 3.4). To compare datasets of different dimensionality, we additionally report the feature-normalised cardinality r⋆/d .
+
+Directional tolerance. We report the directional tolerance τ = ρ−1 (see Section 3.5), which quantifies the range of intervention magnitudes for which the counterfactual direction remains admissible. 
+
+Contraction diagnostics. For each cluster, we re-port the full-retention contraction factor α⋆t (see Sec-tion 3.2), together with the minimum, median, and maximum point-wise contraction scores αi,t . The me-dian score helps distinguish clusters whose members are generally boundary-adjacent from clusters with only a small number of boundary-adjacent observa-tions. 
+
+Feature-weight concentration. Because feature weights determine the weighted Voronoi geometry, we report feature-weight concentration diagnostics, including the maximum feature weight, the effective number of active features, and the dominant feature or feature block. These diagnostics are used to iden-tify cases where the weighted geometry collapses onto one or two binary or one-hot encoded indicators. For feature weights normalised so that Pdj=1 ωj =1, we define the effective number of active features as 
+
+deff = 1
+
+Pdj=1 ω2
+
+> j
+
+.
+
+This quantity equals d under uniform normalised fea-ture weights and approaches 1 when the weighted ge-ometry collapses onto a single feature. 
+
+External clustering agreement. Where external labels are available, we report the Adjusted Rand Index (ARI) as a diagnostic measure of agreement between the clustering solution and the reference la-bels. ARI was not used to optimise centroid loca-tions, feature weights, or counterfactuals, but it pro-vides useful context when interpreting the resulting cluster structure. 
+
+# 5 Results and discussion 
+
+This section analyses the results of our experiments, following the sampling procedure described in Sec-11 Table 3: Validity (Val) of CFCLUST against unweighted, least cost Voronoi-region based counterfactuals. All results use 50 independent k-means iterations. Comparisons are factual–target pairs generated across those iterations.                                                              
+
+> CFCLUST VoICE Dataset Comparisons Val (%) Repair Cost Val (%) Repair Cost
+> Iris 15,000 72.6 0.776 100.0 0.000 Wine 17,800 85.9 0.460 100.0 0.000 Palmer Penguins 34,200 73.8 0.427 100.0 0.000 Breast Cancer 28,450 100.0 0.000 100.0 0.000 Wholesale Customers 44,000 78.8 1.477 100.0 0.000 Diabetes 25,368,000 80.8 0.887 100.0 0.000 Obesity 633,300 71.9 0.463 100.0 0.000 German Credit 50,000 100.0 0.000 100.0 0.000 Heart Failure 14,950 100.0 0.000 100.0 0.000 Student Performance 129,800 68.8 0.521 100.0 0.000
+> Overall 26,335,500 80.6 0.870 100.0 0.000
+
+tion 4, repeated across all clustering modes, action-ability masks, and contraction settings. 
+
+## 5.1 Validity comparison 
+
+Table 3 compares pairwise bisecting-hyperplane counterfactuals of CFCLUST with the VoICE un-weighted (see Algorithm 1). VoICE achieves 100.0% validity by construction, since it optimises directly over the target Voronoi cell. This experiment tests whether CFCLUST also satisfies this criterion when more than two clusters are present, noting that for two-cluster solutions the pairwise bisector and the target Voronoi cell coincide. Across 26 ,335 ,500 factual–target comparisons over ten datasets, CFCLUST produced 21 ,221 ,926 valid counterfactuals and 5 ,113 ,574 invalid, corresponding to pooled validity of 80 .58% and a failure rate of 19 .42%. Because Diabetes contributes a substan-tial majority of all comparisons, the macro-averaged validity across datasets was also calculated and was 83.26%. Among invalid counterfactuals, the failure-weighted mean repair cost was 0.870, and the mean relative cost underestimation was 15.18%. For Wholesale Customers, the corresponding relative underestimation was 21.86%. 
+
+## 5.2 VoICE least-cost evaluation 
+
+Table 4 summarises the performance of VoICE (Al-gorithm 2) across the primary evaluation datasets. Nearly all features change under its least-cost optimi-sation regardless of dataset (99.4–100.0%), since the method is not constrained to a small feature subset. Intervention cost varies considerably across datasets, from 0.496 (Breast Cancer) to 7.532 (Wholesale Cus-tomers). Notably, directional tolerance does not fol-low the same ordering as cost. Breast Cancer com-bines the lowest intervention cost with the highest tolerance, whereas Wholesale Customers combines the highest cost with the lowest mean tolerance. This indicates that low-cost counterfactuals are not neces-sarily the most robust, so cost and tolerance should be considered jointly rather than relying on either alone. 
+
+## 5.3 Parsimony evaluation 
+
+Table 5 summarises the performance of VoICE’s most-parsimonious counterfactuals across the pri-mary evaluation datasets. To facilitate compari-son across datasets with different dimensionalities, we report both the raw minimal intervention car-dinality r⋆ and its feature-normalised version r⋆/d ,where d is the number of features. We do so be-cause raw cardinality can be misleading. For in-stance, Breast Cancer exhibits the highest mean r⋆
+
+12 Table 4: VoICE (Algorithm 2) performance on the primary evaluation datasets. All features are set as actionable, and results are averaged across the three modes (Unweighted k-means, Ranked k-means, and Ranked + weighted SHARK). Feasibility was 100.0% across all datasets and modes.                             
+
+> Dataset Changed Cost Mean directional Runtime features Dω(a, z ⋆)tolerance ( τ)(ms)
+> Iris 99.8% 1.258 2.144 3.1 Wine 99.4% 0.528 1.402 8.0 Palmer Penguins 100.0% 0.874 1.927 2.8 Breast Cancer 100.0% 0.496 2.812 9.4 Wholesale Customers 99.4% 7.532 1.271 3.8
+
+Table 5: VoICE parsimonious performance on the primary evaluation datasets. All features are set as actionable, results are averaged across the three modes (Unweighted k-means, Ranked k-means, and Ranked + weighted SHARK), and r⋆ is the mini-mal intervention cardinality. Feasibility was 100.0% across all datasets and modes.                            
+
+> Dataset Mean r⋆/d Single-feature Mean directional
+> r⋆feasibility (%) tolerance ( τ)Iris 1.79 0.448 35.3 0.697 Wine 3.28 0.252 8.0 0.222 Palmer Penguins 1.85 0.462 36.0 0.756 Breast Cancer 3.88 0.129 5.3 0.099 Wholesale Customers 2.29 0.382 44.0 1.024
+
+but its feature-normalised cardinality is the lowest among all datasets. This indicates that relatively few of its available features are required to achieve a feasible cluster transition. Table 6 reports feasibility of the most-parsimonious counterfactual as an increasing proportion of features are randomly set non-actionable. Feasibility degrades at different rates across datasets. Breast Cancer remains highly feasible even at 75% non-actionable features (88.7%), whereas Iris and Palmer Penguins drop sharply under the same constraint (24.0% and 24.7%). This loosely tracks the feature-normalised cardinality r⋆/d from Table 5. Table 6: Actionability sensitivity for most-parsimonious counterfactuals on the primary eval-uation datasets. Entries show feasibility rates un-der increasingly restrictive random non-actionability masks, averaged across the three modes with con-tracted target regions.                         
+
+> Non-actionable features (%) Dataset 0% 25% 50% 75%
+> Iris 100.0 93.3 66.7 24.0 Wine 100.0 100.0 98.7 39.3 Palmer Penguins 100.0 98.7 72.0 24.7 Breast Cancer 100.0 100.0 100.0 88.7 Wholesale Customers 100.0 94.7 86.0 60.0
+
+## 5.4 Contraction-based robustness 
+
+Table 7 reports α⋆t (the smallest contraction factor retaining all observed data points in a target clus-ter), and the median point-wise contraction score for each dataset under both Unweighted k-means and Ranked + weighted SHARK modes of VoICE (Al-gorithm 2). Breast Cancer is essentially invariant to mode, with median α⋆t changing only marginally (0.989 to 0.992), consistent with its insensitivity to mode reported in Section 5.2. Iris is the clearest ex-ception: SHARK weighting sharply reduces its min-imum α⋆t (0.851 to 0.305) and its median point-wise score (0.079 to 0.000), indicating that its target re-gions become substantially more contractible once feature weights concentrate on a small number of fea-tures. Wholesale Customers shows the highest me-dian point-wise scores among the primary datasets under both modes, with values of 0.274 for un-weighted k-means and 0.417 for ranked and weighted SHARK. This indicates that its cluster members sit less centrally within their bounded target regions, consistent with the comparatively large intervention costs reported in Table 4. 
+
+## 5.5 Weight-concentration stress tests 
+
+Table 8 reports feature-weight concentration and contraction for the primary and diagnostic stress-test datasets. The primary datasets retain multi-feature weighted geometries ( deff from 2.53 to 26.21), whereas several diagnostic datasets collapse onto a 13 Table 7: Contraction-based robustness for the primary evaluation datasets, where α⋆t is the smallest con-traction factor retaining all observed data points in a target cluster.                                                           
+
+> Dataset Mode Min α⋆tMedian α⋆tMax α⋆tMedian score
+> Iris Unweighted k-means 0.851 0.957 0.984 0.079 Ranked + weighted SHARK 0.305 0.861 0.928 0.000 Wine Unweighted k-means 0.891 0.915 0.945 0.127 Ranked + weighted SHARK 0.940 0.961 0.996 0.079 Palmer Penguins Unweighted k-means 0.677 0.958 0.989 0.105 Ranked + weighted SHARK 0.659 0.974 0.996 0.128 Breast Cancer Unweighted k-means 0.986 0.989 0.992 0.094 Ranked + weighted SHARK 0.992 0.992 0.992 0.079 Wholesale Customers Unweighted k-means 0.548 0.975 0.981 0.274 Ranked + weighted SHARK 0.931 0.991 0.999 0.417
+
+Table 8: Feature-weight concentration and contraction under SHARK-weighted clustering, where deff =1/ P 
+
+> j
+
+ω2 
+
+> j
+
+is the effective number of active features. Near-zero α⋆t coincides with datasets where feature weights are most concentrated ( deff ), suggesting weight concentration rather than genuine compactness.                                                          
+
+> Dataset Max ωdeff Top-2 mass Dominant feature/block α⋆trange
+> Evaluation role: Primary
+> Iris 0.452 2.53 0.880 petal width 0.305–0.928 Wine 0.150 10.40 0.295 OD280/OD315 0.940–0.996 Palmer Penguins 0.358 3.58 0.629 flipper length 0.659–0.996 Breast Cancer 0.065 26.21 0.122 concave points mean 0.992–0.992 Wholesale Customers 0.259 4.91 0.510 Grocery 0.931–0.999
+> Evaluation role: Diagnostic stress test
+> Diabetes 1.000 1.00 1.000 Stroke 0.000 Obesity 0.500 2.00 1.000 CALC block 0.000 German Credit 1.000 1.00 1.000 credit-history dummy 0.000 Heart Failure 1.000 1.00 1.000 smoking 0.000 Student Performance 0.500 2.00 1.000 Fjob block 0.000
+
+single feature (Diabetes, German Credit, Heart Fail-ure, deff = 1 .00) or a small categorical block (Obesity, Student Performance, deff = 2 .00). In these cases, near-zero α⋆t reflects compactness in the learned weighted subspace rather than the full feature space. This justifies treating the mixed-type datasets as di-agnostic stress tests rather than including them in the primary comparison, and motivates future work on categorical-aware distances, grouped feature weights, and regularisation of feature-weight concentration. 
+
+# 6 Conclusion 
+
+This paper introduced VoICE, a geometric frame-work for generating counterfactual explanations in feature-weighted k-means clustering by projecting onto weighted Voronoi regions rather than pairwise cluster boundaries. The framework combines ho-mothetic contraction, ranked actionable feature sub-sets, and directional counterfactual ranges within a unified optimisation formulation, and guarantees va-lidity by construction, unlike pairwise-boundary ap-proaches such as CFCLUST [23]. Across the primary evaluation datasets, VoICE produced feasible counterfactuals with well-behaved weighted geometries. The results show that interven-tion cost, cardinality, and directional tolerance cap-ture distinct and complementary aspects of explana-tion quality, feature-normalised cardinality r⋆/d re-vealed that datasets with the largest raw intervention 14 cardinality (e.g. Breast Cancer) could nonetheless be the most parsimonious relative to their dimension-ality, and low-cost counterfactuals were not always the most robust. The diagnostic stress-test datasets further showed that feature-weight concentration can cause contraction statistics to reflect a collapsed, low-dimensional subspace rather than genuine multivari-ate compactness, an important practical caveat for mixed-type data. A key direction for future work concerns mixed-type datasets with binary, ordinal, or one-hot en-coded features, where concentrated weights can col-lapse the geometry onto a small subset of features. Categorical-aware distances and grouped or regu-larised feature weights are promising directions here. 
+
+# References 
+
+[1] S. Wachter, B. Mittelstadt, and C. Russell, “Counterfactual explanations without opening the black box: Automated decisions and the gdpr,” Harvard Journal of Law & Technology ,vol. 31, pp. 841–887, 2017. [2] R. Guidotti, “Counterfactual explanations and how to find them: Literature review and bench-marking,” Data Mining and Knowledge Discov-ery , vol. 38, no. 5, pp. 2770–2824, 2024. [3] M. Ester, H.-P. Kriegel, J. Sander, and X. Xu, “A density-based algorithm for discovering clus-ters in large spatial databases with noise,” in 
+
+Proceedings of the Second International Confer-ence on Knowledge Discovery and Data Mining (KDD) , pp. 226–231, 1996. [4] R. J. G. B. Campello, D. Moulavi, and J. Sander, “Density-based clustering based on hierarchical density estimates,” in Advances in Knowledge Discovery and Data Mining (PAKDD) , pp. 160– 172, 2013. [5] J. C. Bezdek, R. Ehrlich, and W. Full, “Fcm: The fuzzy c-means clustering algorithm,” Com-puters & Geosciences , vol. 10, no. 2-3, pp. 191– 203, 1984. [6] G. J. McLachlan and D. Peel, “Finite mixture models,” Wiley Series in Probability and Statis-tics , 2000. [7] J. MacQueen, “Some methods for classification and analysis of multivariate observations,” in 
+
+Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability, Volume 1: Statistics , vol. 5, pp. 281–298, University of California Press, 1967. [8] A. M. Ikotun, A. E. Ezugwu, L. Abualigah, B. Abuhaija, and J. Heming, “K-means cluster-ing algorithms: A comprehensive review, vari-ants analysis, and advances in the era of big data,” Information Sciences , vol. 622, pp. 178– 210, 2023. [9] K. P. Sinaga and M.-S. Yang, “Unsupervised k-means clustering algorithm,” IEEE access ,vol. 8, pp. 80716–80727, 2020. [10] U. von Luxburg, “Clustering stability: An overview,” Foundations and Trends in Machine Learning , vol. 2, no. 3, pp. 235–274, 2009. [11] S. Ben-David, U. von Luxburg, and D. P´ al, “A sober look at clustering stability,” in Learning Theory , pp. 5–19, Springer, 2006. [12] S. Shalev-Shwartz and S. Ben-David, Under-standing Machine Learning: From Theory to Al-gorithms . Cambridge University Press, 2014. [13] C. M. Bishop, Pattern Recognition and Machine Learning . Springer, 2006. [14] Z. Deng, K.-S. Choi, Y. Jiang, J. Wang, and S. Wang, “A survey on soft subspace clustering,” 
+
+Information sciences , vol. 348, pp. 84–106, 2016. [15] S. Chakraborty and S. Das, “Detecting mean-ingful clusters from high-dimensional data: Astrongly consistent sparse center-based cluster-ing approach,” IEEE Transactions on Knowl-edge and Data Engineering , vol. 44, no. 6, pp. 2894–2908, 2022. 15 [16] E. Hancer, B. Xue, and M. Zhang, “A sur-vey on feature selection approaches for cluster-ing,” Artificial Intelligence Review , vol. 53, no. 6, pp. 4519–4545, 2020. [17] J.-Z. Huang, M. K. Ng, H. Rong, and Z. Li, “Au-tomated variable weighting in k-means type clus-tering,” IEEE Transactions on Pattern Analysis and Machine Intelligence , vol. 27, no. 5, pp. 657– 668, 2005. [18] M. A. Prado-Romero, B. Prenkaj, G. Stilo, and F. Giannotti, “A survey on graph counterfactual explanations: definitions, methods, evaluation, and research challenges,” ACM Computing Sur-veys , vol. 56, no. 7, pp. 1–37, 2024. [19] R. K. Mothilal, A. Sharma, and C. Tan, “Ex-plaining machine learning classifiers through di-verse counterfactual explanations,” in Proceed-ings of the 2020 Conference on Fairness, Ac-countability, and Transparency , pp. 607–617, 2020. [20] A. Van Looveren and J. Klaise, “Interpretable counterfactual explanations guided by proto-types,” Machine Learning , vol. 110, no. 5, pp. 1337–1355, 2021. [21] B. Ustun, A. Spangher, and Y. Liu, “Actionable recourse in linear classification,” in Proceedings of the Conference on Fairness, Accountability, and Transparency , pp. 10–19, 2019. [22] A. Karra, G. Vardakas, E. Pitoura, and A. Likas, “How much does cluster fairness cost? a counterfactual-based approach,” 2025. Manuscript in preparation or under review. [23] G. Vardakas, A. Karra, E. Pitoura, and A. Likas, “Counterfactual explanations for k-means and gaussian clustering,” in Proceedings of the IEEE International Conference on Tools with Artificial Intelligence , 2025. [24] F. Aurenhammer, “Voronoi diagrams—a sur-vey of a fundamental geometric data struc-ture,” ACM Computing Surveys , vol. 23, no. 3, pp. 345–405, 1991. [25] B. Delaunay, “Sur la sph` ere vide,” Izvestiya Akademii Nauk SSSR, Otdelenie Matematich-eskikh i Estestvennykh Nauk , pp. 793–800, 1934. [26] D.-T. Lee and B. J. Schachter, “Two algorithms for constructing a delaunay triangulation,” In-ternational Journal of Computer & Information Sciences , vol. 9, no. 3, pp. 219–242, 1980. [27] R. J. Fawley and R. C. de Amorim, “Shapley-inspired feature weighting in k-means with no additional hyperparameters,” Expert Systems with Applications , p. 133406, 2026. [28] B. Liu, X. Huang, W. Liu, and H. Yang, “A fea-ture weight self-adaptive clustering algorithm,” in 2016 12th International Conference on Natu-ral Computation, Fuzzy Systems and Knowledge Discovery (ICNC-FSKD) , pp. 875–880, IEEE, 2016. [29] R. A. Fisher, “The use of multiple measure-ments in taxonomic problems,” Annals of Eu-genics , vol. 7, no. 2, pp. 179–188, 1936. https: //archive.ics.uci.edu/dataset/53/iris .[30] S. Aeberhard, D. Coomans, and O. De Vel, “Wine data set.” UCI Machine Learning Repos-itory, 1991. https://archive.ics.uci.edu/ ml/datasets/wine .[31] A. M. Horst, A. P. Hill, and K. B. Gorman, 
+
+palmerpenguins: Palmer Archipelago (Antarc-tica) Penguin Data , 2020. R package version 0.1.0. [32] W. Wolberg, O. Mangasarian, N. Street, and W. Street, “Breast Cancer Wisconsin (Diagnos-tic).” UCI Machine Learning Repository, 1995. [Dataset]. [33] M. Cardoso, “Wholesale Customers.” UCI Ma-chine Learning Repository, 2013. [Dataset]. [34] “CDC Diabetes Health Indicators.” UCI Ma-chine Learning Repository, 2017. [Dataset]. [35] “Estimation of Obesity Levels Based On Eating Habits and Physical Condition.” UCI Machine Learning Repository, 2019. [Dataset]. 16 [36] Statlog Project, “German credit data.” UCI Machine Learning Repository, 1994. 
+
+https://archive.ics.uci.edu/ml/ datasets/statlog+(german+credit+data) .[37] UCI Machine Learning Repository, “Heart fail-ure clinical records dataset,” 2020. Dataset con-taining clinical records of 299 heart failure pa-tients with 13 features. [38] P. Cortez and A. Silva, “Using data min-ing to predict secondary school student per-formance.” UCI Machine Learning Reposi-tory, 2008. https://archive.ics.uci.edu/ ml/datasets/Student+Performance .17

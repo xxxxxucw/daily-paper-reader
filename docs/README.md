@@ -6,100 +6,89 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-16
-- 运行时间：2026-07-16 20:51:21 UTC
+- 最新运行日期：2026-07-18
+- 运行时间：2026-07-18 21:33:34 UTC
 - 运行状态：成功
-- 本次总论文数：26
-- 精读区：13
+- 本次总论文数：23
+- 精读区：10
 - 速读区：13
 
 ### 今日简报（AI）
-今日共阅读26篇论文，精读13篇，重点关注共形预测与因果推断的前沿方法。  
-最值得精读的是《ConRad: Efficient Conformal Prediction for Radiomics》（满分10）与《Manifold Constrained Conformal Prediction for Spatial Events》（9分），两者分别展示了共形预测在放射组学和空间事件中的高效应用。  
-建议普通读者优先跟进共形预测如何提升医学影像与空间数据的置信度评估，并留意结合贝叶斯或因果推断的扩展方向。
-- 详情：[/202607/16/README](/202607/16/README)
+今日精读10篇论文，重点聚焦因果发现与因果推理两大方向。最值得关注的是关于贝叶斯因果失效分析与基于Wasserstein距离的因果推断的两篇高分论文（均9.0/10）。建议优先精读这两篇，同时留意因果方法在恶意代码检测、情感分析等速读论文中的应用。
+- 详情：[/202607/18/README](/202607/18/README)
 
 ### 精读区论文标签
-1. [ConRad: Efficient Conformal Prediction for Radiomics](/202607/16/2607.08084v1-conrad-efficient-conformal-prediction-for-radiomics)  
-   标签：评分：10.0/10、query:cp
-   evidence：放射组学目标的分布无关共形预测框架
-2. [Manifold Constrained Conformal Prediction for Spatial Events](/202607/16/2607.10008v1-manifold-constrained-conformal-prediction-for-spatial-events)  
+1. [How Does Bayesian Causal Discovery Fail? Characterising Structural Consequences in Linear Gaussian Networks under Latent Confounding](/202607/18/2607.09449v2-how-does-bayesian-causal-discovery-fail-characterising-structural-consequences-in-linear-gaussian-networks-under-latent-confounding)  
+   标签：评分：9.0/10、query:causal-infer
+   evidence：分析贝叶斯因果发现在潜在混淆下的后验行为
+2. [Contrast-Free ICA and Causal Inference via Wasserstein Distances to the Gaussian](/202607/18/2607.12832v1-contrast-free-ica-and-causal-inference-via-wasserstein-distances-to-the-gaussian)  
+   标签：评分：9.0/10、query:causal-infer
+   evidence：基于Wasserstein距离的线性非高斯无环模型因果推断
+3. [Certified Domain Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees](/202607/18/2607.14157v1-certified-domain-consistency-for-multi-domain-retrieval-label-free-per-domain-contamination-control-with-conformal-risk-guarantees)  
    标签：评分：9.0/10、query:cp
-   evidence：针对空间事件的具有理论保证的共形预测
-3. [Whom Should a Platform Amplify? Truth, Engagement, and Networked Polarization](/202607/16/2607.10228v1-whom-should-a-platform-amplify-truth-engagement-and-networked-polarization)  
+   evidence：用于多域检索污染的保形风险控制
+4. [Counterfactual Optimal Action Trees (COAT): Interpretable Prescriptive Policies from Observational Data](/202607/18/2607.14318v1-counterfactual-optimal-action-trees-coat-interpretable-prescriptive-policies-from-observational-data)  
    标签：评分：9.0/10、query:two-sided
-   evidence：网络协调博弈中的平台扩音设计
-4. [AI YOU Town: Make Friends and Money with Your Digital Twin](/202607/16/2607.10539v1-ai-you-town-make-friends-and-money-with-your-digital-twin)  
+   evidence：将反事实结果估计应用于航空辅助定价（双边市场）
+5. [Learning Who to Treat When Treatment is Missing](/202607/18/2607.14346v1-learning-who-to-treat-when-treatment-is-missing)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：将处理效应估计器扩展到缺失数据情境下的政策学习
+6. [CausalGraphX: A Counterfactual Graph Neural Network Framework for Explainable Systemic Risk Assessment](/202607/18/2607.14416v1-causalgraphx-a-counterfactual-graph-neural-network-framework-for-explainable-systemic-risk-assessment)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：反事实图神经网络框架用于可解释的系统性风险评估
+7. [Adaptive Ad Load Design for Sponsored Search Markets: Evidence, Theory, and Deployment](/202607/18/2607.14418v1-adaptive-ad-load-design-for-sponsored-search-markets-evidence-theory-and-deployment)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：在安卓应用商店进行大规模随机现场实验，评估广告加载量对收入和用户结果的因果效应
+8. [Accelerating A/B-Tests with Counterfactual Estimation: Reducing Variance through Policy Overlap](/202607/18/2607.14604v1-accelerating-ab-tests-with-counterfactual-estimation-reducing-variance-through-policy-overlap)  
+   标签：评分：9.0/10、query:two-sided
+   evidence：在线平台A/B测试中基于反事实估计的方差缩减
+9. [Finite-Sample Conformal Coverage Recovery via Fusion under Degraded Local Guarantees in Occupancy Map Estimation](/202607/18/2607.14906v1-finite-sample-conformal-coverage-recovery-via-fusion-under-degraded-local-guarantees-in-occupancy-map-estimation)  
    标签：评分：9.0/10、query:cp
-   evidence：使用共形预测进行个性推断
-5. [When Screening Misleads: A Robust Mendelian Randomization Test for Reliable Causal Discovery](/202607/16/2607.10755v1-when-screening-misleads-a-robust-mendelian-randomization-test-for-reliable-causal-discovery)  
+   evidence：有限样本共形覆盖，退化局部保证下的融合
+10. [Causal Inference for Sequential Settings under Interference and Latent Confounding](/202607/18/2607.14940v1-causal-inference-for-sequential-settings-under-interference-and-latent-confounding)  
    标签：评分：9.0/10、query:two-sided
-   evidence：稳健的孟德尔随机化检验用于因果效应估计
-6. [Causal Estimation of Share-Induced Engagement with Flywheel Effects](/202607/16/2607.10820v1-causal-estimation-of-share-induced-engagement-with-flywheel-effects)  
-   标签：评分：9.0/10、query:two-sided
-   evidence：平台市场中考虑干扰的因果效应估计
-7. [The Spectral Structure of Latent Treatment Effects](/202607/16/2607.10926v1-the-spectral-structure-of-latent-treatment-effects)  
-   标签：评分：9.0/10、query:two-sided
-   evidence：在未观测混杂下识别异质性处理效应
-8. [CDFM: Towards a General-Purpose Causal Discovery Foundation Model](/202607/16/2607.11508v1-cdfm-towards-a-general-purpose-causal-discovery-foundation-model)  
-   标签：评分：9.0/10、query:causal-infer
-   evidence：因果发现基础模型
-9. [DAG-FM: A Foundation Model for Causal Discovery under Heterogeneous Causal Mechanisms](/202607/16/2607.11510v1-dag-fm-a-foundation-model-for-causal-discovery-under-heterogeneous-causal-mechanisms)  
-   标签：评分：9.0/10、query:causal-infer
-   evidence：基于表格数据的因果发现基础模型
-10. [Relaxing Faithfulness with Intervention-Only Causal Discovery](/202607/16/2607.11816v1-relaxing-faithfulness-with-intervention-only-causal-discovery)  
-   标签：评分：9.0/10、query:causal-infer
-   evidence：利用干预进行因果发现，无需忠实性假设
-11. [Causal Graphs, Markov Properties and Do-calculus for Stochastic Differential Equations](/202607/16/2607.12140v1-causal-graphs-markov-properties-and-do-calculus-for-stochastic-differential-equations)  
-   标签：评分：9.0/10、query:causal-infer
-   evidence：为随机微分方程建立因果图和do演算
-12. [Falsifying Causal Graphs With Outlier Events](/202607/16/2607.12145v1-falsifying-causal-graphs-with-outlier-events)  
-   标签：评分：9.0/10、query:two-sided
-   evidence：提出使用异常事件伪造因果图的统计检验
-13. [Estimation and Inference for Latent Dual Networks Using High-Dimensional IV Screening](/202607/16/2607.13862v1-estimation-and-inference-for-latent-dual-networks-using-high-dimensional-iv-screening)  
-   标签：评分：9.0/10、query:two-sided
-   evidence：面向平台市场的潜在双重网络估计
+   evidence：干扰和潜在混淆下的因果推断，序贯设置
 
 ### 速读区论文标签
-1. [Causal Optimizer Interaction Calculus: Hidden Geometric Relaxation and Identifiable Interventions](/202607/16/2607.07206v2-causal-optimizer-interaction-calculus-hidden-geometric-relaxation-and-identifiable-interventions)  
+1. [Which Neurons Detect Malicious Code? A Probing Study of LLM Security Knowledge](/202607/18/2607.10221v1-which-neurons-detect-malicious-code-a-probing-study-of-llm-security-knowledge)  
    标签：评分：8.0/10、query:causal-infer
-   evidence：为优化器实验开发因果演算
-2. [Scalable Bayesian structure learning of directed acyclic graphs via Laplace approximation, with an application to breast cancer gene expression networks](/202607/16/2607.10222v1-scalable-bayesian-structure-learning-of-directed-acyclic-graphs-via-laplace-approximation-with-an-application-to-breast-cancer-gene-expression-networks)  
+   evidence：通过因果干预定位LLM中与安全相关的关键神经元
+2. [Causal Supervision of Attention for Affective Behaviour Analysis](/202607/18/2607.12091v2-causal-supervision-of-attention-for-affective-behaviour-analysis)  
    标签：评分：8.0/10、query:causal-infer
-   evidence：使用拉普拉斯近似的可扩展贝叶斯有向无环图结构学习，应用于基因表达网络
-3. [Bayesian Robustness Values for Modern Causal Panel Estimators via Riesz Representations](/202607/16/2607.10276v1-bayesian-robustness-values-for-modern-causal-panel-estimators-via-riesz-representations)  
+   evidence：因果注意力监督
+3. [Causal Supervision of Attention for Affective Behaviour Analysis](/202607/18/2607.12091v3-causal-supervision-of-attention-for-affective-behaviour-analysis)  
+   标签：评分：8.0/10、query:causal-infer
+   evidence：因果注意力监督
+4. [MixCIT: A Kernel Based Local-Polynomial Debiased Test for Conditional Independence on Mixed-Type Data](/202607/18/2607.12830v1-mixcit-a-kernel-based-local-polynomial-debiased-test-for-conditional-independence-on-mixed-type-data)  
+   标签：评分：8.0/10、query:causal-infer
+   evidence：提出基于核的混合类型数据条件独立性检验，可用于因果发现
+5. [Resist and Update: Counterfactual Report Coordinates for Incentive-Compatible LLMs](/202607/18/2607.12985v1-resist-and-update-counterfactual-report-coordinates-for-incentive-compatible-llms)  
+   标签：评分：8.0/10、query:causal-infer
+   evidence：通过反事实中介实现LLM报告的因果契约
+6. [LOTAPO: Leave-One-Turn Attribution for Self-Generated Process Rewards in Multi-Turn Search Reasoning](/202607/18/2607.13501v2-lotapo-leave-one-turn-attribution-for-self-generated-process-rewards-in-multi-turn-search-reasoning)  
+   标签：评分：8.0/10、query:causal-infer
+   evidence：留一轮反事实归因方法用于进程奖励
+7. [Causal Discovery of Radiation Response Mechanisms in Human Cells](/202607/18/2607.13994v1-causal-discovery-of-radiation-response-mechanisms-in-human-cells)  
+   标签：评分：8.0/10、query:causal-infer
+   evidence：辐射反应的因果发现
+8. [Deep-learning Causal Retrieval Optimization for Efficient e-commerce Distribution in Pinterest](/202607/18/2607.14161v1-deep-learning-causal-retrieval-optimization-for-efficient-e-commerce-distribution-in-pinterest)  
    标签：评分：8.0/10、query:two-sided
-   evidence：因果面板估计器结合Riesz表示的敏感性分析方法
-4. [Integrating Background Knowledge for Scalable Causal Discovery](/202607/16/2607.10456v1-integrating-background-knowledge-for-scalable-causal-discovery)  
-   标签：评分：8.0/10、query:causal-infer
-   evidence：集成专家背景知识以改进可扩展的因果发现
-5. [Proximal Identification and Estimation in Front-Door Causal Structures with Unobserved Confounding of the Mediator](/202607/16/2607.10515v1-proximal-identification-and-estimation-in-front-door-causal-structures-with-unobserved-confounding-of-the-mediator)  
+   evidence：在Pinterest平台部署因果提升模型优化电商分发
+9. [Probability of worthwhile effect of monotone-response treatments](/202607/18/2607.14414v1-probability-of-worthwhile-effect-of-monotone-response-treatments)  
    标签：评分：8.0/10、query:two-sided
-   evidence：前门准则的近端推广用于因果识别
-6. [Representation Learning for Semiparametric Causal Mediation Analysis under No Essential Heterogeneity](/202607/16/2607.10540v1-representation-learning-for-semiparametric-causal-mediation-analysis-under-no-essential-heterogeneity)  
-   标签：评分：8.0/10、query:two-sided
-   evidence：结合深度表征学习与G估计进行因果中介分析
-7. [CRiT-QA: Evaluating Multi-hop Reasoning with Counterfactual Chains and Distractor Traps](/202607/16/2607.10562v1-crit-qa-evaluating-multi-hop-reasoning-with-counterfactual-chains-and-distractor-traps)  
-   标签：评分：8.0/10、query:causal-infer
-   evidence：利用反事实链评估多跳推理
-8. [Demonstration of the common dual-channel feature decoupling characteristic of front-door mediation causal inference methods in whole-slice image classification](/202607/16/2607.12376v1-demonstration-of-the-common-dual-channel-feature-decoupling-characteristic-of-front-door-mediation-causal-inference-methods-in-whole-slice-image-classification)  
-   标签：评分：8.0/10、query:causal-infer
-   evidence：将因果推断多示例学习应用于图像分类，实现特征解耦
-9. [Eigenvalue Calibration for Semantic Embeddings of Large Language Models](/202607/16/2607.08377v1-eigenvalue-calibration-for-semantic-embeddings-of-large-language-models)  
-   标签：评分：7.0/10、query:cp
-   evidence：通过特征值校准进行大模型不确定性量化
-10. [Inference for Fixed Effects Estimators when Panels are Unbalanced](/202607/16/2607.10246v1-inference-for-fixed-effects-estimators-when-panels-are-unbalanced)  
+   evidence：在单调响应假设下给出治疗效应概率的上下界
+10. [MafiaScope: Non-Invasive, Time-Resolved Belief Probing for LLM Agents in Social Deduction Games](/202607/18/2607.10645v1-mafiascope-non-invasive-time-resolved-belief-probing-for-llm-agents-in-social-deduction-games)  
+   标签：评分：7.0/10、query:causal-infer
+   evidence：在社会推理游戏中反事实评估LLM代理信念
+11. [Efficient Online Proportional Sampling with Applications to Smoothed Online Learning](/202607/18/2607.10963v1-efficient-online-proportional-sampling-with-applications-to-smoothed-online-learning)  
    标签：评分：7.0/10、query:two-sided
-   evidence：非平衡面板数据固定效应估计量的推断，属于因果推断方法
-11. [Calibrated Horizon-Weighted Local Projection Designs for Markov Switchbacks](/202607/16/2607.11694v1-calibrated-horizon-weighted-local-projection-designs-for-markov-switchbacks)  
-   标签：评分：7.0/10、query:two-sided
-   evidence：用于马尔可夫切换实验的时间分配设计
-12. [Auditing Machine-Learning Models and Their Training Data with Explainability and First-Principles Verification: Application to Spin Hall Conductivity](/202607/16/2607.09910v1-auditing-machine-learning-models-and-their-training-data-with-explainability-and-first-principles-verification-application-to-spin-hall-conductivity)  
-   标签：评分：6.0/10、query:causal-infer
-   evidence：在材料模型审计中使用反事实偏依赖分析
-13. [OrDA: Orthogonal Disentanglement of Access Habits Framework for Homepage Marketing Block Recommendations](/202607/16/2607.13420v1-orda-orthogonal-disentanglement-of-access-habits-framework-for-homepage-marketing-block-recommendations)  
-   标签：评分：6.0/10、query:two-sided
-   evidence：使用do-calculus进行因果干预的推荐框架
+   evidence：在线比例采样在委托代理博弈定价和合同设计中的应用
+12. [Constraint-Aware Counterfactual Editing for Aspect-Based Sentiment Analysis](/202607/18/2607.13977v1-constraint-aware-counterfactual-editing-for-aspect-based-sentiment-analysis)  
+   标签：评分：7.0/10、query:causal-infer
+   evidence：约束感知的反事实编辑用于方面级情感分析
+13. [Counterfactuals for Feature-Weighted Clustering](/202607/18/2607.14719v1-counterfactuals-for-feature-weighted-clustering)  
+   标签：评分：7.0/10、query:causal-infer
+   evidence：通过Voronoi投影为特征加权聚类生成反事实解释
 
 
 <div class="dpr-home-promo-card">

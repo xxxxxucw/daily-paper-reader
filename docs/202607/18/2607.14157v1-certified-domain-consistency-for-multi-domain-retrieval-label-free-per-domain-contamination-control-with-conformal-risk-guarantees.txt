@@ -1,0 +1,794 @@
+Title: Certified Domain Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees
+
+URL Source: https://arxiv.org/pdf/2607.14157v1
+
+Published Time: Fri, 17 Jul 2026 00:03:02 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 
+
+## JAYAKUMAR MANOHARAN, Electric Power Research Institute (EPRI), USA 
+
+Retrieval over corpora that mix several domains often returns relevant but wrong-domain evidence that ranking metrics miss and that conformal risk control bounds only marginally, under-covering the worst domains. This work introduces C3R, a drop-in control layer that, from an inferred domain posterior and no query-time label, certifies a per-domain contamination budget where feasible and otherwise abstains rather than silently violating; on the hardest domains it guarantees a reduction, not a tight bound. The core is a two-split scheme built on risk-controlling prediction sets, whose finite-sample transfer bound crosses from the inferred to the true domain with fully estimable slack, supports heterogeneous budgets, and inverts for deployment. Population validity rests on this bound and a controlled simulation; across a thousand resampled calibrations the certificate never violates (a stability result) while marginal control violates the most-contaminated domain in every draw, and soft demotion retains more recall than the strongest calibrated cascade at equal certified contamination. The method replicates across open testbeds including an independent one from public federal regulations, and an LLM-judged downstream probe indicates wrong-authority grounding rises with contamination and falls under control. The layer is frozen-stack and reranker-agnostic. CCS Concepts: • Information systems → Information retrieval .Additional Key Words and Phrases: multi-domain retrieval, conformal risk control, contamination, certified guarantees, retrieval-augmented generation 
+
+1 INTRODUCTION 
+
+Modern retrieval systems index heterogeneous corpora that span many domains - bodies of documents that share technical vocabulary yet differ in scope and authority. A dense or hybrid retriever trained for semantic relevance will happily return a document that is topically close but belongs to the wrong domain: a query about a financial instrument retrieves a biomedical trial report, a scientific-claim query retrieves a nutrition abstract. We call the fraction of top-ranked results drawn from a domain other than the query’s domain its contamination rate . In retrieval-augmented pipelines [ 33 ] this is not a cosmetic problem - wrong-domain evidence is passed verbatim to a downstream reader or analyst - and in high-stakes settings such as regulated industries (nuclear and grid operations, finance, medicine), where a retrieved document carries operational or legal authority, contamination is a first-order risk. Those regulated settings motivate this work; our evaluation, however, is on public multi-domain corpora, and we are explicit throughout about that scope. Two facts make contamination hard to control. First, standard ranking metrics (Recall@ 𝐾 , nDCG@ 𝐾 ) are blind to it: a wrong-domain document that is topically relevant inflates them. Second, the natural statistical tool - conformal risk control [ 4], which can bound the expectation of any bounded loss with finite-sample, distribution-free guarantees -delivers only a marginal bound, averaged over all queries. We show empirically that contamination is sharply asymmetric 
+
+across domains (Figure 1a): on our testbed it ranges from 0.01 on the cleanest domain to 0.63 on the most contaminated. A single marginal budget is therefore the wrong object: tuned to the average, it leaves the worst domain badly under-covered, and tuned to the worst domain, it needlessly over-filters the rest. What practitioners want is a per-domain 
+
+budget. The obstacle is that a per-domain guarantee seems to require the query’s domain, and at inference time we do not have it - production queries arrive unlabeled.  
+
+> Author’s address: Jayakumar Manoharan, Electric Power Research Institute (EPRI), Charlotte, NC, USA, jmanoharan@epri.com. Manuscript submitted to ACM
+
+1arXiv:2607.14157v1 [cs.LG] 14 Jul 2026 2 Jayakumar Manoharan Existing machinery does not close this gap. Group-conditional conformal methods [ 7 , 22 ] assume the group is 
+
+observed (or computable from the input) at test time. Routing and instruction-conditioned retrievers [ 31 , 58 ] infer a domain but offer no statistical guarantee on contamination. Conformal methods for retrieval-augmented generation [ 28 ]certify a different quantity (generation risk) and remain marginal. None controls a bounded retrieval loss , per latent domain , with heterogeneous budgets .
+
+Contributions. We close that gap with C3R (Certified Contamination Control for Retrieval). We are deliberately narrow about what is claimed: we do not solve domain-aware retrieval in general, and we do not improve ranking quality. We certify one specific, bounded loss - cross-domain contamination - under inferred query domains, with explicit and fully estimable router-error slack. Our contributions map one-to-one to the sections that establish them. (1) A label-free per-domain contamination certificate (Section 4). We give a two-split conformal scheme whose first split bounds the domain router’s two error rates and whose independent second split calibrates a demotion threshold, yielding a finite-sample transfer bound from the inferred domain to the true domain (Theorem 1). The bound’s slack is fully estimable - no oracle assumption on the router - supports heterogeneous per-domain budgets, and inverts through a budget-rescaling corollary. This extends the estimated-group conditional-coverage line from set coverage to risk control of a bounded loss .(2) A frozen-stack drop-in control layer (Section 5). C3R attaches to any hybrid BM25 [ 43 ]-plus-dense [ 29 ]-plus-reranker [ 39 ] stack without retraining it: a lightweight domain probe produces the posterior, and a mismatch-score 
+
+soft demotion enforces the certificate. We show that soft demotion breaks the classifier-error floor of hard filtering (Lemma 1), and validate that it retains substantially more recall at equal certificate (Section 6). (3) BEIR-MIX: an open multi-domain contamination testbed, plus the CSCR metric and code (Section 3, Section 6). We assemble a public benchmark from four BEIR datasets in which domain is the genuine ground-truth source, exposing the asymmetric contamination phenomenon; we provide a publicly released artifact that reproduces the assembly and evaluation code. (4) Generalization across a contamination spectrum, including a regulated-domain testbed (Section 6, Table 2). 
+
+We replicate on three further open mixes that bracket the contamination regime - among them Sector-Bench ,built from public US federal regulation, our one fully independent pool, since Mix-D reuses three of Mix-A’s four corpora and Mix-C is near-clean by construction - and show the certificate holds at every point. We also find that contamination tracks inter-domain subject overlap rather than mere topical adjacency: deliberately adjacent technical forums stay clean, while a same-subject cluster contaminates sharply. 
+
+Results preview. On BEIR-MIX, C3R incurs zero per-domain certificate violations across 1000 resampled calibrations, while marginal conformal risk control violates the most-contaminated domain in 100% of draws and a second domain in 53% (Table 6); a simulation reproduces this across 360 ,000 checks (Figure 3). At equal certified contamination and tight budgets ( 𝛼 ≤ 0.5) on contaminated domains, C3R’s soft demotion retains up to ∼ 6× more Recall@10 than the strongest calibrated cascade (Figure 4); on clean domains all methods tie. A stronger reranker improves ranking but leaves contamination essentially unchanged (Table 7), confirming that contamination is orthogonal to ranking quality and that a dedicated certified layer is needed. The certificate is stable without a single violation across four open testbeds spanning the contamination spectrum (Table 2); since two of these pools share corpora, population validity rests on Theorem 1 and the simulation, and we lean on the independent Sector-Bench as the cross-domain check. The soft-demotion advantage replicates on an independent high-contamination pool. 
+
+> Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 3We are candid up front about the regime this buys, because it bears on the high-stakes framing above. The guarantee is bounded by router quality: the misrouted-mass term ¯𝜌𝐵 is a hard floor on the tightest certifiable budget, so on a 
+
+heavily contaminated domain at a strict budget the method abstains (returns nothing) rather than violate, and the tight, feasible certificates land on clean and moderately-contaminated domains. What it delivers on the hardest domains is a certified reduction - e.g. guaranteeing contamination ≤ 0.4 where the uncontrolled rate is 0.63 - not always a tight bound; tightening it requires a stronger domain router, which we do not claim to provide. We treat this as a feature: the limit is visible in the estimated router error rather than hidden in a silent violation. On the downstream side, an LLM-judged probe across three readers (Section 6), which we present as proxy-only motivation rather than as primary evidence, suggests the harm hides from the obvious metric: answers stay topically on-domain, yet the rate at which they ground in wrong-authority evidence rises with retrieval contamination, and C3R reduces it for the weaker readers (the strongest reader’s reduction is directional but not statistically significant at this sample size). And even where a reader is robust, the retrieved evidence is itself an auditable object exposed to users, logs, compliance workflows, and human analysts. The certificate’s value is therefore both a measured downstream reduction and an auditable guarantee on the surfaced evidence - we lead with the latter because it holds regardless of which consumer sits downstream. 
+
+2 RELATED WORK 
+
+Conformal prediction with noisy or latent groups. Conformal prediction [ 2, 32 , 54 ] yields distribution-free coverage, and a recent line strengthens it from marginal to group-conditional . Gibbs, Cherian and Candès [ 22 ] obtain exact coverage over a finite class of covariate shifts, including subgroups - but the subgroup must be a function of the observed input at test time. Kandinsky conformal prediction [ 7] and group-weighted conformal [ 12 ] handle overlapping or fractional (estimated) group membership, and posterior conformal prediction [ 61 ] targets clusters discovered in the data; all three certify set coverage , not the expectation of a bounded loss, and none provides a transfer statement to a true latent group with quantified, estimable slack. The classical route to group-conditional validity is Mondrian conformal prediction [ 53 ], which partitions calibration by an observed category, and the covariate-shift reweighting view [ 50 ]; the calibration-fairness literature pursues a related aim through multicalibration [ 23 ] and adversarially multivalid prediction [ 9]. These hold across many groups at once but, like adaptive conformal sets [ 44 , 45 ], target coverage and assume the conditioning group is computable at test time. A parallel thread studies conformal prediction under label noise : Sesia, Wang and Tong [ 46 ] and Einbinder et al. [ 17 ] correct for contamination in the calibration labels . This is a different locus of noise from ours: our calibration domain labels are clean, and the uncertainty is in the 
+
+test-time domain, which is never observed. Our transfer bound is therefore not a corollary of label-noise correction, nor of Kandinsky-style weighting, which gives coverage rather than risk and never crosses from the inferred to the true group. 
+
+Conformal risk control and retrieval reliability. Conformal risk control [ 4] extends conformal prediction to the expectation of any bounded, monotone loss; we build directly on it. The Learn-then-Test framework [ 3] generalizes risk control to non-monotone losses through multiple testing, and conformal language modeling [ 40 ] carries the risk-control view into generation. C-RAG [ 28 ] applies it to retrieval-augmented generation, but certifies generation risk and remains marginal. Conformal context filtering [ 14 ] guarantees relevance coverage of retrieved context, again marginal and about a different quantity. Group-conditional risk control exists for observed strata - e.g. adaptive risk control over image partitions [ 34 ] - but assumes the group is known at test time. Table 8 maps these settings against ours: no prior method combines (i) risk control of a bounded loss, (ii) a latent test-time group, and (iii) heterogeneous per-group budgets. 
+
+> Manuscript submitted to ACM
+
+4 Jayakumar Manoharan Because exact conditional coverage with a continuous conditioning variable is impossible in finite samples [ 8], we target 
+
+approximate group-conditional control with quantified, estimable slack, which is achievable. Our certify-or-abstain rule, which returns nothing on a domain whose router floor exceeds its budget, is a distribution-free analogue of selective prediction [21] lifted to a per-domain risk certificate. 
+
+Retrieval-augmented generation: reliability and threats. Retrieval-augmented generation [ 27 , 33 , 47 ] grounds a lan-guage model in retrieved evidence, and a large literature now targets its reliability : self-reflective retrieval [ 6], faithfulness metrics such as RAGAS [ 18 ] and FActScore [ 36 ], and broad surveys of the design space [ 20 ]. A complementary security line treats the retrieval corpus itself as an attack surface: adversarial passage injection [ 62 ] and knowledge-corruption attacks [ 63 ] plant documents that a relevance-tuned retriever will surface. Cross-domain contamination is the benign, naturally-occurring counterpart of these adversarial threats - wrong-provenance evidence that no attacker placed - and, unlike faithfulness metrics that score the generated answer post hoc , C3R certifies a property of the retrieved set before any reader consumes it. 
+
+Multi-domain retrieval, routing, and domain-aware encoders. Hybrid retrieval fuses sparse and dense [ 29 , 30 ] signals through rank fusion [ 16 ] and is the standard production stack. To handle heterogeneity, RouterRetriever [ 31 ] routes a query to a domain-expert encoder, and instruction-conditioned retrievers [ 5, 58 ] condition the query encoding on a natural-language instruction; both improve relevance but provide no guarantee on cross-domain contamination, and a routed or instructed retriever can itself be wrapped by our control layer. A fast-growing line at the major IR venues makes retrieval-augmented pipelines robust to imperfect retrieval rather than guaranteeing it: robust fine-tuning against retrieval defects [ 51 ], mixture-of-expert dense retrieval [ 48 ], and learned query routing across multiple retrieval-augmented language models [ 60 ] all adapt the model or the routing to tolerate noise, but none certifies abounded contamination rate, and each is composable with the certified layer we propose. Domain adaptation for dense retrieval [ 26 , 56 ] and concept-erasure methods [ 11 , 41 ] reshape the embedding space but likewise do not certify a contamination rate. C3R is complementary: it is a thin, certified layer that sits on top of any such stack. 
+
+Positioning within recent IR-venue work. The threads above span the venues most relevant to this paper. From the retrieval side, the production hybrid stack (sparse-plus-dense with rank fusion [ 16 ] and cross-encoder reranking [ 39 ]) and its domain-adaptation [ 56 ] and routing [ 31 , 60 ] variants are SIGIR/CIKM/WWW staples, and the most recent reliability work, robust fine-tuning against retrieval defects [ 51 ] (SIGIR 2025) and mixture-of-expert dense retrieval [ 48 ], targets exactly the imperfect-retrieval regime we operate in, but optimizes the model rather than certifying an outcome. From the statistics side, the conditional-coverage and risk-control lineage [ 3, 4 , 7, 12 , 22 , 53 , 61 ] gives validity over 
+
+observed groups, and its retrieval-facing instances [ 14 , 28 , 34 ] either certify generation risk or assume the group is known at test time. C3R is, to our knowledge, the first to bring distribution-free risk control to a latent retrieval group with heterogeneous budgets, and it composes with, rather than competes against, the relevance-improving methods above: any of them can serve as the frozen stack underneath the certified layer. 
+
+3 PROBLEM SETUP AND BENCHMARK 
+
+Domains and contamination. Let C = {1, . . . , 𝐶 } be a set of domains . Every document 𝑑 and every query 𝑞 has a true domain label 𝑦 (𝑑 ), 𝑦 (𝑞 ) ∈ C . In our benchmark a domain is the document’s source corpus - a real, objective ground-truth label, not a stand-in for some hidden taxonomy. For a query 𝑞 with retrieved top-𝐾 list 𝑅 𝐾 (𝑞 ), the Cross-Domain 
+
+> Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 5Contamination Rate is 
+
+CSCR@ 𝐾 (𝑞 ) = 1
+
+|𝑅 𝐾 (𝑞 )| ∑︁ 𝑑 ∈𝑅 𝐾 (𝑞 )
+
+1{𝑦 (𝑑 ) ≠ 𝑦 (𝑞 )} , (1) the fraction of returned results from a domain other than the query’s. It is bounded in [0, 1] and, crucially, is measured against true document provenance, independent of any model’s prediction. The per-domain contamination risk is 
+
+E[CSCR@ 𝐾 (𝑞 ) | 𝑦 (𝑞 ) = 𝑐 ].
+
+The label-free constraint. At calibration time we have a held-out set of queries with known domain labels. At inference 
+
+time the query’s domain 𝑦 (𝑞 ) is unknown; we only have an estimate from a domain probe (Section 5). A method is 
+
+label-free if it never uses 𝑦 (𝑞 ) to serve a query. The marginal alternative - one threshold for all queries - is label-free but, as we show, cannot honor a per-domain budget. 
+
+BEIR-MIX (Mix-A).. We assemble our main open multi-domain testbed - BEIR-MIX , also called Mix-A in the generalization study (Table 2) - by pooling four BEIR datasets [ 49 ] whose corpora are disjoint in subject matter: FiQA (finance) [ 35 ], TREC-COVID (biomedical) [ 52 ], SciFact (scientific claims) [ 55 ], and NFCorpus (nutrition/medical) [ 13 ]. The pooled corpus has 237 ,786 documents and 1,321 test queries that carry their dataset’s own relevance judgments; a query’s domain is its source dataset and a document’s domain is its source corpus. We use each dataset’s official qrels for Recall@10/nDCG@10/MRR and the provenance label for Equation (1); no relevance or domain label is model-generated. This makes contamination a genuine, checkable phenomenon rather than an artifact: a FiQA query that retrieves a TREC-COVID passage is unambiguously cross-domain. We treat BEIR-MIX as a reproducibility testbed, not a contribution in novelty. All four testbeds are summarized in Table 3. For the generalization study (Section 6, Table 2) we assemble three further pools. Two share this exact protocol: Mix-D , a controlled high-contamination pool (NFCorpus, SciFact, SciDocs [ 15 ], FiQA; 92 K docs), and Mix-C , four StackExchange technical forums from CQADupStack [ 25 ](programmers , unix , gaming , english ; 165 K docs) that are topically adjacent (all technical Q&A) yet low in genuine subject overlap - the distinction that drives our contamination finding. The third, Sector-Bench (Section 6), applies the same provenance-labelling principle to public US federal regulation (eCFR), with domain = CFR Title. 
+
+4 TWO-SPLIT LATENT-GROUP RISK CONTROL 
+
+Conceptually we build on conformal risk control [ 4]; the finite-sample tool is the PAC-style ( 1 − 𝛿 ) risk-controlling prediction set framework [ 10 ], which is the form Theorem 1 takes. We now state the guarantee. The retriever produces, for each query, a domain posterior 𝑝 (· | 𝑞 ) and an inferred domain ˆ𝑔 (𝑞 ) = arg max 𝑐 𝑝 (𝑐 | 𝑞 ) (with an ambig bucket when the posterior is diffuse, Section 5). A control parameter 𝜏 governs how aggressively wrong-domain documents are demoted: a candidate 𝑑 is demoted when 𝑚 (𝑞, 𝑑 ) > 𝜏 (Section 5), and the served loss is ℓ𝑞 (𝜏 ) = 1 
+
+> |𝑅 𝐾 (𝑞 ) |
+
+Í𝑑 ∈𝑅 𝐾 (𝑞 ;𝜏 ) 1{𝑦 (𝑑 ) ≠ 𝑦 (𝑞 )} .RCPS requires the calibration loss to be monotone in 𝜏 . The raw served loss is not guaranteed monotone - in top-𝐾 
+
+retrieval, admitting one more candidate can evict a wrong-domain item as easily as add one - so we calibrate against its running-maximum envelope ˜ℓ𝑞 (𝜏 ) = max 𝜏 ′ ≤𝜏 ℓ𝑞 (𝜏 ′), which is monotone by construction and upper-bounds ℓ𝑞 pointwise. Certifying ˜ℓ therefore certifies the true loss (the bound is conservative, never anti-conservative); all reported losses use this envelope. (Recent work gives RCPS-style guarantees for generic non-monotonic losses directly [ 1 ]; we take the simpler conservative-envelope route and quantify its looseness in Section 6.) For each inferred-domain group 𝑔 we choose a threshold 𝜏 𝑔 ; the served loss of a query routed to 𝑔 is ℓ𝑞 (𝜏 𝑔 ).
+
+> Manuscript submitted to ACM
+
+6 Jayakumar Manoharan 
+
+The two splits. We split the labeled calibration pool into two disjoint sets, D1 and D2 (Figure 2); the domain probe is trained on a third, disjoint split. 
+
+• On D1 we estimate, for each domain 𝑐 , the router’s misrouting rate 𝜌 𝑐 = P( ˆ𝑔 (𝑞 ) ≠ 𝑐 | 𝑦 (𝑞 ) = 𝑐 ) and its group impurity 
+
+𝜋 𝑐 = P(𝑦 (𝑞 ) ≠ 𝑐 | ˆ𝑔 (𝑞 ) = 𝑐 ), and form one-sided Clopper-Pearson upper bounds ¯𝜌 𝑐 , ¯𝜋 𝑐 .
+
+• On D2 we run conformal risk control within each inferred-domain group to pick the largest 𝜏 𝑔 whose group risk is certified ≤ its budget. 
+
+Assumption 1 (Exchangeability) . The calibration and test queries are exchangeable draws from a single fixed query pool (i.i.d. sampling is the special case we use). Conditioning on the value of a fixed measurable function preserves exchangeability within the conditioned subset; since the inferred domain ˆ𝑔 = ˆ𝑔 (𝑞 ) is such a function under a frozen probe (trained on the disjoint split of Assumption 3), the calibration and test queries with ˆ𝑔 = 𝑐 are exchangeable for every 𝑐 . This is the level at which the D2 RCPS step certifies risk; conditioning on a true domain {𝑦 = 𝑐 } preserves exchangeability likewise, which is what the decomposition in Theorem 1 uses. 
+
+Assumption 2 (Bounded loss) . ℓ𝑞 (𝜏 ) ∈ [ 0, 𝐵 ] with 𝐵 ≤ 1.
+
+Assumption 3 (Split independence) . D1 and D2 are independent, and the probe is trained on data disjoint from both. 
+
+Theorem 1 (Per-domain transfer certificate) . Run group-𝑐 RCPS [ 10 ] on D2 at level 𝛼 𝑐 with per-domain confidence 1 − 𝛿 𝑐 ,so that the inferred-group risk on the monotone envelope is certified E[ ˜ℓ | ˆ𝑔 (𝑞 ) = 𝑐 ] ≤ 𝛼 𝑐 ; since ℓ ≤ ˜ℓ pointwise, the same bound holds for the true loss E[ℓ | ˆ𝑔 (𝑞 ) = 𝑐 ] ≤ 𝛼 𝑐 (all displays below are in ℓ). Assume each inferred group is non-empty, its impurity bound satisfies ¯𝜋 𝑐 < 1, and the budget lies in the non-vacuous regime 𝛼 𝑐 ≤ 𝐵 (1 − ¯𝜋 𝑐 ) (otherwise the certificate for 𝑐 is the trivial bound 𝐵 , and the method abstains). Under Assumptions 1 to 3, with probability at least 1 − 𝛾 over the draw of D1 ∪ D 2, simultaneously for every domain 𝑐 ,
+
+ECSCR@ 𝐾 (𝑞 ) | 𝑦 (𝑞 ) = 𝑐  ≤ (1 − ¯𝜌 𝑐 ) 𝛼 𝑐 
+
+1 − ¯𝜋 𝑐 
+
++ ¯𝜌 𝑐 𝐵. (2) 
+
+Intuition. Decompose the true-domain risk by whether the router was correct. The correctly-routed mass (probability 
+
+1 − 𝜌 𝑐 ) is served the group-𝑐 threshold, whose risk among truly-𝑐 queries is the group risk 𝛼 𝑐 inflated by the group’s impurity, ≤ 𝛼 𝑐 /( 1 − 𝜋 𝑐 ). The misrouted mass (probability 𝜌 𝑐 ) is served some other group’s threshold and we bound its loss crudely by 𝐵 . Plugging the Clopper-Pearson upper bounds ¯𝜌 𝑐 , ¯𝜋 𝑐 keeps the inequality valid because the right-hand side is monotone in both. The full proof, and the verification that each use of Assumption 3 is what removes circularity (the router errors are estimated on data disjoint from the threshold calibration), are in Section A. 
+
+Why the slack is real, not vacuous. Every term in Equation (2) is computed from data, so the certificate is honest about a weak router: a poor probe yields a large, visible ¯𝜌 𝑐 (and a wide certificate) rather than a silent violation. We make this diagnostic explicit in Section 6 (Figure 5). 
+
+Simultaneity and finite-sample bounds. The guarantee holds simultaneously over all 2𝐶 binomial bounds (one ¯𝜌 and one ¯𝜋 per domain) and the 𝐶 +1 group risk-control statements (each at confidence 1 − 𝛿 𝑐 ). We allocate the global error 𝛾 
+
+across these 3𝐶 +1 statements by a Bonferroni split (level 𝛾 /( 3𝐶 +1) each); a union bound then yields the simultaneous 
+
+1 − 𝛾 guarantee under any dependence among them. This Bonferroni allocation is both what we state the guarantee with and what every reported certificate uses, because it is unconditionally valid for this mixed family of confidence bounds and risk tests. A Šidák allocation is slightly less conservative but assumes independence across the statements; the ablation confirms the choice is second order, moving the NFCorpus certificate from 0.709 (Bonferroni) to 0.693 
+
+> Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 7(Šidák) (Table 9). We use exact Clopper-Pearson intervals for the binomial terms (conservative and valid at any sample size) and the Hoeffding-Bentkus RCPS bound [ 10 ] to certify each group risk E[ℓ | ˆ𝑔 = 𝑐 ] ≤ 𝛼 𝑐 (the HB 𝑝 -value is given in Section B); the latter is far tighter than the additive Hoeffding margin when the observed group loss is well below its budget, which is the regime we operate in (Section 6). 
+
+Budget-rescaling corollary. To make the final per-domain certificate equal a target 𝛼 ★ 
+
+> 𝑐
+
+, invert Equation (2): run group-𝑐 
+
+control at 
+
+𝛼 𝑐 =  𝛼 ★ 
+
+> 𝑐
+
+− ¯𝜌 𝑐 𝐵  1 − ¯𝜋 𝑐 
+
+1 − ¯𝜌 𝑐 
+
+, (3) and abstain (return nothing for that domain) when the right-hand side is non-positive - i.e. when the router is too weak for the requested budget. This gives a clean sample-complexity reading: certifying a target 𝛼 needs the group risk-control step to be feasible at the rescaled level, which by the Hoeffding-Bentkus bound requires roughly 𝑛 min ≈ ln (𝑒 /𝛿 )/ 𝛼 
+
+calibration queries in the group, where 𝛿 is the per-statement error. We confirm this onset empirically in Section 6. 
+
+5 THE C3R CONTROL LAYER 
+
+C3R realizes Theorem 1 as a thin layer over a frozen retrieval stack (Figure 1b). The base stack - BM25, a frozen dense encoder, RRF fusion, and a cross-encoder reranker - is never retrained; C3R adds one small learned component and a calibration procedure. 
+
+Domain probe. A lightweight probe maps a frozen query embedding to a domain posterior 𝑝 (· | 𝑞 ), temperature-scaled on held-out data. We train the probe on query-style text - retrieval queries and document titles - rather than document bodies, because the document-to-query distribution shift otherwise inflates the router errors; Section 6 reports the difference. The probe also scores documents offline, giving 𝑝 (· | 𝑑 ). We route ˆ𝑔 (𝑞 ) = arg max 𝑐 𝑝 (𝑐 | 𝑞 ) when the posterior is confident ( max 𝑐 𝑝 (𝑐 | 𝑞 ) ≥ 𝑢 ) and to an ambig group otherwise. The ambig group is a safety mechanism, not a certified sector: it is calibrated at the strictest budget min 𝑐 𝛼 𝑐 so an ambiguous query is demoted at least as hard as any true domain would be, but it carries no per-domain certificate of its own and does not enter any sector’s bound. A domain whose calibration group is empty or below the sample-complexity onset 𝑛 min (Section 4) is infeasible at its requested budget and the method abstains for it (returns nothing) rather than issue an uncertified result. 
+
+Mismatch score and soft demotion. The control statistic is the posterior overlap mismatch 
+
+𝑚 (𝑞, 𝑑 ) = 1 −∑︁  
+
+> 𝑐 ∈ C
+
+𝑝 (𝑐 | 𝑞 ) 𝑝 (𝑐 | 𝑑 ) ∈ [ 0, 1], (4) and the layer demotes (excludes from the served list) any candidate with 𝑚 (𝑞, 𝑑 ) > 𝜏 ˆ𝑔 (𝑞 ) , where 𝜏 comes from calibration (Section 5). Demotion is soft in the sense that the threshold is a continuous knob on a continuous statistic, and this strictly generalizes hard label filtering. 
+
+Lemma 1 (Soft demotion breaks the classifier kept-set-error floor) . Fix the router. Hard label filtering applies the parameter-free rule “keep 𝑑 iff arg max 𝑐 𝑝 (𝑐 | 𝑑 ) = ˆ𝑔 (𝑞 )”, so at the inferred-group level its served contamination E[ℓ | ˆ𝑔 =𝑐 ]
+
+equals a fixed positive constant, the document classifier’s error rate on the documents it keeps, with no parameter that can lower it. Soft demotion thresholds the continuous statistic 𝑚 (𝑞, 𝑑 ), and its inferred-group risk on the monotone envelope 
+
+E[ ˜ℓ | ˆ𝑔 =𝑐 ] is non-increasing as 𝜏 decreases: it is certifiable at any positive budget feasible at the group sample size, and 
+
+realizes 0 in the empty-served-set limit. Soft demotion therefore removes the hard filter’s classifier kept-set-error floor. It does not remove the router-error floor ¯𝜌 𝑐 𝐵 that the delivered certificate (2) adds, and which both policies share. 
+
+> Manuscript submitted to ACM
+
+8 Jayakumar Manoharan                                  
+
+> Algorithm 1: C3R calibration and serving
+> Calibrate (offline) : split the labeled pool into independent D1,D2. For each domain 𝑐 : (i) form Clopper-Pearson upper bounds
+> ¯𝜌 𝑐 ,¯𝜋 𝑐 on D1; (ii) rescale the target budget 𝛼 ★
+> 𝑐 to 𝛼 𝑐 via (3) ; (iii) set 𝜏 𝑐 to the largest threshold whose Hoeffding-Bentkus RCPS risk is ≤𝛼 𝑐 on the D2group-𝑐 losses, or abstain if infeasible.
+> Serve (per query 𝑞 ): run the frozen stack to get candidates; set 𝑔 =ˆ𝑔 (𝑞 ); demote every candidate with 𝑚 (𝑞, 𝑑 )>𝜏 𝑔 ; emit the top-𝐾 list and the certificate (2).
+
+Proof. The hard rule has no free parameter, so its inferred-group served loss is fixed at the classifier’s kept-set error. For soft demotion the certified object is the monotone envelope ˜ℓ (𝜏 ), non-decreasing in 𝜏 (Section 4); decreasing 
+
+𝜏 only removes served candidates, and at the most aggressive threshold the served set is empty, giving ˜ℓ = 0 under the convention 0/0 :=0. The Hoeffding-Bentkus step certifies any budget 𝛼 > 0 feasible at the group sample size but cannot certify 𝛼 =0 (its 𝑝 -value at zero observed loss is 1), so soft demotion certifies inferred-group contamination arbitrarily close to, but not equal to, 0, hence strictly below the positive classifier floor. Substituting into (2) , the delivered per-domain certificate still carries the 𝜏 -independent term ¯𝜌 𝑐 𝐵 : this router floor is shared with hard filtering and is a different object from the group-level served loss above. □
+
+Two clarifications. First, the group-level ˜ℓ=0 above is the served loss of the empty set ; it is not in tension with the per-domain certificate convention, under which an infeasible budget makes (3) non-positive and C3R abstains , reporting the vacuous certificate 𝐵 =1 for that domain (it delivers nothing). Second, hard filtering thresholds a coarsened (binary) domain-agreement statistic, of which 𝑚 is the continuous refinement, so the hard rule is the degenerate member of the soft threshold family, which is the sense in which soft demotion strictly generalizes it. We confirm the empirical consequence in Section 6. 
+
+Honesty under a weak probe. Because the certificate (2) carries ¯𝜌, ¯𝜋 explicitly, a poor probe cannot cause a silent 
+
+violation: it widens the certificate, and at the extreme drives (3) non-positive and forces honest abstention. This is the safety property a contamination guarantee must have, and it is what distinguishes a certified layer from an uncertified filter. 
+
+6 EXPERIMENTS 
+
+Setup. The base stack is BM25 ( 𝑘 1=0.9, 𝑏 =0.4), a frozen BGE-base encoder [ 59 ], RRF fusion ( 𝑘 =60 ), and an MS-MARCO cross-encoder reranker; we also test a stronger Qwen3-Reranker-8B. The domain probe is a temperature-scaled logistic head on frozen embeddings (an MLP variant appears in ablations). Calibration uses 1000 resampled splits: per domain we hold out 30% of queries for evaluation and split the remaining 70% evenly into D1 (router-error bounds ¯𝜌, ¯𝜋 ) and D2
+
+(threshold), with the probe trained on a separate disjoint pool; all reported metrics are means over the 1000 resamples. We use a global 𝛾 =0.1; budgets are heterogeneous, with the most-contaminated domain held to the strictest budget (𝛼 ★=0.05 for the SciFact analog, 0.15 elsewhere); Table 6 thus already exercises genuinely heterogeneous per-domain budgets. We set 𝛾 =0.1 and split it across the 3𝐶 +1 statements by Bonferroni; the results are insensitive to this choice. All reported numbers trace to released result files; every retrieval number uses the datasets’ own qrels and every contamination number uses true provenance. 
+
+Contamination is real and asymmetric. The uncontrolled stack has per-domain CSCR@10 of 0.014 (FiQA), 0.006 
+
+(TREC-COVID), 0.630 (SciFact), and 0.559 (NFCorpus), with marginal average 0.287 (Figure 1a). A marginal budget at 
+
+> Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 9
+
+0.287 would leave SciFact at more than twice its target, which is precisely the failure a per-domain certificate must prevent. 
+
+C1: the certificate is valid; marginal control is not (Table 6, Figure 3). On BEIR-MIX, C3R incurs zero certificate violations on every domain across all 1000 resampled calibrations, while marginal conformal risk control violates SciFact’s budget in 100% of draws and NFCorpus’s in 53% (at full calibration data; the violation rises with 𝑛 as the threshold sharpens at the wrong target); the oracle that uses test-time labels also never violates, confirming the harness. We are careful about what this number is: the 1000 draws resample calibration splits of the same data , so 0/1000 is a stability result - the procedure does not violate across splits (a 0/1000 rate has a 95% Clopper-Pearson upper bound of 0.004 ) - not a fresh estimate of population coverage. Population validity rests on the finite-sample theory (Theorem 1) and the controlled simulation below; the 0/1000 and 1000 /1000 contrast with marginal control is the relative evidence that the per-domain scheme is calibrated where the marginal one is not. The Recall@10 means in Figure 4 carry 95% resampling confidence intervals of half-width ≤ 0.009 across all points, so the soft-vs-cascade gaps (e.g. 0.10 at 𝛼 =0.4 on SciFact, with intervals of half-width 0.004 ) exceed their uncertainty by more than an order of magnitude. We are precise about what this validity does and does not claim, and Table 6 unpacks it per domain. A certificate is a guarantee, not a free lunch: the misrouted-mass term ¯𝜌 𝑐 𝐵 is a hard floor on the achievable budget. When that floor exceeds the requested budget -SciFact’s ¯𝜌𝐵 =0.23 against its strict 𝛼 ★=0.05 , or TREC-COVID’s 0.28 (loose because it has only 50 test queries) - the rescaled run-budget is non-positive and C3R abstains , issuing the vacuous certificate 1.0 and returning nothing rather than violating. Only the clean domain (FiQA) is feasibly certified at these locked budgets, comfortably meeting the 0.15 
+
+budget (its actual contamination is just 0.015 , so this is a feasible certificate rather than a tight one) while retaining 45% 
+
+Recall@10; NFCorpus is feasible in 34% of resamples, and its mean certificate of 0.71 averages those feasible resamples (certificate near 0.15 ) with the 66% that abstain at 1.0. The point of the comparison is the last two columns: faced with the same impossible budgets, C3R abstains (and so never violates) while marginal CRC commits and violates SciFact in 100% and NFCorpus in 53% of draws. Abstention is the correct, safe action - and it is visible in ¯𝜌 𝑐 rather than hidden in a violation. The monotone envelope is not the culprit: recomputing the raw (non-monotonized) loss, the envelope inflates the certified loss by only ≤ 0.024 over the raw served loss at the operating thresholds (FiQA 0.002 ,SciFact 0.006 , NFCorpus 0.024 ; max 0.10 over all 𝜏 ), so abstention reflects the genuine router floor ¯𝜌𝐵 , not envelope looseness. The recall-bearing certified operating points are the looser, feasible budgets of Figure 4 (C2), where C3R retains up to ∼ 6× the Recall@10 of the strongest cascade at equal certified contamination; validity (C1) certifies the bound never lies, and the Pareto (C2) is where the method earns its keep. A controlled simulation sweeps router quality and reproduces the picture (Figure 3): C3R’s strict-domain violation rate stays at 0 across 360 ,000 trial-domain checks, whereas naive transfer (no ¯𝜌 / ¯𝜋 correction), marginal control, and a posterior-weighted variant all breach the nominal 𝛾 
+
+as the router degrades. The naive scheme is the most instructive negative control: with more calibration data it sets a tighter threshold at the wrong target, so its violation rate rises toward 1. On BEIR-MIX, where the query-style probe is good, naive transfer does not visibly violate; the simulation is what exhibits its failure regime. 
+
+Feasibility, abstention, and a worked budget-rescaling example (Table 4). Because the certificate is honest about router quality, abstention is not an all-or-nothing event but a measured rate that a deployer can read in advance. Table 4 reports, per domain and testbed, the fraction of resampled calibrations in which a non-vacuous certificate is issued; its complement is the abstention rate. The pattern is consistent across all three open testbeds: a clean-router domain certifies on every resample, a moderate one on a fraction, and a domain whose router floor exceeds the requested budget abstains throughout. A worked example makes the mechanism concrete. Fix a target budget 𝛼 ★ and read the rescaled 
+
+> Manuscript submitted to ACM
+
+10 Jayakumar Manoharan run-budget from (3) , 𝛼 = (𝛼 ★ − ¯𝜌 𝑐 𝐵 )( 1 − ¯𝜋 𝑐 )/( 1 − ¯𝜌 𝑐 ). On FiQA the query-style router is clean ( ¯𝜌𝐵 =0.03 , ¯𝜋 =0.02 ), so at 
+
+𝛼 ★=0.15 the run-budget is 𝛼 =0.12 : the budget passes through almost unchanged and is certified on 100% of resamples. On NFCorpus the floor is higher ( ¯𝜌𝐵 =0.11 , ¯𝜋 =0.15 ), so the run-budget tightens to 𝛼 =0.04 , which the Hoeffding-Bentkus step certifies only when the inferred group is large enough, here in 34% of resamples; C3R abstains otherwise. On SciFact at the stricter 𝛼 ★=0.05 the floor ¯𝜌𝐵 =0.23 already exceeds the target, the rescaled budget is non-positive, and the domain abstains in every resample. The deployer thus reads servability directly from ¯𝜌 𝑐 𝐵 : the router error is the operational dial, and an empty certified set is a visible statement that the router is too weak for the request, never a silent failure. 
+
+C2: soft demotion retains more at equal certificate (Figure 4). We compare C3R’s soft demotion against the two strongest calibrated classifier-plus-filter cascades - a hard argmax filter and a stronger posterior-threshold filter - all run through the same two-split calibration so that only the filter family differs. On the contaminated domain (SciFact), at equal certified contamination and tight budgets, C3R retains up to ∼ 6× more Recall@10 than the strongest cascade: 0.12 
+
+vs. 0.02 at 𝛼 =0.4, 0.26 vs. 0.09 at 𝛼 =0.5, and 0.39 vs. 0.26 at 𝛼 =0.6. This is the direct answer to the concern that the certificate is vacuous where it matters: on the most contaminated domain, at an achievable budget 𝛼 =0.4, C3R issues a 
+
+non-vacuous certificate - it guarantees SciFact contamination ≤ 0.4, down from its uncontrolled 0.63 , while retaining recall - whereas at that same budget the hard cascade and marginal CRC cannot certify at all. The certificate is vacuous only below the router floor ¯𝜌𝐵 (the strict 0.05 regime of Table 6), not on the contaminated domains as such. The hard argmax cascade cannot certify the contaminated domains at any threshold - its contamination floor ( 0.57 on SciFact) sits above the budgets - so it abstains. We are explicit about the scope of this advantage: on the clean domain (FiQA) all methods tie at 0.45 , and at loose budgets the gap to the posterior cascade closes. The advantage is real where it matters -tight budgets on contaminated domains - and we do not claim it elsewhere. An uncertified domain-classifier filter ( ★ in Figure 4) sits at 0.57 contamination with no guarantee at all, illustrating why an uncontrolled filter is not a substitute for a certified layer. 
+
+The price of being label-free (oracle ceiling). To price the inference-time-label constraint directly, we add an oracle 
+
+that routes every query by its true domain 𝑦 (𝑞 ) (no router-error slack, ¯𝜌 = ¯𝜋 =0) and certifies at the same budgets - the recall C3R could retain if the probe were perfect. The gap is the honest cost of operating without query-time labels, and it is small exactly where the probe is good: on the clean domain (FiQA) C3R matches the oracle to within 0.001 
+
+Recall@10 at every budget, so being label-free is essentially free there. On the hardest, most contaminated domain (SciFact) the gap is larger but shrinks as the budget loosens - 0.28 at 𝛼 =0.4, 0.19 at 0.5, 0.11 at 0.6 - tracing precisely to the router error ¯𝜌 that the certificate already exposes. The label-free constraint thus costs little when the domain is separable and degrades gracefully, and visibly, when it is not. 
+
+G1: results generalize across a contamination spectrum (Table 2). A single testbed cannot separate a property of C3R from a property of one dataset pool, so we replicate on two further BEIR-style mixes built to bracket the contamination regime (a third, regulated pool, Sector-Bench , follows in G2). The construction itself is a finding: across our four pools, contamination tracks whether the mix contains a same-subject cluster, not merely topically adjacent domains. A deliberately adjacent pool of four StackExchange technical forums ( programmers , unix , gaming , english ; 165 K docs) is nonetheless nearly clean (per-domain CSCR@10 in the narrow band 0.07 -0.08 ): a competent cross-encoder keeps results on-topic unless two domains share genuine subject vocabulary. We therefore build a controlled high-contamination pool with a same-subject cluster plus a distinct outlier - NFCorpus, SciFact, SciDocs (biomedical/scientific) and FiQA 
+
+> Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 11 (finance), 92 K docs. This pool deliberately re-uses three Mix-A corpora (FiQA, SciFact, NFCorpus) and adds the new SciDocs collection, so that what changes from Mix-A is the pool composition , not the underlying datasets: per-domain CSCR@10 of 0.012 (FiQA), 0.019 (SciDocs), 0.215 (SciFact), and 0.366 (NFCorpus) - a pronounced imbalance (a 30 ×
+
+spread) that echoes Mix-A’s asymmetry, though here with a single dominant contaminated domain rather than two. On this pool both core results replicate exactly: C3R incurs zero certificate violations on every domain across 1000 
+
+resampled calibrations, and on the contaminated domains soft demotion dominates the strongest calibrated cascade - at a tight budget 𝛼 =0.3 on SciFact, C3R certifies 0.39 retention where the posterior cascade certifies only 0.04 and the hard cascade abstains entirely. The certificate is valid at both ends of the spectrum, including the low-contamination forums where it is correctly near-trivial. As an independent check on the subject-overlap reading, we measure inter-domain overlap directly as the cosine similarity between domain centroids in the frozen BGE-base embedding space: the two pools that contaminate most (Mix-A, Mix-D) are exactly the two with the highest inter-domain centroid similarity (0.94 ), above the adjacent-forum and low-adjacency pools ( 0.86 -0.90 ). With only four constructed pools we present this as a corroborating observation about pool composition , not a law; a systematic overlap-versus-contamination study is future work. We report per-domain contamination throughout: the marginal mean understates the problem precisely because the certificate’s job is to protect the contaminated minority of domains that the mean averages away. 
+
+G2: the certificate holds on real regulated-domain text ( Sector-Bench , Table 2). The regulated settings that motivate this work are not BEIR datasets, so we build Sector-Bench : a contamination testbed from the public US Code of Federal Regulations (eCFR; a continuously-updated reference, not the official legal edition), with domain = CFR Title - the genuine, objective provenance of each regulation, requiring no human relevance or appropriateness annotation. We pool 19 K sections from four CFR Titles ( 10 , 18 , 40 , 21 ), which correspond broadly to energy , power and water resources ,
+
+environmental protection , and food and drugs ; section headings serve as queries. Contamination on actual regulation reproduces the asymmetric BEIR-MIX structure (Table 5 gives the full per-sector breakdown): the two energy-related Titles are the most contaminated and bleed into each other (per-domain CSCR@10 0.36 for Title 18, 0.21 for Title 10), while the environmental ( 0.14 ) and food/drug ( 0.15 ) Titles are cleaner. All three core results carry over. The certificate is valid on every sector (zero violations over 1000 resampled calibrations). We are careful about where the soft-demotion 
+
+advantage shows up, because it is not on the most contaminated sector. The two genuinely contaminated energy Titles are the hard cases: Title 18 ( 0.36 ) abstains at the swept budgets - like SciFact in Mix-A, it needs a looser budget than we sweep - and Title 10 ( 0.21 ) shows only a modest edge ( 0.40 vs. 0.32 at 𝛼 =0.6). The large gaps ( 0.58 vs. 0.10 
+
+on the environmental Title, 0.54 vs. 0.16 on food/drug at 𝛼 =0.4) are on the moderately contaminated sectors, whose raw CSCR ( 0.14 , 0.15 ) sits below the 0.4 budget; there the budget is not binding and the result really shows that the cascade over-filters under the rescaled run-budget while soft demotion does not. Both are legitimate - validity transfers to regulated text, and soft demotion avoids needless over-filtering - but we do not claim a tight win on the hardest regulated sectors, which behave exactly as their BEIR analogues do. 
+
+Does contamination mean harm ? An appropriateness probe. CSCR counts a retrieval as contamination by provenance (wrong CFR Title); whether that passage carries genuinely wrong regulatory authority is a stronger, content-level question. As a first quantification we sample 180 cross-Title retrievals (top result, balanced over the four sectors) plus 
+
+48 same-Title controls, and have an LLM judge - shown only the query and passage, not their provenance (gpt-oss-120b; an automatic proxy we will human-validate) - label each appropriate / wrong-authority / unrelated . The control is a clean check on the judge: same-Title passages are labelled appropriate 100% of the time. Among cross-Title (contaminating) retrievals, 17% are judged (by the LLM) wrong-authority - citing the wrong body of regulation ( 95% CI 
+
+> Manuscript submitted to ACM
+
+12 Jayakumar Manoharan 
+
+[12 , 23 ]%, 𝑛 =180 ) - versus 0% within-domain, while 54% are benign cross-cutting regulation (procedural sections that legitimately span Titles) and 29% off-topic. Two things follow. First, for cross-Title wrong-authority errors CSCR is a 
+
+conservative proxy: such errors are a subset of wrong-provenance ones, so a certificate CSCR @𝐾 ≤ 𝛼 upper-bounds their rate by 𝛼 . We do not claim CSCR certifies all forms of regulatory inappropriateness - wrong authority could in principle arise within a Title too, which provenance does not see. Second, this LLM-judged evidence suggests the harm is real and contamination-specific - it appears in 17% of cross-domain results and none of the within-domain controls -but it is an automatic proxy, not human annotation. A human-annotated appropriateness layer (with inter-annotator agreement) is the natural next refinement; the labelled proxy set is released for that validation. 
+
+Downstream: contamination propagates to grounding , and C3R reduces it (dose-response). We test the end-to-end question directly on the contaminated domain (SciFact). Three readers spanning capability - Qwen2.5-0.5B/1.5B/7B-Instruct - answer each query from four contexts of increasing contamination dose : clean ( 0% wrong-domain passages), C3R-certified ( 𝛼 =0.4, 42% ), uncontrolled ( 54% ), and adversarial ( 100% ). The percentages are the realized mean wrong-domain fraction of the top-6 passages fed to the reader on this 60 -query subset; they are not the certified quantity and do not contradict it - the 𝛼 =0.4 certificate bounds the expectation of CSCR@10 (top-10 ) over all truly-SciFact queries on the full eval split, so a realized top-6 mean of 0.42 on a subset is consistent with it (and the uncontrolled 
+
+54% is likewise a top-6 subset figure, below the 0.63 top-10 CSCR of Figure 1a for the same reason). A judge, blind to reader and arm, scores two things: whether the answer drifts off the question’s scientific topic, and which passage best supports the answer’s main claim - which we map to its objective source domain, so a wrong-domain support is a 
+
+wrong-authority grounding . The two metrics tell different stories, and the gap between them is the finding. Topical drift is small and roughly flat ( ≤ 10% for the 7B at every dose; the 0.5B reaches 23% only under a fully adversarial context): a capable reader keeps the topic . But wrong-authority grounding rises monotonically with the dose for every reader -
+
+0 → 0.25 → 0.35 → 1.0 (7B), 0 → 0.50 → 0.75 → 1.0 (1.5B), and 0 → 0.22 → 0.50 → 1.0 (0.5B). This is exactly the regulated harm a drift check misses: an answer that stays on-topic yet rests on the wrong body of authority. And at the certified operating point versus uncontrolled, wrong-authority grounding falls - by 0.28 for the 0.5B ( 0.50 →0.22 ) and 
+
+0.25 for the 1.5B ( 0.75 →0.50 ), both with non-overlapping 95% intervals on this 𝑛 =60 subset, and directionally by 0.10 
+
+for the 7B ( 0.35 →0.25 ) though that interval overlaps. The downstream gain is thus clearest exactly where it should be - weaker, less-robust readers - and we treat it as illustrative, proxy-judged evidence ( 𝑛 =60 , an LLM judge, no human labels), not a primary claim. We lead instead with the value that needs no reader at all: the certified guarantee on the 
+
+surfaced evidence , which protects direct human consumption and accountability regardless of any downstream model. A human-annotated version of this probe is future work. 
+
+S1: a stronger reranker does not fix contamination (Table 7). Swapping the reranker for Qwen3-Reranker-8B raises overall nDCG@10 from 0.406 to 0.522 , yet contamination is essentially unchanged (SciFact CSCR stays above 0.4). Contamination is orthogonal to ranking quality; C3R wraps the stronger stack unchanged and transfers its quality gains under the same certificate. 
+
+S2: contamination is retriever-agnostic, and no released retriever certifies it (Table 1). The cascades of Figure 4 are the strongest certified comparison; we also ask whether simply choosing a different or “domain-aware” retriever avoids contamination in the first place. We run five released dense retrievers - Contriever [ 26 ], GTR [ 38 ], E5 [ 57 ], TAS-B [ 24 ], and all-MiniLM (a sentence-transformers checkpoint [ 42 ]) - plus HyDE query expansion [ 19 ] (a Qwen2.5-7B-generated hypothetical document embedded with our frozen encoder), as pure top-10 retrieval on Mix-A. Every one contaminates 
+
+> Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 13 FiQA 
+
+> (finance)
+> TREC-COVID
+> (biomed)
+> SciFact
+> (science)
+> NFCorpus
+> (nutrition)
+
+0.0 
+
+0.2 
+
+0.4 
+
+0.6  
+
+> Uncontrolled CSCR@10
+> marginal
+> budget 0.29
+> 0.01 0.01
+> 0.63
+> 0.56
+
+(a) FROZEN STACK      
+
+> BM25 + dense + RRF
+> + cross-encoder
+> sector probe
+> p(c|q)
+> mismatch-score
+> soft demotion
+> per-domain
+> CERTIFICATE
+> CSCR@K ≤αc
+> (unchanged, not retrained)
+
+(b) Fig. 1. (a) Cross-domain contamination is sharply asymmetric: SciFact (0.63) and NFCorpus (0.56) exceed a marginal budget (0.29, dashed) that FiQA (0.01) satisfies, so a marginal guarantee cannot protect the contaminated domains. (b) C3R is a drop-in layer over a frozen stack: an inferred domain posterior drives mismatch-score soft demotion and emits a per-domain certificate, with no query-time label. 
+
+both biomedical domains in the 0.50 -0.84 range. The five plain dense retrievers post overall CSCR of 0.32 -0.40 , all worse 
+
+than our stack’s 0.287 ; HyDE’s LLM query expansion helps marginally on the average ( 0.253 ) and even posts the highest Recall@10 of any method ( 0.448 ), yet still leaves SciFact at 0.56 and NFCorpus at 0.50 . This confirms on the retriever side what S1 showed on the reranker side: contamination is not an artifact of one encoder and does not shrink with ranking quality - the best-ranking method here is still badly contaminated on the domains that matter. The comparison is not like-for-like - our stack adds sparse fusion and a reranker the pure-dense baselines lack - but that is exactly the point: contamination persists across pipeline strength and retriever family, and none of these systems controls it. Crucially, none of these methods emits a per-domain contamination guarantee - they are exactly the “infer a domain but certify nothing” systems of Section 1 - whereas C3R attaches a certified budget to any of them. 
+
+S3 / S4: vacuity frontier and sample complexity (Figure 5, Figure 6). The certificate width as a function of router error 
+
+( ¯𝜌, ¯𝜋 ) traces a vacuity frontier (Figure 5): the document-trained probe ( 𝜌 =0.45 ) lands in the vacuous region, which is exactly why it fails its gate visibly ; the query-style probe ( 𝜌 =0.13 ) lands in the usable region. This is the honesty property of Section 5 made quantitative. Figure 6 validates the sample-complexity rule: at 𝛼 =0.5 the theoretical onset is 
+
+𝑛 min ≈ 12 calibration queries per group, and empirically feasibility turns on between 𝑛 2=12 and 16 and is complete by 
+
+24 , with zero empirical violations wherever a certificate is issued. 
+
+Ablations (Table 9). Two design choices are load-bearing. Replacing the Hoeffding-Bentkus bound with the plain Hoeffding margin makes even a feasible domain uncertifiable (its certificate widens to 1.0). Dropping the ¯𝜌 / ¯𝜋 correction produces a tighter reported certificate by ignoring router error - an unsafe claim, and the failure mode the simulation exhibits. The ambig bucket and the Bonferroni-vs-Šidák allocation are second-order. 
+
+Cost (Table 10). The control layer adds 0.007 ms/query of arithmetic (a mismatch score over 100 candidates plus a thresholded demotion) on top of the frozen stack (single-threaded CPU, NVIDIA GB10 host), and all calibration is offline; the certified layer is effectively free at serving time. 
+
+> Manuscript submitted to ACM
+
+14 Jayakumar Manoharan train 
+
+sector probe 
+
+D1
+
+Clopper-Pearson ̄
+
+ρ,̄ π
+
+D2
+
+RCPS threshold 
+
+τ
+
+test 
+
+(eval)    
+
+> independent D1⟂D2
+> disjoint splits of the labeled calibration pool
+
+Fig. 2. Two-split calibration: D1 bounds the router errors ¯𝜌, ¯𝜋 ; the independent D2 sets the demotion threshold 𝜏 . Independence (D1 ⊥ D 2) makes the transfer bound non-circular. 0.0 0.1 0.2 0.3 0.4 0.5 
+
+# probe error ρ (strict domain) 
+
+# 0.0 
+
+# 0.2 
+
+# 0.4 
+
+# 0.6 
+
+# 0.8 
+
+# 1.0 
+
+> violation rate (strict domain)
+
+# γ=0.1 
+
+C3R (ours) 
+
+Naive transfer 
+
+Marginal CRC 
+
+Weighted 
+
+Fig. 3. Simulation: C3R’s strict-domain violation rate stays at 0 across router quality, while naive transfer, marginal control, and the weighted variant breach the nominal 𝛾 =0.1 as the router degrades. 
+
+7 CONCLUSION 
+
+We presented C3R, a drop-in layer that certifies a per-domain contamination budget for multi-domain retrieval using only an inferred domain posterior. Its core is a two-split conformal scheme whose transfer bound crosses from the inferred domain to the true domain with fully estimable slack, supports heterogeneous budgets, and inverts for deployment. On an open multi-domain testbed the certificate never violates while marginal control fails the contaminated domains, and soft demotion retains markedly more recall than the strongest calibrated hard filter where budgets are tight. 
+
+> Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 15 0.0 0.2 0.4 0.6 
+
+certified contamination budget α
+
+0.0 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+0.6 
+
+0.7 
+
+> Recall@10 (where certified)
+
+SciFact (contaminated) 
+
+> C3R soft (ours)
+> posterior cascade
+> hard cascade
+> uncertified filter
+
+0.0 0.2 0.4 0.6 
+
+certified contamination budget α
+
+FiQA (clean) 
+
+Fig. 4. Recall@10 retained where the budget is certified , vs. contamination budget 𝛼 . On the contaminated domain (SciFact) C3R retains 2-6× more than the strongest calibrated cascade and the hard cascade cannot certify; on the clean domain (FiQA) all methods tie. The uncertified classifier filter ( ★) sits at 0.57 contamination with no guarantee. 0.0 0.1 0.2 0.3 0.4 0.5 0.6 
+
+# misrouting  ̄ ρ
+
+## 0.0 
+
+## 0.1 
+
+## 0.2 
+
+## 0.3 
+
+## 0.4 
+
+## 0.5 
+
+## 0.6 
+
+> impurity  ̄  π
+
+query-style probe 
+
+(usable) 
+
+doc-trained probe 
+
+(vacuous) 
+
+## 0.0 
+
+## 0.2 
+
+## 0.4 
+
+## 0.6 
+
+## 0.8 
+
+## 1.0 
+
+> certificate width
+
+Fig. 5. Vacuity frontier: certificate width as a function of router error ( ¯𝜌, ¯𝜋 ). A weak probe announces itself with a wide (visible) certificate rather than a silent violation; the doc-trained probe ( ×) is vacuous, the query-style probe ( ◦) usable. 
+
+Deploying C3R in practice. The method exposes three knobs, and our experiments suggest concrete defaults. The probe 
+
+need not be strong, only calibrated : a temperature-scaled logistic head on frozen embeddings places the query-style 
+
+> Manuscript submitted to ACM
+
+16 Jayakumar Manoharan 20 40 60 80 
+
+# calibration size n2 (per group) 
+
+# 0.0 
+
+# 0.2 
+
+# 0.4 
+
+# 0.6 
+
+# 0.8 
+
+# 1.0 
+
+> rate
+
+## theory 
+
+## nmin ≈ 12 feasible fraction 
+
+empirical violation 
+
+Fig. 6. Empirical sample complexity: feasibility onset matches the theoretical 𝑛 min ≈ ln (𝑒 /𝛿 )/ 𝛼 (≈ 12 ), with zero empirical violations wherever a certificate is issued. Table 1. Contamination is retriever-agnostic and uncertified. Five released dense retrievers, run as pure top-10 retrieval on the same Mix-A pool, all contaminate the biomedical domains heavily - independent of ranking quality (E5 nearly matches our Recall@10 yet contaminates at 0.33 ; TAS-B contaminates most). None emits any contamination guarantee. C3R is a certified layer over any such retriever. “Ours” is the full hybrid+rerank stack (uncontrolled); ↓/↑ mark better. 
+
+Retriever R@10 ↑ CSCR@10 ↓ worst-domain CSCR ↓
+
+(overall) SciFact NFCorpus BGE+rerank (ours) 0.417 0.287 0.63 0.56 
+
+Contriever 0.332 0.321 0.62 0.72 
+
+GTR-base 0.363 0.316 0.67 0.64 
+
+E5-base 0.414 0.326 0.67 0.70 
+
+TAS-B 0.243 0.397 0.81 0.84 
+
+all-MiniLM 0.371 0.326 0.63 0.72 
+
+HyDE (Qwen2.5-7B) 0.448 0.253 0.56 0.50 
+
++ C3R certified per-domain CSCR ≤ 𝛼 𝑐 certified (Table 6, Figure 4) 
+
+router in the usable region of the vacuity frontier ( ¯𝜌 ≈ 0.13 ), whereas a document-trained probe is vacuous; a practitioner should check ¯𝜌 on a held-out split before trusting the certificate, since the certificate width is governed by it. The budget 𝛼 𝑐 should be set per domain from the tolerable contamination of the consumer , not the retriever: a strict 𝛼 on a domain whose router floor ¯𝜌𝐵 exceeds it will simply return nothing, which is the safe action but an operational cost, so a deployer who needs availability on a hard domain must either accept a looser certified budget (a guaranteed 
+
+reduction rather than a tight bound) or invest in a better router. Abstention should be surfaced, not hidden: an empty 
+
+> Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 17 
+
+Table 2. Generalization across a contamination spectrum, including a regulated-domain testbed. Contamination tracks inter-domain subject overlap, not topical adjacency. C3R’s per-domain certificate is valid (zero violations over 1000 resampled calibrations) at every 
+
+point, and soft demotion dominates the strongest calibrated cascade wherever a domain is contaminated. All pools are open corpora (BEIR / CQADupStack / public US Code of Federal Regulations ); contamination is measured against true provenance. CSCR ranges rounded to two decimals. The last column reports soft vs. cascade Recall@10 retention at a tight feasible budget on a contaminated domain; for Sector-Bench this is the tightest feasible sector (environmental), not the highest-CSCR sector (Title 18), which is too contaminated to certify at the swept budgets (Section 6). 
+
+Testbed Domain pool CSCR@10 C3R cert. soft vs. cascade (4 domains) range viol./1000 (tight feasible dom.) Mix-A (main) finance, biomed ×3 0.01 -0.63 0/1000 0.39 vs. 0.26 
+
+Mix-D (ctrl. high) science ×3, finance 0.01 -0.37 0/1000 0.39 vs. 0.04 
+
+Mix-C (ctrl. low) tech Q&A forums 0.07 -0.08 0/1000 - (clean) 
+
+Sector-Bench CFR Titles 10/18/40/21 0.14 -0.36 0/1000 0.58 vs. 0.10 
+
+Table 3. The four open testbeds (all assembled from public corpora; domain = source). Each query carries its source dataset’s own relevance judgments (BEIR / CQADupStack) or, for Sector-Bench , its section heading; a document’s domain is its objective source provenance, making contamination a checkable phenomenon rather than a model artifact. Assembly scripts are released. 
+
+Testbed Source Domains #docs #queries BEIR-MIX (Mix-A) BEIR finance, biomed ×3 237 ,786 1,321 
+
+Mix-D BEIR science ×3, finance 92 ,111 2,271 
+
+Mix-C CQADupStack tech Q&A ×4 165 ,080 4,948 
+
+Sector-Bench eCFR energy/power/env./drug 19 ,174 5,744 
+
+Table 4. Feasibility and abstention per domain, at the locked target budgets. The fraction of resampled calibrations in which the domain is feasible (a certificate tighter than 𝐵 =1 is issued); the complement is the abstention rate. Feasibility tracks the router floor 
+
+¯𝜌 𝑐 𝐵 : clean-router domains certify on every resample, moderate ones certify on a fraction, and domains whose floor exceeds the requested budget abstain throughout. This is the quantity a deployer reads to decide whether a domain is servable at a given budget. 
+
+Testbed Domain budget 𝛼 ★ feasible (non-abstain) Mix-A FiQA 0.15 100% 
+
+Mix-A NFCorpus 0.15 34% 
+
+Mix-A SciFact 0.05 0% (abstains) Mix-A TREC-COVID 0.15 0% (abstains, small sample) Mix-D SciDocs 0.15 100% 
+
+Mix-D FiQA 0.15 100% 
+
+Mix-D NFCorpus 0.15 56% 
+
+Mix-D SciFact 0.05 0% (abstains) 
+
+Sector-Bench EPA/environ (Title 40) 0.40 100% 
+
+Sector-Bench FDA/drug (Title 21) 0.40 100% 
+
+Sector-Bench Energy/NRC (Title 10) 0.40 70% 
+
+Sector-Bench FERC/power (Title 18) 0.40 0% (abstains) 
+
+certified result set is a signal that the requested guarantee is infeasible at the current router quality, and is more useful to a downstream compliance workflow than a silently contaminated list. Because the layer is frozen-stack and adds 
+
+0.007 ms/query, it can be A/B-tested behind an existing retriever with no retraining. 
+
+> Manuscript submitted to ACM
+
+18 Jayakumar Manoharan 
+
+Table 5. Sector-Bench per-sector detail (public eCFR; domain = CFR Title). Uncontrolled top-10 contamination (CSCR), feasibility at budget 𝛼 =0.4, and soft-demotion vs. strongest-calibrated-cascade Recall@10 retention at equal certified contamination . On the two cleaner, fully feasible sectors soft demotion retains 4 to 6× the cascade; Energy/NRC is feasible in 70% of resamples and operates near its feasibility limit, where the soft curve is steep; FERC/power, the most contaminated sector, abstains at this budget. Resampling half-widths are ≤ 0.01 (Section 6). 
+
+Sector (Title) #docs #queries CSCR feasible soft vs. cascade R@10 EPA/environ (40) 6,000 1,500 0.14 100% 0.58 vs. 0.10 
+
+FDA/drug (21) 6,000 1,500 0.15 100% 0.54 vs. 0.16 
+
+Energy/NRC (10) 5,159 1,500 0.21 70% 0.06 vs. 0.21 
+
+FERC/power (18) 2,015 1,244 0.36 0% n/a (abstains) 
+
+Table 6. Per-domain certificate, fully unpacked (BEIR-MIX, 1000 resampled calibrations, 𝛾 =0.1, locked budgets). The router floor ¯𝜌𝐵 
+
+is the irreducible misrouted-mass term: when it exceeds the target budget 𝛼 ★ the rescaled run-budget is non-positive, the domain is 
+
+infeasible , and C3R abstains (issues the vacuous certificate 1.0 and returns nothing) rather than violate. The key contrast is the last two columns: C3R never violates (its empirical CSCR stays ≤ its issued certificate, including by abstaining), whereas marginal CRC commits to a single budget and violates it on the contaminated domains. “-” marks an abstaining domain. 
+
+## Domain 𝛼 ★ ¯𝜌𝐵 resc. 𝛼 feas. C3R cert C3R viol marg. viol CSCR R@10 FiQA 0.15 0.03 0.12 100% 0.15 0.00 0.00 0.015 0.45 
+
+## TREC-COVID 0.15 0.28 - 0% 1.0† 0.00 0.00 - -SciFact 0.05 0.23 - 0% 1.0† 0.00 1.00 - -NFCorpus 0.15 0.11 0.04 34% 0.71 0.00 0.53 - - 
+
+> †
+
+abstains: the router floor ¯𝜌𝐵 exceeds the requested budget, so no certificate tighter than 𝐵 =1 is issuable. The two abstentions have different causes: SciFact’s is a genuine router-error floor, whereas TREC-COVID’s ¯𝜌𝐵 =0.28 is inflated by its small sample ( 50 test queries, hence a loose Clopper-Pearson bound), not a contamination floor. The oracle that uses test-time labels also never violates (omitted for space). Recall-bearing certified operating points are the feasible budgets of Figure 4. 
+
+Table 7. A stronger reranker improves ranking but does not reduce contamination; C3R’s certificate is reranker-agnostic. 
+
+Reranker Recall@10 nDCG@10 overall CSCR@10 MiniLM-L6 0.417 0.406 0.287 Qwen3-Reranker-8B 0.522 0.522 0.258 
+
+Table 8. Positioning vs prior work. No prior method combines risk control of a bounded loss, a latent test-time group, and heterogeneous per-group budgets.                                                
+
+> Work Guarantee type Group at test time Risk vs coverage Per-group budgets Missing for our setting Sesia et al. [46] noise-corrected coverage class (standard) coverage no latent group; risk control Einbinder et al. [17] robust coverage none coverage no groups; risk; budgets Gibbs-Cherian-Candès [22] conditional coverage computable from 𝑥 coverage no latent group; risk control Kandinsky CP [7] weighted cond. coverage fractional (estimated) coverage no risk control; true-group transfer Posterior CP [61] approx. cond. validity data-driven clusters coverage no risk; quantified slack; budgets C-RAG [28] conformal risk control none risk (generation) no groups; per-group budgets CCRA-S [34] group risk control observed strata risk per-stratum latent group; transfer
+> C3R (ours) conformal risk control latent (inferred) risk (contamination) heterogeneous -
+
+Is provenance the right object to certify? We control cross-domain provenance mismatch (CSCR), and our appropriate-ness probe shows this is not the same as harm : only 17% of cross-domain retrievals are wrong-authority, while 54% are 
+
+Manuscript submitted to ACM Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 19    
+
+> Table 9. Ablation: NFCorpus certificate width. Hoeffding cannot certify; dropping the ¯𝜌 /¯𝜋 correction yields an unsafe (too-tight) certificate.
+
+Variant NFCorpus cert. Full (HB, Bonferroni, ¯𝜌 / ¯𝜋 , AMBIG) 0.709 
+
+− ¯𝜌 / ¯𝜋 correction (unsafe) 0.150 
+
+− AMBIG bucket 0.685 Hoeffding (vs HB) 1.000 Šidák (vs Bonferroni) 0.693 
+
+> Table 10. The certified control layer adds negligible arithmetic atop the frozen retrieval stack; calibration is offline.
+
+Component Cost Control layer (mismatch + demotion) 0.007 ms/query Calibration ( 𝐷 1, 𝐷 2) offline Frozen BM25+dense+rerank stack dominates benign cross-cutting regulation that a reader could legitimately use. CSCR therefore over-counts harm, and demoting on it has a recall cost - the visible price of acting on a conservative signal. We argue provenance is nonetheless the right target for a label-free, inference-time guarantee, for two reasons. First, appropriateness is not computable at query time without the very labels the setting denies us; provenance is the strongest objective signal available without an oracle, and it conservatively contains the harmful subset (wrong-authority ⊆ wrong-provenance for cross-domain errors), so a provenance certificate bounds that harm from above. Second, soft demotion turns the recall cost into a tunable trade-off rather than a hard filter: the budget 𝛼 chooses how much benign cross-cutting evidence to keep in exchange for a tighter harm bound. A method that certified appropriateness directly would need an appropriateness oracle at calibration time; integrating even a partial human-annotated layer into the certified loss - so the budget is on harm, not provenance - is the most valuable extension this work points to. 
+
+Scope and limitations. Our BEIR domains are general-purpose corpora; Sector-Bench (Table 2) closes part of the gap to the regulated setting by certifying contamination on actual public federal regulation, where provenance is objective. It does not directly certify appropriateness - whether a wrong-provenance passage carries genuinely wrong regulatory authority. An LLM-judged probe (Section 6) gives a first answer - 17% of contaminating retrievals are wrong-authority versus 0% within-domain, and since these are a subset of wrong-provenance ones the CSCR certificate bounds them - but a human -annotated appropriateness layer with inter-annotator agreement, and settings where domain boundaries are contested or labels are truly hidden, remain the central pieces of future work. Two further caveats: TREC-COVID contributes only 50 test queries, so its per-domain certificate is a small-sample stress case that often abstains; and the naive scheme’s failure mode is established in simulation rather than on BEIR-MIX, because our probe is good enough that naive transfer does not visibly break on this benchmark. The sample-complexity rule 
+
+𝑛 min ≈ ln (𝑒 /𝛿 )/ 𝛼 is theoretically derived and empirically supported on the main testbed; we replicate the certificate’s validity and the soft-demotion advantage on three further open pools spanning the contamination spectrum (Table 2), but the subject-overlap trend rests on only four constructed pools and merits a larger systematic study. 
+
+> Manuscript submitted to ACM
+
+20 Jayakumar Manoharan 
+
+Threats to validity. We name the main ones explicitly. External validity: all testbeds are general-purpose public corpora with objectively known provenance; whether the certificate transfers to regulated sectors, where domain boundaries are contested and labels are costly, is unvalidated and is the central future-work item. Probe sensitivity: the certificate width is governed by the router errors ¯𝜌, ¯𝜋 , which depend on the probe and its training split; a weaker probe yields a wider (but still valid and visible ) certificate, and at the extreme the bound is vacuous (Figure 5) - so results are contingent on a probe in the usable region, not on a perfect router. Dataset bias: domain = source dataset, so the contamination we measure inherits each BEIR dataset’s topic and qrel conventions; the magnitude of contamination is therefore a property of the pool composition (Table 2), not a universal constant. 
+
+Future work. The natural next step is a regulated-domain benchmark with expert domain and appropriateness annotations, on which the inferred-domain certificate can be stress-tested where it matters most; online recalibration under distribution shift; and joint certification of contamination together with relevance. We will release the BEIR-MIX assembly, the CSCR evaluation protocol, and the C3R calibration code to support these directions. 
+
+ETHICAL CONSIDERATIONS 
+
+This work studies a reliability mechanism for retrieval and uses only public, open corpora - BEIR datasets, CQADupStack forums, and public US CFR/eCFR regulatory text - with released or objective (source-provenance) labels; no human subjects, personal data, or proprietary corpora are involved. The intended effect of C3R is to reduce the risk that retrieval-augmented systems surface wrong-domain evidence, which is a safety-positive goal in high-stakes settings. We note two honest caveats. First, a certificate is only as meaningful as its stated assumptions: deployers must not read a per-domain contamination bound as a guarantee of factual correctness or of fitness for a regulated purpose. 
+
+Sector-Bench validates provenance-based contamination control on public regulatory text, but not expert-judged legal or operational appropriateness, which a certified provenance bound does not supply. Second, the domain probe could encode dataset-specific biases; because the method is label-free at inference, an over-trusted but miscalibrated probe could degrade service for under-represented query types. C3R mitigates this by making router error visible in the certificate width rather than silent, but we recommend auditing probe calibration before deployment. We provide a publicly released artifact (code, result files, benchmark assembly) to support independent scrutiny. 
+
+REFERENCES                      
+
+> [1] Anastasios N. Angelopoulos. 2026. Conformal Risk Control for Non-Monotonic Losses. arXiv preprint arXiv:2602.20151 (2026). [2] Anastasios N. Angelopoulos and Stephen Bates. 2023. Conformal Prediction: A Gentle Introduction. Foundations and Trends in Machine Learning 16, 4 (2023), 494-591. https://doi.org/10.1561/2200000101 [3] Anastasios N. Angelopoulos, Stephen Bates, Emmanuel J. Candès, Michael I. Jordan, and Lihua Lei. 2021. Learn then Test: Calibrating Predictive Algorithms to Achieve Risk Control. (2021). arXiv:2110.01052. [4] Anastasios N. Angelopoulos, Stephen Bates, Adam Fisch, Lihua Lei, and Tal Schuster. 2024. Conformal Risk Control. In International Conference on Learning Representations (ICLR) .[5] Akari Asai, Timo Schick, Patrick Lewis, Xilun Chen, Gautier Izacard, Sebastian Riedel, Hannaneh Hajishirzi, and Wen tau Yih. 2023. Task-Aware Retrieval with Instructions. In Findings of the Association for Computational Linguistics (ACL) .[6] Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and Hannaneh Hajishirzi. 2024. Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection. In International Conference on Learning Representations (ICLR) .[7] Konstantina Bairaktari, Jiayun Wu, and Zhiwei Steven Wu. 2025. Kandinsky Conformal Prediction: Beyond Class- and Covariate-Conditional Coverage. arXiv preprint arXiv:2502.17264 (2025). [8] Rina Foygel Barber, Emmanuel J. Candès, Aaditya Ramdas, and Ryan J. Tibshirani. 2021. The Limits of Distribution-Free Conditional Predictive Inference. Information and Inference: A Journal of the IMA 10, 2 (2021). [9] Osbert Bastani, Varun Gupta, Christopher Jung, Georgy Noarov, Ramya Ramalingam, and Aaron Roth. 2022. Practical Adversarial Multivalid Conformal Prediction. In Advances in Neural Information Processing Systems 35 (NeurIPS) .Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 21 
+
+[10] Stephen Bates, Anastasios N. Angelopoulos, Lihua Lei, Jitendra Malik, and Michael I. Jordan. 2021. Distribution-Free, Risk-Controlling Prediction Sets. J. ACM 68, 6 (2021). [11] Nora Belrose, David Schneider-Joseph, Shauli Ravfogel, Ryan Cotterell, Edward Raff, and Stella Biderman. 2023. LEACE: Perfect Linear Concept Erasure in Closed Form. In Advances in Neural Information Processing Systems (NeurIPS) .[12] Aabesh Bhattacharyya and Rina Foygel Barber. 2024. Group-Weighted Conformal Prediction. arXiv preprint arXiv:2401.17452 (2024). [13] Vera Boteva, Demian Gholipour, Artem Sokolov, and Stefan Riezler. 2016. A Full-Text Learning to Rank Dataset for Medical Information Retrieval. In 
+
+Advances in Information Retrieval - 38th European Conference on IR Research (ECIR) (LNCS, Vol. 9626) . Springer, 716-722. https://doi.org/10.1007/978-3-319-30671-1_58 [14] Debashish Chakraborty, Eugene Yang, Daniel Khashabi, Dawn Lawrie, and Kevin Duh. 2025. Principled Context Engineering for Retrieval-Augmented Generation: Statistical Guarantees via Conformal Prediction. arXiv preprint arXiv:2511.17908 (2025). [15] Arman Cohan, Sergey Feldman, Iz Beltagy, Doug Downey, and Daniel S. Weld. 2020. SPECTER: Document-level Representation Learning using Citation-informed Transformers. In Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics (ACL) . Association for Computational Linguistics, 2270-2282. https://doi.org/10.18653/v1/2020.acl-main.207 [16] Gordon V. Cormack, Charles L. A. Clarke, and Stefan Büttcher. 2009. Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods. In Proceedings of the 32nd International ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR) . ACM, 758-759. https://doi.org/10.1145/1571941.1572114 [17] Bat-Sheva Einbinder, Stephen Bates, Anastasios N. Angelopoulos, Asaf Gendler, and Yaniv Romano. 2024. Label Noise Robustness of Conformal Prediction. Journal of Machine Learning Research (2024). [18] Shahul Es, Jithin James, Luis Espinosa-Anke, and Steven Schockaert. 2024. RAGAs: Automated Evaluation of Retrieval Augmented Generation. In 
+
+Proceedings of the 18th Conference of the European Chapter of the Association for Computational Linguistics: System Demonstrations (EACL) . Association for Computational Linguistics, 150-158. [19] Luyu Gao, Xueguang Ma, Jimmy Lin, and Jamie Callan. 2023. Precise Zero-Shot Dense Retrieval without Relevance Labels. In Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (ACL) . arXiv:2212.10496. [20] Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia, Jinliu Pan, Yuxi Bi, Yi Dai, Jiawei Sun, Meng Wang, and Haofen Wang. 2023. Retrieval-Augmented Generation for Large Language Models: A Survey. arXiv preprint (2023). arXiv:2312.10997. [21] Yonatan Geifman and Ran El-Yaniv. 2017. Selective Classification for Deep Neural Networks. In Advances in Neural Information Processing Systems 30 (NeurIPS) .[22] Isaac Gibbs, John J. Cherian, and Emmanuel J. Candès. 2025. Conformal Prediction with Conditional Guarantees. Journal of the Royal Statistical Society Series B (2025). [23] Úrsula Hébert-Johnson, Michael P. Kim, Omer Reingold, and Guy N. Rothblum. 2018. Multicalibration: Calibration for the (Computationally-Identifiable) Masses. In Proceedings of the 35th International Conference on Machine Learning (ICML) (PMLR, Vol. 80) . 1939-1948. [24] Sebastian Hofstätter, Sheng-Chieh Lin, Jheng-Hong Yang, Jimmy Lin, and Allan Hanbury. 2021. Efficiently Teaching an Effective Dense Retriever with Balanced Topic Aware Sampling. In Proceedings of the 44th International ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR) . arXiv:2104.06967. [25] Doris Hoogeveen, Karin M. Verspoor, and Timothy Baldwin. 2015. CQADupStack: A Benchmark Data Set for Community Question-Answering Research. In Proceedings of the 20th Australasian Document Computing Symposium (ADCS) . ACM, 3:1-3:8. https://doi.org/10.1145/2838931.2838934 [26] Gautier Izacard, Mathilde Caron, Lucas Hosseini, Sebastian Riedel, Piotr Bojanowski, Armand Joulin, and Edouard Grave. 2022. Unsupervised Dense Information Retrieval with Contrastive Learning. Transactions on Machine Learning Research (TMLR) (2022). [27] Gautier Izacard and Edouard Grave. 2021. Leveraging Passage Retrieval with Generative Models for Open Domain Question Answering. In 
+
+Proceedings of the 16th Conference of the European Chapter of the Association for Computational Linguistics (EACL) . Association for Computational Linguistics, 874-880. [28] Mintong Kang, Nezihe Merve Gürel, Ning Yu, Dawn Song, and Bo Li. 2024. C-RAG: Certified Generation Risks for Retrieval-Augmented Language Models. In International Conference on Machine Learning (ICML) .[29] Vladimir Karpukhin, Barlas Oğuz, Sewon Min, Patrick Lewis, Ledell Wu, Sergey Edunov, Danqi Chen, and Wen-tau Yih. 2020. Dense Passage Retrieval for Open-Domain Question Answering. In Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP) .Association for Computational Linguistics, 6769-6781. [30] Omar Khattab and Matei Zaharia. 2020. ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT. In 
+
+Proceedings of the 43rd International ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR) . ACM, 39-48. https: //doi.org/10.1145/3397271.3401075 [31] Hyunji Lee, Luca Soldaini, Arman Cohan, Minjoon Seo, and Kyle Lo. 2025. RouterRetriever: Routing over a Mixture of Expert Embedding Models. In 
+
+AAAI Conference on Artificial Intelligence .[32] Jing Lei, Max G’Sell, Alessandro Rinaldo, Ryan J. Tibshirani, and Larry Wasserman. 2018. Distribution-Free Predictive Inference for Regression. J. Amer. Statist. Assoc. 113, 523 (2018), 1094-1111. https://doi.org/10.1080/01621459.2017.1307116 [33] Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel, Sebastian Riedel, and Douwe Kiela. 2020. Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. In Advances in Neural Information Processing Systems 33 (NeurIPS) . 9459-9474. Manuscript submitted to ACM 22 Jayakumar Manoharan 
+
+[34] Rui Luo and Zhixin Zhou. 2025. Conditional Conformal Risk Adaptation. arXiv preprint arXiv:2504.07611 (2025). [35] Macedo Maia, Siegfried Handschuh, André Freitas, Brian Davis, Ross McDermott, Manel Zarrouk, and Alexandra Balahur. 2018. WWW’18 Open Challenge: Financial Opinion Mining and Question Answering. In Companion Proceedings of The Web Conference 2018 (WWW ’18 Companion) . ACM, 1941-1942. https://doi.org/10.1145/3184558.3192301 [36] Sewon Min, Kalpesh Krishna, Xinxi Lyu, Mike Lewis, Wen-tau Yih, Pang Wei Koh, Mohit Iyyer, Luke Zettlemoyer, and Hannaneh Hajishirzi. 2023. FActScore: Fine-grained Atomic Evaluation of Factual Precision in Long Form Text Generation. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP) . Association for Computational Linguistics, 12076-12100. [37] Tri Nguyen, Mir Rosenberg, Xia Song, Jianfeng Gao, Saurabh Tiwary, Rangan Majumder, and Li Deng. 2016. MS MARCO: A Human Generated Machine Reading Comprehension Dataset. In CoCo@NIPS . arXiv:1611.09268. [38] Jianmo Ni, Chen Qu, Jing Lu, Zhuyun Dai, Gustavo Hernández Ábrego, Ji Ma, Vincent Y Zhao, Yi Luan, Keith B Hall, Ming-Wei Chang, and Yinfei Yang. 2022. Large Dual Encoders Are Generalizable Retrievers. In Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing (EMNLP) . arXiv:2112.07899. [39] Rodrigo Nogueira and Kyunghyun Cho. 2019. Passage Re-ranking with BERT. arXiv preprint (2019). arXiv:1901.04085. [40] Victor Quach, Adam Fisch, Tal Schuster, Adam Yala, Jae Ho Sohn, Tommi S. Jaakkola, and Regina Barzilay. 2024. Conformal Language Modeling. In 
+
+International Conference on Learning Representations (ICLR) .[41] Shauli Ravfogel, Yanai Elazar, Hila Gonen, Michael Twiton, and Yoav Goldberg. 2020. Null It Out: Guarding Protected Attributes by Iterative Nullspace Projection. In Annual Meeting of the Association for Computational Linguistics (ACL) .[42] Nils Reimers and Iryna Gurevych. 2019. Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks. In Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing (EMNLP-IJCNLP) . arXiv:1908.10084. [43] Stephen Robertson and Hugo Zaragoza. 2009. The Probabilistic Relevance Framework: BM25 and Beyond. Foundations and Trends in Information Retrieval 3, 4 (2009), 333-389. https://doi.org/10.1561/1500000019 [44] Yaniv Romano, Evan Patterson, and Emmanuel J. Candès. 2019. Conformalized Quantile Regression. In Advances in Neural Information Processing Systems 32 (NeurIPS) . 3538-3548. [45] Yaniv Romano, Matteo Sesia, and Emmanuel J. Candès. 2020. Classification with Valid and Adaptive Coverage. In Advances in Neural Information Processing Systems 33 (NeurIPS) .[46] Matteo Sesia, Y. X. Rachel Wang, and Xin Tong. 2025. Adaptive Conformal Classification with Noisy Labels. Journal of the Royal Statistical Society Series B (2025). [47] Weijia Shi, Sewon Min, Michihiro Yasunaga, Minjoon Seo, Rich James, Mike Lewis, Luke Zettlemoyer, and Wen-tau Yih. 2024. REPLUG: Retrieval-Augmented Black-Box Language Models. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics (NAACL-HLT) . Association for Computational Linguistics, 8371-8384. [48] Effrosyni Sokli, Pranav Kasela, Georgios Peikos, and Gabriella Pasi. 2024. Investigating Mixture of Experts in Dense Retrieval. arXiv preprint arXiv:2412.11864 (2024). [49] Nandan Thakur, Nils Reimers, Andreas Rücklé, Abhishek Srivastava, and Iryna Gurevych. 2021. BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of Information Retrieval Models. In NeurIPS Datasets and Benchmarks .[50] Ryan J. Tibshirani, Rina Foygel Barber, Emmanuel J. Candès, and Aaditya Ramdas. 2019. Conformal Prediction Under Covariate Shift. In Advances in Neural Information Processing Systems 32 (NeurIPS) . 2526-2536. [51] Yiteng Tu, Weihang Su, Yujia Zhou, Qingyao Ai, and Yiqun Liu. 2025. RbFT: Robust Fine-tuning for Retrieval-Augmented Generation against Retrieval Defects. In Proceedings of the 48th International ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR) .arXiv:2501.18365. [52] Ellen Voorhees, Tasmeer Alam, Steven Bedrick, Dina Demner-Fushman, William R. Hersh, Kyle Lo, Kirk Roberts, Ian Soboroff, and Lucy Lu Wang. 2021. TREC-COVID: Constructing a Pandemic Information Retrieval Test Collection. ACM SIGIR Forum 54, 1 (2021), 1-12. https: //doi.org/10.1145/3451964.3451965 [53] Vladimir Vovk. 2012. Conditional Validity of Inductive Conformal Predictors. In Proceedings of the Asian Conference on Machine Learning (ACML) (PMLR, Vol. 25) . 475-490. [54] Vladimir Vovk, Alexander Gammerman, and Glenn Shafer. 2005. Algorithmic Learning in a Random World . Springer, New York. [55] David Wadden, Shanchuan Lin, Kyle Lo, Lucy Lu Wang, Madeleine van Zuylen, Arman Cohan, and Hannaneh Hajishirzi. 2020. Fact or Fiction: Verifying Scientific Claims. In Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP) . Association for Computational Linguistics, 7534-7550. https://doi.org/10.18653/v1/2020.emnlp-main.609 [56] Kexin Wang, Nandan Thakur, Nils Reimers, and Iryna Gurevych. 2022. GPL: Generative Pseudo Labeling for Unsupervised Domain Adaptation of Dense Retrieval. In Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics (NAACL-HLT) .Association for Computational Linguistics, 2345-2360. [57] Liang Wang, Nan Yang, Xiaolong Huang, Binxing Jiao, Linjun Yang, Daxin Jiang, Rangan Majumder, and Furu Wei. 2022. Text Embeddings by Weakly-Supervised Contrastive Pre-training. arXiv preprint arXiv:2212.03533 (2022). [58] Orion Weller, Benjamin Van Durme, Dawn Lawrie, Ashwin Paranjape, Yuhao Zhang, and Jack Hessel. 2024. Promptriever: Instruction-Trained Retrievers Can Be Prompted Like Language Models. arXiv preprint arXiv:2409.11136 (2024). Manuscript submitted to ACM Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 23            
+
+> [59] Shitao Xiao, Zheng Liu, Peitian Zhang, Niklas Muennighoff, Defu Lian, and Jian-Yun Nie. 2023. C-Pack: Packed Resources for General Chinese Embeddings. arXiv preprint arXiv:2309.07597 (2023). [60] Jiarui Zhang, Xiangyu Liu, and Yong Hu. 2025. RAGRouter: Learning to Route Queries to Multiple Retrieval-Augmented Language Models. arXiv preprint arXiv:2505.23052 (2025). [61] Yao Zhang and Emmanuel J. Candès. 2024. Posterior Conformal Prediction. arXiv preprint arXiv:2409.19712 (2024). [62] Zexuan Zhong, Ziqing Huang, Alexander Wettig, and Danqi Chen. 2023. Poisoning Retrieval Corpora by Injecting Adversarial Passages. In
+> Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP) . Association for Computational Linguistics, 13764-13775. [63] Wei Zou, Runpeng Geng, Binghui Wang, and Jinyuan Jia. 2025. PoisonedRAG: Knowledge Corruption Attacks to Retrieval-Augmented Generation of Large Language Models. In 34th USENIX Security Symposium (USENIX Security) . 3827-3844. arXiv:2402.07867.
+
+A PROOF OF THE PER-DOMAIN TRANSFER CERTIFICATE 
+
+We prove the per-domain bound (2) ; simultaneity over domains follows from the Bonferroni allocation and union bound discussed after the theorem. Fix a domain 𝑐 and condition on 𝑦 (𝑞 ) = 𝑐 . Write 𝐿 = CSCR @𝐾 (𝑞 ) for the served contamination loss and partition on the router outcome: 
+
+E[𝐿 | 𝑦 = 𝑐 ] = P( ˆ𝑔 = 𝑐 | 𝑦 = 𝑐 ) E[𝐿 | 𝑦 = 𝑐, ˆ𝑔 = 𝑐 ]+ P( ˆ𝑔 ≠ 𝑐 | 𝑦 = 𝑐 ) E[𝐿 | 𝑦 = 𝑐, ˆ𝑔 ≠ 𝑐 ]≤ ( 1 − 𝜌 𝑐 ) E[𝐿 | 𝑦 = 𝑐, ˆ𝑔 = 𝑐 ] + 𝜌 𝑐 𝐵, (5) using P( ˆ𝑔 ≠ 𝑐 | 𝑦 = 𝑐 ) = 𝜌 𝑐 and 𝐿 ≤ 𝐵 (Assumption 2) for the misrouted mass. 
+
+Correctly-routed term. Queries with ˆ𝑔 = 𝑐 are served threshold 𝜏 𝑐 , and the group-𝑐 RCPS step certifies, with confidence 
+
+1 − 𝛿 𝑐 , E[𝐿 | ˆ𝑔 = 𝑐 ] ≤ 𝛼 𝑐 , a bound on the risk over the inferred group (the finite-sample correction is absorbed into the choice of 𝜏 𝑐 , not added to 𝛼 𝑐 ). We need the risk over the truly-𝑐 subset of that group. Let 𝐴 = {𝑦 = 𝑐 } and 𝐺 = { ˆ𝑔 = 𝑐 }.By definition 𝜋 𝑐 = P(¬ 𝐴 | 𝐺 ), so P(𝐴 | 𝐺 ) = 1 − 𝜋 𝑐 , and since 𝐿 ≥ 0,
+
+E[𝐿 | 𝐺 ] ≥ P(𝐴 | 𝐺 ) E[𝐿 | 𝐺, 𝐴 ] = (1 − 𝜋 𝑐 ) E[𝐿 | 𝑦 = 𝑐, ˆ𝑔 = 𝑐 ]. (6) Rearranging and applying the RCPS bound, E[𝐿 | 𝑦 = 𝑐, ˆ𝑔 = 𝑐 ] ≤ E[𝐿 | 𝐺 ]/( 1 − 𝜋 𝑐 ) ≤ 𝛼 𝑐 /( 1 − 𝜋 𝑐 ). Substituting into (5) ,
+
+E[𝐿 | 𝑦 = 𝑐 ] ≤ ( 1 − 𝜌 𝑐 ) 𝛼 𝑐 
+
+1 − 𝜋 𝑐 
+
++ 𝜌 𝑐 𝐵. (7) 
+
+Plugging in estimated bounds (non-circularity). (7) is in terms of the true 𝜌 𝑐 , 𝜋 𝑐 , which we do not know. The right-hand side is non-decreasing in 𝜌 𝑐 whenever 𝐵 ≥ 𝛼 𝑐 /( 1 − 𝜋 𝑐 ) (the regime of interest, since 𝐵 upper-bounds the loss) and non-decreasing in 𝜋 𝑐 ; therefore replacing them with the one-sided Clopper-Pearson upper bounds ¯𝜌 𝑐 , ¯𝜋 𝑐 can only increase it, preserving the inequality. The estimates ¯𝜌 𝑐 , ¯𝜋 𝑐 are computed on D1, while 𝜏 𝑐 (hence the certified 𝛼 𝑐 ) is computed on D2; by Assumption 3 these are independent, so the binomial coverage events and the RCPS risk-control event are jointly controlled by a union bound and no data is used both to fit and to certify the same threshold. This is the step that makes the slack estimable rather than circular. Combining the binomial coverage (each ¯𝜌, ¯𝜋 valid with its allocated error) with (7) yields (2). □
+
+Remark (impossibility scope). Theorem 1 is an approximate group-conditional statement: the slack over the group budget - the router-error term ¯𝜌 𝑐 𝐵 and the impurity inflation factor 1/( 1 − ¯𝜋 𝑐 ) - does not vanish unless the router is perfect ( ¯𝜌 𝑐 = ¯𝜋 𝑐 = 0). This is unavoidable - exact conditional coverage with an estimated conditioning variable is 
+
+> Manuscript submitted to ACM
+
+24 Jayakumar Manoharan impossible in finite samples [ 8] - and is the price of operating without test-time labels. The contribution is that the slack is fully estimable and degrades gracefully and visibly with router quality. 
+
+B ADDITIONAL DETAILS 
+
+Calibration protocol. For each domain 𝑐 we draw, per resample, a disjoint partition of the truly-𝑐 queries: 30% are held out for evaluation and the remaining 70% are split evenly into D1 (router-error estimation) and D2 (threshold calibration); the domain probe is trained once on a third, disjoint pool of queries and frozen. On D1 we form one-sided Clopper-Pearson upper bounds ¯𝜌 𝑐 , ¯𝜋 𝑐 at level 1 − 𝛾 each , where the global error 𝛾 =0.1 is split across the 3𝐶 +1 statements (2𝐶 binomial bounds and 𝐶 +1 group risk-control tests) by a Bonferroni allocation, which is unconditionally valid and is the allocation behind every reported certificate (a Šidák allocation is second order, Table 9). On D2 we run group-𝑐 
+
+RCPS at the rescaled level 𝛼 𝑐 of (3) and read the largest feasible threshold 𝜏 𝑐 . All reported quantities are means over 
+
+1000 such resamples; the demotion threshold grid is 𝜏 ∈ { 0, 0.02 , . . . , 1} (51 points), 𝐾 =10 , and the bounded-loss range is 𝐵 =1.
+
+Hoeffding-Bentkus RCPS.. The Hoeffding-Bentkus RCPS 𝑝 -value for a group of 𝑛 losses with empirical mean ˆ𝐿 against level 𝛼 is min { 𝑒 · P(Bin (𝑛, 𝛼 ) ≤ ⌈ 𝑛 ˆ𝐿 ⌉) , exp (− 2𝑛 (𝛼 − ˆ𝐿 )2
+
+> +
+
+) } [10 ]; we certify a threshold 𝜏 when this is ≤ 𝛿 , taking the most permissive 𝜏 that remains certified. The Bentkus term dominates (is tighter) when the observed loss sits well below the budget, which is the regime our calibration operates in; the additive Hoeffding margin alone (the ablation of Table 9) is far looser and renders even feasible domains uncertifiable. 
+
+Budget-rescaling inversion. The corollary (3) is the exact inverse of the certificate (2) . Setting the right-hand side of (2) equal to a target 𝛼 ★ 
+
+> 𝑐
+
+and solving for the run-budget 𝛼 𝑐 ,
+
+𝛼 ★ 
+
+> 𝑐
+
+= (1 − ¯𝜌 𝑐 ) 𝛼 𝑐 
+
+1 − ¯𝜋 𝑐 
+
++ ¯𝜌 𝑐 𝐵 ⇐⇒ 𝛼 𝑐 =  𝛼 ★ 
+
+> 𝑐
+
+− ¯𝜌 𝑐 𝐵  1 − ¯𝜋 𝑐 
+
+1 − ¯𝜌 𝑐 
+
+,
+
+which is (3) . The map is monotone increasing in 𝛼 ★ 
+
+> 𝑐
+
+, so a tighter target yields a tighter run-budget; it crosses zero at 
+
+𝛼 ★ 
+
+> 𝑐
+
+= ¯𝜌 𝑐 𝐵 , the router floor, below which 𝛼 𝑐 ≤ 0 and the domain is infeasible. Running group-𝑐 RCPS at this 𝛼 𝑐 and substituting back reproduces 𝛼 ★ 
+
+> 𝑐
+
+on the left of (2) , so the delivered per-domain certificate equals the requested target exactly when feasible. 
+
+Sample-complexity onset. The feasibility threshold 𝑛 min follows from the Bentkus term. With observed group loss 
+
+ˆ𝐿 → 0 (an aggressively demoted, clean served set), the Hoeffding-Bentkus 𝑝 -value reduces to 𝑒 · P(Bin (𝑛, 𝛼 )=0) =
+
+𝑒 (1 − 𝛼 )𝑛 . Certification requires this to be ≤ 𝛿 , i.e. (1 − 𝛼 )𝑛 ≤ 𝛿 /𝑒 , hence 
+
+𝑛 ≥ ln (𝑒 /𝛿 )− ln (1 − 𝛼 ) ≈ ln (𝑒 /𝛿 )
+
+𝛼 (small 𝛼 ),
+
+the 𝑛 min ≈ ln (𝑒 /𝛿 )/ 𝛼 used in Section 4. Since − ln (1 − 𝛼 ) ≥ 𝛼 , the approximation ln (𝑒 /𝛿 )/ 𝛼 slightly over estimates the exact threshold ln (𝑒 /𝛿 )/(− ln (1 − 𝛼 )) , so the stated 𝑛 min is a mildly conservative leading-order estimate and the true onset is marginally smaller; Figure 6 confirms the empirical feasibility turns on at the predicted scale. A domain is therefore servable at run-budget 𝛼 𝑐 once its D2 group exceeds ≈ ln (𝑒 /𝛿 )/ 𝛼 𝑐 queries, which, with the rescaling above, is the precise sense in which a stricter target or a weaker router (larger ¯𝜌 𝑐 𝐵 , smaller 𝛼 𝑐 ) demands more calibration data or forces abstention. 
+
+> Manuscript submitted to ACM
+
+Certified Domain-Consistency for Multi-Domain Retrieval: Label-Free Per-Domain Contamination Control with Conformal Risk Guarantees 25 
+
+Reproducibility. The frozen retrieval stack is BM25 ( 𝑘 1=0.9, 𝑏 =0.4) + BGE-base dense with RRF ( 𝑘 =60 ) and a cross-encoder reranker trained on MS-MARCO [ 37 ]; the probe is a temperature-scaled logistic head (an MLP variant in the ablations); the random seed is 42 throughout. The probe, per-domain splits, locked budgets, every result file behind each figure and table, and the assembly scripts for all four testbeds (Table 3) are provided in the publicly released artifact.

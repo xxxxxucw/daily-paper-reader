@@ -1,0 +1,967 @@
+Title: Finite-Sample Conformal Coverage Recovery via Fusion under Degraded Local Guarantees in Occupancy Map Estimation
+
+URL Source: https://arxiv.org/pdf/2607.14906v1
+
+Published Time: Fri, 17 Jul 2026 01:06:16 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+# Finite-Sample Conformal Coverage Recovery via Fusion under Degraded Local Guarantees in Occupancy Map Estimation 
+
+Ritvik Mahajan, Aneesh Raghavan, Karl Henrik Johansson 
+
+Abstract — Accurate and reliable environmental mapping is a fundamental requirement for multi-robot autonomy. While continuous mapping techniques like Gaussian Process Occu-pancy Mapping (GPOM) provide rich spatial correlation and uncertainty estimates, they lack formal, finite-sample guaran-tees on their predictive reliability. Conformal prediction can equip each robot’s local map with a distribution-free cover-age guarantee, but this local guarantee degrades in practice: temporal correlation along a robot’s trajectory breaks the exchangeability on which conformal calibration relies, and each robot observes only a spatially limited, non-uniform portion of the environment. Taking these degraded per-agent guarantees as given, we develop a distributed fusion algorithm that recovers the desired coverage across the team. Robots exchange only lightweight scalar e-values with their neighbors, and a receiver fuses them using a per-neighborhood miscoverage budget and an uncertainty-attenuated fusion operator. We prove that the fused set-valued map recovers the target user-specified coverage level regardless of the communication graph topology or the underlying sensor noise distribution. However, a drawback is that wherever the fused evidence is insufficient, the map declines to commit and returns both labels (free and occupied), leaving a significant fraction of the domain unclassified rather than thresholded into a single decision. Simulated multi-agent mapping experiments demonstrate that the fused predictor reliably meets its theoretical coverage bounds, and illustrate that denser communication topologies significantly enhance map efficiency by shrinking this unclassified fraction. 
+
+I. I NTRODUCTION 
+
+Having an accurate map of the environment is fundamental to mobile robot autonomy. A likelihood map assigns each location a continuous occupancy score, a probability or log-odds value, whereas the occupancy map is the binary free/occupied classification obtained by applying a thresh-olding policy to that likelihood map. Mapping algorithms overwhelmingly estimate the likelihood map, leaving the occupancy map, the object actually consumed by planning and safety layers, to an unguaranteed thresholding step. The classical Occupancy Grid Map (OGM) framework discretizes the workspace and treats cell occupancies independently [1], [2]. While computationally tractable, this assumption discards spatial correlations and fixes map resolution. Contin-uous alternatives, such as Gaussian Process Occupancy Map-ping (GPOM) [3], overcome these limitations by providing spatial correlation and uncertainty estimates. Recent scalable         
+
+> This work was partly supported by the Knut and Alice Wallenberg Foundation (Wallenberg Scholar grant), the Swedish Research Council (Distinguished Professor grant 2017-01078), and the Swedish Foundation for Strategic Research (SUCCESS FUS21-0026). The authors are with the Department of Decision and Control Systems, School of Electrical Engineering and Computer Science, KTH Royal Institute of Technology, and also with Digital Futures, Stockholm, Swe-den.
+
+{ritvikm,aneesh,kallej }@kth.se 
+
+extensions include incremental updates [4] and Hilbert Maps [5]–[7]. However, their uncertainty estimates rely heavily on heuristics or exact hyperparameter tuning, lacking formal finite-sample guarantees on map reliability. Tasks such as exploration and search-and-rescue are better served by multi-robot teams covering larger areas efficiently, which requires systematic map-merging methods. Existing continuous fusion approaches handle intermittent connectiv-ity and communication constraints using Gaussian Mixture Models [8], distributed sparse GPs [9], or distributed factor graphs [10]. Despite this progress, existing methods fail to provide formal, distribution-free guarantees on the fraction of map queries answered correctly. This is a critical gap for safety-critical deployment because heterogeneous explo-ration naturally results in non-uniform data quality across the environment. Conformal Prediction (CP) is a distribution-free frame-work for constructing prediction sets with provable finite-sample coverage guarantees [11], [12]. Recent advances have extended CP to handle online data streams [13], label noise [14], safe control planning [15], and distributed computation via message passing [16]. Specifically in mapping and nav-igation, recent work has begun leveraging CP to quantify uncertainty in 3D semantic occupancy in autonomous driv-ing [17], for semantic navigation in unknown environments under perceptual uncertainty [18], and to extract probabilistic safety bounds for UGV trajectory planning [19]. These prop-erties make CP a natural tool for certifying map predictions. However, providing formal finite-sample guarantees for dis-tributed, multi-agent occupancy fusion under correlated, non-i.i.d. data remains an open challenge, which this work addresses. The proposed approach is agnostic to the choice of likelihood-map estimator, and instead targets the occupancy map it induces: each agent equips its own thresholded map with a conformal coverage guarantee, but since spatially and temporally correlated data degrade this per-agent guarantee below the target level, we pose the problem as retrieving the desired coverage by fusing the degraded local guarantees across the team, without exchanging raw data. 
+
+A. Motivating Experiments 
+
+To make the challenge concrete, we run single- and multi-agent studies in the simulation environment described in Section V (with full setup and noise levels there). As external baselines, we map using OGM (grid-based) and IGPOM (GP-based) with a single robot traversing the entire workspace ( 989 scans) and report ROC-AUC against the known ground truth. Two limitations emerge. First, sensing arXiv:2607.14906v1 [eess.SY] 16 Jul 2026 noise degrades the grid-based OGM (ROC-AUC 0.86 → 0.82 
+
+as the LiDAR range-noise standard deviation σr grows from 
+
+0 to 0.1 m, Fig. 1a); the variance-aware IGPOM resists noise but is far costlier ( ∼ 140 s vs. ∼ 8 s per map). Second, collecting more data does not close this gap: as the retained-scan fraction grows from 0.1 to 1, IGPOM’s ROC-AUC stays within [0 .87 , 0.93] and never approaches 1, while its GP training time rises roughly tenfold ( 14 → 134 s, Fig. 1b). The achievable single-agent quality is thus bounded away from perfect and cannot be bought with more measurements. Collaboration, in contrast, does help because a single robot observes only part of the workspace. Fig. 1c reports ROC-AUC over the whole workspace as more agents’ local GPs are fused (each agent’s bare-Mat´ ern GP, the pre-fusion local estimator of Section II-B, combined by a gate-masked probability average). A lone agent, informative only on its own ∼60% of the map, attains 0.80 ; two complementary agents already reach 0.93 (e.g. robots 4 and 5 individually score 0.79 each but 0.92 fused), and the five-agent team reaches 0.95 .Yet all of these methods share a deeper limitation: each outputs a probabilistic map that must be thresholded heuris-tically to obtain a classified (occupied/free) map, and that threshold carries no guarantee on the fraction of misclassified queries. Fig. 2 shows the diffuse occupancy-probability field of a single agent’s pre-fusion local estimator, the bare-Mat´ ern GP of Section II-B, sharpening around observed structure and degrading under sparse, noisy data. Choosing the classification threshold is itself ill-posed: Fig. 3 sweeps the threshold τ on the occupied-class F1 of one such map (full data, σr = 0 .1 m), whose peak is 0.38 at τ ≈ 0.6
+
+and collapses on either side; and because the occupied class is rare ( ∼5% ), accuracy is uninformative (a trivial all-free map scores ∼95% ). No principled, condition-independent threshold exists, and none of these maps bounds its mis-classification rate. This motivates our approach: rather than thresholding a probability field into a single label per cell, we fuse such agents into a set-valued map that, at each query, returns the set of occupancy labels it deems admissible. This set carries a finite-sample guarantee at a user-chosen level α:across queries, the true occupancy label is excluded from the returned set at most a fraction α of the time (equivalently, the fused map covers the true label with probability at least 
+
+1 − α), regardless of the sensor noise or the amount of data. 
+
+B. Problem Description 
+
+Multiple agents are gathering data. Using the collected data in a static environment, the objective is to estimate an occupancy map without exchanging data. There are vari-ous algorithms for estimating the likelihood map, such as OGM, GPOM, and Hilbert maps. However, no algorithm formally guarantees the accuracy of the occupancy map obtained by applying a given thresholding policy to the likelihood map. Given the data and any choice of likelihood estimation algorithm, we assume that there exist thresholds that achieve coverage guarantees, even when the data are spatially and temporally correlated. We consider the prob-lem of recovering coverage guarantees from degraded local guarantees. Formally, we cast distributed occupancy mapping as a coverage-retrieval problem (Problem 1): each agent applies split conformal prediction to its local likelihood map and returns a set-valued occupancy prediction whose miscoverage can exceed the target level α, since its trajectory data are temporally correlated and cover only part of the workspace, and the task is to design a per-agent fusion rule over the communication neighborhood that restores level α
+
+while agents share only scalar e-values on a common query set and no raw measurements. 
+
+C. Contributions 
+
+To solve the coverage-retrieval problem posed above (Problem 1), we give an algorithm (Algorithm 1) that sepa-rates independent local fitting and calibration from a single round of e-value broadcast followed by a weighted-average fusion at each receiver. The fusion rule combines a per-neighborhood budget β = α/d that splits the target among the d agents, a per-agent threshold recalibrated to that budget on a held-out fold, a lifted e-value carrying an observation gate and an uncertainty attenuation, and fixed weights under which fusion is a simple average; the budget lets a single confident agent decide a query in the region it has observed, and we prove (Theorem 4.1) that the fused set attains cover-age 1 − α at every agent for any graph and any sensor-noise distribution under local stationarity and temporal mixing rather than i.i.d. data, with the attenuation restoring the target level when a local guarantee fails (Proposition 2). Multi-agent simulations confirm that the bound holds across α
+
+and both topologies and that denser graphs leave a smaller unclassified fraction. The outline of the paper is as follows. The problem formulation is presented in Section II . The Algorithm in presented in Section III while its properties are studied in Section IV. The simulation results are presented in Section V and we conclude in Section VI. II. P ROBLEM FORMULATION 
+
+In this section we describe the problem setup in subsection II-A, the local estimation procedure in II-B and the main problem in subsection II-C. All random variables are defined on a common probability space (Ω , F, P), and the law of a random variable X is denoted L(X).
+
+A. Problem Setup 
+
+We consider N robots operating collaboratively. The robots communicate over an undirected graph G = ( V, E),where V = {1, . . . , N } is the set of robots and (i, j ) ∈ E 
+
+if robots i and j can exchange messages. Let N (i) := 
+
+{j : ( i, j ) ∈ E} denote the neighborhood of robot i. Each robot communicates only with its immediate neighbors; there is no central coordinator.The robots operate in a bounded region E ⊂ R2 with a deterministic occupancy function O :
+
+E → {− 1, +1 } that is unknown and must be inferred from noisy measurements. Each robot i moves along a trajectory 0.00 0.02 0.04 0.06 0.08 0.10   
+
+> LiDAR range-noise std σr(m)
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> ROC AUC
+> OGM
+> IGPOM
+
+(a) noise degrades quality 0.2 0.4 0.6 0.8 1.0  
+
+> Fraction of scans used
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> ROC AUC
+> IGPOM ROC AUC
+> OGM ROC AUC
+> IGPOM train time
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> 120
+> GP train time (s)
+
+(b) more data leads to more compute 1 2 3 4 5 
+
+> Number of collaborating agents
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> ROC AUC on whole map
+
+(c) collaboration extends coverage 
+
+Fig. 1: Motivating experiments (ROC-AUC vs. ground truth). (a) A single robot over the whole workspace: the grid-based OGM degrades as the LiDAR range-noise σr grows, while the variance-aware IGPOM resists noise but costs ∼18 × more and saturates. (b) The same robot, varying the retained-scan fraction: IGPOM’s ROC-AUC stays flat while GP training time rises ∼10 ×. (c) Multi-agent collaboration: fusing more agents’ local GPs raises the whole-workspace ROC-AUC from 0.80 
+
+(one agent) to 0.95 (five agents), since collaboration maps regions that a single robot never observes. 
+
+(a) ground truth (b) full data, low noise 
+
+(c) sparse + high noise 
+
+Fig. 2: Occupancy probability of a single agent’s pre-fusion local estimator over the whole workspace, beside the ground truth. In (b),(c), the color encodes P (occupied) from 0
+
+(blue) to 1 (red); in (a), blue/red mark free/occupied ground truth. The map is a diffuse probability field, sharper around observed structure and degrading under sparse/noisy data. 0.0 0.2 0.4 0.6 0.8 1.0      
+
+> Classification threshold τon P(occupied)
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> F1 (occupied class)
+> best F1 = 0.38 at τ= 0.60
+
+Fig. 3: Occupied-class F1 versus classification threshold τ
+
+for a single-agent map (full data, σr = 0 .1 m). The best F1 is 0.38 , at τ ≈ 0.6, and collapses on either side. 
+
+(ei
+
+> 0: n
+
+, R i
+
+> 0: n
+
+) ∈ (R2 × SO (2)) n+1 and collects 2D LiDAR scans. A scan at time n consists of Lin range-bearing returns: 
+
+Zin = (ri,ℓ n , φ i,ℓ n ) Lin
+
+> ℓ=1
+
+, (1) where ri,ℓ n ≥ 0 is the range and φi,ℓ n is the bearing of beam ℓ
+
+in the robot’s local frame. Both odometry and sensor returns are corrupted by additive Gaussian noise: 
+
+˜ri,ℓ n = ri,ℓ n + ϵi,ℓ r,n , ˜φi,ℓ n = φi,ℓ n + ϵi,ℓ φ,n , (2) 
+
+˜ein = ein + ϵie,n , ˜θin = θin + ϵiθ,n . (3) where ϵi,ℓ r,n ∼ N (0 , σ 2 
+
+> r
+
+), ϵi,ℓ φ,n ∼ N (0 , σ 2
+
+> φ
+
+), ϵie,n ∼ N (0 , σ 2 
+
+> e
+
+I),
+
+ϵiθ,n ∼ N (0 , σ 2 
+
+> θ
+
+), and all noise terms are jointly independent. For beam ℓ, the endpoint is occupied, and points along the ray are free. Using the noisy pose and returns, scan Zin yields labeled samples: 
+
+˜Din =
+
+> Lin
+
+[
+
+> ℓ=1
+
+
+
+{(˜ zi,ℓ n , +1) } ∪ { (˜ xi,ℓ,m n , −1) }M i,ℓ n
+
+> m=1
+
+
+
+, (4) where ˜zi,ℓ n is the noisy beam endpoint and ˜xi,ℓ,m n are free-space samples along the beam. We denote the stochastic process of sampled map locations by Xin ∈ E, driven by the robot’s noisy pose. For any query X ∈ E, the clean label is Y := O(X) ∈ {− 1, +1 }, and each sampled location yields an observed noisy label ˜Y in ∈ {− 1, +1 }. The joint distribution of location and noisy label is 
+
+dPiX, ˜Y ,n (x, ˜y) = dPi  ˜Y in = ˜ y | Xin = x dPiX,n (x), (5) where the conditional measurement distribution is a function of the deterministic O(x). Fix a block half-length T . Partition the time indices into blocks Ik := {(2 k −2) T +1 , . . . , 2kT }
+
+for k = 1 , 2, . . . , each of length 2T . Each block k is split into a training half and a calibration half: 
+
+Itrain  
+
+> k
+
+:= {(2 k − 2) T + 1 , . . . , (2 k − 1) T },
+
+Ical  
+
+> k
+
+:= {(2 k − 1) T + 1 , . . . , 2kT }.
+
+Define the training dataset Di, train  
+
+> k
+
+:= {(Xin, ˜Y in)}n∈I train  
+
+> k
+
+,calibration dataset Di, cal  
+
+> k
+
+:= {(Xin, ˜Y in)}n∈I cal  
+
+> k
+
+, and training 
+
+σ-algebra Gik := σ (Xin, ˜Y in) : n ∈ I train 
+
+> k
+
+. Global stationar-ity is unrealistic in mobile robotics since the robot’s spatial sampling distribution evolves as exploration proceeds, and the environment is spatially heterogeneous. The exchange-ability assumption in conformal prediction is generally vio-lated; related failures and remedies under distribution shift, covariate shift, and time-series dependence have been studied in [13], [20]–[22]. Following [22], [23], we impose local stationarity within each block and temporal mixing across blocks. Distributional closeness is measured in total variation distance dTV (P, Q ) := sup A |P (A) − Q(A)| [24]. 
+
+Assumption 1 (Local Stationarity): For each agent i and block k,
+
+sup 
+
+> n,n ′∈I cal
+> k
+
+dTV 
+
+ L(Xin, ˜Y in), L(Xin′ , ˜Y in′ ) ≤ δT ,
+
+where δT → 0 as T grows appropriately. Within each block, the robot explores a locally homoge-neous region: occupancy structure, sensor noise, and motion statistics remain approximately constant over the block du-ration but may change substantially across blocks. 
+
+Assumption 2 ( β-Mixing): For each agent i, the stochas-tic process {(Xin, ˜Y in)}n≥1 is βi-mixing with coefficient 
+
+βi(ℓ) → 0 as ℓ → ∞ .This captures the decay of temporal dependence due to continuous robot motion. Together, Assumptions 1 and 2 ensure that the calibration data behaves approximately as an i.i.d. sequence within each block. 
+
+B. Local Estimation 
+
+Given Di, train  
+
+> k
+
+, agent i fits an ExactGP with a Mat´ ern- 32
+
+kernel to obtain a predictive model 
+
+Y | X = x ∼ N  ˆμik(x), (ˆ σik)2(x). (6) Conditioned on Gik, the fitted functions ˆμik and ˆσik are deterministic. For each calibration sample n ∈ I cal  
+
+> k
+
+, define the normalized residual nonconformity score 
+
+Ain := | ˜Y in − ˆμik(Xin)|
+
+ˆσik(Xin) . (7) For a query pair (x⋆, y ⋆), define Ai(x⋆, y ⋆) := |y⋆ −
+
+ˆμik(x⋆)|/ˆσik(x⋆). The conformal p-value is 
+
+pik(x⋆, y ⋆) := 1
+
+T + 1 
+
+1 + X
+
+> m∈I cal
+> k
+
+1{Aim ≥ Ai(x⋆, y ⋆)}
+
+ .
+
+(8) The local prediction set at inner level a is Γik(x⋆) := {y :
+
+pik(x⋆, y ) > a }, and {pik(X⋆k , Y ⋆k ) ≤ a} is its miscoverage event; a standard choice is a = α, but the fused operator of Section III-A replaces it with a per-agent recalibrated threshold aik. We consider the relevance of agents in two distinct roles. The first is a binary observation gate that activates agent i only where it has actually collected data. A natural candidate would be the GP predictive standard deviation ˆσik(x⋆), but it is unsuitable for this role as for a stationary Mat´ ern kernel, ˆσik(x) saturates at the prior level 
+
+¯σi := p1 + ( σin)2 (the bare Mat´ ern kernel fixes the signal variance to 1, and σin is the GP likelihood (observation-noise) standard deviation, fit per agent) as x leaves the explored region, and with a moderate length-scale it can remain well below any fixed threshold over the entire bounded workspace. We instead gate on proximity to the agent’s own training inputs, agent i active at x⋆ ⇐⇒ dist  x⋆, {Xin}n∈I train 
+
+> k
+
+ < r, 
+
+(9) where dist( x⋆, S ) := min s∈S ∥x⋆ − s∥2 is the Euclidean distance from x⋆ to the nearest point of the set S, and r is a radius on the order of the inter-sample spacing. The gate uses the agent’s own training inputs {Xin}n∈I train  
+
+> k
+
+, so, like 
+
+ˆμik and ˆσik, it is deterministic given Gik; each agent evaluates (9) on its own data. The second role is a smooth attenuation 
+
+that down-weights confident-but-uncertain queries; here ˆσik
+
+is appropriate, and we use the decay (13). 
+
+C. Problem Definition 
+
+Let di := |N (i) ∪ { i}| . We allocate the target miscoverage as a budget across the neighborhood, 
+
+βi := αdi
+
+, (10) and have each contributing agent j recalibrate its detection threshold to that budget. The agents agree on a common set of query locations Qk = {X⋆k,ℓ }Lk
+
+> ℓ=1
+
+, with Lk := |Q k| (a shared reference grid over the workspace, held fixed across blocks, or a block-specific finite test set), and collaborate by exchanging e-values described as follows. Each element of 
+
+Qk is a realization of the random test location whose block-
+
+k law enters the guarantee below; we write (X⋆k , Y ⋆k ) for a generic such location and its true label Y ⋆k := O(X⋆k ),unobserved at query time. Because Y ⋆k is unknown, each agent evaluates its e-value eik(X⋆k,ℓ , y ⋆) at every query loca-tion X⋆k,ℓ ∈ Q k and both candidate labels y⋆ ∈ {− 1, +1 }. A non-negative scalar e is an e-value if E[e] ≤ 1; by Markov’s inequality, a large e-value is then calibrated evidence against a hypothesis. The use of e-values is motivated by the closure of e-values under deterministic convex averaging: if each local statistic has expectation at most one under the null, then any fixed weighted average remains an e-value [25], [26]. Recent work on conformal e-prediction shows that conformal prediction sets can be constructed from e-values rather than p-values: for each candidate label y, one computes an e-value (e(x, y )) that is valid under the hypothesis Y = y, and then includes y whenever e(x, y ) < 1/α , [27], [28]. At the end of block k, for every X⋆k,ℓ ∈ Q k and each label 
+
+y⋆ ∈ {− 1, +1 }, agent i computes an e-value eik(X⋆k,ℓ , y ⋆)
+
+from its local model to measure the evidence against y⋆ as follows. Writing ϵik(a) := P pik(X⋆k , Y ⋆k ) ≤ a for the local miscoverage of the inner set {y : pik(x, y ) > a }, agent i sets 
+
+aik := sup {a ∈ (0 , 1) : ϵik(a) ≤ βi}, ϵ ik := ϵik(aik) ≤ βi,
+
+(11) estimated on a held-out fold (Remark 2). For a query 
+
+(X⋆k,ℓ , y ⋆), agent i defines the lifted violation indicator: 
+
+eik(X⋆k,ℓ , y ⋆) := gik(X⋆k,ℓ ) 1{pik(X⋆k,ℓ , y ⋆) ≤ aik}
+
+ϵik
+
+· 1{dist( X⋆k,ℓ , {Xin}n∈I train  
+
+> k
+
+) < r }, (12) where the gate 1{dist( X⋆k,ℓ , {Xin}n∈I train  
+
+> k
+
+) < r} of (9) activates agent i only where it has observed data: this confines each agent’s contribution to the region where its local-coverage bound applies, so it abstains ( eik = 0 ) rather than casting an uncalibrated vote where it has no data. The factor gik(X⋆k,ℓ ) ∈ (0 , 1] is the attenuation 
+
+gik(X⋆k,ℓ ) := exp  −λ ˆσik(X⋆k,ℓ ) ∈ (0 , 1] , λ ≥ 0, (13) which further down-weights queries where the agent is uncertain, supplying the margin that recovers coverage when the local bound is loose (Proposition 2); λ = 0 recovers the unattenuated indicator. The attenuation is placed inside the e-value rather than in the mixing weights: since gik(X⋆k,ℓ ) ≤ 1
+
+pointwise, it can only shrink each agent’s contribution, so the e-value property E[eik] ≤ 1 is preserved (see the proof of Theorem 4.1). Thus, the e-value is constructed locally using the conformal p-value (8), an observation gate, an attenuation factor, and a recalibrated threshold. Agent i then broadcasts only these scalars to its neighbors, ensuring no raw data is ever shared. 
+
+Problem 1: Fix the communication graph G = ( V, E) of Section II-A. At the end of block k, every agent j ∈ V 
+
+computes its local e-values ejk(X⋆k,ℓ , y ⋆), ℓ = 1 , . . . , L k, of (12) over the shared query set Qk and transmits them to its neighbors N (j), so that each agent i receives {ejk}j∈N (i)∪{ i}
+
+in one communication round. Let (X⋆k , Y ⋆k ) be a test point whose law is close, in total variation, to the block-k calibra-tion law of every active agent j ∈ N (i) ∪ { i}:
+
+sup 
+
+> n∈I cal
+> k
+
+dTV 
+
+ L(Xjn, ˜Y jn ), L(X⋆k , ˜Y ⋆k ) ≤ δT .
+
+The objective is to design, at each agent i, a fusion rule that combines the received e-values {ejk}j∈N (i)∪{ i} into a fused prediction set Γfused ,i k (X⋆k,ℓ ) at each query location, satisfying 
+
+P Y ⋆k /∈ Γfused ,i k (X⋆k ) ≤ α. 
+
+The key difficulty is that temporal correlation in the robot’s data violates the i.i.d. exchangeability assumption on which split conformal prediction relies, so a single agent can no longer certify that its local miscoverage remains at 
+
+α. Compounding this, any one agent observes only part of the workspace. Fusion over the neighborhood, together with the per-neighborhood budget introduced in Section III-A, recovers the target level α while letting a lone confident agent still decide a query in its own region, without requiring i.i.d. data or any additional structural assumptions. III. A LGORITHM 
+
+In this section, we present the fusion operator which solves Problem 1 and then subsequently an algorithm utilizing the same for occupancy map estimation. 
+
+A. Fusion Operator 
+
+Define uniform weights over the neighborhood: 
+
+wjk := 1
+
+|N (i) ∪ { i}| , j ∈ N (i) ∪ { i}, (14) so that P  
+
+> j∈N (i)∪{ i}
+
+wjk = 1 . Keeping the mixing weights fixed and data-independent is essential for validity: query-dependent convex weights that renormalize over the active set would inflate the contributions of surviving agents and re-quire coverage conditional on the query location, which split conformal prediction does not provide. For each X⋆k,ℓ ∈ Q k,the aggregated e-value, fused p-value, and fused prediction set are: 
+
+efused ,i k (X⋆k,ℓ , y ⋆) := X 
+
+> j∈N (i)∪{ i}
+
+wjk ejk(X⋆k,ℓ , y ⋆), (15) 
+
+pfused ,i k (X⋆k,ℓ , y ⋆) := min 1, 1
+
+efused ,i k (X⋆k,ℓ , y ⋆)
+
+!
+
+, (16) 
+
+Γfused ,i k (X⋆k,ℓ ) := y ∈ {− 1, +1 } : pfused ,i k (X⋆k,ℓ , y ) > α .
+
+(17) The maps efused ,i k , pfused ,i k , and Γfused ,i k are deterministic given the fitted models {ˆμjk, ˆσjk}j ; the randomness in the coverage statements of Section IV arises solely from evalu-ating them at the random test point (X⋆k , Y ⋆k ).
+
+Remark 1: When no agent in N (i) ∪ { i} is active at 
+
+X⋆k,ℓ (all dist( X⋆k,ℓ , {Xjn}n∈I train  
+
+> k
+
+) ≥ r), every ejk = 0,so efused ,i k = 0 and pfused ,i k = 1 . Thus Γfused ,i k (X⋆k,ℓ ) = 
+
+{− 1, +1 }; the prediction set is trivially valid but uninforma-tive. This is the correct conservative behavior when no agent has observed the queried region. 
+
+B. Coverage Recovery via Fusion 
+
+Algorithm 1 summarizes the full procedure. Phases 1– 2 run independently at each agent with no communication beyond agreeing on the query set Qk. In Phase 2, each agent broadcasts only its scalar e-values over Qk; no raw data, GP model, or calibration scores leave the agent. Phase 3 fuses the received e-values by a weighted average. The payload is 
+
+O(|Q k|) per agent and sparse, since eik vanishes wherever agent i is inactive or does not flag the candidate label. The budget (10) controls how decisive the fusion is. Because each e-value is normalized by its own miscoverage 
+
+ϵjk ≈ βi = α/d i, a single active agent that flags the label contributes ejk ≈ di/α ; after the 1/d i averaging in the fused e-value (15), this reaches the fused decision threshold 1/α .Without the budget, each agent would instead normalize by 
+
+α, so one flagging agent would contribute only 1/(αd i) after averaging, and a label could be excluded only if several agents flagged it together. The budget removes this factor di,so an agent can decide queries in the region it has observed on its own. 
+
+Remark 2: The threshold aik and its normalizer ϵik in (11) are computed from a held-out fold: a labeled set the agent holds that is disjoint from the data used to fit its GP and to compute its calibration scores, and that follows the same local regime as the test point. On this fold, aik is the largest inner level at which the agent’s measured miscoverage stays within the budget βi = α/d i, and ϵik is the miscoverage measured at aik. Keeping this fold disjoint from the cali-bration scores makes aik and ϵik independent of the scores to which they are applied. The choice of this fold in our experiments is the calibration half of the following block, as discussed in Section V-A. The validity proof (Theorem 4.1) Algorithm 1 Conformal Coverage Recovery via Fusion 
+
+Require: Agents i = 1 , . . . , N ; block data {(Xin, ˜Y in)}n∈I k ;
+
+d-regular graph G (d = |N (i)∪{ i}| ); level α; gate radius 
+
+r; decay rate λ; query set Qk
+
+Ensure: Fused prediction set Γfused ,i k (X⋆k,ℓ ), X⋆k,ℓ ∈ Q k, at each agent i
+
+Phase 1: Local Calibration and Recalibration (each agent i) 
+
+> 1:
+
+for each agent i = 1 , . . . , N do  
+
+> 2:
+
+(ˆ μik, ˆσik) ← TrainGP( Di, train  
+
+> k
+
+) 
+
+> 3:
+
+Ain ← | ˜Y in − ˆμik(Xin)|/ˆσik(Xin), n ∈ I cal  
+
+> k
+
+▷ (7)  
+
+> 4:
+
+β ← α/d ; recalibrate aik and ϵik on a held-out fold 
+
+▷ (10),(11)  
+
+> 5:
+
+end for Phase 2: Local E-values and Broadcast (each agent i) 
+
+> 6:
+
+for each X⋆k,ℓ ∈ Q k and y⋆ ∈ {− 1, +1 } do  
+
+> 7:
+
+Ai ← | y⋆ − ˆμik(X⋆k,ℓ )|/ˆσik(X⋆k,ℓ ); pik ← 1 
+
+> T+1
+
+ 1 + #{m : Aim ≥ Ai} ▷ (8)  
+
+> 8:
+
+eik(X⋆k,ℓ , y ⋆) ← e−λˆσik (X⋆k,ℓ ) 1{pik ≤ aik}
+
+ϵik
+
+· 1{dist( X⋆k,ℓ , {Xin}n∈I train  
+
+> k
+
+) < r }
+
+▷ (12)  
+
+> 9:
+
+end for  
+
+> 10:
+
+Broadcast {eik(X⋆k,ℓ , ·)}X⋆k,ℓ ∈Q k to all j ∈ N (i)
+
+Phase 3: Fusion (each agent i, on received e-values)  
+
+> 11:
+
+for each X⋆k,ℓ ∈ Q k and y⋆ ∈ {− 1, +1 } do  
+
+> 12:
+
+efused ,i k ← 1
+
+> d
+
+P  
+
+> j∈N (i)∪{ i}
+
+ejk(X⋆k,ℓ , y ⋆); pfused ,i k ←
+
+min(1 , 1/e fused ,i k ) ▷ (15),(16)  
+
+> 13:
+
+end for  
+
+> 14:
+
+return Γfused ,i k (X⋆k,ℓ ) ← { y⋆ : pfused ,i k (X⋆k,ℓ , y ⋆) > α } ▷
+
+(17) needs only one property of ϵik: that it upper-bounds the true miscoverage P(pik(X⋆k , Y ⋆k ) ≤ aik). The held-out estimate provides this under the temporal protocol of Section II-B. We require ϵik > 0, which holds for finite T because a p-value cannot fall below 1/(T +1) . When the attenuation is tuned as in Proposition 2, ϵik may instead be set to the smaller confident-interior miscoverage ϵi
+
+> 0
+
+.IV. A NALYSIS 
+
+We establish that Algorithm 1 solves Problem 1. 
+
+Assumption 3 (Local Coverage): For each agent i, block 
+
+k, and the recalibrated inner threshold aik of (11), the denominator ϵik ∈ (0 , 1) upper-bounds the local miscoverage of the inner set {y : pik(x, y ) > a ik}: for every test point 
+
+(X⋆k , Y ⋆k ) whose law satisfies 
+
+sup 
+
+> n∈I cal
+> k
+
+dTV 
+
+ L(Xin, ˜Y in), L(X⋆k , ˜Y ⋆k ) ≤ δT ,
+
+=⇒ P pik(X⋆k , Y ⋆k ) ≤ aik
+
+ ≤ ϵik. (18) The above assumption is in principle the same as the results in [22], [23]. The joint condition (18) refers to the law of 
+
+(X⋆k , ˜Y ⋆k ), yet the label is unavailable at query time. The next result shows that, under the shared measurement kernel of our sensing model, it can nonetheless be certified from the spatial marginal L(X) alone. 
+
+Proposition 1 (Testing the marginal suffices): Fix agent i
+
+and block k, and suppose the noisy label is generated by a common measurement kernel: there is a Markov kernel 
+
+K(· | x) on {− 1, +1 } such that 
+
+L( ˜Y in | Xin = x) = K(· | x) for all n ∈ I cal  
+
+> k
+
+,
+
+L( ˜Y ⋆k | X⋆k = x) = K(· | x).
+
+Then for every n ∈ I cal  
+
+> k
+
+,
+
+dTV 
+
+ L(Xin, ˜Y in), L(X⋆k , ˜Y ⋆k ) = dTV 
+
+ L(Xin), L(X⋆k ).
+
+Consequently, the joint closeness (18) holds if and only if the spatial marginals are within δT , so any relevance signal that is a function of x alone, such as the observation gate (9) or the predictive uncertainty ˆσik(x⋆), controls the quantity Assumption 3 constrains. 
+
+Proof. Write μ = L(Xin) and ν = L(X⋆k ), and let P, Q be the joint laws, which by the shared-kernel hypothesis disintegrate through the same K: P (dx, dy ) = K(dy | x) μ(dx ) and 
+
+Q(dx, dy ) = K(dy | x) ν(dx ).
+
+Lower bound. The coordinate projection π(x, y ) = x is measurable and pushes P, Q forward to μ, ν . Since a measur-able map cannot increase total variation [24], dTV (P, Q ) ≥
+
+dTV (π#P, π #Q) = dTV (μ, ν ).
+
+Upper bound. Let λ = μ − ν, a finite signed measure with 
+
+λ(X ) = 0 . For measurable A ⊆ X ×{− 1, +1 } with sections 
+
+Ax = {y : ( x, y ) ∈ A},
+
+P (A) − Q(A) = 
+
+Z
+
+> X
+
+K(Ax | x) λ(dx ),
+
+and x 7 → K(Ax | x) is measurable with values in [0 , 1] .Hence 
+
+|P (A) − Q(A)| ≤ sup 
+
+> 0≤h≤1
+
+Z
+
+h dλ = λ+(X ) = dTV (μ, ν ),
+
+where λ+(X ) = dTV (μ, ν ) because λ(X ) = 0 . Taking the supremum over A gives dTV (P, Q ) ≤ dTV (μ, ν ), and the two bounds yield equality. ■
+
+The shared-kernel hypothesis holds in our sensing model because the occupancy O(x) is deterministic and the noise parameters in (2)–(3) are location- and index-invariant, so 
+
+L( ˜Y | X = x) depends on x alone. 
+
+A. E-values and the Markov Inequality 
+
+The fused coverage guarantee rests on the theory of e-values [25]. Recall from Section II that a non-negative random variable e is an e-value if E[e] ≤ 1. The following standard property is used by the analysis. 
+
+Lemma 1 (Markov Inequality for E-values): If e is an e-value, then for any α ∈ (0 , 1) ,P(e ≥ 1/α ) ≤ α. Equivalently, for pe := min(1 , 1/e ), we have P(pe ≤ α) ≤ α.
+
+Proof. Direct application of Markov’s inequality: P(e ≥
+
+1/α ) ≤ α E[e] ≤ α. The equivalence follows from {e ≥
+
+1/α } = {1/e ≤ α} = {pe ≤ α}. ■Theorem 4.1 (Fused Coverage): Under Assumption 3, for any agent i, block k, and test point (X⋆k , Y ⋆k ):
+
+P Y ⋆k /∈ Γfused ,i k (X⋆k ) ≤ α. 
+
+Proof. Fix agent i and block k. We show efused ,i k is an e-value and apply Lemma 1. Note that each ejk is an e-value and that is proven as follows. For any j ∈ N (i) ∪ { i},
+
+E[ejk]= 1
+
+ϵjk
+
+Egjk(X⋆k ) 1{pjk ≤ ajk} · 1{dist( X⋆k , {Xjn}) < r }
+
+≤ 1
+
+ϵjk
+
+E1{pjk ≤ ajk} = 1
+
+ϵjk
+
+P pjk(X⋆k , Y ⋆k ) ≤ ajk
+
+ ≤ 1,
+
+where the first inequality uses 0 ≤ gjk(X⋆k ) ≤ 1 and the gate indicator ≤ 1, and the last uses Assumption 3. Hence 
+
+E[ejk] ≤ 1 for all j ∈ N (i) ∪ { i}. By linearity of expectation and P 
+
+> j
+
+wjk = 1 :
+
+Eefused ,i k
+
+ = X 
+
+> j∈N (i)∪{ i}
+
+wjk E[ejk] ≤ X 
+
+> j∈N (i)∪{ i}
+
+wjk = 1 ,
+
+thus efused ,i k is an e-value. Invoking Lemma 1, it follows that 
+
+P Y ⋆k /∈ Γfused ,i k (X⋆k ) = P pfused ,i k (X⋆k , Y ⋆k ) ≤ α
+
+= P efused ,i k (X⋆k , Y ⋆k ) ≥ 1/α  ≤ α. 
+
+■
+
+B. Coverage Recovery via Uncertainty Attenuation 
+
+Theorem 4.1 assumes the local-coverage bound holds for every active agent. In practice, an agent may be active at x⋆
+
+(it has observed data nearby) yet not strictly compliant, so its conditional local miscoverage at x⋆ exceeds ϵjk. We now show that the attenuation gjk recovers the target level under a graded control on how miscoverage degrades with predictive uncertainty. 
+
+Assumption 4 (Uncertainty-graded miscoverage): For each agent i and block k there exist ϵi 
+
+> 0
+
+∈ (0 , 1) and a growth rate μi ≥ 0 such that the conditional local miscoverage 
+
+cik(x) := P pik(X⋆k , Y ⋆k ) ≤ aik X⋆k = x
+
+satisfies cik(x) ≤ ϵi 
+
+> 0
+
+exp  μi ˆσik(x) for every active x (i.e. 
+
+dist( x, {Xin}n∈I train  
+
+> k
+
+) < r ). This posits that conditional miscoverage is at most ϵi 
+
+> 0
+
+in the confident interior and degrades at most exponentially as predictive uncertainty grows. It is a modeling assumption , not a derived fact: it holds when the GP variance is a faithful proxy for predictive error, and μi quantifies the residual variance miscalibration in the extrapolation regime. 
+
+Proposition 2 (Recovery): Set the e-value denominators to ϵjk = ϵj 
+
+> 0
+
+and let gjk(x⋆) = exp( −λˆσjk(x⋆)) with λ ≥
+
+max j μj . Then under Assumption 4, each ejk is an e-value and 
+
+P Y ⋆k /∈ Γfused ,i k (X⋆k ) ≤ α, 
+
+without requiring the local-coverage bound (Assumption 3) to hold uniformly over active agents. 
+
+Proof. Conditioning on X⋆k = x and the calibration data, the gate and attenuation are deterministic, so 
+
+Eejk | X⋆k = x, Gik
+
+ =
+
+gjk(x) 1{dist( x, {Xjn}n∈I train  
+
+> k
+
+) < r }
+
+ϵj
+
+> 0
+
+cjk(x).
+
+On the active region {dist( x, {Xjn}n∈I train  
+
+> k
+
+) < r }, Assump-tion 4 and λ ≥ μj give 
+
+gjk(x) cjk(x) ≤ ϵj 
+
+> 0
+
+exp  (μj − λ)ˆ σjk(x) ≤ ϵj
+
+> 0
+
+,
+
+so E[ejk | X⋆k = x] ≤ 1 pointwise, hence E[ejk] ≤ 1. Steps 2– 3 of the proof of Theorem 4.1 then apply verbatim. ■
+
+Remark 3 (Validity–efficiency dial): Because ˆσjk is bounded by the prior level ¯σj =
+
+q
+
+1 + ( σjn)2, the condition 
+
+λ ≥ μj is always met with a finite decay rate; taking λ
+
+large enough that the floor exp( −λ¯σj ) ≤ ϵj 
+
+> 0
+
+controls even the worst case cjk ≡ 1. Larger λ makes recovery easier but shrinks every gjk, yielding more conservative, larger prediction sets, so λ is the validity–efficiency dial. The guarantee remains marginal: Assumption 4 is used only to bound the marginal expectation E[ejk], not to assert conditional coverage of the output set. 
+
+Remark 4 (Topology and the Budget): Theorem 4.1 holds for any graph G: the factor 1/d i in efused ,i k and the di-fold sum over the neighborhood cancel, so E[efused ,i k ] ≤ 1
+
+regardless of topology and the coverage guarantee is graph-independent. Topology instead shapes efficiency as a denser graph lets each agent reach the data of more peers, so more of the workspace is covered by at least one active neighbor and the no-data fraction shrinks; since the per-neighborhood budget βi = α/d i keeps each active agent decisive regardless of di, a denser graph decides more queries. Section V con-firms that the mesh attains a far smaller no-data fraction and a higher classified fraction than the ring at equal coverage. The budget βi = α/d i requires each agent to know the (common) neighborhood size, so the clean broadcast form assumes a regular graph; for an irregular graph, one may use the global bound β = α/ max i di, preserving validity at a mild efficiency cost. V. S IMULATION 
+
+We instantiate Algorithm 1 on a 2D multi-robot occu-pancy mapping benchmark to validate Theorem 4.1 and to quantify the effect of communication topology anticipated in Remark 4. Per that remark, validity holds for any graph G;the simulation isolates the two finite-sample consequences of topology that the bound does not capture: the efficiency 
+
+of the fused prediction set (no-data fraction and mean set size) and the realized empirical miscoverage relative to the nominal level α.
+
+A. Setup 
+
+The workspace is a rectangular region E = [0 , 30] ×
+
+[0 , 20] m with interior walls forming corridors and obstacles. 
+
+N = 5 ground robots, each equipped with a 180 ◦ planar 0 5 10 15 20 25 30 
+
+> x (m)
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> y (m)
+> Data collection: agent trajectories
+> robot1
+> robot2
+> robot3
+> robot4
+> robot5
+
+Fig. 4: The five agents’ trajectories over the workspace E
+
+(start markers circled). The agents traverse partially overlap-ping sub-regions LiDAR with range 5 m, traverse partially overlapping sub-regions of E. Sensor and pose noise follow (2)–(3) with 
+
+σr = 2 × 10 −2 m, σφ = 3 × 10 −3 rad, σe = 4 × 10 −2 m, 
+
+σθ = 3 × 10 −3 rad. Each LiDAR scan is converted to a labeled point cloud via (4) using 5 free-space samples per beam. Fig. 4 shows the five trajectories; each agent covers 
+
+52 –62% of the workspace within LiDAR range, in partially overlapping sub-regions. Each agent’s trajectory is divided into K = 2 temporal blocks of equal length, and each block is split into a training half and a calibration half as in Section II-B. Within each block, agent i fits an ExactGP with Mat´ ern- 32 kernel on up to 1.2×10 4 subsampled labeled points from Di, train  
+
+> k
+
+and computes the calibration scores 
+
+{Ain} on Di, cal  
+
+> k
+
+(capped at 2,000 points). The recalibrated inner threshold aik and denominator ϵik of (11) are estimated on a separate held-out fold: the calibration half of the next block, which lies in the same shifted regime as the test set yet is disjoint from it, so the reported coverage is not circular (Remark 2). Following the temporal-mixing rationale of Section II-B, the test set for block k is the training fold of block k+1 , capped at 2,000 points per agent. The union of these per-agent test sets across all N agents forms the shared evaluation set used to compute fused coverage; per-agent coverage is evaluated on each agent’s own test fold. The nominal miscoverage level is α = 0 .2. The observation gate (9) uses radius r = 1 m, on the order of the radial spacing of the LiDAR free-space samples. The per-neighborhood budget is βi = s α/d i with safety factor s = 0 .7, so a lone active agent clears the fused threshold with margin. The attenuation decay is λ = 0 at the operating point and is swept separately to trace the validity–efficiency dial. For the validity study we sweep α ∈ { 0.05 , 0.10 , . . . , 0.40 }.
+
+B. Communication Topologies 
+
+Ring and mesh topologies have been used in multi-robot occupancy map estimation / SLAM for e.g. [29], [30].  
+
+> •
+
+Ring Gring : the agents are arranged in a single cycle ordered by spatial adjacency, 1-2-3-5-4-1. Each agent is adjacent to its two cyclic neighbors, so |N (i)∪{ i}| = 3 
+
+for every i; 
+
+> •
+
+Mesh Gmesh : the complete graph KN , so |N (i)∪{ i}| =
+
+N = 5 for every i.For each topology and each agent i, the fusion of Section III-A is applied over N (i) ∪ { i} on the broadcast e-values, with the budget βi = s α/d i set by the common degree di ∈{3, 5}. The fused prediction set Γfused ,i k (x⋆) is evaluated at every test point and on a dense grid over E for the map figures. 
+
+C. Metrics 
+
+We report, per agent, and then averaged across agents:  
+
+> •
+
+Coverage 1 − bmi, the fraction of test points whose true label lies in Γfused ,i k ; 
+
+> •
+
+Classified fraction , the fraction of singleton sets |Γ| = 1 
+
+(a decided free/occupied cell), and accuracy on classi-fied , the fraction of those singletons that are correct;  
+
+> •
+
+Uncertain fraction , the fraction of Γ = {− 1, +1 }
+
+returned with data (a genuine conformal abstention), kept separate from the no-data fraction νi, where no neighbor of i is active and Γ = {− 1, +1 } is returned trivially;  
+
+> •
+
+Empty fraction , the fraction of Γ = ∅ (both labels excluded — the only genuine coverage failure), and the 
+
+mean set size ¯si ∈ [0 , 2] .Category fractions are reported both on the whole grid and on the explored region ( ≥ 1 active agent), so trivial no-data sets are never conflated with informative decisions. For the validity study, we plot 1 − bmi against the nominal coverage 
+
+1 − α for each topology, alongside the ideal diagonal. 
+
+D. Implementation Details 
+
+The pipeline is implemented in Python using GPyTorch for the GPs and a custom NumPy implementation of the conformal, gating, and e-value primitives. Each agent’s GP is trained once per block; the distance gate, conformal p-values, recalibration, and e-value fusion are vectorized, so evaluating a second topology on the same broadcast e-values is a single O(N |Q k|) pass. 
+
+E. Results 
+
+Table I reports the per-agent statistics at α = 0 .2. Both topologies satisfy the fused bound with a large margin: every agent’s coverage 1 − bmi exceeds the target 1 − α = 0 .8, with agent-averaged values 0.990 for the ring and 0.976 for the mesh. The method commits to a singleton only when the e-value evidence is strong, achieving 97 –99% accuracy on the cells it decides, so realized coverage sits well above the nom-inal guarantee, and α trades the decided fraction rather than the coverage (Fig. 6).As expected, denser communication is better. The mesh decides 84 .8% of test queries with only a 1.7% no-data fraction, versus 43 .6% decided and 17 .4% 
+
+no-data for the ring, at comparable coverage and accuracy (0.982 vs. 0.977 ). This is due to the per-neighborhood budget 
+
+βi = sα/d i, as it keeps a lone confident agent decisive even in the mesh’s five-agent neighborhood, so the mesh’s broader reach reduces no-data without diluting decisions. (a) robot1 (b) robot2 (c) robot3 (d) robot4 (e) robot5 
+
+(f) fused (mesh) unexplored free occupied uncertain empty true obstacle 
+
+Fig. 5: Per-agent local maps (a)–(e), each at the agent’s own level α, and the fused mesh map (f), at α = 0 .2. Colours: unexplored (gray), free (blue), occupied (red), uncertain {− 1, +1 } with data (yellow), empty ∅ (green); black lines mark the true obstacles (ground truth). Each agent’s standalone conformal map classifies free/occupied within its observed region (gray elsewhere), but leaves empty cells where the single agent under-covers under the temporal shift. Fusion combines the local maps into a near-complete, valid map, with the residual uncertain label sitting mainly along obstacle boundaries. TABLE I: Per-agent fused statistics at α = 0 .2. 1− bmi: cov-erage; ci: classified (singleton) fraction; νi: no-data fraction. Ring permutation is 1−2−3−5−4−1, so cyclic neighbors share spatial coverage.                                              
+
+> Ring Mesh agent 1−bmiciνi1−bmiciνi
+> robot1 0.988 0.490 0.200 0.976 0.848 0.017 robot2 0.988 0.594 0.133 0.976 0.848 0.017 robot3 0.994 0.350 0.110 0.976 0.848 0.017 robot4 0.984 0.587 0.205 0.976 0.848 0.017 robot5 0.995 0.157 0.224 0.976 0.848 0.017 mean 0.990 0.436 0.174 0.976 0.848 0.017
+
+Fig. 5 shows that each agent’s standalone conformal map is gray (no data) outside its own route and, even within it, leaves empty (mis-covered) cells under the tem-poral shift, whereas the fused mesh map covers nearly the whole workspace and restores valid coverage, leaving 
+
+{− 1, +1 } mainly along obstacle boundaries. The ring’s per-agent variation tracks spatial overlap between cyclic neigh-bors: robot 1, with overlapping neighbors, decides 49 .0% of queries, whereas robot 5, whose cyclic edge to robot 4 spans opposite ends of the workspace, decides only 15 .7% and returns the largest sets. The mesh removes this heterogeneity because N (i) ∪ { i} is the full agent set for every i. Fig. 6 plots empirical coverage against the nominal 1 − α over 
+
+α ∈ { 0.05 , . . . , 0.40 }. Both curves stay well above the ideal diagonal throughout, confirming Theorem 4.1, and remain near 0.98 across the range. However, it should be noted that cells with a decision are 97 –99% accurate, and the residual abstention mass (uncertain or no-data sets) counts as covered, so realized coverage stays high even as α grows. Fig. 8 sweeps the attenuation decay λ at the mesh operating point. As λ grows, every gjk = e−λˆσ shrinks, so the decided fraction falls from 0.85 to 0 while coverage rises from 0.98 to 1
+
+— λ trades informativeness for conservativeness exactly as 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95 1.00  
+
+> nominal coverage 1 − α
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> empirical coverage
+> Validity: empirical vs nominal coverage
+> ring
+> mesh
+> ideal
+
+Fig. 6: Empirical fused coverage versus nominal coverage 
+
+1 − α for ring and mesh. Both stay above the ideal line at every α.Remark 3 predicts. At λ = 0 the method is already valid, so attenuation is a safety margin rather than a necessity in this benchmark. The proposed fusion algorithm has three main limitations. First, the guarantee in Theorem 4.1 is marginal: it ensures coverage on average over the test point and calibration data, but not conditional coverage at a fixed query location x⋆. Such pointwise guarantees in continu-ous spaces generally require stronger assumptions on the data-generating process or score functions. Second, validity depends on local stationarity (Assumption 1) and temporal mixing (Assumption 1). In highly dynamic environments, or under erratic robot motion that increases the total-variation drift δT , one must tune the block length T or introduce larger safety margins. Third, although exchanging scalar e-values is far cheaper than sharing raw point clouds or model parameters, the communication cost still scales with the size of the shared query set |Q k|, which may be limiting in large 3D environments. coverage    
+
+> classified
+> acc|cls
+> uncertain
+> empty
+> unexplored
+> set size
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 1.25
+> 1.50
+> Ring vs mesh at α= 0.2 (test set, mean over agents)
+> 1 − α=0.8
+> ring
+> mesh
+
+Fig. 7: Ring vs. mesh at α = 0 .2 (test set, mean over agents). The mesh determines more of the map (higher classification, lower uncertainty, and no-data fraction) at equal coverage and accuracy. 0 1 2 3 4    
+
+> attenuation decay λ
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> 0.95
+> 1.00
+> empirical coverage
+> Validity--efficiency dial (mesh): larger λ⇒ higher coverage, fewer decisions
+> coverage
+> 1 − α=0.8
+> classified frac.
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> classified fraction
+
+Fig. 8: Increasing the attenuation decay λ raises coverage toward 1 while shrinking the classified fraction toward 0 (sets grow to {− 1, +1 }). VI. C ONCLUSION 
+
+This paper presented a distributed fusion algorithm for multi-robot environmental mapping that combines Gaussian Process local estimators, conformal prediction, and e-value fusion to recover a user-specified finite-sample coverage level despite spatial and temporal correlations in each robot’s data. By decoupling local model training from distributed fusion, the method enables agents to construct set-valued occupancy maps with formal coverage guarantees, using a per-neighborhood budget and uncertainty attenuation to balance individual decisiveness with network-wide validity. Theoretical analysis shows that coverage holds independently of the communication graph topology, while simulations demonstrate that denser topologies improve the informative fraction of the map, helping bridge scalable continuous mapping with the reliability requirements of safety-critical autonomy. REFERENCES [1] A. Elfes, “Using occupancy grids for mobile robot perception and navigation,” Computer , vol. 22, no. 6, pp. 46–57, 1989. [2] S. Thrun, W. Burgard, and D. Fox, Probabilistic Robotics . MIT Press, 2005. [3] S. T. O’Callaghan and F. T. Ramos, “Gaussian process occupancy maps,” The International Journal of Robotics Research , vol. 31, no. 14, pp. 1542–1570, 2012. [4] M. G. Jadidi, J. V. Miro, and G. Dissanayake, “Gaussian processes au-tonomous mapping and exploration for range-sensing mobile robots,” 
+
+Autonomous Robots , vol. 42, no. 2, pp. 273–290, 2018. [5] F. Ramos and L. Ott, “Hilbert maps: Scalable continuous occupancy mapping with stochastic gradient descent,” The International Journal of Robotics Research , vol. 35, no. 14, pp. 1717–1730, 2016. [6] R. Senanayake and F. Ramos, “Bayesian hilbert maps for dynamic continuous occupancy mapping,” in Proceedings of the 1st Annual Conference on Robot Learning (CoRL) , vol. 78 of Proceedings of Machine Learning Research , pp. 458–471, PMLR, 2017. [7] R. Senanayake and F. Ramos, “Building continuous occupancy maps with moving robots,” in Proceedings of the AAAI Conference on Artificial Intelligence , vol. 32, 2018. [8] H. Dong, J. Yu, Y. Xu, Z. Xu, Z. Shen, J. Tang, Y. Shen, and Y. Wang, “Mr-gmmapping: Communication efficient multi-robot mapping sys-tem via gaussian mixture model,” IEEE Robotics and Automation Letters , vol. 7, no. 2, pp. 3294–3301, 2022. [9] J. Di, E. Zobeidi, A. Koppel, and N. Atanasov, “Distributed gaussian process mapping for robot teams with time-varying communication,” in 2022 American Control Conference (ACC) , pp. 4458–4464, 2022. [10] D. McGann and M. Kaess, “iMESA: Incremental distributed opti-mization for collaborative simultaneous localization and mapping,” in 
+
+Proceedings of Robotics: Science and Systems (RSS) , 2024. [11] V. Vovk, A. Gammerman, and G. Shafer, Algorithmic Learning in a Random World . Springer, 2005. [12] H. Papadopoulos, K. Proedrou, V. Vovk, and A. Gammerman, “Induc-tive confidence machines for regression,” in Machine Learning: ECML 2002 , vol. 2430 of Lecture Notes in Computer Science , pp. 345–356, Springer Berlin Heidelberg, 2002. [13] I. Gibbs and E. J. Cand` es, “Adaptive conformal inference under distribution shift,” in Advances in Neural Information Processing Systems (NeurIPS) , vol. 34, pp. 1660–1672, 2021. [14] B.-S. Einbinder, S. Feldman, S. Bates, A. N. Angelopoulos, A. Gendler, and Y. Romano, “Label noise robustness of conformal prediction,” Journal of Machine Learning Research , vol. 25, no. 328, pp. 1–66, 2024. [15] L. Lindemann, Y. Zhao, X. Yu, G. J. Pappas, and J. V. Deshmukh, “Formal verification and control with conformal prediction,” arXiv preprint arXiv:2409.00536 , 2024. [16] H. Wen, H. Xing, and O. Simeone, “Distributed conformal prediction via message passing,” arXiv preprint arXiv:2501.14544 , 2025. [17] S. Su, N. Chen, C. Lin, F. Juefei-Xu, C. Feng, and F. Miao, “ α-occ: Uncertainty-aware camera-based 3d semantic occupancy prediction,” 2025. [18] D. S. Sundarsingh, Y. Li, T. Tang, G. J. Pappas, N. Atanasov, and Y. Kantaros, “Safe planning in unknown environments using con-formalized semantic maps,” IEEE Robotics and Automation Letters ,vol. 11, no. 4, pp. 4921–4928, 2026. [19] S. X. Wei, L. Gan, and J. W. Burdick, “A safety-critical framework for ugvs in complex environments: A data-driven discrepancy-aware approach,” 2024. [20] R. J. Tibshirani, R. Foygel Barber, E. Candes, and A. Ramdas, “Conformal prediction under covariate shift,” Advances in neural information processing systems , vol. 32, 2019. [21] M. Zaffran, O. F´ eron, Y. Goude, J. Josse, and A. Dieuleveut, “Adaptive conformal predictions for time series,” in International conference on machine learning , pp. 25834–25866, PMLR, 2022. [22] R. F. Barber, E. J. Candes, A. Ramdas, and R. J. Tibshirani, “Con-formal prediction beyond exchangeability,” The Annals of Statistics ,vol. 51, no. 2, pp. 816–845, 2023. [23] H. Mao, R. Martin, and B. J. Reich, “Valid model-free spatial prediction,” Journal of the American Statistical Association , vol. 119, no. 546, pp. 904–914, 2024. [24] R. M. Dudley, Real analysis and probability . Chapman and Hall/CRC, 2018. [25] V. Vovk and R. Wang, “E-values: Calibration, combination and appli-cations,” Annals of Statistics , vol. 49, no. 3, pp. 1736–1754, 2021. [26] R. Wang, “The only admissible way of merging arbitrary e-values,” 
+
+Biometrika , vol. 112, no. 2, p. asaf020, 2025. [27] E. Gauthier, F. Bach, and M. I. Jordan, “E-values expand the scope of conformal prediction,” arXiv preprint arXiv:2503.13050 , 2025. [28] V. Vovk, “Conformal e-prediction,” Pattern Recognition , vol. 166, p. 111674, 2025. [29] Y. Zhang, Z. Tian, J. Wei, and M. Guo, “Flykites: Human-centric interactive exploration and assistance under limited communication,” in 2025 IEEE International Conference on Robotics and Automation (ICRA) , pp. 10222–10228, IEEE, 2025. [30] G. S. Martins, D. Portugal, and R. P. Rocha, “Mrgs: A multi-robot slam framework for ros with efficient information sharing,” in Robot Operating System (ROS) The Complete Reference (Volume 5) , pp. 45– 75, Springer, 2020.

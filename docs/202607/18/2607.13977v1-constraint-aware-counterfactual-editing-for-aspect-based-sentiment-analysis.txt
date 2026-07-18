@@ -1,0 +1,620 @@
+Title: Constraint-Aware Counterfactual Editing for Aspect-Based Sentiment Analysis
+
+URL Source: https://arxiv.org/pdf/2607.13977v1
+
+Published Time: Thu, 16 Jul 2026 01:18:52 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# Constraint-Aware Counterfactual Editing for Aspect-Based Sentiment Analysis 
+
+S M Rafiuddin 1, Vamsi Krishna Pavuluri 1 and Atriya Sen 1
+
+> 1
+
+Department of Computer Science, Oklahoma State University, Stillwater, Oklahoma, USA 
+
+Abstract 
+
+Aspect-Based Sentiment Analysis (ABSA) requires models to identify sentiment toward specific aspects rather than relying on the global polarity of a sentence. This makes counterfactual evaluation especially challenging: a valid counterfactual should flip the sentiment of one target aspect while preserving the sentiment of all non-target aspects, semantic meaning, fluency, and factual consistency. Existing counterfactual generation methods often focus on sentence-level label flipping and may produce edits that are fluent but aspect-invalid, semantically drifting, or contradictory. To address this limitation, we propose CAVE-ABSA , a Constraint-Aware Validated 
+
+Editing framework for generating and validating aspect-level counterfactuals. CAVE-ABSA localizes the opinion span associated with the target aspect, performs controlled counterfactual rewriting, refines candidates through a repair module, and filters them using aspect-level verification, semantic similarity, AMR-guided structural preservation, edit minimality, fluency, and contradiction detection. The framework is designed to construct validated counterfactual ABSA datasets for robustness evaluation and data augmentation. By explicitly separating generation from validation, CAVE-ABSA provides a principled approach for producing meaningful aspect-local counterfactuals and for testing whether ABSA models truly rely on aspect-grounded sentiment reasoning. 
+
+Keywords 
+
+Aspect-Based Sentiment Analysis, Counterfactual Editing, Counterfactual Data Augmentation, Robustness Evaluation, Semantic Verification, Abstract Meaning Representation 
+
+## 1. Introduction 
+
+Aspect-Based Sentiment Analysis (ABSA) identifies sentiment polarity toward specific aspects or opinion targets rather than assigning a single global label to a sentence [ 1 , 2 , 3 ]. This distinction is important because a sentence may express different sentiments toward different aspects, e.g., “The battery is excellent, but the screen is dull.” Although pretrained language models have improved ABSA performance by modeling aspect-context interactions [ 4 , 5 , 6 , 7], strong benchmark results do not necessarily imply robust aspect-grounded reasoning . Models may still exploit global sentiment, polarity shortcuts, or dataset artifacts instead of correctly grounding sentiment in the target aspect [ 8 ]. 
+
+Counterfactual examples offer a useful way to test such robustness. Prior work on counterfactually augmented data shows that minimally edited examples can reduce reliance on spurious correlations and reveal brittle decision boundaries [ 9 , 10 , 11 , 12 ]. However, most counterfactual generation methods are designed for sentence-level classification, where changing the global label is sufficient [ 13 , 14 ]. This assumption does not hold for ABSA: a valid counterfactual must flip the sentiment of one target aspect while preserving all non-target aspect sentiments. We frame this requirement as an aspect-local counterfactual editing problem. Given an ABSA instance with a sentence, target aspect, and original sentiment label, the goal is to generate a minimally edited, fluent, and meaningful counterfactual where only the target aspect sentiment changes. Simple polarity-changing perturbations are often insufficient. For example, changing “The trackpad is nice and smooth” to “The trackpad is poor and smooth” introduces mixed polarity, while changing “easy to use” to “a bad laptop” changes global sentiment without directly flipping the target aspect. Such cases show that ABSA counterfactuals require aspect-level verification rather than sentence-level sentiment change alone. 
+
+2nd International Workshop on Informing ML with Knowledge Engineering for Hybrid Intelligent Systems (HHAI-KEML 2026), July 6–7, 2026, Brussels, Belgium 
+
+$ srafiud@okstate.edu (S. M. Rafiuddin)  
+
+> ©2026 Copyright for this paper by its authors. Use permitted under Creative Commons License Attribution 4.0 International (CC BY 4.0).
+
+Recent ABSA-specific work identifies aspect-related opinion expressions and generates reversed-polarity replacements [ 15 ]. While promising, meaningful counterfactual generation remains challenging: lexical substitutions can be unnatural, masked language models may produce label-invalid edits, and direct semantic-graph edits can introduce grammatical errors or semantic drift. CEval further shows that counterfactual generation often trades off label-flipping success against fluency, coherence, and minimality [16]. In this paper, we propose CAVE-ABSA , a Constraint-Aware Validated Editing framework for ABSA counterfactual generation. CAVE-ABSA localizes the opinion span associated with the target aspect, performs controlled phrase- or clause-level rewriting, refines candidates through a repair step, and validates them using aspect-level flipping , non-target preservation , semantic similarity , fluency ,
+
+minimality , contradiction filtering , and AMR-guided structural preservation [17 , 18 , 19 , 20 ]. The framework can be used to construct validated counterfactual ABSA datasets for robustness evaluation and to augment training data with high-quality minimally paired examples. Our contributions are: (1) We formalize ABSA counterfactual editing as a constrained genera-tion problem requiring target aspect flipping, non-target preservation, semantic consistency, fluency, minimality, and contradiction avoidance; (2) We propose CAVE-ABSA , a hybrid generation-and-verification framework based on opinion-span localization, controlled rewriting, repair, AMR-guided structure checking, and ABSA-specific validation; (3) We introduce evaluation criteria for measuring counterfactual validity, non-target consistency, semantic preservation, edit minimality, fluency, contra-diction rate, and (4) We position validated counterfactuals as a resource for both ABSA robustness evaluation and data augmentation. 
+
+## 2. Related Work 
+
+Aspect-Based Sentiment Analysis (ABSA) identifies sentiment polarity toward specific aspects rather than assigning a single global label to a sentence [ 1 , 2, 3]. SemEval ABSA benchmarks established the standard tasks of aspect extraction and aspect-level polarity classification, while MAMS highlighted the challenge of multi-aspect sentences with different polarities in the same context [ 8 ]. Pretrained lan-guage models have improved ABSA by modeling aspect-context interactions through auxiliary-sentence classification and text-to-text formulations [ 4 , 5 , 6, 7 ]; however, high benchmark performance does not guarantee aspect-grounded reasoning , as models may still rely on global sentiment, polarity short-cuts, or dataset artifacts [ 8 ]. Counterfactual data augmentation has been used to reduce spurious correlations and improve robustness by minimally editing examples so that their labels change [ 9 , 10 ], although subsequent studies show that the resulting gains are not always consistent [ 11 , 12 ]. Auto-matic methods such as MiCE and Polyjuice generate minimal or controllable counterfactual edits for explanation, evaluation, and augmentation [ 13 , 14 ], while recent LLM-based approaches such as CORE and DISCO improve scalability through retrieve-then-edit generation and over-generation followed by filtering [ 21 , 22 ]. Nevertheless, these methods mainly target sentence-level label flipping and do not explicitly enforce aspect-specific preservation . ABSA counterfactual editing is more constrained: a valid edit must flip the sentiment of the target aspect while preserving all non-target aspect sentiments. Wu et al. [ 15 ] address this setting by using integrated gradients to identify aspect-related opinion expressions and T5 to generate reversed-polarity expressions; however, existing ABSA counterfactual methods mainly emphasize augmentation and downstream performance, while broader validity con-straints such as semantic consistency, fluency, minimality, contradiction avoidance, and non-target preservation are not jointly enforced. Our preliminary exploration also shows that lexical replace-ment, masked language model substitution, and direct semantic-graph editing often produce unnatural, contradictory, or target-mismatched counterfactuals. Evaluating counterfactuals therefore requires more than checking whether a label changes. CEval emphasizes that counterfactual generation should be evaluated using both validity and text-quality criteria, including fluency, coherence, and semantic preservation [ 16 ]. Embedding-based similarity methods such as Sentence-BERT can estimate semantic closeness [ 20 ], but may miss structural drift. Therefore, we use Abstract Meaning Representation (AMR) as an auxiliary semantic-structure signal, since AMR represents sentence meaning as a rooted labeled graph [ 19 ]. Unlike direct AMR generation, we use AMR as a verification layer to support se-mantic preservation. Overall, CAVE-ABSA differs from prior work by framing counterfactual ABSA as a constraint-aware generation and validation problem, enforcing target aspect flipping, non-target preservation, semantic consistency, fluency, minimality, contradiction avoidance, and AMR-guided structure checking. 
+
+## 3. Problem Formulation 
+
+We formulate counterfactual editing for Aspect-Based Sentiment Analysis (ABSA) as a constrained generation problem. Given an input sentence 𝑥 , let 𝐴 (𝑥 ) = {𝑎 1, 𝑎 2, . . . , 𝑎 𝑚 } denote the set of anno-tated aspect terms in the sentence. Each aspect 𝑎 𝑗 ∈ 𝐴 (𝑥 ) is associated with a sentiment polarity label 
+
+𝑦 𝑗 ∈ 𝒴 , where 𝒴 denotes the task-specific sentiment label space, such as positive, negative, and neutral. For a target aspect 𝑎 * ∈ 𝐴 (𝑥 ) with original sentiment label 𝑦 *, the goal is to generate a counterfactual sentence 𝑥 ′ that changes the sentiment toward 𝑎 * while preserving the sentiment toward all non-target aspects. Let 𝑓 𝜃 (𝑥, 𝑎 ) denote an ABSA classifier that predicts the sentiment polarity of aspect 𝑎 in sentence 𝑥 . A valid counterfactual sentence 𝑥 ′ should first satisfy the target-aspect flip constraint 
+
+𝑓 𝜃 (𝑥 ′, 𝑎 *) = 𝑦 𝑐𝑓 , where 𝑦 𝑐𝑓 ̸ = 𝑦 *. In the binary setting, 𝑦 𝑐𝑓 is defined as the opposite polarity of 𝑦 *,i.e., 𝑦 𝑐𝑓 = negative if 𝑦 * = positive , and 𝑦 𝑐𝑓 = positive if 𝑦 * = negative . However, target flipping alone is not sufficient for ABSA. If the original sentence contains multiple aspects, a counterfactual edit should not alter the sentiment of non-target aspects. Therefore, for every 𝑎 𝑗 ∈ 𝐴 (𝑥 ) where 𝑎 𝑗 ̸ = 𝑎 *,the preservation constraint must hold: 𝑓 𝜃 (𝑥 ′, 𝑎 𝑗 ) = 𝑦 𝑗 , ∀𝑎 𝑗 ∈ 𝐴 (𝑥 ), 𝑎 𝑗 ̸ = 𝑎 *. In addition to aspect-level label constraints, the edited sentence should remain close to the original sentence in meaning and form. We therefore require semantic preservation , edit minimality , fluency , and contradic-tion avoidance , expressed as Sim( 𝑥, 𝑥 ′) ≥ 𝜏 sem , EditDistance( 𝑥, 𝑥 ′) ≤ 𝛿 , Fluency( 𝑥 ′) ≥ 𝜏 flu , and 
+
+Contradiction( 𝑥 ′) = 0 . Here, Sim( 𝑥, 𝑥 ′) measures semantic similarity between the original and edited sentences, EditDistance( 𝑥, 𝑥 ′) measures the magnitude of the edit, Fluency( 𝑥 ′) estimates grammati-cality and naturalness, and Contradiction( 𝑥 ′) indicates whether the candidate introduces conflicting sentiment cues or inconsistent facts. These constraints are necessary because a sentence can flip a classifier prediction while still being invalid as a meaningful counterfactual. For example, “the trackpad is poor and smooth” contains a negative cue, but it also preserves a positive cue for the same aspect, producing a mixed and contradictory sentiment expression. We define the valid counterfactual set for an ABSA instance (𝑥, 𝑎 *, 𝑦 *) as 𝒱 (𝑥, 𝑎 *) = {𝑥 ′ : 𝑓 𝜃 (𝑥 ′, 𝑎 *) = 𝑦 𝑐𝑓 , 𝑦 𝑐𝑓 ̸ = 𝑦 *; 𝑓 𝜃 (𝑥 ′, 𝑎 𝑗 ) = 𝑦 𝑗 , ∀𝑎 𝑗 ̸ =
+
+𝑎 *; Sim( 𝑥, 𝑥 ′) ≥ 𝜏 sem ; EditDistance( 𝑥, 𝑥 ′) ≤ 𝛿 ; Fluency( 𝑥 ′) ≥ 𝜏 flu ; Contradiction( 𝑥 ′) = 0 }.The objective of CAVE-ABSA is to generate a small set of high-quality counterfactual candidates 
+
+𝒞 (𝑥, 𝑎 *) = {𝑥 ′
+
+> 1
+
+, 𝑥 ′
+
+> 2
+
+, . . . , 𝑥 ′ 
+
+> 𝐾
+
+}, where 𝑥 ′ 
+
+> 𝑘
+
+∈ 𝒱 (𝑥, 𝑎 *) and each 𝑥 ′ 
+
+> 𝑘
+
+provides a fluent, meaningful, and minimally edited alternative to the original sentence. To rank candidate counterfactuals, we use a 
+
+composite score that combines target flipping, non-target preservation, semantic similarity, fluency, minimality, structural preservation, and contradiction penalty: 𝑆 (𝑥 ′) = 𝜆 1𝑃 flip (𝑥 ′) + 𝜆 2𝑃 keep (𝑥 ′) + 
+
+𝜆 3𝑆 sem (𝑥, 𝑥 ′) + 𝜆 4𝑆 flu (𝑥 ′) + 𝜆 5𝑆 edit (𝑥, 𝑥 ′) + 𝜆 6𝑆 struct (𝑥, 𝑥 ′) − 𝜆 7𝐶 (𝑥 ′). Here, 𝑃 flip (𝑥 ′) measures whether the target aspect sentiment is flipped, 𝑃 keep (𝑥 ′) measures whether non-target aspect senti-ments are preserved, 𝑆 sem (𝑥, 𝑥 ′) measures semantic similarity, 𝑆 flu (𝑥 ′) measures fluency, 𝑆 edit (𝑥, 𝑥 ′)
+
+rewards minimal edits, 𝑆 struct (𝑥, 𝑥 ′) measures semantic-structure preservation, and 𝐶 (𝑥 ′) penalizes contradiction. The final counterfactual set is obtained by selecting the top-𝐾 candidates that satisfy all hard validity constraints. 
+
+## 4. Methodology 
+
+We propose CAVE-ABSA , a Constraint-Aware Validated Editing framework for generating aspect-local counterfactuals for ABSA. Given an input sentence 𝑥 , a target aspect 𝑎 *, and its original polarity 𝑦 *,CAVE-ABSA generates a set of candidate counterfactuals and retains only those that satisfy target-aspect CAVE-ABSA Architecture : Constraint-Aware Validated Editing for Aspect-Based Sentiment Analysis                                                                                                                                                                  
+
+> •Sentence x
+> •Aspect set
+> A(x) =
+> {a₁, …, aₘ}
+> •Target
+> aspect a*
+> •Original
+> label y*
+> •Non-target
+> labels yⱼ
+> ①ABSA Input
+> •Aspect
+> proximity
+> •Syntactic
+> cues
+> •Optional
+> attribution
+> •Editable
+> span s*
+> s* =argmax span
+> relevance
+> ②Opinion-Span
+> Localization
+> •Rewrite only s*
+> or target clause
+> •Preserve target
+> aspect string
+> •Preserve non-
+> target aspects
+> x=cleft ⊕s* ⊕
+> cright
+> scf =g_ϕ(s*, a*,
+> ycf ,
+> cleft ,cright )
+> x̃ ′=cleft ⊕scf ⊕
+> cright
+> ③Controlled
+> Counterfactual
+> Rewriting
+> •Grammar
+> repair
+> •Fluency
+> improvement
+> •Preserve
+> aspect,
+> numbers,
+> entities
+> •Remove
+> awkward
+> phrasing
+> x′ =Rψ( x̃ ′, x,
+> a*, ycf )
+> ④Repair-Based
+> Refinement
+> •Parse
+> original and
+> edited
+> sentence
+> •Compare non-
+> target
+> AMR structure
+> •Detect
+> semantic drift
+> G=
+> AMRparse(x)
+> G′ =
+> AMRparse(x′)
+> Sstruct =|E(G)
+> ∩E(G′)| /
+> |E(G) ∪E(G′)|
+> ⑤AMR-Guided
+> Structural
+> Preservation
+> ⑥Constraint-Based
+> Verification
+> •Composite
+> score S(x′)
+> •Rank valid
+> candidates
+> S(x′) =λ₁P flip
+> +
+> λ₂P keep +
+> λ₃S sem +
+> λ₄S flu +
+> λ₅S edit +
+> λ₆S struct −λ₇C
+> ⑦Candidate
+> Ranking
+> C(x, a*) =
+> {x′₁, ...,
+> x′ₖ}
+> •Target
+> aspect flips
+> •Non-target
+> aspects
+> preserved
+> •Fluent and
+> meaningful
+> •No
+> contradiction
+> ⑧Accepted
+> Counterfactual
+> Set •Target Flip
+> Accuracy
+> •Non-target
+> Consistency
+> •Counterfactual
+> Validity
+> •Semantic
+> Similarity
+> •Contradiction
+> Rate
+> •Human Validity
+> Tests aspect-
+> grounded
+> reasoning.
+> ⑨Robustness
+> Evaluation
+> •Original ABSA
+> data +
+> validated
+> counterfactuals
+> •Train ABSA
+> model
+> •Evaluate
+> accuracy /
+> macro-F1 /CF
+> robustness
+> Improves aspect-
+> grounded
+> learning.
+> ⑩Data
+> Augmentation
+> “The battery
+> is
+> excellent,
+> but the
+> screen is
+> dull.”
+> a*: battery,
+> y*: positive
+> screen:
+> negative
+> example
+> span:
+> “excellent”
+> “excellent” →
+> “poor”
+> “lasts all
+> day” →
+> “drains
+> quickly”
+> “bad
+> appearance
+> of
+> seamless”
+> →
+> repaired
+> V1 Target Flip:
+> Pflip (x′) =
+> pθ(y cF |x′, a*)
+> V2 Non-target
+> Preservation:
+> Pkeep (x′)
+> fθ(x′, aⱼ) =yⱼ,
+> for all aⱼ ≠a*
+> V3 Semantic
+> Similarity:
+> Sim(x, x′) ≥
+> τsem
+> V4 Edit
+> Minimality:
+> EditDistance(x,
+> x′) ≤δ
+> V5 Fluency:
+> Fluency(x′) ≥
+> τflu
+> V6 Contradiction
+> Filter:
+> Contradiction(x′)
+> =0
+> Reject Reject Reject Reject Reject Reject
+> Original:
+> “The
+> battery is
+> excellent,
+> but the
+> screen
+> is dull.”
+> Accepted CF:
+> “The battery
+> is poor,
+> but the
+> screen is
+> dull.”
+
+Figure 1: Overview of the CAVE-ABSA architecture. Given an ABSA instance consisting of an input sentence 𝑥 , an aspect set 𝐴 (𝑥 ), a target aspect 𝑎 *, its original sentiment label 𝑦 *, and non-target aspect labels 𝑦 𝑗 ,
+
+CAVE-ABSA generates validated aspect-level counterfactuals through a left-to-right pipeline. The framework first performs opinion-span localization to identify the editable span 𝑠 * associated with the target aspect. It then applies controlled counterfactual rewriting to modify only the target opinion span or clause while preserving the target aspect string, non-target aspects, and factual context. The generated candidate is refined through a repair module to improve grammar and fluency, followed by AMR-guided structural preservation 
+
+to detect semantic drift in non-target content. A constraint-based verification module filters candidates using six hard validity checks: target aspect flipping, non-target preservation, semantic similarity, edit minimality, fluency, and contradiction avoidance. Valid candidates are ranked using a composite score that combines target flip confidence, non-target consistency, semantic similarity, fluency, edit minimality, AMR structural preservation, and contradiction penalty. The final accepted counterfactual set 𝒞 (𝑥, 𝑎 *) is used for robustness evaluation and data augmentation , enabling tests of whether ABSA models rely on aspect-grounded sentiment reasoning rather than global sentence polarity. 
+
+flipping, non-target aspect preservation, semantic consistency, fluency, minimality, and contradiction-avoidance constraints. As shown in Figure 1, the framework consists of five main stages: opinion-span localization, controlled counterfactual rewriting, repair-based refinement, semantic-structure checking, and constraint-based verification. The verified candidates are then ranked and used to construct the accepted counterfactual set for robustness evaluation and data augmentation. 
+
+4.1. Overview 
+
+The overall CAVE-ABSA pipeline is represented as 𝑥 → Opinion Span Localization →
+
+Controlled Rewriting → Repair → Verification → 𝒞 (𝑥, 𝑎 *). Unlike direct lexical substitution or direct AMR concept replacement , CAVE-ABSA does not treat counterfactual editing as a single-word replacement problem. Instead, it identifies the opinion-bearing span associated with the target aspect and rewrites that span or its surrounding clause under explicit aspect-level constraints . This design is motivated by the observation that aspect sentiment is often expressed through short opinion phrases such as “lasts all day,” “easy to use,” or “poor build quality,” rather than through isolated polarity words. 
+
+4.2. Opinion-Span Localization 
+
+For each ABSA instance (𝑥, 𝑎 *, 𝑦 *), we first identify the local opinion span 𝑠 * that expresses sentiment toward the target aspect 𝑎 *. This span acts as the editable region . We use a hybrid localization strategy combining aspect proximity , syntactic cues , and optional model attribution . Let 𝑇 (𝑥 ) = 
+
+{𝑡 1, 𝑡 2, . . . , 𝑡 𝑛 } denote the token sequence of 𝑥 . We assign each token 𝑡 𝑖 a relevance score with respect to the target aspect as 𝑟 𝑖 = 𝛼 1𝑟 prox  
+
+> 𝑖
+
++ 𝛼 2𝑟 dep  
+
+> 𝑖
+
++ 𝛼 3𝑟 attr  
+
+> 𝑖
+
+, where 𝑟 prox  
+
+> 𝑖
+
+measures distance from the aspect term, 𝑟 dep  
+
+> 𝑖
+
+measures dependency connectivity to the aspect, and 𝑟 attr  
+
+> 𝑖
+
+is an optional attribution score from an ABSA classifier, such as integrated gradients [ 17 , 15 ]. The highest-scoring contiguous region is selected as the opinion span, 𝑠 * = arg max 𝑠 ⊆𝑥 ∑︀ 𝑡 𝑖 ∈𝑠 𝑟 𝑖 . When attribution scores are unavailable, 
+
+CAVE-ABSA falls back to dependency- and clause-based localization. Specifically, it selects the clause containing the target aspect and identifies adjectives, adverbs, sentiment-bearing verbs, and adjectival complements near the aspect as candidate opinion expressions. 
+
+4.3. Controlled Counterfactual Rewriting 
+
+After identifying the target opinion span 𝑠 *, CAVE-ABSA generates counterfactual candidates by rewriting only the target span or target clause. Let 𝑥 be decomposed into three parts as 𝑥 = 𝑐 left ⊕
+
+𝑠 * ⊕ 𝑐 right , where 𝑐 left and 𝑐 right are the preserved context segments. The rewriting module generates a counterfactual opinion span 𝑠 𝑐𝑓 with the desired polarity 𝑦 𝑐𝑓 as 𝑠 𝑐𝑓 = 𝑔 𝜑 (𝑠 *, 𝑎 *, 𝑦 𝑐𝑓 , 𝑐 left , 𝑐 right ). The candidate sentence is then reconstructed as ˜𝑥 ′ = 𝑐 left ⊕ 𝑠 𝑐𝑓 ⊕ 𝑐 right . The generator is prompted or constrained to follow four rules: preserve the target aspect string, change only the sentiment toward the target aspect, keep all non-target aspects and factual details unchanged, and return a fluent complete sentence. This span-level rewriting is more flexible than antonym replacement because it can transform expressions such as “lasts all day” into “drains quickly,” or “easy to use” into “difficult to use,” rather than replacing a single token. 
+
+4.4. Repair-Based Refinement 
+
+Generated candidates may satisfy the desired polarity change but still contain grammatical errors or unnatural phrasing. Therefore, each raw candidate ˜𝑥 ′ is passed through a repair module as 
+
+𝑥 ′ = 𝑅 𝜓 (˜ 𝑥 ′, 𝑥, 𝑎 *, 𝑦 𝑐𝑓 ), where 𝑅 𝜓 rewrites the candidate for grammar and fluency while preserving the intended counterfactual meaning. The repair step is explicitly constrained not to change the target aspect, non-target aspects, numbers, named entities, or product-specific facts. This step is important because many automatic edits produce malformed sentences such as “bad appearance of seamless” or contradictory expressions such as “poor and smooth.” The repair module attempts to convert such outputs into grammatical alternatives, but candidates are still rejected if they fail the final verification stage .
+
+4.5. AMR-Guided Structural Preservation 
+
+To reduce semantic drift , CAVE-ABSA uses Abstract Meaning Representation (AMR) as a structure-level preservation signal [ 19 ]. We parse both the original sentence and the candidate counterfactual into AMR graphs as 𝐺 = AMRParse( 𝑥 ) and 𝐺 ′ = AMRParse( 𝑥 ′). Since the target opinion subgraph is expected to change, we exclude the localized target region from the structural comparison. Let 𝐸 (𝐺 )
+
+and 𝐸 (𝐺 ′) denote the sets of non-target semantic edges in the original and edited AMR graphs. We compute structural preservation as 𝑆 struct (𝑥, 𝑥 ′) = |𝐸 (𝐺 )∩𝐸 (𝐺 ′)||𝐸 (𝐺 )∪𝐸 (𝐺 ′)| . This score helps reject candidates that remain lexically similar but alter important non-target relations. For example, if an edit flips the target aspect but also changes a comparison, removes a causal relation, or changes the relation between a product and its attribute, its structural preservation score decreases. 
+
+4.6. Constraint-Based Verification 
+
+The verification module is the core component of CAVE-ABSA. It ensures that a generated sentence is not accepted merely because it contains an opposite-polarity word. Each candidate 𝑥 ′ is evaluated using six constraints. First, the target aspect must flip, measured as 𝑃 flip (𝑥 ′) = 𝑝 𝜃 (𝑦 𝑐𝑓 | 𝑥 ′, 𝑎 *). Second, all non-target aspects must preserve their original labels, measured as 𝑃 keep (𝑥 ′) = 1
+
+> |𝐴 (𝑥 )∖{ 𝑎 *}|
+
+∑︀ 𝑎 𝑗 ̸ =𝑎 * 𝑝 𝜃 (𝑦 𝑗 |Algorithm 1 CAVE-ABSA Counterfactual Editing 
+
+Require: Sentence 𝑥 , target aspect 𝑎 *, original polarity 𝑦 *, aspect set 𝐴 (𝑥 )
+
+Ensure: Valid counterfactual set 𝒞 (𝑥, 𝑎 *) 
+
+> 1:
+
+Determine target polarity 𝑦 𝑐𝑓 such that 𝑦 𝑐𝑓 ̸ = 𝑦 * 
+
+> 2:
+
+Localize target opinion span 𝑠 * associated with 𝑎 * 
+
+> 3:
+
+Parse original sentence into AMR graph 𝐺  
+
+> 4:
+
+Initialize candidate set 𝒰 ← ∅  
+
+> 5:
+
+for 𝑖 = 1 to 𝑁 do  
+
+> 6:
+
+Generate raw candidate ˜𝑥 ′ 
+
+> 𝑖
+
+by controlled rewriting of 𝑠 * 
+
+> 7:
+
+Repair ˜𝑥 ′ 
+
+> 𝑖
+
+to obtain fluent candidate 𝑥 ′ 
+
+> 𝑖
+> 8:
+
+Compute target flip score 𝑃 flip (𝑥 ′
+
+> 𝑖
+
+) 
+
+> 9:
+
+Compute non-target preservation score 𝑃 keep (𝑥 ′
+
+> 𝑖
+
+) 
+
+> 10:
+
+Compute semantic, fluency, edit, and AMR-structure scores  
+
+> 11:
+
+Detect contradiction 𝐶 (𝑥 ′
+
+> 𝑖
+
+) 
+
+> 12:
+
+if 𝑥 ′ 
+
+> 𝑖
+
+satisfies all validity constraints then  
+
+> 13:
+
+Add 𝑥 ′ 
+
+> 𝑖
+
+to 𝒰  
+
+> 14:
+
+end if  
+
+> 15:
+
+end for  
+
+> 16:
+
+Rank candidates in 𝒰 using 𝑆 (𝑥 ′) 
+
+> 17:
+
+return top-𝐾 candidates as 𝒞 (𝑥, 𝑎 *)
+
+𝑥 ′, 𝑎 𝑗 ); for single-aspect sentences, we set 𝑃 keep (𝑥 ′) = 1 . Third, the candidate must remain semantically close to the original sentence, computed as 𝑆 sem (𝑥, 𝑥 ′) = cos( ℎ(𝑥 ), ℎ (𝑥 ′)) , where ℎ(·) is a sentence embedding model such as Sentence-BERT [ 20 ]. Fourth, the edit should be minimal, measured as 
+
+𝑆 edit (𝑥, 𝑥 ′) = 1 − 𝑑 (𝑥,𝑥 ′) 
+
+> |𝑥 |
+
+, where 𝑑 (𝑥, 𝑥 ′) is a token-level edit distance. Fifth, the sentence must be fluent, measured as 𝑆 flu (𝑥 ′) = exp( −𝜆 · PPL( 𝑥 ′)) , where lower perplexity indicates better fluency. Finally, the candidate must not contain contradictory or mixed-polarity expressions, represented as 
+
+𝐶 (𝑥 ′) = 1 if contradiction is detected and 𝐶 (𝑥 ′) = 0 otherwise. Contradiction detection combines local polarity checks, rule-based mixed-cue detection, and optionally a natural language inference model. For example, expressions such as “poor and smooth,” “terrible but excellent,” or “sluggish and easy to use” are treated as invalid when they refer to the same target aspect. 
+
+4.7. Candidate Ranking and Selection 
+
+All valid candidates are ranked using the composite score introduced in Section 3. In practice, we first apply hard constraints: 𝑃 flip (𝑥 ′) ≥ 𝜏 flip , 𝑃 keep (𝑥 ′) ≥ 𝜏 keep , 𝑆 sem (𝑥, 𝑥 ′) ≥ 𝜏 sem , 𝑆 flu (𝑥 ′) ≥ 𝜏 flu ,and 𝐶 (𝑥 ′) = 0 . Candidates that fail any hard constraint are discarded. The remaining candidates are ranked by 𝑆 (𝑥 ′) = 𝜆 1𝑃 flip (𝑥 ′) + 𝜆 2𝑃 keep (𝑥 ′) + 𝜆 3𝑆 sem (𝑥, 𝑥 ′) + 𝜆 4𝑆 flu (𝑥 ′) + 𝜆 5𝑆 edit (𝑥, 𝑥 ′) + 
+
+𝜆 6𝑆 struct (𝑥, 𝑥 ′) − 𝜆 7𝐶 (𝑥 ′). The top-𝐾 candidates are selected as the final counterfactual set ,
+
+𝒞 (𝑥, 𝑎 *) = TopK 𝑥 ′∈𝒱 (𝑥,𝑎 *) 𝑆 (𝑥 ′).
+
+4.8. Algorithm 
+
+Algorithm 1 summarizes the CAVE-ABSA pipeline. 
+
+## 5. Experimental Setup 
+
+We evaluate CAVE-ABSA from two complementary perspectives: (i) the quality of generated coun-terfactual examples , and (ii) their usefulness for evaluating and improving ABSA models . The first setting measures whether the generated sentence is a valid and meaningful aspect-level counter-factual . The second setting tests whether validated counterfactuals can expose model brittleness and improve aspect-grounded sentiment classification .
+
+5.1. Datasets 
+
+We conduct experiments on standard ABSA benchmarks . Our primary dataset is the SemEval-2014 Laptop domain, which contains product reviews annotated with aspect terms and sentiment polarity labels [ 1]. We also consider the SemEval-2014 Restaurant domain and MAMS for additional evaluation. MAMS is especially useful because it contains multi-aspect sentences where different aspects can have different sentiment polarities [ 8 ]. This setting directly tests whether a counterfactual generator can flip one target aspect while preserving non-target aspects. For each dataset, we construct counterfactual candidates only for instances with positive or negative target polarities. Neutral instances are excluded from polarity-flip generation because the desired counterfactual direction is less clearly defined. For each eligible instance (𝑥, 𝑎 *, 𝑦 *), we generate up to 𝐾 counterfactual candidates. 
+
+5.2. Baselines 
+
+We compare CAVE-ABSA against representative counterfactual generation baselines. Lexicon Replace-ment replaces sentiment-bearing words near the target aspect with opposite-polarity words using an antonym or sentiment lexicon; it is simple and interpretable, but often produces unnatural or contradic-tory outputs. Masked Language Model Replacement masks opinion words near the target aspect and uses a masked language model to generate replacements; it can produce locally fluent substitutions, but does not explicitly guarantee aspect-level polarity flipping. Prompt-only Rewriting uses a sequence-to-sequence generator or instruction-tuned model to rewrite the sentence so that the target aspect polarity changes, but does not include the full verification pipeline. Direct AMR Concept Editing parses the original sentence into an AMR graph, replaces sentiment-bearing concepts with opposite-polarity concepts, and generates text back from the edited graph, testing whether semantic-graph editing alone is sufficient. Attribution-guided T5 Rewriting follows the idea of identifying important opinion expressions and generating reversed-polarity expressions using a text-to-text model [ 15 ]. CAVE-ABSA 
+
+is our full method, combining opinion-span localization, controlled rewriting, repair, semantic-structure checking, and constraint-based verification. 
+
+5.3. Automatic Evaluation Metrics 
+
+We evaluate each generated counterfactual using both aspect-level validity metrics and text-quality metrics . Target Flip Accuracy measures the percentage of candidates for which the predicted sen-timent of the target aspect changes to the desired counterfactual polarity. Non-target Consistency 
+
+measures the percentage of candidates for which all non-target aspect polarities remain unchanged. 
+
+Counterfactual Validity measures the percentage of candidates satisfying both target flip and non-target preservation constraints. Semantic Similarity measures the semantic closeness between the original and edited sentence, computed using sentence embeddings such as Sentence-BERT [ 20 ]. Edit Minimality is computed using normalized token-level edit distance between 𝑥 and 𝑥 ′, where lower edit distance indicates a more minimal counterfactual. Fluency measures grammaticality and naturalness using a language-model-based fluency score or perplexity. Post-hoc Contradiction Rate measures the percentage of retained candidates that are later judged to contain mixed-polarity or contradictory expressions, such as “poor and smooth” for the same aspect, by an external evaluator after automatic filtering. This metric is distinct from the internal contradiction filter used during CAVE-ABSA verifi-cation; therefore, a non-zero value indicates residual contradictions missed by the automatic verifier. 
+
+AMR Structural Preservation measures the overlap between the non-target semantic structures of the original and edited sentences, indicating whether the candidate preserves sentence-level meaning beyond surface similarity. Unless otherwise stated, quality metrics are computed over retained candi-dates that pass the filtering stage, whereas Generation Yield is computed over all initially generated candidates before filtering. 5.4. Downstream ABSA Evaluation 
+
+To evaluate whether generated counterfactuals are useful for training, we augment the original ABSA training set with validated counterfactual examples . We compare models trained under five settings: (1) original training data only; (2) original data plus lexicon-based counterfactuals ; (3) original data plus prompt-only counterfactuals ; (4) original data plus direct AMR-edited counterfactuals ; and (5) original data plus CAVE-ABSA counterfactuals . We evaluate downstream ABSA performance using accuracy and macro-F1 . We also evaluate robustness on counterfactual test pairs, where a model is expected to change its prediction for the edited target aspect while preserving predictions for non-target aspects. 
+
+5.5. Ablation Study 
+
+We perform ablation studies to measure the contribution of each component: (1) Without opinion-span localization , where the full sentence is rewritten instead of the target opinion span; (2) Without repair , where the fluency-improvement step is removed; (3) Without contradiction filtering , where mixed-polarity outputs are allowed; (4) Without AMR structural checking , where only embedding similarity is used for semantic preservation; (5) Without non-target verification , where only target aspect flipping is enforced; and (6) Generic sentiment verifier , where the ABSA verifier is replaced with a sentence-level sentiment classifier. These ablations test whether each constraint is necessary for producing valid and meaningful ABSA counterfactuals. 
+
+## 6. Results and Analysis 
+
+This section reports the effectiveness of CAVE-ABSA in generating valid and meaningful aspect-level counterfactuals. We analyze the results from three perspectives: counterfactual generation quality, usefulness for ABSA robustness evaluation, and the contribution of each framework component. 
+
+6.1. Counterfactual Generation Quality 
+
+Table 1 compares CAVE-ABSA with representative counterfactual generation baselines. We evaluate generation quality using six criteria: Target Flip , Non-target Keep , Semantic Similarity , Fluency ,
+
+Post-hoc Contradiction Rate , and Generation Yield . Target Flip measures whether the edited aspect changes to the desired counterfactual polarity, while Non-target Keep measures whether the sentiment labels of unchanged aspects remain stable. Semantic Similarity and Fluency capture meaning preservation and linguistic naturalness. Post-hoc Contradiction Rate measures residual mixed-polarity or inconsistent generations detected after automatic filtering. All quality metrics are computed over retained candidates, while Generation Yield is computed over all initially generated candidates before filtering. The results show that CAVE-ABSA achieves the best overall balance across validity, quality, and filtering efficiency. It obtains the highest Target Flip score of 92.4 , the highest Non-target Keep score of 91.1 , and the strongest Semantic Similarity score of 89.3 . It also achieves the highest Fluency score of 91.8 while reducing the Contradiction Rate to only 4.6 , substantially lower than all baselines. These results indicate that CAVE-ABSA does not merely generate fluent polarity-changing sentences; it produces counterfactuals that better satisfy the full set of aspect-level constraints. The baseline trends are consistent with their design limitations. Lexicon Replacement achieves moderate Target Flip but suffers from low Fluency and a high Contradiction Rate, reflecting the brittleness of direct polarity-word substitution. MLM Replacement improves Semantic Similarity and Fluency, but its low Target Flip score suggests that locally plausible substitutions do not reliably produce aspect-level counterfactuals. Prompt-only Rewrite achieves strong Fluency and Target Flip, but weaker Non-target Keep and Semantic Similarity show that unconstrained rewriting can alter non-target information. Direct AMR Edit performs poorly on Fluency and Semantic Similarity, suggesting that direct graph editing can introduce awkward or semantically drifting generations. Attribution + T5 
+
+is the strongest baseline, but it still trails CAVE-ABSA because it does not jointly enforce all validation constraints. Overall, these results support the central claim that aspect-local counterfactual generation re-quires constraint-based verification . High target-flip accuracy alone is insufficient: a valid ABSA counterfactual must also preserve non-target aspects, remain semantically close to the original sen-tence, avoid mixed polarity, and retain fluency. CAVE-ABSA achieves this stronger validity profile while maintaining the highest Generation Yield, showing that its verification pipeline improves quality without excessively discarding generated candidates. 
+
+Table 1 
+
+Counterfactual generation quality. Target Flip measures whether the target aspect sentiment is correctly flipped, Non-target Keep measures whether non-target aspect sentiments are preserved, Semantic Similarity measures meaning preservation, and Fluency measures grammaticality and naturalness. Post-hoc Contradiction Rate measures residual mixed-polarity or inconsistent generations detected by an external evaluator after automatic filtering. These quality metrics are computed over retained candidates. Generation Yield denotes the percentage of all initially generated candidates retained after validity filtering. All values are percentages except Semantic Similarity and Fluency, which are normalized to a 0–100 scale.                                            
+
+> Method Target Flip ↑
+> Non-target Keep ↑
+> Semantic Similarity ↑Fluency ↑
+> Posthoc Contradiction Rate ↓
+> Generation Yield ↑
+> Lexicon Replacement 76.4 61.8 82.3 51.2 46.7 41.8 MLM Replacement 57.9 73.6 88.1 84.7 18.9 46.2 Prompt-only Rewrite 84.8 64.2 75.6 91.3 14.6 52.7 Direct AMR Edit 66.5 67.4 70.2 47.9 32.8 38.5 Attribution + T5 85.7 81.3 84.6 87.5 10.9 63.4
+> CAVE-ABSA 92.4 91.1 89.3 91.8 4.6 68.9
+
+6.2. Aspect-Level Robustness Evaluation 
+
+We next evaluate whether counterfactual pairs generated by CAVE-ABSA expose weaknesses in standard ABSA models. For each original–counterfactual pair, a robust model should satisfy two conditions: it should change its prediction for the edited target aspect and preserve its prediction for all unchanged non-target aspects . We therefore report Target Sensitivity and Non-target Stability 
+
+in addition to standard test accuracy. Table 2 shows that all models achieve relatively strong Original Accuracy , but their counterfactual robustness is substantially lower. For example, DeBERTa-ABSA obtains the best Original Accuracy of 87.2 , but its Target Sensitivity drops to 72.1 . Similarly, RoBERTa-ABSA reaches 85.4 Original Accuracy but only 66.8 Target Sensitivity. This gap indicates that high standard accuracy does not necessarily imply reliable aspect-grounded reasoning under minimal sentiment interventions. The results also show that Target Sensitivity is consistently lower than Non-target Stability 
+
+across all models. This suggests that ABSA models are better at preserving predictions for unchanged aspects than correctly responding to localized sentiment flips. Among the evaluated models, DeBERTa-ABSA performs best overall, achieving the highest Original Accuracy, Target Sensitivity, and Non-target Stability. However, even the strongest model remains far from perfect on counterfactual pairs, confirming that the generated counterfactuals provide a more diagnostic robustness test than standard benchmark accuracy alone. Overall, these findings support the need for aspect-level counterfactual evaluation . A model may classify original examples correctly while still failing to update its prediction when the sentiment toward a specific target aspect is minimally changed. Such failures suggest reliance on global sentiment cues, lexical shortcuts, or shallow correlations rather than robust aspect-specific sentiment grounding. Table 2                   
+
+> ABSA robustness evaluation using generated counterfactual pairs. Original Acc. measures standard test accuracy, Target Sensitivity measures whether the model changes its prediction for the edited target aspect, and Non-target Stability measures whether the model preserves predictions for unchanged aspects. All values are percentages.
+> Model Original Acc. ↑Target Sensitivity ↑Non-target Stability ↑
+> BERT-ABSA 82.6 61.3 78.4 RoBERTa-ABSA 85.4 66.8 81.7 T5-ABSA 84.1 70.5 79.2 DeBERTa-ABSA 87.2 72.1 83.5
+
+6.3. Data Augmentation Results 
+
+We also evaluate whether validated counterfactuals improve downstream ABSA performance. Table 3 compares models trained on the original data only with models augmented using counterfactual examples from different generation methods. We report standard Accuracy , Macro-F1 , and CF Robustness , where CF Robustness measures performance on counterfactual test pairs.                      
+
+> Table 3
+> Downstream ABSA performance with counterfactual data augmentation. Accuracy and Macro-F1 measure standard ABSA test performance, while CF Robustness measures performance on counterfactual test pairs. All values are percentages.
+> Training Data Accuracy ↑Macro-F1 ↑CF Robustness ↑
+> Original Only 87.2 85.4 62.8 + Lexicon Counterfactuals 86.8 84.9 64.1 + Prompt-only Counterfactuals 87.6 85.8 68.7 + Direct AMR Counterfactuals 86.9 85.0 65.3
+> + CAVE-ABSA Counterfactuals 88.4 86.9 74.6
+
+The results show that counterfactual augmentation mainly improves robustness , rather than only increasing standard test performance. Training with the original data achieves 87.2 Accuracy and 
+
+85.4 Macro-F1, but only 62.8 CF Robustness. Lexicon and Direct AMR counterfactuals provide limited gains and slightly reduce standard Accuracy, suggesting that noisy or unnatural counterfactuals can introduce weak supervision. Prompt-only counterfactuals improve CF Robustness to 68.7 , but the gain remains smaller than that obtained with CAVE-ABSA. Augmenting with CAVE-ABSA counterfactuals gives the best performance across all metrics, reach-ing 88.4 Accuracy, 86.9 Macro-F1, and 74.6 CF Robustness. The largest improvement appears in CF Robustness, with an absolute gain of 11.8 points over the original-only setting. This supports the claim that validated aspect-level counterfactuals provide more useful supervision than unconstrained or weakly filtered counterfactual edits. 
+
+6.4. Ablation Analysis 
+
+Table 4 analyzes the contribution of each component in CAVE-ABSA . We compare the full framework against variants that remove opinion-span localization , repair , AMR structural checking , contra-diction filtering , non-target verification , and the ABSA-specific verifier . The results show that each component contributes to a different aspect of counterfactual validity. The full CAVE-ABSA model achieves the strongest overall balance, with high Target Flip and 
+
+Non-target Keep , the best Semantic Similarity and Fluency , and the lowest post-hoc Contradiction Rate , indicating that only a small fraction of residual contradictions remain after automatic verification. Removing opinion-span localization causes a clear drop in Non-target Keep from 91.1 to 77.9 and Semantic Similarity from 89.3 to 80.8 , showing that uncontrolled rewriting introduces semantic drift and affects unchanged aspects. Table 4                                                  
+
+> Ablation study of CAVE-ABSA components. Target Flip measures whether the target aspect sentiment is correctly flipped, Non-target Keep measures whether non-target aspect sentiments are preserved, Semantic Similarity measures meaning preservation, and Fluency measures grammaticality and naturalness. Post-hoc Contradiction Rate measures residual mixed-polarity or inconsistent generations detected by an external evaluator after automatic filtering. These quality metrics are computed over retained candidates. Generation Yield denotes the percentage of all initially generated candidates retained after filtering. All values are percentages except Semantic Similarity and Fluency, which are normalized to a 0–100 scale.
+> Variant Target Flip ↑
+> Non-target Keep ↑
+> Semantic Similarity ↑Fluency ↑
+> Contradiction Rate ↓
+> Generation Yield ↑
+> Full CAVE-ABSA 92.4 91.1 89.3 91.8 4.6 68.9
+> w/o Opinion Localization 86.7 77.9 80.8 88.4 9.7 60.8 w/o Repair 91.5 89.2 87.6 82.1 6.9 61.4 w/o AMR Check 91.8 87.4 82.5 90.7 5.8 66.2 w/o Contradiction Filter 92.7 90.4 88.6 91.2 13.8 74.5 w/o Non-target Verification 94.1 69.6 84.2 90.5 8.4 72.8 Generic Sentiment Verifier 89.3 74.8 83.7 88.9 10.6 65.1
+
+Removing the repair module mainly reduces Fluency, from 91.8 to 82.1 , while keeping Target Flip relatively stable. This indicates that repair improves linguistic quality without substantially weakening aspect-level validity. Removing the AMR check lowers Semantic Similarity to 82.5 , confirming that structure-level verification helps preserve non-target meaning beyond surface embedding similarity. The effect of removing contradiction filtering is especially clear: Generation Yield increases from 
+
+68.9 to 74.5 , but Contradiction Rate rises sharply from 4.6 to 13.8 . This shows that contradiction filtering rejects many fluent but invalid candidates. Similarly, removing non-target verification 
+
+increases Target Flip to 94.1 , but Non-target Keep drops substantially to 69.6 , confirming that target flipping alone is insufficient for ABSA counterfactual validity. Finally, replacing the ABSA-specific verifier with a generic sentiment verifier reduces Non-target Keep, Semantic Similarity, and Fluency while increasing Contradiction Rate. This supports the central design choice of CAVE-ABSA: counterfactual validation must be performed at the aspect level , not merely at the sentence level. 
+
+6.5. Qualitative Analysis 
+
+Table 5 presents representative valid and invalid counterfactual examples. The examples illustrate why ABSA counterfactual generation requires aspect-level validation rather than simple sentence-level polarity change. A valid counterfactual should change the sentiment of the target aspect while preserving non-target aspect sentiment and the remaining factual content. The valid examples show localized sentiment intervention : only the opinion expression associated with the target aspect is changed. In contrast, the invalid examples reveal common failure modes. The phrase “poor and smooth” introduces mixed polarity for the same aspect, while “a bad laptop” changes the global sentence sentiment without directly modifying the sentiment toward the target aspect use . These cases show that high label-flipping probability alone is insufficient. A reliable ABSA counterfactual must satisfy target flipping, non-target preservation, semantic consistency, fluency, and contradiction avoidance simultaneously. 
+
+6.6. Error Analysis 
+
+Invalid generations fall into four main categories: target mismatch , mixed polarity , semantic drift ,and fluency degradation . Target mismatch occurs when the generated sentence changes the sentiment of the whole sentence or another entity without directly flipping the target aspect, such as rewriting “easy to use” as “bad laptop,” which changes global sentiment but not the sentiment toward the target Table 5                                
+
+> Qualitative examples of valid and invalid ABSA counterfactuals. Italicized terms indicate the relevant target or non-target aspects.
+> Original Counterfactual Judgment
+> The battery lasts all day, but the
+> screen is dull. The battery drains quickly, but the
+> screen is dull.
+> Valid : target aspect flips, while the non-target aspect is pre-served. The trackpad is nice and smooth. The trackpad is poor and smooth. Invalid : mixed polarity is intro-duced for the same aspect. It is easy to use and has a good
+> display .It is difficult to use and has a good
+> display .
+> Valid :target aspect changes, while the display remains positive. It is easy to use and has a good
+> display .It is a bad laptop and has a good
+> display .
+> Invalid :global sentiment changes, but the target aspect use
+> is not directly flipped.
+
+aspect use . Mixed polarity occurs when a candidate contains conflicting positive and negative cues for the same aspect, such as “poor and smooth.” Semantic drift occurs when the edit changes facts beyond the target aspect, including price, product identity, comparison structure, or causal relations. Fluency degradation occurs when the edit produces unnatural phrases or broken grammar, especially in graph-based or token-level methods. Overall, these errors show that high target flip accuracy alone is insufficient; a reliable ABSA counterfactual generator must jointly enforce aspect-level validity and 
+
+text quality .
+
+## 7. Conclusion 
+
+We introduced CAVE-ABSA , a constraint-aware framework for generating and validating aspect-level counterfactuals for ABSA. The framework treats counterfactual editing as a localized intervention: the sentiment toward the target aspect should flip, while non-target aspect sentiments and factual content remain stable. CAVE-ABSA operationalizes this goal through opinion-span localization, con-trolled rewriting, repair-based refinement, AMR-guided structural preservation, and constraint-based verification. The results show that CAVE-ABSA produces more valid and fluent counterfactuals than lexical, MLM-based, prompt-only, AMR-based, and attribution-guided baselines, while reducing residual contradictions. Robustness and augmentation experiments further indicate that validated counterfac-tuals expose weaknesses in standard ABSA models and improve counterfactual robustness. Overall, CAVE-ABSA provides a principled step toward meaningful aspect-local counterfactual generation and reliable robustness evaluation for ABSA. Future work will extend the framework to neutral and conflict labels, multilingual datasets, stronger aspect-specific verifiers, and human-in-the-loop validation. 
+
+## Declaration on Generative AI 
+
+During the preparation of this work, the author(s) used Generative AI tools only for language and presentation support. Specifically, these tools were used for grammar and spelling correction, improving sentence clarity, polishing academic writing, organizing paper structure, formatting text, and assisting with editorial revisions. The research problem, core ideas, methodology, experimental design, analysis, interpretations, and conclusions are the authors’ own. No Generative AI tool was used to create the scientific contribution, generate research claims, produce experimental results, or make final decisions about the content of the paper. After using these tools, the author(s) carefully reviewed, revised, and verified the manuscript, and take full responsibility for the publication’s content. References 
+
+[1] M. Pontiki, D. Galanis, J. Pavlopoulos, H. Papageorgiou, I. Androutsopoulos, S. Manandhar, SemEval-2014 task 4: Aspect based sentiment analysis, in: P. Nakov, T. Zesch (Eds.), Proceedings of the 8th International Workshop on Semantic Evaluation (SemEval 2014), Association for Com-putational Linguistics, Dublin, Ireland, 2014, pp. 27–35. URL: https://aclanthology.org/S14-2004/. doi: 10.3115/v1/S14-2004 .[2] M. Pontiki, D. Galanis, H. Papageorgiou, S. Manandhar, I. Androutsopoulos, SemEval-2015 task 12: Aspect based sentiment analysis, in: P. Nakov, T. Zesch, D. Cer, D. Jurgens (Eds.), Proceedings of the 9th International Workshop on Semantic Evaluation (SemEval 2015), Association for Computational Linguistics, Denver, Colorado, 2015, pp. 486–495. URL: https://aclanthology.org/S15-2082/. doi: 10. 18653/v1/S15-2082 .[3] M. Pontiki, D. Galanis, H. Papageorgiou, I. Androutsopoulos, S. Manandhar, M. AL-Smadi, M. Al-Ayyoub, Y. Zhao, B. Qin, O. De Clercq, V. Hoste, M. Apidianaki, X. Tannier, N. Loukachevitch, E. Kotelnikov, N. Bel, S. M. Jiménez-Zafra, G. Eryiğit, SemEval-2016 task 5: Aspect based sentiment analysis, in: S. Bethard, M. Carpuat, D. Cer, D. Jurgens, P. Nakov, T. Zesch (Eds.), Proceedings of the 10th International Workshop on Semantic Evaluation (SemEval-2016), Association for Computational Linguistics, San Diego, California, 2016, pp. 19–30. URL: https://aclanthology.org/ S16-1002/. doi: 10.18653/v1/S16-1002 .[4] J. Devlin, M.-W. Chang, K. Lee, K. Toutanova, BERT: Pre-training of deep bidirectional transformers for language understanding, in: J. Burstein, C. Doran, T. Solorio (Eds.), Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1 (Long and Short Papers), Association for Computational Linguistics, Minneapolis, Minnesota, 2019, pp. 4171–4186. URL: https://aclanthology.org/N19-1423/. doi: 10.18653/v1/N19-1423 .[5] C. Sun, L. Huang, X. Qiu, Utilizing BERT for aspect-based sentiment analysis via constructing auxiliary sentence, in: J. Burstein, C. Doran, T. Solorio (Eds.), Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1 (Long and Short Papers), Association for Computational Linguistics, Minneapolis, Minnesota, 2019, pp. 380–385. URL: https://aclanthology.org/N19-1035/. doi: 10. 18653/v1/N19-1035 .[6] J. Liu, Z. Teng, L. Cui, H. Liu, Y. Zhang, Solving aspect category sentiment analysis as a text generation task, in: M.-F. Moens, X. Huang, L. Specia, S. W.-t. Yih (Eds.), Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing, Association for Computational Linguistics, Online and Punta Cana, Dominican Republic, 2021, pp. 4406–4416. URL: https:// aclanthology.org/2021.emnlp-main.361/. doi: 10.18653/v1/2021.emnlp-main.361 .[7] Y. Tian, C. Liu, Y. Song, F. Xia, Y. Zhang, Aspect-based sentiment analysis with context denois-ing, in: K. Duh, H. Gomez, S. Bethard (Eds.), Findings of the Association for Computational Linguistics: NAACL 2024, Association for Computational Linguistics, Mexico City, Mexico, 2024, pp. 3083–3095. URL: https://aclanthology.org/2024.findings-naacl.194/. doi: 10.18653/v1/2024. findings-naacl.194 .[8] Q. Jiang, L. Chen, R. Xu, X. Ao, M. Yang, A challenge dataset and effective models for aspect-based sentiment analysis, in: K. Inui, J. Jiang, V. Ng, X. Wan (Eds.), Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP), Association for Computational Linguistics, Hong Kong, China, 2019, pp. 6280–6285. URL: https://aclanthology.org/D19-1654/. doi: 10.18653/v1/D19-1654 .[9] D. Kaushik, E. Hovy, Z. C. Lipton, Learning the difference that makes a difference with counterfactually-augmented data, in: International Conference on Learning Representations, 2020. URL: https://openreview.net/forum?id=Sklgs0NFvr. [10] M. Gardner, Y. Artzi, V. Basmov, J. Berant, B. Bogin, S. Chen, P. Dasigi, D. Dua, Y. Elazar, A. Got-tumukkala, N. Gupta, H. Hajishirzi, G. Ilharco, D. Khashabi, K. Lin, J. Liu, N. F. Liu, P. Mulcaire, Q. Ning, S. Singh, N. A. Smith, S. Subramanian, R. Tsarfaty, E. Wallace, A. Zhang, B. Zhou, Evalu-ating models’ local decision boundaries via contrast sets, in: T. Cohn, Y. He, Y. Liu (Eds.), Findings of the Association for Computational Linguistics: EMNLP 2020, Association for Computational Linguistics, Online, 2020, pp. 1307–1323. URL: https://aclanthology.org/2020.findings-emnlp.117/. doi: 10.18653/v1/2020.findings-emnlp.117 .[11] I. Sen, M. Samory, F. Flöck, C. Wagner, I. Augenstein, How does counterfactually augmented data impact models for social computing constructs?, in: M.-F. Moens, X. Huang, L. Spe-cia, S. W.-t. Yih (Eds.), Proceedings of the 2021 Conference on Empirical Methods in Natu-ral Language Processing, Association for Computational Linguistics, Online and Punta Cana, Dominican Republic, 2021, pp. 325–344. URL: https://aclanthology.org/2021.emnlp-main.28/. doi: 10.18653/v1/2021.emnlp-main.28 .[12] N. Joshi, H. He, An investigation of the (in)effectiveness of counterfactually augmented data, in: S. Muresan, P. Nakov, A. Villavicencio (Eds.), Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), Association for Computational Linguistics, Dublin, Ireland, 2022, pp. 3668–3681. URL: https://aclanthology.org/2022.acl-long.256/. doi: 10.18653/v1/2022.acl-long.256 .[13] A. Ross, A. Marasović, M. Peters, Explaining NLP models via minimal contrastive editing (MiCE), in: C. Zong, F. Xia, W. Li, R. Navigli (Eds.), Findings of the Association for Computational Linguistics: ACL-IJCNLP 2021, Association for Computational Linguistics, Online, 2021, pp. 3840–3852. URL: https://aclanthology.org/2021.findings-acl.336/. doi: 10.18653/v1/2021.findings-acl.336 .[14] T. Wu, M. T. Ribeiro, J. Heer, D. Weld, Polyjuice: Generating counterfactuals for explaining, evalu-ating, and improving models, in: C. Zong, F. Xia, W. Li, R. Navigli (Eds.), Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing (Volume 1: Long Papers), Association for Computa-tional Linguistics, Online, 2021, pp. 6707–6723. URL: https://aclanthology.org/2021.acl-long.523/. doi: 10.18653/v1/2021.acl-long.523 .[15] D. Wu, L. Wen, C. Chen, Z. Shi, A novel counterfactual data augmentation method for aspect-based sentiment analysis, in: B. Yanıkoğlu, W. Buntine (Eds.), Proceedings of the 15th Asian Conference on Machine Learning, volume 222 of Proceedings of Machine Learning Research , PMLR, 2024, pp. 1479–1493. URL: https://proceedings.mlr.press/v222/wu24a.html. [16] V. B. Nguyen, C. Seifert, J. Schlötterer, CEval: A benchmark for evaluating counterfactual text generation, in: S. Mahamood, N. L. Minh, D. Ippolito (Eds.), Proceedings of the 17th International Natural Language Generation Conference, Association for Computational Linguistics, Tokyo, Japan, 2024, pp. 55–69. URL: https://aclanthology.org/2024.inlg-main.6/. doi: 10.18653/v1/2024. inlg-main.6 .[17] M. Sundararajan, A. Taly, Q. Yan, Axiomatic attribution for deep networks, in: D. Precup, Y. W. Teh (Eds.), Proceedings of the 34th International Conference on Machine Learning, volume 70 of 
+
+Proceedings of Machine Learning Research , PMLR, 2017, pp. 3319–3328. URL: https://proceedings. mlr.press/v70/sundararajan17a.html. [18] C. Raffel, N. Shazeer, A. Roberts, K. Lee, S. Narang, M. Matena, Y. Zhou, W. Li, P. J. Liu, Exploring the limits of transfer learning with a unified text-to-text transformer, Journal of Machine Learning Research 21 (2020) 1–67. URL: http://jmlr.org/papers/v21/20-074.html. [19] L. Banarescu, C. Bonial, S. Cai, M. Georgescu, K. Griffitt, U. Hermjakob, K. Knight, P. Koehn, M. Palmer, N. Schneider, Abstract Meaning Representation for sembanking, in: A. Pareja-Lora, M. Liakata, S. Dipper (Eds.), Proceedings of the 7th Linguistic Annotation Workshop and Interoperability with Discourse, Association for Computational Linguistics, Sofia, Bulgaria, 2013, pp. 178–186. URL: https://aclanthology.org/W13-2322/. [20] N. Reimers, I. Gurevych, Sentence-BERT: Sentence embeddings using Siamese BERT-networks, in: K. Inui, J. Jiang, V. Ng, X. Wan (Eds.), Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP), Association for Computational Linguistics, Hong Kong, China, 2019, pp. 3982–3992. URL: https://aclanthology.org/D19-1410/. doi: 10.18653/v1/D19-1410 .[21] T. Dixit, B. Paranjape, H. Hajishirzi, L. Zettlemoyer, CORE: A retrieve-then-edit framework for counterfactual data generation, in: Y. Goldberg, Z. Kozareva, Y. Zhang (Eds.), Findings of the Association for Computational Linguistics: EMNLP 2022, Association for Computational Linguistics, Abu Dhabi, United Arab Emirates, 2022, pp. 2964–2984. URL: https://aclanthology.org/ 2022.findings-emnlp.216/. doi: 10.18653/v1/2022.findings-emnlp.216 .[22] Z. Chen, Q. Gao, A. Bosselut, A. Sabharwal, K. Richardson, DISCO: Distilling counterfactuals with large language models, in: A. Rogers, J. Boyd-Graber, N. Okazaki (Eds.), Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), Association for Computational Linguistics, Toronto, Canada, 2023, pp. 5514–5528. URL: https://aclanthology.org/2023.acl-long.302/. doi: 10.18653/v1/2023.acl-long.302 .

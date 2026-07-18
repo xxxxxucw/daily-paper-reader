@@ -1,0 +1,784 @@
+Title: Accelerating A/B-Tests with Counterfactual Estimation: Reducing Variance through Policy Overlap
+
+URL Source: https://arxiv.org/pdf/2607.14604v1
+
+Published Time: Fri, 17 Jul 2026 00:37:27 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Accelerating A/B-Tests with Counterfactual Estimation 
+
+# Reducing Variance through Policy Overlap 
+
+# Olivier Jeunen ∗
+
+Independent Researcher Antwerp, Belgium 
+
+## Abstract 
+
+Online controlled experiments are the gold standard for hypothesis testing in online platforms. Notwithstanding their ubiquity, they are notoriously expensive to run, and issues of variance hamper statistical power in assessing treatment effects. While standard vari-ance reduction techniques leverage model-based control variates to reduce outcome noise, they remain agnostic to potential structural relationships between competing policies. In this work, we identify a critical inefficiency in the standard A/B-testing protocol: when a treatment and control policy agree on an action, the resulting outcome contributes noise but no signal regarding the treatment effect—unnecessarily inflating confidence intervals. We propose a novel experimental protocol that exploits this policy overlap to accelerate experimentation. The key insight is to frame the randomised treatment assignment mechanism as a meta-policy, and leverage Δ-Off-Policy Estimation methods to ob-tain unbiased estimates for average treatment effects. We prove an-alytically that our approach recovers standard A/B-testing practices in the general case, but that its variance scales with the divergence 
+
+between policies rather than raw outcome variance. Hence, we dom-inate the standard Difference-in-Means estimator whenever policies have common support, and the improvement is strict whenever the overlap region contributes non-zero residual variance. Empirical results corroborate these theoretical insights—holding promise for significant impact on the real-world evaluation of recommender systems, information retrieval pipelines, and large language model interfaces. 
+
+## 1 Introduction & Motivation 
+
+A/B-tests make the internet go round: online controlled experi-ments are used far and wide as the go-to approach for testing and evaluating virtually any change to an online platform or applica-tion [ 42 ]. They are, however, not infallible, and the potential pitfalls with these digital randomised controlled trials have been discussed at length in the research literature [9, 12, 23, 25, 39, 41]. A commonly recurring problem is that of statistical power: often, the variance inherent to the outcome metric inhibits practitioners from attaining tight confidence intervals around Average Treatment Effects (ATEs) that would allow them to claim statistical significance and have confidence that any observed effects are beyond the result of sampling variation. User-level outcomes such as click-through rate, dwell time, watch time, or revenue proxies are inherently noisy, heavy-tailed, and subject to substantial heterogeneity. When expected improvements are small—as is typical for incremental model updates—detecting lift requires either prolonged test dura-tions or substantial traffic allocation, both of which impose material opportunity costs. Variance reduction in online experimentation 
+
+> ∗Part of this work was done while the author was affiliated with aampe.
+
+is, as a result, a prominent research area with significant industry involvement. Existing approaches tend to leverage model-based control variates to explain outcome heterogeneity [ 1, 4 , 10 , 18 , 52 ], or ensure that the metrics they consider have inherently favourable noise characteristics [8, 33, 38, 45, 53, 63, 66]. Alternatively, a large body of work has explored “Offline A/B-Testing” [ 16 ] in an attempt to forego the opportunity cost asso-ciated with online experiments by leveraging data logged under randomised policies. These methods make use of counterfactual in-ference techniques, often based on importance sampling or Inverse Propensity Scoring (IPS) [ 51 , Ch. 9], to construct offline estimators of online effects [ 22 ]. This has led to widespread successes in both offline evaluation and learning capabilities in Recommender Sys-tems [ 6, 17 , 31 , 57 , 65 ], Information Retrieval [ 19 , 35 , 47 ], Large Language Models (LLMs) [61, 68], and beyond [2, 55, 64]. Some recent work has drawn connections between the on- and offline paradigms, opening up a promising research area [26, 67]. In particular, Jeunen [26] demonstrates a structural and exact equivalence between the classical Difference-in-Means (DiM) esti-mator for A/B-testing, and the Δ𝛽 ★-IPS estimator used in off-policy settings [ 32 ]. Indeed, the randomised treatment assignment mecha-nism that diverts traffic to either 𝜋 𝐴 or 𝜋 𝐵 is in itself a meta-policy 
+
+𝜋 0. This simple reframing allows us to directly use the Δ-OPE frame-work on A/B-testing data—logged under 𝜋 0—to unbiasedly estimate the ATE between 𝜋 𝐴 and 𝜋 𝐵 and, furthermore, enjoy a guaranteed 
+
+variance reduction if 𝜋 𝐴 and 𝜋 𝐵 have any common support. The central observation of this work is simple but consequential: when two policies agree on an action, the observed outcome con-tributes noise but no information about their ATE. If, for a given context, both policies would select the same action, then the realised reward is identical under treatment and control. Such samples are uninformative for estimating lift, yet the standard DiM estimator assigns them equal weight. The result is that common support di-lutes statistical power in A/B-testing—whereas Δ-OPE leverages it to appropriately downweight the relevant samples. In practice, most updates to production models are incremental. As a consequence, the treatment and control policies often agree on a large fraction of actions. For many contexts, they select identical items or near-identical slates. This high degree of policy overlap is common, yet its statistical implications are rarely exploited. Our key contributions include: (1) Applying the Δ-OPE framework to online A/B-testing. 
+
+We show that by interpreting treatment assignment as a meta-policy, we can directly apply Δ-OPE estimators to A/B-testing data. This unlocks a family of unbiased estimators for the ATE that leverage information about policy overlap. (2) A variance dominance theorem. We formally prove that the resulting estimators strictly dominate the DiM estimator arXiv:2607.14604v1 [cs.LG] 16 Jul 2026 Olivier Jeunen 
+
+for any traffic split provided the policies have nonzero over-lap, and show how the variance scales with the divergence between the policies that are being tested. (3) An optimal traffic allocation insight. By characterising the variance of the ATE as a function of the treatment allocation ratio, we show that the variance-optimal split need not be balanced. The optimal allocation is determined by the curvature of the policy divergence and admits a unique solution, which can be used to guide practitioners. (4) The Δ-MRDR estimator to directly minimise variance. 
+
+Leveraging connections between Δ-Doubly Robust (DR) and online variance reduction methods, we propose Δ-MRDR to train reward models that directly minimise ATE estimation variance, concentrating model capacity on re-gions of policy disagreement where variance reduction is most impactful. (5) The Δ-DCG estimator to enable ranking applications. 
+
+Extending recent work that frames the classical Discounted Cumulative Gain (DCG) metric as an off-policy estima-tor [ 31 ] with the Δ-OPE view, we derive a Δ-DCG estimator that unbiasedly estimates the ATE for ranking policies un-der the Position-Based Model. We additionally incorporate the 𝛽 -IPS control variate [20] to further reduce variance. (6) Empirical validation and a practical deployment recipe. 
+
+Through rigorous, realistic and reproducible simulation sce-narios, we demonstrate that substantial variance reduction can be achieved with a minimal engineering overhead. 
+
+## 2 Background & Problem Setting 
+
+In the context of A/B-testing [ 42 ], we are particularly interested in the setting where the hypothesis tested by the online exper-iment pertains to two varying personalised treatment regimes: policies 𝜋, 𝜋 ′ [ 65 ]. Policies induce probability distributions over actions 𝑎 ∈ A , conditional on contextual information 𝑥 ∈ X , as 
+
+𝜋 (𝑎 |𝑥 ) ≡ P(𝐴 = 𝑎 |𝑋 = 𝑥 ; Π = 𝜋 ). The “action” framing is general, but it subsumes the common use-cases where 𝐴 represents item rec-ommendations [ 34 ], rankings [ 19 ], sequences of tokens (LLMs) [ 50 ], or model parameters themselves [ 30 ]. The personalisation aspect comes from conditioning on the context 𝑥 , which can include any information pertaining to the request and end user. Online experiments often consider user-level metrics [ 27 ] (e.g. conversions, revenue, clicks). The ATE of a policy deployment on this metric is then used as the decision criterion in a test, with: 
+
+𝑉 (𝜋 ) = E  
+
+> 𝑥 ∼P(𝑋 )
+
+E   
+
+> 𝑎 ∼𝜋 (· | 𝑥 )
+
+E  
+
+> P(𝑌 |𝑋 =𝑥 ;𝐴 =𝑎 )
+
+[𝑌 ] ,𝑉 Δ (𝜋, 𝜋 ′) = 𝑉 (𝜋 ) − 𝑉 (𝜋 ′).
+
+## 2.1 Online Controlled Experiments 
+
+When running an A/B-test, both policies are effectively deployed to a fraction of the user population. This enables unbiased estimation of the ATE by separating the sample according to the policy variant that was assigned to a user or context, as: 
+
+𝑉 Δ (𝜋, 𝜋 ′) = E  
+
+> 𝑎 ∼𝜋 (· | 𝑥 )
+
+[𝑌 ]
+
+| {z }  
+
+> 𝑉 (𝜋 )
+
+− E   
+
+> 𝑎 ∼𝜋 ′(· | 𝑥 )
+
+[𝑌 ]
+
+| {z }   
+
+> 𝑉 (𝜋 ′)
+
+.
+
+For a dataset D := {( 𝑥 𝑖 , 𝑎 𝑖 , 𝑦 𝑖 , 𝜋 𝑖 )} 𝑁 𝑖 =1, we denote a subset gener-ated under policy 𝜋 as D𝜋 := {( 𝑥 𝑖 , 𝑎 𝑖 , 𝑦 𝑖 , 𝜋 𝑖 ) ∈ D| 𝜋 𝑖 = 𝜋 }. Then, the difference in sample means gives rise to the standard ATE estimate: 
+
+ˆ𝜇 (𝑌, 𝜋 ) = 1
+
+|D 𝜋 |∑︁ (𝑥 𝑖 ,𝑎 𝑖 ,𝑦 𝑖 ) ∈ D 𝜋 
+
+𝑦 𝑖 , (1) 
+
+ˆ𝑉 Δ−DiM (𝜋, 𝜋 ′) = ˆ𝜇 (𝑌, 𝜋 ) − ˆ𝜇 (𝑌, 𝜋 ′). (2) The inherent variance of the outcomes 𝑦 𝑖 can hamper the statisti-cal power of this estimator. A common approach is to leverage a model-based additive control variate to reduce this variance. CUPED [ 10 ], CUPAC [ 45 ], and MLRATE [ 18 ] can be unified as regression-adjusted difference-in-means estimators (RADiM) [ 26 ]: 
+
+ˆ𝜇 𝑓 (𝑌, 𝜋 ) = 1
+
+|D 𝜋 |∑︁ (𝑥 𝑖 ,𝑎 𝑖 ,𝑦 𝑖 ) ∈ D 𝜋 
+
+(𝑦 𝑖 − 𝑓 (𝑥 𝑖 )) , (3) 
+
+ˆ𝑉 Δ−RADiM (𝜋, 𝜋 ′) = ˆ𝜇 𝑓 (𝑌, 𝜋 ) − ˆ𝜇 𝑓 (𝑌, 𝜋 ′). (4) 
+
+## 2.2 Off-Policy Estimation 
+
+To remedy the high costs associated with online evaluation, ideas from the broader causal and counterfactual inference literature [ 2,57 ] have been applied to offline evaluation [ 16 ]. Data logged under some logging policy 𝜋 0 can be used to unbiasedly estimate the ATE, typically by leveraging importance sampling techniques [ 51 , Ch. 9]. For notational convenience, let Δ(𝑎 |𝑥 ) := 𝜋 (𝑎 |𝑥 ) − 𝜋 ′ (𝑎 |𝑥 ). The 
+
+Δ-IPS estimator is given by [32]: 
+
+ˆ𝑉 Δ−IPS = 1
+
+|D| ∑︁ (𝑥,𝑎,𝑦 ) ∈ D 
+
+Δ(𝑎 |𝑥 )
+
+𝜋 0 (𝑎 |𝑥 ) 𝑦. (5) Whilst unbiased, the importance weights can be problematic for variance. Analogous to the online experiment setting, additive con-trol variates provide a way to reduce variance whilst preserving unbiasedness. With a single scalar, this is known as 𝛽 -IPS [ 20 , 32 ]: 
+
+ˆ𝑉 Δ𝛽 −IPS = 1
+
+|D| ∑︁ (𝑥,𝑎,𝑦 ) ∈ D 
+
+Δ(𝑎 |𝑥 )
+
+𝜋 0 (𝑎 |𝑥 ) (𝑦 − 𝛽 ). (6) The optimal, variance-minimising, value for 𝛽 is given by: 
+
+𝛽 ★ =
+
+E
+
+ Δ(𝑎 |𝑥 )   
+
+> 𝜋 0(𝑎 |𝑥 )
+
+2
+
+𝑦 
+
+
+
+E
+
+ Δ(𝑎 |𝑥 )   
+
+> 𝜋 0(𝑎 |𝑥 )
+
+2  . (7) This quantity can be estimated from logged data through a cross-fitting procedure to preserve unbiasedness of the estimator [ 7, 29 ]. More generally, the additive control variate can be derived from a learnt reward model 𝑓 (𝑥, 𝑎 ), yielding the Δ-Doubly Robust (DR) estimator [ 13 , 26 ]. We define the control variate ˆ𝜏 (𝑥 ) as the expected difference in model predictions under the target policies: 
+
+ˆ𝜏 (𝑥 ) := E 
+
+> 𝑎 ∼𝜋
+
+[𝑓 (𝑥, 𝑎 )] − E  
+
+> 𝑎 ∼𝜋 ′
+
+[𝑓 (𝑥, 𝑎 )] =∑︁ 
+
+> 𝑎 ∈ A
+
+Δ(𝑎 |𝑥 )𝑓 (𝑥, 𝑎 ). (8) With a correction term to preserve unbiasedness, we obtain: 
+
+ˆ𝑉 Δ-DR = 1
+
+|D| ∑︁ (𝑥,𝑎,𝑦 ) ∈ D 
+
+
+
+ˆ𝜏 (𝑥 ) + Δ(𝑎 |𝑥 )
+
+𝜋 0 (𝑎 |𝑥 ) (𝑦 − 𝑓 (𝑥, 𝑎 )) 
+
+
+
+. (9) Note that if 𝑓 is independent of actions 𝑎 , ˆ𝜏 (𝑥 ) ≡ 0, as is the case for typical online applications of RADiM methods [26]. Accelerating A/B-Tests with Counterfactual Estimation 
+
+The variance reduction that doubly robust methods entail, relies heavily on the reward model 𝑓 [ 28 ]. Farajtabar et al . [15] propose the More Robust Doubly Robust (MRDR) objective to directly learn a parameterised model 𝑓 𝜃 that minimises estimation variance. Jeunen [26] formally derives an exact equivalence between Δ𝛽 ★-IPS and DiM, and between Δ-DR and RADiM. This implies that extensions to any of these methods can be applied interchange-ably, opening the door for cross-pollination among disconnected research areas. Nevertheless, they do not consider that the structural overlap between the policies further enhances statistical power. A growing body of work has sought to connect online and of-fline evaluation methods. Oosterhuis and de Rijke [48] propose an approach that blends interleaving with counterfactual estimation to efficiently evaluate ranking policies online. Buchholz et al . [3] introduce a dynamic user behaviour model that optimises its bias-variance trade-off to reduce estimation error in offline evaluation. A practical instantiation that blends A/B-testing with OPE was recently detailed by Zhang et al . [67] in the context of market-place ranking—proposing a heuristic framework that leverages rank disagreement to reduce the variance of proxy metrics in on-line experiments. Concurrent work by Konishi et al . [43] introduces the MID estimator, which bounds reward variance via a synthetic middle policy for single-action bandits, though it relies on an as-sumed balanced traffic split. Similarly, recent work by Sakhi et al .[60] explores a family of bias-corrected regularised estimators for online experiments, specifically accommodating non-Markovian reward processes. While they also empirically demonstrate the value of exploiting policy similarity, their analysis relies on min-imising a variance surrogate rather than the exact variance, and treats the traffic allocation as fixed. Furthermore, both works ex-plicitly leave the integration of doubly robust control variates to future work—overlooking the exact equivalences between DR and RADiM estimators. Appendix A provides a comparison table. Our work complements and extends this literature by identifying how Δ𝛽 ★-IPS can be directly applied to online experiments with policies, to provide a guaranteed variance reduction as soon as they have common support. We derive the exact variance of our estimators and solve for the optimal traffic allocation ratio 𝑝 ★ that minimises it. This naturally enables us to apply Δ-DR for online variance reduction, and we further propose the Δ-MRDR learning objective that focuses model capacity on regions of policy disagree-ment to maximise statistical power. Finally, we naturally extend our work to include ranking estimators for DCG [31]. 
+
+## 3 Methodology & Contributions 
+
+Exact equivalences between DiM and IPS, and RADiM and DR have been established in the literature [ 26 ]—but only at the level where policies themselves are treated as actions. That is, they show that standard A/B-testing practices imply an action space of treatment policies 𝑇 ∈ { 𝜋, 𝜋 ′ } where the logging policy selects 𝜋 0 (𝑇 = 𝜋 ) = 𝑝 .The policies themselves are modelled as black boxes, and the result-ing importance weights solely rely on the A/B-group assignment: 
+
+𝑤 DiM (𝑥, 𝑎 ) =
+
+( 1{𝑇 =𝜋 }− 1{𝑇 =𝜋 ′ }    
+
+> 𝜋 0(𝑇 =𝜋 )
+
+= 1 
+
+> 𝑝
+
+if 𝑎 ∼ 𝜋,           
+
+> 1{𝑇 =𝜋 }− 1{𝑇 =𝜋 ′}
+> 𝜋 0(𝑇 =𝜋 ′)
+
+= −11−𝑝 if 𝑎 ∼ 𝜋 ′ . (10) Plugging these importance weights into Eq. 6 with an optimal 𝛽 ★,recovers the standard and widely used DiM estimator [26, §3]. A key insight is that we can jointly and directly model the action distributions induced by the policies {𝜋, 𝜋 ′ }, by considering 𝜋 0 as a meta-policy that defines a mixture over the policies being tested: 
+
+𝜋 0 (𝑎 |𝑥 ) = 𝑝𝜋 (𝑎 |𝑥 ) + ( 1 − 𝑝 )𝜋 ′ (𝑎 |𝑥 ). (11) Whilst mathematically and conceptually straightforward, this gives rise to a different set of importance weights that can be plugged into Eq. 6 to obtain an unbiased ATE estimate: 
+
+𝑤 ∆ (𝑥, 𝑎 ) = Δ(𝑎 |𝑥 )
+
+𝜋 0 (𝑎 |𝑥 ) . (12) The resulting policy-aware estimator leverages structural infor-mation about the policies to reduce estimation noise for the ATE. Crucially, because of the exact equivalence between DiM and Δ𝛽 ★-IPS, this comes at no extra cost. Even if 𝜋 and 𝜋 operate on fully disjoint action spaces, jointly modelling them under the Δ-OPE framework recovers standard practice. As soon as there is any common support, i.e. ∃𝑎 ∈ A : 𝜋 (𝑎 |𝑥 ) > 0 ∧ 𝜋 ′ (𝑎 |𝑥 ) > 0, and this overlapping region contributes non-zero residual variance, the policy-aware estimator strictly reduces estimation variance com-pared to standard practice—and these results naturally extend to their regression-adjusted analogues RADiM and DR. 
+
+## 3.1 Variance Reduction and Dominance 
+
+We now prove that the policy-aware estimator strictly dominates the standard approach in terms of variance—and hence, estimation error and statistical power—under minimal assumptions. 
+
+Theorem 3.1 (Variance Reduction with 𝑤 Δ). Let ˆ𝑉 DiM be the standard Difference-in-Means estimator and ˆ𝑉 Δ𝛽 ★−IPS be the policy-aware estimator leveraging the importance weights in Eq. 12. For any context 𝑥 , action space A, and treatment allocation ratio 𝑝 ∈ ( 0, 1):
+
+Var ( ˆ𝑉 ∆𝛽 ★−IPS ) ≤ Var ( ˆ𝑉 DiM ). (13) 
+
+The inequality is strict whenever there exists a set of positive proba-bility on which 
+
+𝜋 (𝑎 |𝑥 ) > 0, 𝜋 ′ (𝑎 |𝑥 ) > 0, and E(𝑌 − 𝛽 ★)2 | 𝑥, 𝑎  > 0.
+
+Proof. Both estimators are unbiased for the same Average Treat-ment Effect. Note that ˆ𝑉 DiM is baseline-invariant: plugging 𝑤 DiM 
+
+into Eq. 6 with any 𝛽 recovers Eq. (2) exactly, as the 𝛽 -terms can-cel under fixed allocation 𝑝 . We therefore compare ˆ𝑉 DiM against 
+
+ˆ𝑉 Δ𝛽 ★-IPS : the variance-optimal baseline correction. Consequently, 
+
+Var ( ˆ𝑉 ) = E[ ˆ𝑉 2] − 𝑉 Δ (𝜋, 𝜋 ′)2,
+
+and comparing variances is equivalent to comparing second mo-ments. For a single sample (𝑥, 𝑎 ), the second moment of the estimators evaluated at this shared baseline is 
+
+E𝑤 2 (𝑌 − 𝛽 ★)2 | 𝑥, 𝑎  .
+
+We define 𝛼 = 𝜋 (𝑎 |𝑥 ) and 𝛾 = 𝜋 ′ (𝑎 |𝑥 ) for brevity. 
+
+1. Variance of the DiM Estimator. The squared weight for DiM is stochastic conditioned on the action, depending on the group Olivier Jeunen 
+
+assignment 𝑇 . Due to the law of total expectation over assignments, and noting that 𝜋 0 = 𝑝𝛼 + ( 1 − 𝑝 )𝛾 , we have 
+
+E[𝑤 2DiM | 𝑥, 𝑎 ] =
+
+ 1
+
+𝑝 
+
+2 𝑝𝛼 𝜋 0
+
++
+
+ −11 − 𝑝 
+
+2 (1 − 𝑝 )𝛾 𝜋 0
+
+= 1
+
+𝜋 0
+
+ 𝛼 𝑝 + 𝛾 
+
+1 − 𝑝 
+
+
+
+.
+
+(14) 
+
+2. Variance of the Policy-Aware Estimator. The policy-aware importance weight is deterministic for a given action: 
+
+𝑤 2 
+
+> Δ
+
+= (𝛼 − 𝛾 )2
+
+𝜋 20
+
+. (15) 
+
+3. The Variance Gap. The difference in squared weights is 
+
+Δ𝑤 2 = E[𝑤 2DiM | 𝑥, 𝑎 ] − 𝑤 2 
+
+> Δ
+
+. (16) Factoring out the common denominator 𝑝 (1 − 𝑝 )𝜋 20 gives 
+
+Δ𝑤 2 = 1
+
+𝜋 20
+
+ 𝜋 0
+
+𝑝 (1 − 𝑝 )
+
+ (1 − 𝑝 )𝛼 + 𝑝𝛾  − ( 𝛼 − 𝛾 )2
+
+
+
+. (17) Substituting 𝜋 0 = 𝑝𝛼 + ( 1 − 𝑝 )𝛾 yields 
+
+Δ𝑤 2 = 1
+
+𝑝 (1 − 𝑝 )𝜋 20
+
+h 𝑝𝛼 + ( 1 − 𝑝 )𝛾    (1 − 𝑝 )𝛼 + 𝑝𝛾 
+
+− 𝑝 (1 − 𝑝 )( 𝛼 − 𝛾 )2 i
+
+. (18) Expanding the terms cancels 𝛼 2 and 𝛾 2, leaving 
+
+Δ𝑤 2 = 𝛼𝛾 𝑝 (1 − 𝑝 )𝜋 20
+
+≥ 0. (19) Therefore, 
+
+Δ𝑤 2 (𝑌 − 𝛽 ★)2 ≥ 0
+
+pointwise, since both Δ𝑤 2 ≥ 0 and (𝑌 − 𝛽 ★)2 ≥ 0.Then, expectations yield: 
+
+Var ( ˆ𝑉 DiM ) − Var ( ˆ𝑉 Δ𝛽 ★−IPS ) = EΔ𝑤 2 (𝑌 − 𝛽 ★)2  ≥ 0.
+
+The inequality is strict whenever there exists a set of points on which both 𝛼𝛾 > 0 and 
+
+E(𝑌 − 𝛽 ★)2 | 𝑥, 𝑎  > 0,
+
+since the integrand is then strictly positive. □
+
+Since all estimators we consider are unbiased—a reduction in variance implies a reduction in overall estimation error. Moreover, lower variance leads to tighter confidence intervals and, as a result, an increase in statistical power. We construct an analogous proof for their additive control variate analogues RADiM and Δ-DR. 
+
+Theorem 3.2 (Variance Reduction with Δ-DR). Let ˆ𝑉 RADiM be the standard Regression-Adjusted Difference-in-Means estimator and 
+
+ˆ𝑉 Δ−DR be the Policy-Aware Doubly Robust estimator. For any reward model 𝑓 : X × A → R, context 𝑥 , and allocation 𝑝 ∈ ( 0, 1):
+
+Var ( ˆ𝑉 Δ−DR ) ≤ Var ( ˆ𝑉 RADiM ). (20) 
+
+The inequality is strict if there exists any overlap between policies, i.e. ∃𝑎 ∈ A : 𝜋 (𝑎 |𝑥 ) > 0 ∧ 𝜋 ′ (𝑎 |𝑥 ) > 0, and the reward model has non-zero residual variance, i.e. Var (𝑌 |𝑥, 𝑎 ) > 0.
+
+Proof. Both estimators are unbiased and share the exact same expected control variate term ˆ𝜏 (𝑥 ) = E𝑎 ∼𝜋 [𝑓 (𝑥, 𝑎 )]− E𝑎 ∼𝜋 ′ [𝑓 (𝑥, 𝑎 )] ,which is constant given 𝑥 . Consequently, the difference in their total variance is fully determined by the variance of their weighted resid-uals. Let 𝑍 = 𝑌 − 𝑓 (𝑥, 𝑎 ) denote the residual. The estimators differ only in the weights applied to 𝑍 : ˆ𝑉 RADiM uses the assignment-based weight 𝑤 DiM , while ˆ𝑉 Δ−DR uses the policy-aware weight 𝑤 Δ.Applying the pointwise weight identity established in Theo-rem 3.1 to the residual variable 𝑍 instead of the direct outcome 𝑌 
+
+yields: 
+
+ΔVar = Var ( ˆ𝑉 RADiM ) − Var ( ˆ𝑉 Δ−DR ) = E (𝑤 2DiM − 𝑤 2
+
+> Δ
+
+)𝑍 2  . (21) Substituting the strictly non-negative weight difference derived in Theorem 1, leads to: 
+
+ΔVar = E𝑥 
+
+"∑︁ 
+
+> 𝑎 ∈ A
+
+𝜋 (𝑎 |𝑥 )𝜋 ′ (𝑎 |𝑥 )
+
+𝑝 (1 − 𝑝 )𝜋 0 (𝑎 |𝑥 )2 E[𝑍 2 |𝑥, 𝑎 ]
+
+#
+
+. (22) Since probabilities, 𝑝 (1 − 𝑝 ), and the expected squared residual 
+
+E[𝑍 2 |𝑥, 𝑎 ] are all non-negative, the variance gap is guaranteed to be non-negative. This implies that Δ-DR can only reduce the variance obtained via RADiM. □
+
+## 3.2 Deriving an Optimal Allocation Ratio 
+
+Standard A/B-testing practice recommends a balanced split ( 𝑝 =
+
+0.5), as it maximises power under the assumption that outcome variances are homoskedastic [ 40 ]. In contrast, the variance of our policy-aware estimators depends on the structural relationship be-tween policies. This implies that we can seek the optimal allocation ratio 𝑝 ∈ ( 0, 1) that minimises the total estimation variance for a given online experiment. This, in turn, maximises statistical power and reduces the cost of running the experiment. For the general case covering both Δ𝛽 ★-IPS and Δ-DR, we min-imise the variance of the weighted variable 𝑍 (where 𝑍 = 𝑌 for IPS, and 𝑍 = 𝑌 − 𝑓 (𝑥, 𝑎 ) for DR). The variance as a function of 𝑝 is then: 
+
+𝐽 (𝑝 ) = E 
+
+> 𝑥 ∼P(𝑋 )
+
+"∑︁ 
+
+> 𝑎 ∈ A
+
+Δ(𝑎 |𝑥 )2
+
+𝑝𝜋 (𝑎 |𝑥 ) + ( 1 − 𝑝 )𝜋 ′ (𝑎 |𝑥 ) E[𝑍 2 |𝑥, 𝑎 ]
+
+#
+
+. (23) Assuming homoskedasticity on 𝑌 , the term E[𝑍 2 |𝑥, 𝑎 ] is constant and does not affect the location of the optimum for standard IPS. In the case of Δ-DR, however, this term represents the residual variance of the reward model. Including it ensures that the optimal allocation 𝑝 ★ shifts traffic towards the policy that samples regions where the reward model is least accurate (i.e. has high residual variance), in an attempt to stabilise the overall estimator. Since 𝑓 (𝑦 ) = 1/𝑦 is strictly convex, the objective 𝐽 (𝑝 ) remains strictly convex in 𝑝 regardless of the weighting by E[𝑍 2 |𝑥, 𝑎 ].In practice, assuming a reasonable degree of stationarity in the context distribution P(𝑋 ), practitioners can leverage existing sys-tem logs to estimate these moments pre-experiment. Estimating the residual variance under a production policy yields an approximation for 𝑝 ★ under Δ-DR, ignoring this term yields the optimal 𝑝 ★ under 
+
+Δ𝛽 ★-IPS. We can then apply search or gradient-based optimisation procedures to obtain the variance-optimal ratio a priori. 
+
+Adaptive Allocation. The above derivation assumes homoskedas-ticity on 𝑌 . Without this assumption, the optimum 𝑝 ★ relies on a quantity that is unknown prior to the experiment. To mitigate this, Accelerating A/B-Tests with Counterfactual Estimation 
+
+one can consider a practical two-stage adaptive design. In a first stage, deploy the experiment with a balanced split 𝑝 0 = 0.5 to collect an initial sample. Using this data, empirically estimate the weighted residual variances for both treatment and control groups to solve for the empirical optimum ˆ𝑝 ★. This lifts the homoskedasticity assump-tion on 𝑌 , but induces a stationarity assumption on P(𝑋 ). Note that this procedure does not constitute “peeking” [ 36 ]—as the alloca-tion update depends on the empirical variance and not the ATE estimate. Furthermore, because the Δ-IPS and Δ-DR estimators rely on importance sampling, they remain unbiased for time-varying logging policies, provided that the propensity scores 𝜋 (𝑡 ) 
+
+> 0
+
+used in the estimator accurately reflect the assignment probabilities at each time step 𝑡 and are treated appropriately [ 14 , 37 , 49 ]. This could al-low practitioners to dynamically optimise statistical power without inflating Type-I error rates [39] in real-world experiments. 
+
+## 3.3 Δ-MRDR: Optimal Variance Reduction 
+
+Standard regression approaches train the DR reward model 𝑓 𝜃 (pa-rameterised by 𝜃 ) to minimise the Mean Squared Error (MSE) on the outcome 𝑦 . However, minimising model prediction error does not necessarily minimise the variance of the resulting estimator [ 15 ]. To address this, we propose the Δ-MRDR (More Robust Doubly Ro-bust) objective, which adapts the model loss specifically to minimise the variance of the Δ-DR estimator defined in Eq. 9. Since the estimator is unbiased, minimising its variance is equiv-alent to minimising the second moment of the weighted residual term. Neglecting the variance of the control variate (which is con-stant with respect to the action assignment given the context), the optimisation problem becomes: 
+
+𝜃 ★ = arg min 
+
+> 𝜃
+
+E(𝑥,𝑎,𝑦 )∼D 
+
+" Δ(𝑎 |𝑥 )
+
+𝜋 0 (𝑎 |𝑥 ) (𝑦 − 𝑓 𝜃 (𝑥, 𝑎 )) 
+
+2 #
+
+. (24) This yields a Weighted Least Squares (WLS) objective, where the sample weights are given by the squared policy-aware importance weights: 
+
+LΔ-MRDR (𝜃 ) = 1
+
+|D| ∑︁ (𝑥,𝑎,𝑦 ) ∈ D 
+
+𝑤 Δ (𝑥, 𝑎 )2 (𝑦 − 𝑓 𝜃 (𝑥, 𝑎 )) 2. (25) Unlike standard regression which treats all samples equally, Δ-MRDR weights the loss by the squared policy divergence 𝑤 2 
+
+> Δ
+
+∝(𝜋 (𝑎 |𝑥 ) − 𝜋 ′ (𝑎 |𝑥 )) 2. Consequently, the objective forces the model to focus its limited capacity on the regions of disagreement between the policies. Accurate prediction in regions where policies agree (i.e. Δ(𝑎 |𝑥 ) ≈ 0) contributes negligibly to variance reduction and is effectively down-weighted. This aligns the learning objective with the overarching experimental goal: orienting model capacity towards the context-action-reward triplets that affect the ATE. 
+
+## 3.4 Δ-DCG: Evaluating Ranking Policies 
+
+Our work so far has focused on contextual bandit settings where a policy selects a single action. Modern recommender systems, however, typically serve ranked lists of items to users. To com-bat a combinatorial explosion of the action space, models of user behaviour are typically adopted [46]. Recent work has shown that Discounted Cumulative Gain (DCG) admits an interpretation as an importance sampling estimator of expected online reward under a position-based click model (PBM) with known exposure probabilities [ 31 ]. Under this view, ranking evaluation reduces to off-policy estimation with exposure propensi-ties. We leverage this perspective to derive a Δ-DCG estimator for statistically efficient A/B-testing of ranking policies. Let R and R′ be two ranking policies we wish to compare. Given a context 𝑥 , each policy induces expected exposure for item 𝑎 [11 ]: 
+
+𝜀 R (𝑥, 𝑎 ), 𝜀 R′ (𝑥, 𝑎 ),
+
+where 𝜀 R (𝑥, 𝑎 ) denotes the probability that policy R exposes item 𝑎 
+
+to the user. This combines both selection bias due to the stochastic ranking policy, as well as position bias in the system. As before, the A/B-test logging policy is a mixture: 
+
+𝜀 0 (𝑥, 𝑎 ) = 𝑝 𝜀 R (𝑥, 𝑎 ) + ( 1 − 𝑝 ) 𝜀 R′ (𝑥, 𝑎 ).
+
+The common support assumption for IPS is trivially satisfied as before, i.e. if 𝜀 R (𝑥, 𝑎 ) > 0 or 𝜀 R′ (𝑥, 𝑎 ) > 0, then 𝜀 0 (𝑥, 𝑎 ) > 0.Under the PBM, reward decomposes as: 
+
+𝑦 = 𝑣 · 𝑞 (𝑥, 𝑎 ),
+
+where 𝑣 is a position-dependent binary examination variable and 
+
+𝑞 (𝑥, 𝑎 ) represents intrinsic “quality” or relevance. In this setting, DCG can be considered an unbiased estimator of an online reward metric. This requires independence assumptions among ranks and trajectories, for which we refer to the work of Jeunen et al. [31]. Let D = {( 𝑥 𝑖 , 𝒂 𝑖 , 𝒚 𝑖 )} 𝑁 𝑖 =1 be logged interactions under the mixture policy—where 𝒂 = (𝑎 1, . . . , 𝑎 𝐾 ) and 𝒚 = (𝑦 1, . . . , 𝑦 𝐾 ) represent vectorised actions and rewards across positions 1 ≤ 𝑗 ≤ 𝐾 . The expected DCG difference between R and R′ is given by: 
+
+ΔDCG = E
+
+> 𝒂 ∼R
+
+" 𝐾 ∑︁ 
+
+> 𝑗 =1
+
+𝑦 𝑗 
+
+#
+
+− E
+
+> 𝒂 ∼R ′
+
+" 𝐾 ∑︁ 
+
+> 𝑗 =1
+
+𝑦 𝑗 
+
+#
+
+.
+
+By leveraging the exposure propensities, we define the marginal policy-aware importance weight for an item 𝑎 at position 𝑗 as: 
+
+𝑤 Δ (𝑥, 𝑎 𝑗 ) = 𝜀 R (𝑥, 𝑎 𝑗 ) − 𝜀 R′ (𝑥, 𝑎 𝑗 )
+
+𝜀 0 (𝑥, 𝑎 𝑗 ) .
+
+We can then unbiasedly estimate the difference: 
+
+ˆ𝑉 Δ−DCG = 1
+
+|D| ∑︁ (𝑥, 𝒂 ,𝒚 ) ∈ D 
+
+> 𝐾
+
+∑︁ 
+
+> 𝑗 =1
+
+𝑤 Δ (𝑥, 𝑎 𝑗 )𝑦 𝑗 .
+
+This estimator is the ranking analogue of Δ-IPS under the PBM, replacing action propensities with exposure propensities that in-corporate both selection and position bias. The variance of ˆ𝑉 Δ−DCG 
+
+depends on the squared marginal importance weights 𝑤 Δ (𝑥, 𝑎 𝑗 )2.
+
+Optimal Baselines for Rankings ( Δ𝛽 ★-DCG). While the marginal-isation inherent to the PBM prevents the combinatorial explosion of slate-level importance weights, the estimator still suffers from high variance when policy divergence is large. To mitigate this, we can introduce an additive control variate directly into the marginal formulation. Analogous to the optimal scalar baseline 𝛽 ★ defined for the single-action setting, we can derive a variance-minimising baseline for the ranking scenario, as previously proposed for the Item-Position model [ 29 ]. As the authors note, a globally optimal Olivier Jeunen 
+
+vectorised additive control variate is non-trivial to estimate. In-stead, we adopt a position-specific approximation that assumes independence among ranks as: 
+
+𝛽 ★ 
+
+> ⊥⊥,𝑗
+
+= E 𝑤 Δ (𝑥, 𝑎 𝑗 )2𝑦 𝑗 
+
+
+
+E 𝑤 Δ (𝑥, 𝑎 𝑗 )2  ,
+
+yielding the Δ𝛽 ★
+
+> ⊥⊥
+
+-DCG estimator: 
+
+ˆ𝑉 Δ𝛽 ★  
+
+> ⊥⊥−DCG
+
+= 1
+
+|D| ∑︁ (𝑥, 𝒂 ,𝒚 ) ∈ D 
+
+> 𝐾
+
+∑︁ 
+
+> 𝑗 =1
+
+𝑤 Δ (𝑥, 𝑎 𝑗 )( 𝑦 𝑗 − 𝛽 ★ 
+
+> ⊥⊥,𝑗
+
+).
+
+By shifting the outcome at each rank based on the global average reward for that specific position, weighted by policy divergence, 
+
+Δ𝛽 ★
+
+> ⊥⊥
+
+-DCG substantially reduces variance compared to Δ-DCG. When the two ranking policies induce similar exposure proba-bilities for most items (high policy overlap in exposure space), the numerator of 𝑤 Δ is small. Thus, impressions where both rankers behave similarly are effectively down-weighted, mirroring the over-lap effect observed in the single-action setting, and ensuring that the estimator focuses strictly on the ATE. Conversely, when poli-cies disagree strongly (large exposure divergence), impressions re-ceive larger weights. In these high-divergence regimes, the position-specific 𝛽 ★ 
+
+> ⊥⊥,𝑗
+
+baseline is critical to constrain the variance explosion inherently associated with importance sampling. 
+
+## 4 Empirical Validation 
+
+We validate our theoretical findings through a series of controlled simulations. Unlike fixed public datasets where the ground truth counterfactuals are unobserved, synthetic environments allow us to compute the exact bias and variance of our estimators against the true Average Treatment Effect (ATE). Our experiments are designed to answer the following four research questions: 
+
+RQ1 (Baseline Estimator Efficiency): 
+
+Does the Policy-Aware Δ-OPE view reduce variance compared to the standard Difference-in-Means (DiM) estimator, and how does this reduction scale with action space size |A| ?
+
+RQ2 (Optimal Experiment Design): 
+
+Does the theoretical variance proxy 𝐽 (𝑝 ) accurately predict empirical estimation error? Can we achieve lower variance by deviating from the standard even split in asymmetric settings? 
+
+RQ3 (Optimal Variance Reduction): 
+
+Does the proposed Δ-MRDR loss function yield control variates that reduce estimator variance more effectively than Δ-DR? 
+
+RQ4 (Extensions to Ranking): 
+
+Do the proposed Δ-DCG estimator and its additive control variate extension reliably reduce estimation variance? 
+
+To aid in the reproducibility of our empirical results, the source code to reproduce all figures and numbers reported in this Section is available at github.com/olivierjeunen/delta-OPE-ABTesting/. 
+
+## 4.1 RQ1: Estimator Efficiency & Scalability 
+
+To assess the baseline performance of our estimator, we simulate a contextual bandit setting with a linear reward structure ( 𝑑 = 5). We vary the action space size |A| ∈ { 10 , 100 , 500 , 1 000 , 5 000 }. We vary the inverse temperature 1 
+
+> 𝑇
+
+of a Softmax policy 𝜋 ′, which is a proxy for the policy divergence w.r.t. a uniformly random policy 𝜋 , (i.e. 
+
+lim 1  
+
+> 𝑇 →0
+
+𝜋 ′ ≡ 𝜋 ). We simulate an A/B-testing scenario with 5 000 
+
+users, and repeat this 1 000 times to reduce sampling variation. 
+
+Result. Figure 1 illustrates the Mean Squared Error (MSE) of the standard DiM estimator versus the proposed Δ-IPS estimator. Consistent with Theorem 3.1, the policy-aware estimator strictly dominates DiM. Notably, in the high-overlap regime ( 1 
+
+> 𝑇
+
+→ 0), the variance of Δ-IPS approaches zero as the control variate term per-fectly cancels out the common noise. Furthermore, Figure 1 demon-strates robustness to the “curse of dimensionality”: the variance reduction persists even as the action space grows to |A| = 5 000 ,confirming that Δ-IPS is suitable for larger-scale settings. Neverthe-less, we see strong potential for further variance reduction in larger action spaces by combining the Δ-OPE view with recent advances in the OPE literature [58, 59]. 
+
+## 4.2 RQ2: Optimal Treatment Allocation 
+
+Standard A/B-testing practice recommends an equal traffic split (𝑝 = 0.5), as this maximises the statistical power of the DiM esti-mator [ 40 ]. Theory suggests that when comparing policies with asymmetric support under the Δ-OPE framework (e.g. a determin-istic production model vs. a high-entropy exploration model), the optimal design is non-uniform. 
+
+Setup. We compare a conservative control policy 𝜋 ′ (allocating 95% mass to a single “safe” action) against an exploratory treatment policy 𝜋 (allocating 50% mass uniformly across 100 actions). We vary the traffic allocation 𝑝 ∈ [ 0.05 , 0.95 ] and measure the empirical variance of the Δ-IPS estimator over 𝑁 = 5 000 , 000 trials. 
+
+Result. Figure 2 validates our optimal design theory. The empiri-cal variance perfectly tracks the theoretical variance 𝐽 (𝑝 ) derived in Eq. 23 (up to a constant factor). The minimum variance is achieved at 𝑝 ★ ≈ 0.81 , allocating significantly more traffic to the exploratory treatment policy. This optimal split yields a variance reduction of approximately 18% compared to the standard 50/50 split. This confirms that experimental design should proportionally favour higher-entropy policies to ensure adequate coverage of the action space. As 𝐽 (𝑝 ) can be estimated from pre-experiment data, this confirms that 𝑝 ★ can be estimated effectively and efficiently. 
+
+## 4.3 RQ3: Variance Reduction via Δ-MRDR 
+
+We evaluate whether weighting the regression loss by the policy divergence reduces the variance of the resulting Doubly Robust (DR) estimator, particularly when model capacity is constrained. 
+
+Setup. We simulate a highly heterogeneous recommendation environment where a latent intent feature 𝑞 ∈ ( 0, 1) governs both user behaviour and observation noise. The majority of the traffic consists of low-intent users whose outcomes are highly stochastic. A small minority consists of high-intent users whose outcomes have lower variance. This heteroskedasticity provides an environment in which we expect uniformly weighted DR to be suboptimal. We compare a target policy 𝜋 that aggressively targets high-intent users against a passive control baseline 𝜋 ′ using data logged from a standard 50 /50 A/B-test. We train Ridge regression models with moderate regularization to force a strict bias-variance trade-off, utilising a two-stage sample splitting procedure to ensure unbiased evaluation: (1) Δ-DR Model: Minimises global MSE, Accelerating A/B-Tests with Counterfactual Estimation 10 −1 10 0 10 1 10 2                    
+
+> 0
+> 1
+> MSE on ATE  ×10 −2|A| = 10
+> 10 −110 010 110 2
+> |A| = 100
+> 10 −110 010 110 2
+> |A| = 500
+> 10 −110 010 110 2
+> |A| = 1000
+> 10 −110 010 110 2
+> |A| = 5000
+> DiM
+> ∆-IPS
+> Proxy for Policy Divergence 1
+> T∝ D (π|| π′)
+
+Figure 1: Mean Squared Error (MSE) of the standard DiM estimator and the Policy-Aware Δ-IPS estimator for varying action space sizes |A| . The 𝑥 -axis represents policy divergence (proxied by the inverse temperature 1 
+
+> 𝑇
+
+of 𝜋 ′). We observe that the Δ-OPE view successfully exploits policy overlap to significantly reduce estimation error, remaining robust across large action spaces. 0.5 0.6 0.7 0.8 0.9 1.0
+
+Treatment Allocation Ratio ( p)  
+
+> 2.22.32.42.52.62.7
+> Empirical Variance
+> Optimal Design
+> p?≈0.81
+> 1.10 1.15 1.20 1.25 1.30 1.35
+> Theoretical Variance
+
+Figure 2: Visualising optimal treatment allocation ( 𝑝 ★) in an asymmetric policy setting. We compare a conservative control policy 𝜋 ′ against an exploratory treatment policy 𝜋 .We validate that empirical estimation variance tracks the theoretical variance proxy 𝐽 (𝑝 ) derived in Eq. 23 up to a mul-tiplicative constant. The minimum variance is achieved at 
+
+𝑝 ★ ≈ 0.81 , reducing variance by 18% compared to an even split. 
+
+(2) Δ-MRDR Model: Minimises the weighted MSE with sam-ple weights 𝑤 2 
+
+> 𝑖
+
+=
+
+ 𝜋 (𝑎 𝑖 |𝑥 𝑖 ) − 𝜋 ′ (𝑎 𝑖 |𝑥 𝑖 )   
+
+> 𝜋 0(𝑎 𝑖 |𝑥 𝑖 )
+
+2
+
+.
+
+Result. Figure 3 compares the distribution of ATE estimates over 
+
+10 000 trials. First, we see that the Δ-DR estimator significantly reduces the variance of the Δ𝛽 ★-IPS estimator whilst retaining un-biasedness. Nevertheless, with the regularisation term constraining model capacity, the reward model focuses on the majority of users, who are low-intent and noisy. In contrast, the Δ-MRDR model focuses on users with a large causal impact for the ATE in pol-icy change. This targeted learning approach reduces the estimator variance by 75% and 8% compared to Δ𝛽 ★ and Δ-DR respectively. These results demonstrate that the best model for prediction is not necessarily the best model for causal estimation. 
+
+## 4.4 RQ4: Variance Reduction in Ranking 
+
+Finally, we evaluate the performance of our exposure-aware es-timators in combinatorial action spaces, specifically focusing on top-𝐾 ranking under a Position-Based Model (PBM). We investigate how policy divergence impacts estimation variance and whether the position-specific optimal baseline ( Δ𝛽 ★
+
+> ⊥⊥
+
+-DCG) can successfully mitigate the variance explosion inherent to off-policy ranking evaluation—translating to direct statistical power improvements for online evaluation of ranking policies. 
+
+Setup. We simulate a ranking environment with a catalogue of 
+
+𝑀 = 100 items and a slate size of 𝐾 = 25 (i.e. |A| ≈ 2.4 × 10 23 ). 0.02.5
+
+> Density
+
+∆β?-IPS (MSE: 0.0100)  
+
+> 05
+> Density  Variance
+> −72 .9% (∆β?-IPS)
+
+∆-DR (MSE: 0.0027)        
+
+> 0.20.30.40.50.60.70.80.9
+
+Estimated Policy ATE ( ˆV (π) − ˆV (π′))  
+
+> 05
+> Density  Variance
+> −75 .2% (∆β?-IPS)
+> −8.4% (∆-DR)
+
+∆-MRDR (MSE: 0.0025) 
+
+True ATE 
+
+Figure 3: Variance reduction via the Δ-MRDR objective in a highly heterogeneous environment. The Δ𝛽 ★-IPS estima-tor serves as the optimal model-free baseline. The Δ-DR es-timator minimises global MSE, causing it to overfit to the noisy majority and mischaracterise the baseline for the tar-get group, resulting in suboptimal variance. The Δ-MRDR estimator targets model capacity exclusively at the regions of high policy divergence, learning the correct local relation-ship and significantly reducing ATE estimation variance. 
+
+User contexts and item relevances 𝑞 are randomly distributed. We define a target policy R that perfectly sorts items by 𝑞 , and a control policy R′ whose scores are corrupted by noise. The degree of noise is controlled by an interpolation parameter 𝛼 ∈ [ 0, 1], allowing us to strictly sweep the policy divergence ( 1 − 𝛼 ) from 0.0 (identical policies) to 1.0 (independent policies with limited overlap). Data is logged using a 50 /50 uniform mixture of R and R′, with a small 𝜖 = 0.1 uniform exploration mass added to ensure strict pos-itivity of exposure propensities. We compare three estimators over 
+
+5 000 independent trials: the standard Difference-in-Means (DiM) of the observed A/B-test DCG, the unbaselined Δ-DCG estimator, and the optimally baselined Δ𝛽 ★
+
+> ⊥⊥
+
+-DCG estimator which computes a distinct 𝛽 ★ 
+
+> ⊥⊥,𝑗
+
+for each rank position 𝑗 .
+
+Result. Figure 4 illustrates the empirical variance of the estimators (on a logarithmic scale) as policy divergence increases. The standard A/B-testing (DiM) variance remains relatively constant across all divergence levels, as it simply computes the sample mean difference Olivier Jeunen 0.0 0.2 0.4 0.6 0.8 1.0
+
+Policy Divergence ( 1 − α)
+
+> 10 −3
+> 10 −2
+> Estimator Variance
+> DiM
+> ∆-DCG
+> ∆β?-DCG
+
+Figure 4: Empirical variance of top-𝐾 ranking estimators across varying levels of policy divergence ( 1 − 𝛼 ), shown on a logarithmic scale. The standard A/B testing procedure (DiM) suffers from high variance regardless of policy overlap. The unbaselined Δ-DCG estimator performs well under high over-lap but suffers from severe variance explosion as divergence increases. The Δ𝛽 ★-DCG estimator utilises position-specific optimal baselines to mitigate this explosion, achieving sig-nificant variance reduction compared to the standard A/B test across all divergence regimes. 
+
+between the two logging arms without exploiting the structural overlap of the policies. When policies are highly similar (divergence → 0), both Δ-estimators leverage the substantial overlap in item exposures to achieve near-zero variance, vastly outperforming DiM. However, as policy divergence increases, the exposure propensities for the two policies diverge. For the unbaselined Δ-DCG estimator, this causes the marginal importance weights to inflate, leading to a variance explosion that surpasses the standard DiM baseline. Crucially, the Δ𝛽 ★
+
+> ⊥⊥
+
+-DCG estimator mitigates this explosion. By shifting the outcome at each position 𝑗 by the variance-minimising scalar 𝛽 ★ 
+
+> ⊥⊥,𝑗
+
+, the estimator successfully neutralises the variance injected by the importance weights while preserving the bene-fits of the Δ-OPE formulation. The resulting Δ𝛽 ★
+
+> ⊥⊥
+
+-DCG estimator maintains a strict variance advantage over the standard A/B-test across the entire divergence spectrum, demonstrating the efficacy of position-aware control variates when evaluating ranking policies. 
+
+## 4.5 Limitations of our Experimental Design 
+
+The empirical validation presented in this work relies exclusively on synthetic simulation environments. Whilst this choice affords full control over ground-truth counterfactuals—enabling exact bias and variance measurement against the true ATE, which is unobservable in logged public data—it necessarily entails simplifying assumptions about reward structure, context distributions, and policy behaviour. Practitioners should treat the reported variance reduction figures as indicative of the relative ordering of methods, and empirical validation of our theoretical contributions, rather than as precise predictions of real-world uplifts. Indeed, these will depend on the degree of policy overlap, reward heterogeneity, and the quality of any fitted reward models in their specific deployment. The absence of publicly available logged datasets suitable for this experimental setting is a structural limitation of the broader field, not unique to this work. Existing benchmarks for off-policy evaluation in recommendation [ 62 ] tend to involve small action spaces and rely on counterfactual evaluation procedures that are themselves subject to high variance [ 44 ]—making them ill-suited as a reliable ground truth against which to validate estimator efficiency. In this respect, our simulation approach follows established practice in the OPE literature [ 56 ], where synthetic environments are the standard vehicle for controlled comparison of estimators. A second limitation concerns the estimation of policy proba-bilities. The proposed estimators ( Δ-IPS , Δ-DR , Δ-MRDR , Δ-DCG )require knowledge of 𝜋 (𝑎 |𝑥 ) and 𝜋 ′ (𝑎 |𝑥 ) to compute the impor-tance weights 𝑤 Δ. In our simulations, and often in practice, these probabilities are known exactly by construction. Alternatively, poli-cies can come from stochastic neural models whose exact action probabilities may be expensive to compute [ 24 ] or subject to numer-ical instability—particularly in large action spaces or in sequence-generation settings such as large language models, where the policy probability over a full output is a product of per-token probabilities. We note that this is a general challenge for IPS-based methods, and that existing mitigations—such as top-𝐾 truncation [ 21 , 54 ] or embedding-based approximations [ 58 ]—are likely applicable here. Nevertheless, the sensitivity of the proposed estimators to propen-sity misspecification warrants further empirical investigation. Finally, the derivation of the variance-optimal traffic allocation 
+
+𝑝 ★ assumes stationarity of the context distribution P(𝑋 ) between the pre-experiment logging period and the live experiment, and invokes homoskedasticity of outcomes 𝑌 for the analytical solution under Δ-IPS. The adaptive two-stage design we suggest relaxes the latter assumption in practice, but the robustness of 𝑝 ★ to distribu-tion shift—common in live recommender systems due to seasonal effects, item catalogue changes, or user population drift—remains an open question. We view this as a promising direction for fu-ture work, alongside the development of fully sequential adaptive designs that converge to 𝑝 ★ continuously over the course of the experiment whilst retaining unbiased estimators of ATEs. 
+
+## 5 Conclusions & Outlook 
+
+Our work identifies a structural inefficiency in the standard A/B-testing protocol: when competing policies agree on an action, the resulting outcome contributes noise to the Average Treatment Ef-fect estimate without providing any signal regarding the uplift. By reframing the randomised treatment assignment as a meta-policy, we established a rigorous connection between online controlled experiments and Off-Policy Evaluation. This perspective unlocks a family of unbiased, policy-aware estimators ( Δ-IPS and Δ-DR) that strictly dominate standard Difference-in-Means (DiM) estimators by exploiting policy overlap. Our theoretical analysis demonstrates that the variance of these estimators scales with policy divergence rather than direct outcome noise. This insight enables three practical innovations: (i) a deriva-tion of the variance-optimal traffic allocation ratio 𝑝 ★, which can deviate from the standard 50/50 split; (ii) the Δ-MRDR learning objective, which trains control variates to explicitly minimise esti-mation variance by focusing model capacity on regions of policy disagreement; and (iii) the extension of this framework to com-binatorial ranking action spaces via Δ-DCG, leveraging a Posi-tion-Based Model and rank-specific optimal baselines ( Δ𝛽 ★
+
+> ⊥⊥
+
+-DCG) Accelerating A/B-Tests with Counterfactual Estimation 
+
+to successfully combat variance explosion in Top-𝐾 ranking evalua-tion. Empirical validation confirms that these methods significantly reduce estimation variance in both highly heterogeneous single-action environments and complex slate-recommendation scenarios, maintaining strict dominance over standard DiM across varying divergence regimes with minimal engineering overhead. This work opens several avenues for future research. First, while our Δ𝛽 ★
+
+⊥⊥-DCG estimator relies on a marginal approximation for computational stability, future work could explore estimating the full cross-rank covariance matrix to construct a strictly globally optimal joint baseline vector for slate evaluation [ 29 ]. Second, our optimal design derivation assumes a fixed allocation 𝑝 . Further exploring an adaptive experimental design, where traffic allocation is dynamically updated to converge to 𝑝 ★ during the test, could drastically accelerate decision-making. Third, whilst our work fo-cuses on ATEs, recent extensions of the OPE framework allow us to estimate a full distribution of counterfactual outcomes [ 5]—which could be integrated directly. Finally, we see promise in applying 
+
+Δ-MRDR beyond variance reduction, potentially using it as a robust loss function for offline policy learning in settings with skewed logging policies. We hope this work encourages the community to view online and offline evaluation not as distinct phases, but as a unified continuum of counterfactual estimation problems. 
+
+## References 
+
+[1] Shubham Baweja, Neeti Pokharna, Aleksei Ustimenko, and Olivier Jeunen. 2024. Variance Reduction in Ratio Metrics for Efficient Online Experiments. In Proc. of the 46th European Conference on Information Retrieval (ECIR ’24) . Springer. [2] Léon Bottou, Jonas Peters, Joaquin Quiñonero-Candela, Denis X. Charles, D. Max Chickering, Elon Portugaly, Dipankar Ray, Patrice Simard, and Ed Snelson. 2013. Counterfactual Reasoning and Learning Systems: The Example of Computational Advertising. Journal of Machine Learning Research 14, 101 (2013), 3207–3260. http://jmlr.org/papers/v14/bottou13a.html [3] Alexander Buchholz, Ben London, Giuseppe Di Benedetto, Jan Malte Lichtenberg, Yannik Stein, and Thorsten Joachims. 2024. Counterfactual Ranking Evaluation with Flexible Click Models. In Proceedings of the 47th International ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR ’24) .ACM, 1200–1210. doi:10.1145/3626772.3657810 [4] Roman Budylin, Alexey Drutsa, Ilya Katsev, and Valeriya Tsoy. 2018. Consistent Transformation of Ratio Metrics for Efficient Online Controlled Experiments. In Proc. of the Eleventh ACM International Conference on Web Search and Data Mining (WSDM ’18) . ACM, 55–63. doi:10.1145/3159652.3159699 [5] Yash Chandak, Scott Niekum, Bruno da Silva, Erik Learned-Miller, Emma Brun-skill, and Philip S. Thomas. 2021. Universal Off-Policy Evaluation. In Ad-vances in Neural Information Processing Systems , Vol. 34. Curran Associates, Inc., 27475–27490. https://proceedings.neurips.cc/paper_files/paper/2021/file/ e71e5cd119bbc5797164fb0cd7fd94a4-Paper.pdf [6] Minmin Chen, Alex Beutel, Paul Covington, Sagar Jain, Francois Belletti, and Ed H Chi. 2019. Top-k off-policy correction for a REINFORCE recommender system. In Proc. of the Twelfth ACM International Conference on Web Search and Data Mining . 456–464. [7] Victor Chernozhukov, Denis Chetverikov, Mert Demirer, Esther Duflo, Christian Hansen, Whitney Newey, and James Robins. 2018. Dou-ble/debiased machine learning for treatment and structural parameters. 
+
+The Econometrics Journal 21, 1 (01 2018), C1–C68. doi:10.1111/ectj.12097 arXiv:https://academic.oup.com/ectj/article-pdf/21/1/C1/27684918/ectj00c1.pdf [8] Alex Deng, Luke Hagar, Nathaniel T. Stevens, Tatiana Xifara, and Amit Gandhi. 2024. Metric Decomposition in A/B Tests. In Proc.of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD ’24) . ACM, 4885–4895. doi:10.1145/3637528.3671556 [9] Alex Deng and Xiaolin Shi. 2016. Data-Driven Metric Development for On-line Controlled Experiments: Seven Lessons Learned. In Proc. of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (KDD ’16) . ACM, 77–86. doi:10.1145/2939672.2939700 [10] Alex Deng, Ya Xu, Ron Kohavi, and Toby Walker. 2013. Improving the Sensitivity of Online Controlled Experiments by Utilizing Pre-Experiment Data. In Proc. of the Sixth ACM International Conference on Web Search and Data Mining (WSDM ’13) . ACM, 123–132. doi:10.1145/2433396.2433413 [11] Fernando Diaz, Bhaskar Mitra, Michael D. Ekstrand, Asia J. Biega, and Ben Carterette. 2020. Evaluating Stochastic Rankings with Expected Exposure. In 
+
+Proceedings of the 29th ACM International Conference on Information & Knowledge Management (CIKM ’20) . ACM, 275–284. doi:10.1145/3340531.3411962 [12] Pavel Dmitriev, Somit Gupta, Dong Woo Kim, and Garnet Vaz. 2017. ADirty Dozen: Twelve Common Metric Interpretation Pitfalls in Online Con-trolled Experiments. In Proc.of the 23rd ACM SIGKDD International Confer-ence on Knowledge Discovery and Data Mining (KDD ’17) . ACM, 1427–1436. doi:10.1145/3097983.3098024 [13] Miroslav Dudík, Dumitru Erhan, John Langford, and Lihong Li. 2014. Doubly Robust Policy Evaluation and Optimization. Statist. Sci. 29, 4 (2014), 485–511. [14] Víctor Elvira, Luca Martino, David Luengo, and Mónica F. Bugallo. 2019. Gen-eralized Multiple Importance Sampling. Statist. Sci. 34, 1 (2019), 129 – 155. doi:10.1214/18-STS668 [15] Mehrdad Farajtabar, Yinlam Chow, and Mohammad Ghavamzadeh. 2018. More Robust Doubly Robust Off-policy Evaluation. In Proc. of the 35th International Conference on Machine Learning (Proc. of Machine Learning Research, Vol. 80) .PMLR, 1447–1456. https://proceedings.mlr.press/v80/farajtabar18a.html [16] Alexandre Gilotte, Clément Calauzènes, Thomas Nedelec, Alexandre Abraham, and Simon Dollé. 2018. Offline A/B Testing for Recommender Systems. In Proc. of the Eleventh ACM International Conference on Web Search and Data Mining (WSDM ’18) . ACM, 198–206. https://doi.org/10.1145/3159652.3159687 [17] Alois Gruson, Praveen Chandar, Christophe Charbuillet, James McInerney, Samantha Hansen, Damien Tardieu, and Ben Carterette. 2019. Offline Eval-uation to Make Decisions About Playlist Recommendation Algorithms. In Proc. of the Twelfth ACM International Conference on Web Search and Data Mining (WSDM ’19) . ACM, 420–428. doi:10.1145/3289600.3291027 [18] Yongyi Guo, Dominic Coey, Mikael Konutgan, Wenting Li, Chris Schoener, and Matt Goldman. 2021. Machine Learning for Variance Reduction in Online Exper-iments. In Advances in Neural Information Processing Systems , Vol. 34. Curran Associates, Inc., 8637–8648. [19] Shashank Gupta, Philipp Hager, Jin Huang, Ali Vardasbi, and Harrie Oosterhuis. 2024. Unbiased Learning to Rank: On Recent Advances and Practical Applications. In Proc. of the 17th ACM International Conference on Web Search and Data Mining (WSDM ’24) . ACM, 1118–1121. doi:10.1145/3616855.3636451 [20] Shashank Gupta, Olivier Jeunen, Harrie Oosterhuis, and Maarten de Rijke. 2024. Optimal Baseline Corrections for Off-Policy Contextual Bandits. In Proc. of the 18th ACM Conference on Recommender Systems (RecSys ’24) . ACM, 722–732. [21] Edward L. Ionides. 2008. Truncated Importance Sampling. Journal of Computa-tional and Graphical Statistics 17, 2 (2008), 295–311. [22] Olivier Jeunen. 2021. Offline Approaches to Recommendation with Online Success .Ph. D. Dissertation. University of Antwerp. [23] Olivier Jeunen. 2023. A Common Misassumption in Online Experiments with Machine Learning Models. SIGIR Forum 57, 1, Article 13 (dec 2023), 9 pages. doi:10.1145/3636341.3636358 [24] Olivier Jeunen. 2025. Counterfactual Inference under Thompson Sampling. arXiv:2504.08773 [cs.IR] [25] Olivier Jeunen. 2025. t-Testing the Waters: Empirically Validating Assumptions for Reliable A/B-Testing. In Proceedings of the Nineteenth ACM Conference on Rec-ommender Systems (RecSys ’25) . ACM, 1307–1310. doi:10.1145/3705328.3759307 [26] Olivier Jeunen. 2026. Unifying On- and Off-Policy Variance Reduction Methods. In Proceedings of the 49th International ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR ’26) . arXiv:2603.08370 [27] Olivier Jeunen, Shubham Baweja, Neeti Pokharna, and Aleksei Ustimenko. 2024. Powerful A/B-Testing Metrics and Where to Find Them. In Proc.of the 18th ACM Conference on Recommender Systems (RecSys ’24) . ACM, 816–818. doi:10.1145/ 3640457.3688036 [28] Olivier Jeunen and Bart Goethals. 2020. An Empirical Evaluation of Doubly Robust Learning for Recommendation. In REVEAL Workshop at ACM RecSys ’20 (REVEAL ’20) .[29] Olivier Jeunen and Shashank Gupta. 2026. Additive Control Variates Dominate Self-Normalisation in Off-Policy Evaluation. In Proceedings of the 49th Inter-national ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR ’26) . arXiv:2602.14914 [30] Olivier Jeunen, Jatin Mandav, Ivan Potapov, Nakul Agarwal, Sourabh Vaid, Wen-zhe Shi, and Aleksei Ustimenko. 2024. Multi-Objective Recommendation via Multivariate Policy Learning. In Proc. of the 18th ACM Conference on Recommender Systems (RecSys ’24) . ACM, 712–721. doi:10.1145/3640457.3688132 [31] Olivier Jeunen, Ivan Potapov, and Aleksei Ustimenko. 2024. On (Normalised) Discounted Cumulative Gain as an Off-Policy Evaluation Metric for Top-n Recom-mendation. In Proc. of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD ’24) . ACM, 1222–1233. doi:10.1145/3637528.3671687 [32] Olivier Jeunen and Aleksei Ustimenko. 2024. Δ-OPE: Off-Policy Estimation with Pairs of Policies. In Proc. of the 18th ACM Conference on Recommender Systems (RecSys ’24) . ACM, 878–883. doi:10.1145/3640457.3688162 [33] Olivier Jeunen and Aleksei Ustimenko. 2024. Learning Metrics that Maximise Power for Accelerated A/B-Tests. In Proc.of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD ’24) . ACM, 5183–5193. https: //doi.org/10.1145/3637528.3671512 Olivier Jeunen 
+
+[34] Thorsten Joachims, Ben London, Yi Su, Adith Swaminathan, and Lequn Wang. 2021. Recommendations as Treatments. AI Magazine 42, 3 (Nov. 2021), 19–30. [35] Thorsten Joachims, Adith Swaminathan, and Tobias Schnabel. 2017. Unbiased Learning-to-Rank with Biased Feedback. In Proc. of the Tenth ACM International Conference on Web Search and Data Mining (WSDM ’17) . ACM, 781–789. doi:10. 1145/3018661.3018699 [36] Ramesh Johari, Pete Koomen, Leonid Pekelis, and David Walsh. 2017. Peeking at A/B Tests: Why it matters, and what to do about it. In Proceedings of the 23rd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (KDD ’17) . ACM, 1517–1525. doi:10.1145/3097983.3097992 [37] Nathan Kallus, Yuta Saito, and Masatoshi Uehara. 2021. Optimal Off-Policy Evaluation from Multiple Logging Policies. In Proceedings of the 38th Inter-national Conference on Machine Learning (Proceedings of Machine Learning Research, Vol. 139) , Marina Meila and Tong Zhang (Eds.). PMLR, 5247–5256. https://proceedings.mlr.press/v139/kallus21a.html [38] Eugene Kharitonov, Alexey Drutsa, and Pavel Serdyukov. 2017. Learning Sen-sitive Combinations of A/B Test Metrics. In Proc. of the Tenth ACM Interna-tional Conference on Web Search and Data Mining (WSDM ’17) . ACM, 651–659. doi:10.1145/3018661.3018708 [39] Ron Kohavi and Nanyu Chen. 2024. False Positives in A/B Tests. In Proc.of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD ’24) . ACM, 5240–5250. doi:10.1145/3637528.3671631 [40] Ron Kohavi, Alex Deng, Roger Longbotham, and Ya Xu. 2014. Seven rules of thumb for web site experimenters. In Proc.of the 20th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (KDD ’14) . ACM, 1857–1866. doi:10.1145/2623330.2623341 [41] Ron Kohavi, Alex Deng, and Lukas Vermeer. 2022. A/B Testing Intuition Busters: Common Misunderstandings in Online Controlled Experiments. In Proc. of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD ’22) . ACM, 3168–3177. https://doi.org/10.1145/3534678.3539160 [42] Ron Kohavi, Diane Tang, and Ya Xu. 2020. Trustworthy online controlled experi-ments: A practical guide to A/B testing . Cambridge University Press. [43] Koki Konishi, Masataka Ushiku, and Yuta Saito. 2026. A More Accurate Al-gorithm Comparison through A/B Testing using Offline Evaluation Methods. arXiv:2607.01958 [cs.LG] https://arxiv.org/abs/2607.01958 [44] Damien Lefortier, Adith Swaminathan, Xiaotao Gu, Thorsten Joachims, and Maarten de Rijke. 2016. Large-scale Validation of Counterfactual Learning Meth-ods: A Test-Bed. In NIPS What If Workshop on Inference and Learning of Hypotheti-cal and Counterfactual Interventions in Complex Systems . arXiv:1612.00367 [cs.LG] [45] Jeffrey Li, Yixin Tang, and Jared Bauman. 2020. Improving Experimental Power through Control Using Predictions as Covariate (CUPAC). DoorDash Engineering Blog. https://doordash.engineering/2020/06/08/improving-experimental-power-through-control-using-predictions-as-covariate-cupac/ [46] Shuai Li, Yasin Abbasi-Yadkori, Branislav Kveton, S. Muthukrishnan, Vishwa Vinay, and Zheng Wen. 2018. Offline Evaluation of Ranking Policies with Click Models. In Proc. of the 24th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining (KDD ’18) . ACM, 1685–1694. doi:10.1145/3219819. 3220028 [47] Harrie Oosterhuis and Maarten de Rijke. 2020. Policy-Aware Unbiased Learning to Rank for Top-k Rankings. In Proc. of the 43rd International ACM SIGIR Con-ference on Research and Development in Information Retrieval (SIGIR ’20) . ACM, 489–498. doi:10.1145/3397271.3401102 [48] Harrie Oosterhuis and Maarten de Rijke. 2020. Taking the Counterfactual Online: Efficient and Unbiased Online Evaluation for Ranking. In Proceedings of the 2020 ACM SIGIR on International Conference on Theory of Information Retrieval (ICTIR ’20) . ACM, 137–144. doi:10.1145/3409256.3409820 [49] Harrie Oosterhuis and Maarten de Rijke. 2021. Unifying Online and Coun-terfactual Learning to Rank: A Novel Counterfactual Estimator that Effec-tively Utilizes Online Interventions. In Proceedings of the 14th ACM Interna-tional Conference on Web Search and Data Mining (WSDM ’21) . ACM, 463–471. doi:10.1145/3437963.3441794 [50] Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller, Maddie Simens, Amanda Askell, Peter Welinder, Paul F Christiano, Jan Leike, and Ryan Lowe. 2022. Training language models to follow instructions with human feedback. In 
+
+Advances in Neural Information Processing Systems , S. Koyejo, S. Mohamed, A. Agarwal, D. Belgrave, K. Cho, and A. Oh (Eds.), Vol. 35. Curran Associates, Inc., 27730–27744. https://proceedings.neurips.cc/paper_files/paper/2022/file/ b1efde53be364a73914f58805a001731-Paper-Conference.pdf [51] Art B. Owen. 2013. Monte Carlo theory, methods and examples .[52] Alexey Poyarkov, Alexey Drutsa, Andrey Khalyavin, Gleb Gusev, and Pavel Serdyukov. 2016. Boosted Decision Tree Regression Adjustment for Variance Reduction in Online Controlled Experiments. In Proc. of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (KDD ’16) .ACM, 235–244. doi:10.1145/2939672.2939688 [53] Lee Richardson, Alessandro Zito, Dylan Greaves, and Jacopo Soriano. 2023. Pareto optimal proxy metrics. arXiv:2307.01000 [stat.ME] [54] Nicolas Le Roux, Marc G Bellemare, Jonathan Lebensold, Arnaud Bergeron, Joshua Greaves, Alexandre Fréchette, Carolyne Pelletier, Eric Thibodeau-Laufer, Sándor Tóth, and Sam Work. 2025. Tapered Off-Policy REINFORCE - Stable and efficient reinforcement learning for large language models. In The Thirty-ninth Annual Conference on Neural Information Processing Systems . https://openreview. net/forum?id=gFFgCWiXWI [55] Hitesh Sagtani, Madan Gopal Jhawar, Rishabh Mehrotra, and Olivier Jeunen. 2024. Ad-load Balancing via Off-policy Learning in a Content Marketplace. In 
+
+Proc. of the 17th ACM International Conference on Web Search and Data Mining (WSDM ’24) . ACM, 586–595. doi:10.1145/3616855.3635846 [56] Yuta Saito, Shunsuke Aihara, Megumi Matsutani, and Yusuke Narita. 2021. Open Bandit Dataset and Pipeline: Towards Realistic and Reproducible Off-Policy Evaluation. In Proc. of the Neural Information Processing Systems Track on Datasets and Benchmarks , Vol. 1. [57] Yuta Saito and Thorsten Joachims. 2021. Counterfactual Learning and Evaluation for Recommender Systems: Foundations, Implementations, and Recent Advances. In Proc. of the 15th ACM Conference on Recommender Systems (RecSys ’21) . ACM, 828–830. doi:10.1145/3460231.3473320 [58] Yuta Saito and Thorsten Joachims. 2022. Off-Policy Evaluation for Large Action Spaces via Embeddings. In Proc. of the 39th International Conference on Machine Learning (Proc. of Machine Learning Research, Vol. 162) . PMLR, 19089–19122. https://proceedings.mlr.press/v162/saito22a.html [59] Yuta Saito, Qingyang Ren, and Thorsten Joachims. 2023. Off-Policy Evaluation for Large Action Spaces via Conjunct Effect Modeling. In Proc. of the 40th Inter-national Conference on Machine Learning (Proc. of Machine Learning Research, Vol. 202) . PMLR, 29734–29759. https://proceedings.mlr.press/v202/saito23b.html [60] Otmane Sakhi, Alexandre Gilotte, and David Rohde. 2025. Practical Improve-ments of A/B Testing with Off-Policy Estimation. arXiv:2506.10677 [stat.ML] https://arxiv.org/abs/2506.10677 [61] Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. 2024. DeepSeek-Math: Pushing the Limits of Mathematical Reasoning in Open Language Models. arXiv:2402.03300 [cs.CL] https://arxiv.org/abs/2402.03300 [62] Adith Swaminathan and Thorsten Joachims. 2015. Batch Learning from Logged Bandit Feedback through Counterfactual Risk Minimization. Journal of Ma-chine Learning Research 16, 52 (2015), 1731–1755. http://jmlr.org/papers/v16/ swaminathan15a.html [63] Nilesh Tripuraneni, Lee Richardson, Alexander D’Amour, Jacopo Soriano, and Steve Yadlowsky. 2023. Choosing a Proxy Metric from Past Experiments. arXiv:2309.07893 [stat.ME] [64] Bram van den Akker, Olivier Jeunen, Ying Li, Ben London, Zahra Nazari, and Devesh Parekh. 2024. Practical Bandits: An Industry Perspective. In Proc. of the 17th ACM International Conference on Web Search and Data Mining (WSDM ’24) .ACM, 1132–1135. doi:10.1145/3616855.3636449 [65] Flavian Vasile, David Rohde, Olivier Jeunen, and Amine Benhalloum. 2020. A Gentle Introduction to Recommendation as Counterfactual Policy Learning. In 
+
+Proc. of the 28th ACM Conference on User Modeling, Adaptation and Personalization (UMAP ’20) . ACM, 392–393. doi:10.1145/3340631.3398666 [66] Huizhi Xie and Juliette Aurisset. 2016. Improving the Sensitivity of Online Controlled Experiments: Case Studies at Netflix. In Proc. of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (KDD ’16) .ACM, 645–654. doi:10.1145/2939672.2939733 [67] Qing Zhang, Alex Deng, Michelle Du, Huiji Gao, Liwei He, and Sanjeev Katariya. 2025. Harnessing the Power of Interleaving and Counterfactual Evaluation for Airbnb Search Ranking. In Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V.2 (KDD ’25) . ACM, 5205–5214. doi:10. 1145/3711896.3737232 [68] Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui Chen, Bowen Yu, Chang Gao, Kai Dang, Yuqiong Liu, Rui Men, An Yang, Jingren Zhou, and Junyang Lin. 2025. Group Sequence Policy Optimization. arXiv:2507.18071 [cs.LG] https://arxiv.org/abs/2507.18071 
+
+## A Contemporaneous Work 
+
+Table 1 provides a systematic overview of contemporaneous ap-proaches to policy-aware A/B testing, highlighting how these dis-tinct methodologies—whilst sharing a common foundation in coun-terfactual inference—diverge in their mathematical frameworks, variance-reduction guarantees, and practical extensions. Accelerating A/B-Tests with Counterfactual Estimation 
+
+Table 1: Methodological Comparison of Contemporaneous Policy-Aware A/B-Testing Estimators. This Work Konishi et al. (MID) [43] Sakhi et al. [60] Core Mechanism Meta-policy mixture 𝜋 0 = 𝑝𝜋 + ( 1 − 𝑝 )𝜋 ′ Synthetic middle policy 𝜋 𝑀 𝑓 -regularized IPS weights 
+
+Theoretical Basis Exact point-wise variance dominance Reward variance bounding via 𝜋 𝑀 ∗ Second-moment surrogate 𝑆 𝑓 
+
+Traffic Allocation Analytical variance-optimal 𝑝 ∗ Assumed 50/50 balanced split Sample ratio 𝑛 𝑟 integrated 
+
+Reward Modeling Δ-DR and Δ-MRDR objective IPS; DR extensions noted IPS-focused; no reward model 
+
+Combinatorial Spaces Δ-DCG for Ranking Single-action bandits Single-action; non-Markovian 
+
+Robustness Assumes known propensities Assumes known propensities Extends to propensity estimation
