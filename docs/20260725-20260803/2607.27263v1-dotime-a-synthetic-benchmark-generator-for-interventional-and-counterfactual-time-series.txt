@@ -1,0 +1,689 @@
+Title: DoTime: A Synthetic Benchmark Generator for Interventional and Counterfactual Time Series
+
+URL Source: https://arxiv.org/pdf/2607.27263v1
+
+Published Time: Fri, 31 Jul 2026 00:02:13 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# DoTime: A Synthetic Benchmark Generator for Interventional and Counterfactual Time Series 
+
+# Dennis Thumm 
+
+National University of Singapore Singapore, Singapore dennis.thumm@u.nus.edu 
+
+# Billy Tim Anthony 
+
+National University of Singapore Singapore, Singapore tim.anthony@u.nus.edu 
+
+# Ying Chen 
+
+National University of Singapore Singapore, Singapore matcheny@nus.edu.sg 
+
+## Abstract 
+
+Most benchmarks for causal inference over time series are ob-servational, small, or domain-specific, leaving interventional and counterfactual estimation under-served exactly where it matters most, such as in healthcare, policy evaluation, and climate science. We introduce DoTime , an open, scalable, and theoretically grounded generator of multivariate temporal structural causal models (TSCMs) with interventions, released as the dotime PyPI package together with four frozen evaluation suites. Beyond existing work, it adds capabilities absent from prior generators: continuous-time intervention windows , counterfactual sampling modes with a positivity guard, regime-switching SCMs as a strict generalization of interrupted time series, non-stationary dynamics by construction with switching SCM parameters, and determin-istic ramp and sinusoidal intervention profiles that place trends and structural breaks inside the evaluation window. Moreover, it demonstrates the suitability of the generator as a prior for a causal foundation model reference implementation. The released suites span a training-scale snapshot of 100 ,000 trajectories and eight named identification structures, each with exact ground truth: paired interventional trajectories from the same SCM throughout, and shared-noise counterfactuals in the continuous-time suite. We ship reference baseline implementations with an evaluation harness, and pose a falsifiable claim: interventional training buys a measurable direction-accuracy advantage over an observational model of identical capacity. It is tested across three training seeds per arm. Under structure-matched evaluation on held-out episodes, the interventional prior-fitted network’s (PFN) gap is positive in every structure, trajectory length, and seed tested. 
+
+## CCS Concepts 
+
+• Computing methodologies → Causal reasoning and diag-nostics ; Machine learning ; • Mathematics of computing →
+
+Time series analysis ; • Information systems → Test collections .
+
+## Keywords 
+
+causal inference, time series, interventions, counterfactuals, benchmarks, structural causal models, foundation models 
+
+## 1 Introduction 
+
+Counterfactual reasoning over time is the bottleneck in many high-stakes domains. Estimating the effect of a treatment policy on a patient’s trajectory, of a non-pharmaceutical intervention on an epidemic curve, or of an emissions change on a climate index all require answering do (·) queries about how a multivariate 
+
+system would have evolved under intervention. Progress on such questions is increasingly driven by prior-fitted networks (PFNs) and tabular/time foundation models [14, 18, 22] that are trained entirely on synthetic data sampled from a structural prior. To facilitate this progress, DoTime provides two distinct resources doing two distinct jobs: the prior determines what a model can learn, while the benchmark determines what a reader can detect about it. Both are therefore decisive, and both are affected by the same shortcoming. The resources the community trains and evaluates on are overwhelmingly observational , so a model trained to answer 𝑝 (𝑌 | do (𝐴 )) is fitted to, and scored on, data that only ever shows 𝑝 (𝑌 | 𝐴 ).This skew shows up along three axes. (a) Observational time-series generators such as Dream3 [16] and NetSim [23] target structural discovery, not effect estimation. (b) Domain-specific interventional datasets such as the Causal Chambers [7] are real but small and do not scale to foundation-model training. (c) Static-tabular causal benchmarks such as ACIC [11] and IHDP [13] provide ground-truth effects but ignore time entirely. The recent CausalDynamics benchmark [12] scales to coupled ODE/SDE dynamics but evaluates structural discovery , recovering a graph from observational dynamics, which is complementary to, and disjoint from, interventional effect estimation. Poinsot et al. [20] document the absence of a widely agreed benchmark for time-series causal inference. 
+
+Contribution as artifact. We release the dotime PyPI package (generator, suite loaders, and evaluation harness), four frozen suites with Zenodo DOIs and Croissant metadata, a Hugging Face mirror, reference baselines, and a versioned public reference table with a scripted submission path (results are contributed via a GitHub pull request; §8). Our contribution is the benchmark ecosystem 1: the generalized DoTime generator, the four evaluation suites, and the benchmarking protocol. 
+
+Contribution as benchmark scope. We organize the design along four axes: the intervention type, structural family, counterfactual mode, and time grid (§4). Each is exercised by a released suite. 
+
+Why principled. The generator enforces acyclicity by construc-tion and a positivity guard, with value clipping and divergence de-tection at simulation time. An optional hardening configuration additionally rescales lag matrices to a target spectral radius (used for PFN training, not applied to the released v1.0.0 suites). The un-derlying convergence result is restated in Appendix C.       
+
+> 1Where Thumm et al. [25] introduced a single Do-Over-Time-PFN model instance, we generalize that sampling surface into an open generator and use the PFN here only as a reference implementation that exercises the benchmark and validates its utility — not as the paper’s technical contribution. The convergence result (Appendix C) is likewise restated to make this paper self-contained, not claimed as new theory. arXiv:2607.27263v1 [cs.LG] 29 Jul 2026 Dennis Thumm, Billy Tim Anthony, and Ying Chen
+> Generation
+> Evaluation
+> graph, mechanism & noise prior temporal SCM 𝜓 paired (obs, do) trajectories loaders / frozen suites baselines & foundation model metrics
+
+Figure 1: The DoTime pipeline: a structural prior sam-ples TSCMs, which are simulated observationally and un-der intervention to yield paired trajectories with exact ground-truth targets (noise-matched counterfactuals in the continuous-time generator); frozen suites and an evaluation harness close the loop. 
+
+What our benchmark supports and what it does not. DoTime measures interventional / counterfactual effect estimation on synthetic multivariate Temporal Structural Causal Models (TSCMs) [24] with known ground truth, across named identifi-cation structures. It does not validate real-world transportability or partial observability beyond the provided hidden-confounding case. These are explicit limitations (§8), though it does cover irregular observation grids (§4). Figure 1 summarizes the pipeline. 
+
+## 2 Related Work and Positioning 
+
+Static causal benchmarks. ACIC [11] and IHDP [13] provide ground-truth effects but no temporal structure, and so cannot probe lagged confounding, intervention timing, or effect decay. 
+
+Time-series causal evaluation. Dream3 [16] and NetSim [23] are observational, the Causal Chambers [7] are real but small, and in-terventional Electronic Health Record (EHR) cohorts are propri-etary. CausalDynamics [12] recovers graphs from observational dynamics over coupled ODE/SDE systems, and CausalTime [5] generates realistic observational series (air-quality, traffic, medi-cal) for causal discovery : both reconstruct graphs from observa-tional data, whereas DoTime answers do (·) queries over time 2.Even where interventional temporal data appears in the discov-ery literature — CAnDOIT [4] combines observational and inter-ventional series to recover graphs — the goal is structure identi-fication, without counterfactual ground truth, frozen suites, or an effect-estimation protocol. Table 1 summarizes the coverage gap. 
+
+Synthetic priors for foundation models. Do-PFN [22] (static causal effects) and TempoPFN [17] (observational, univariate series) are the closest priors; DoTime is their natural temporal-interventional generalization and extends the Do-PFN sampling surface for the instantaneous graph and mechanism priors. TSCM priors are meanwhile becoming mainstream in foundation-model pretraining — TabPFN-3’s discrete-time dynamic SCM [10], Google’s TabFM pretrained on hundreds of millions of on-the-fly SCM datasets [9], Chronos-2’s autoregressive rollouts     
+
+> 2Despite the one-edit-distance name, DoTime ≠CausalTime : the former applies the do -operator over time, the latter produces realistic observational series with no interventions.
+
+Table 1: Where DoTime sits. ✓/✗ denote whether a bench-mark addresses each property: temporal, interventional, counterfactual, named identification structures, config-urable scale, and a citable DOI. DoTime is the only entry covering interventional and counterfactual estimation with named structures at configurable scale.                                           
+
+> Benchmark Temp. Interv. Counterf. Struct. Scale DOI ACIC / IHDP ✗✓✓✗✗✓
+> Dream3 / NetSim ✓✗✗✗✗✓
+> Causal Chambers ✓✓✗✗✗✓
+> CausalDynamics ✓✗✗✓✓✓
+> CausalTime ✓✗✗✗✗✓
+> DoTime ✓✓✓✓✓✓
+
+of random temporal causal graphs [2] — but none adds the interventional/counterfactual side DoTime supplies. 
+
+## 3 The DoTime Framework 3.1 Temporal Structural Causal Model family 
+
+A TSCM [24] is 𝜓 = (G , 𝑓 , 𝑝 𝜀 ), with graph collection 
+
+G = (𝐺 0, 𝐺 1: 𝐾 ), an instantaneous Directed Acyclic Graph (DAG) 𝐺 0 over 𝑁 variables, lagged adjacencies 𝐺 1, . . . , 𝐺 𝐾 , a per-node mechanism 𝑓 𝑖 , and a noise distribution 𝑝 𝜀 . The forward recursion is 
+
+𝑋 𝑖 𝑡 = 𝑓 𝑖 
+
+
+
+Pa 0 
+
+> 𝑖
+
+(𝑋 𝑡 ), Pa 1: 𝐾 𝑖 (𝑋 𝑡 −1: 𝑡 −𝐾 )
+
+
+
++ 𝜀 𝑖 𝑡 , (1) where Pa 0 
+
+> 𝑖
+
+are instantaneous parents and Pa 𝑘 𝑖 are lag-𝑘 parents. We assume acyclicity of 𝐺 0 and Markovianity of order 𝐾 ; the the-ory additionally assumes a stable spectral radius, which the op-tional hardening configuration enforces by rescaling (in the re-leased suites, stability is instead handled by clipping plus diver-gence detection, §7). Interventions act on Eq. (1) by overriding 𝑓 𝑖 
+
+for the targeted node over a set of time steps (§4). This yields two distinct kinds of ground truth, along Pearl’s hierarchy [19]. An in-terventional target (Level 2, E[𝑌 | do (𝐴 =𝑣 )] ) draws the intervened arm’s exogenous noise afresh from the prior 𝑃 (𝜀 ): it is forward-looking, and the two arms diverge from the first step because the intervened arm follows a different noise realisation. A counterfac-tual target (Level 3, E[𝑌 𝑣 | 𝐴 =𝑎, 𝑌 =𝑦 ]) instead conditions on the observed run: the intervened arm reuses the same noise stream 𝜀 
+
+that produced the observational trajectory — equivalently, the pos-terior 𝑃 (𝜀 | observed run ), which for a fully observed SCM is that one realisation — so the arms are bit-identical until the interven-tion and differ only through it. The released continuous-time suite provides Level 3 counterfactuals by construction; the discrete-time suites provide Level 2 interventional twins (§8). 
+
+## 3.2 Graph prior 
+
+𝐺 0 is Erdős–Rényi [6] with acyclicity guaranteed by construction: edges are sampled from a strictly upper-triangular Bernoulli mask over a random topological order, so no rejection sampling is needed. Lagged edges are Bernoulli with geometric decay 𝛾 𝑘 in the lag 𝑘 . Edge probability is drawn from Beta (2, 5); 𝑁 ∼ U{ 3, . . . , 10 }
+
+and 𝐾 ∼ U{ 1, . . . , 3}. A subset of nodes is marked hidden to induce DoTime: A Synthetic Benchmark Generator for Interventional and Counterfactual Time Series 
+
+unobserved confounding. Figure 2 shows all eight identification structures of dot-Identifiability-v1 unrolled over time : each edge of the identification skeleton is instantiated either instantaneously (within slice 𝑡 ) or as a lagged edge 𝐺 1: 𝐾 connecting earlier slices, and the intervention acts on 𝐴 𝑡 (red) while the query reads 𝑌 𝑇 .
+
+## 3.3 Mechanism and noise priors 
+
+Mechanisms are drawn uniformly from {linear , tanh , sin , cos , | · | ,
+
+(·) 2, ReLU , tanh ◦(·) 2, tanh ◦ReLU }, a set chosen to span monotone, saturating, periodic, and even nonlinearities. Root and non-root noise scales are sampled from shifted exponentials. Numerical sta-bility is enforced by value clipping, a divergence check that re-places a diverged trajectory with an all-zero episode, and a burn-in that discards transient dynamics. The resulting zeroed fraction per released suite is reported and discussed in §7. 
+
+## 3.4 Sampling pipeline 
+
+A type sampler draws 70% diverse (random DAGs over the full mechanism set), 15% chain (a single directed path, the hardest long-range-propagation case), and 15% regime-switching SCMs; each is simulated forward with burn-in to a configurable length 𝑇 . Algo-rithm 1 (Appendix A) gives the full pseudocode and Algorithm 2 the counterfactual reconstruction. 
+
+## 4 Scope and Extensions 
+
+The four axes below are DoTime’s main extensions beyond prior generators. Each ships a concrete API and is exercised by a released suite. 
+
+## 4.1 Intervention types 
+
+We support hard do (𝐴 𝑡 = 𝑣 ), soft (an additive shift to the mecha-nism output), and time-varying do (𝐴 𝑡 = 𝑣 (𝑡 )) interventions, en-coded as a single InterventionSpec so the same SCM can be queried under all three. Figure 3 shows a paired observational / in-terventional trajectory from the continuous-time generator, which simulates both arms under one shared noise realisation: pre-onset the two runs are bit-identical, inside the window the clamped treat-ment drives 𝑌 off its observational path, and after the window the arms re-synchronize as the dynamics forget the clamp. Every vis-ible difference is caused by the intervention alone. The discrete-time generators instead pair each observational trajectory with an 
+
+independent interventional draw from the same SCM which relates to interventional rather than counterfactual ground truth (§8). 
+
+## 4.2 Continuous-time intervention windows 
+
+We generalize a single-step intervention to a window do (𝐴 [𝑡 0,𝑡 1 ] =
+
+𝑣 ), encoded by floating-point intervention_time_start and 
+
+intervention_time_end in [0, 1]. Continuous-time trajectories are generated by Euler–Maruyama integration of an underlying stochastic differential equation (SDE) on a fine grid, of which the observed series is a discretization [15]. This lets us vary window duration independently of the observation cadence. Crucially, the observation schedule itself is configurable — regular , jittered 
+
+(Δ𝑖 = ¯Δ(1 + 𝜉 𝑖 ), 𝜉 𝑖 ∼ Unif [− 𝜌, 𝜌 ]), or a Poisson point process (Δ𝑖 ∼ Exp (1/ ¯Δ)) — so the generator natively covers genuinely irregular, non-uniformly spaced observation times rather than deferring them to future work. Figure 4 shows that the mean intervention effect on the outcome decays with the query offset, motivating the multi-offset evaluation protocol. 
+
+## 4.3 Counterfactual sampling modes 
+
+The intervention value can be drawn from five modes: an un-guarded extrapolative draw, the same draw under a positivity guard, and three in-support modes. The guard clips to [ ˆ𝜇 ± 3 ˆ 𝜎 ],estimated from the pre-intervention window of the treated variable ( positivity_aware = prior + clip): 
+
+prior : 𝑣 ∼ 𝑝 prior (extrapolative) ,
+
+observed_discrete : 𝑣 ∼ Unif {𝐴 <𝑡 0 },
+
+observed_normal : 𝑣 ∼ N ( ˆ𝜇, ˆ𝜎 2),
+
+observed_uniform : 𝑣 ∼ Unif [min 𝐴 <𝑡 0 , max 𝐴 <𝑡 0 ].
+
+This choice governs a distinction users repeatedly face: whether a model is trained on extrapolative interventions or on counterfac-tuals inside the observed support. We quantify the resulting out-of-distribution (OOD) ratio and effect magnitude per mode in Ap-pendix D. 
+
+## 4.4 Regime-switching as an ITS generalization 
+
+We define a sticky-Markov regime chain over TSCM parameters with a high self-transition probability. A two-regime chain with a deterministic transition at 𝑡 ★ recovers the piecewise interrupted-time-series (ITS) design — a single known changepoint shifting both level and dynamics, exactly the step-plus-slope change a segmented regression specifies, where a correctly specified ITS estimator is unbiased and the exact ground truth lets the benchmark verify this rather than assume it. Relaxing those assumptions one at a time — stochastic switch times, more than two regimes, nonlinear within-regime mechanisms — breaks the segmented-regression specification while leaving the ground truth exact, so the same suite stress-tests classical Bayesian piecewise ITS [21] and modern causal foundation models head-to-head. The released suite varies regime density over {2, 3, 5}, exposed as a difficulty tier. 
+
+## 5 The Released Benchmark Suites 
+
+We release four versioned, immutable suites. Each is stored as par-quet shards plus a checksummed manifest.json and Croissant JSON-LD, and every episode carries a difficulty tier .
+
+dot-Identifiability-v1 . Eight named identification structures — back_door , observed_confounder , confounder_mediator 
+
+(back-door family); front_door , mediator (front-door family); 
+
+instrumental_variable ; bi_variate (trivially identified); and 
+
+unobserved_confounder (non-identifiable by design, testing graceful degradation). Among these, observed_confounder is a deliberate null-effect control: 𝑋 confounds 𝐴 and 𝑌 but 𝐴 has no causal path to 𝑌 , so the confounded observational correlation is spurious and back-door adjustment must recover a zero effect. 
+
+≈ 1,350 episodes per structure ( ≈ 10 .8k total), 𝑇 = 200 , with exact interventional targets and a per-structure intervention/query offset protocol matched to identification theory. We state the identification asymmetry plainly [19]: back-door and front-door Dennis Thumm, Billy Tim Anthony, and Ying Chen                                                     
+
+> Bi-Variate
+> trivial (RCT)
+> 𝑎 𝑇 −1𝑎 𝑇
+> 𝑦 𝑇 −1𝑦 𝑇
+> Observed-Confounder
+> back-door (null effect)
+> 𝑎 𝑇 −1𝑎 𝑇
+> 𝑥 𝑇 −1𝑥 𝑇
+> 𝑦 𝑇 −1𝑦 𝑇
+> Back-Door
+> back-door
+> 𝑎 𝑇 −1𝑎 𝑇
+> 𝑥 𝑇 −1𝑥 𝑇
+> 𝑦 𝑇 −1𝑦 𝑇
+> Confounder-Mediator
+> back-door
+> 𝑎 𝑇 −1𝑎 𝑇
+> 𝑚 𝑇 −1𝑚 𝑇
+> 𝑦 𝑇 −1𝑦 𝑇
+> 𝑥 𝑇 −1𝑥 𝑇
+> Mediator
+> front-door
+> 𝑎 𝑇 −1𝑎 𝑇
+> 𝑚 𝑇 −1𝑚 𝑇
+> 𝑦 𝑇 −1𝑦 𝑇
+> Front-Door
+> front-door
+> 𝑎 𝑇 −1𝑎 𝑇
+> 𝑚 𝑇 −1𝑚 𝑇
+> 𝑦 𝑇 −1𝑦 𝑇
+> 𝑢 𝑇 −1𝑢 𝑇
+> Instrumental-Variable
+> IV
+> 𝑥 𝑇 −1𝑥 𝑇
+> 𝑎 𝑇 −1𝑎 𝑇
+> 𝑦 𝑇 −1𝑦 𝑇
+> 𝑢 𝑇 −1𝑢 𝑇
+> Unobserved-Confounder
+> non-identifiable
+> 𝑎 𝑇 −1𝑎 𝑇
+> 𝑦 𝑇 −1𝑦 𝑇
+> 𝑢 𝑇 −1𝑢 𝑇
+
+Figure 2: All eight identification structures of dot-Identifiability-v1 as temporal SCMs, unrolled over two consecutive slices 
+
+𝑇 −1 (pre-intervention) and 𝑇 (intervened). The identification-strategy taxonomy follows [25], with edges as instantiated by the released generator ( tscm_sampler , lagged variant). Solid blue arrows are causal edges, either instantaneous within a slice, or lagged across slices, including an autoregressive lag-1 self-edge on every variable. Each structure additionally carries a lag that makes its identification strategy visible from history (e.g. 𝑥 𝑇 −1→𝑦 𝑇 for the back-door family, 𝑚 𝑇 −1→𝑦 𝑇 for front-door). The intervention do (𝑎 𝑇 ) (orange node) severs the incoming edges of 𝑎 𝑇 (red dashed) while its outgoing edges stay active; the queried outcome 𝑦 𝑇 is the open node, and dashed nodes ( 𝑢 ) are hidden. Identification status per structure is in Table 2. Table 2: The eight canonical identification structures in dot-Identifiability-v1 , by family and identification status. Dis-play names map one-to-one to the code identifiers in §5. 
+
+Structure Family Identifiable? Bi-Variate trivial (RCT) ✓ (direct) Observed-Confounder back-door ✓ (null effect) Back-Door back-door ✓
+
+Confounder-Mediator back-door ✓
+
+Mediator front-door ✓
+
+Front-Door front-door ✓
+
+Instrumental-Variable IV ✓ (linear/mono.) Unobserved-Confounder — ✗ (by design) 
+
+are nonparametrically point-identifiable. The instrumental-variable case identifies only under linearity/monotonicity. The unobserved-confounder case is non-identifiable by design, in-cluded to measure graceful degradation rather than accuracy. Table 2 lists the eight structures and their identification status 3. 
+
+> 3“Bi-Variate” ( bi_variate ) is the trivial
+
+𝐴 → 𝑌 design — an in-silico random-ized controlled trial (RCT) with no confounding. The archived v1.0.0 files carry this structure’s legacy label rct_no_confounding , which load_benchmark relabels to  
+
+> bi_variate on read.
+
+dot-RegimeSwitch-v1 . 10 k trajectories, regime density 
+
+∈ {2, 3, 5}; designed as the target for CausalPy-style [21] piecewise-ITS baselines. 
+
+dot-Continuous-v1 . 10 k trajectories with continuous-time intervention windows of varying duration and query offsets 
+
+{1, 2, 3, 5, 10 }.
+
+dot-Generic-100k . 100 ,000 trajectories from the full diverse prior. It is an order of magnitude larger than the other three be-cause it serves a different purpose: the diagnostic suites isolate a named structure or mechanism and reach tight error bars at ≈ 10 kepisodes, whereas this one is the training-scale snapshot, sized for pre-training a foundation model rather than for scoring one. It is validated for effect-magnitude distribution and intervention-type ratio. See §7 for the divergence-handling disclosure. 
+
+Distribution and reproducibility. Each suite is archived on Zenodo with a citable DOI and mirrored as a Hugging Face dataset for discovery. load_benchmark pulls from either and verifies md5 checksums against the manifest. We cite each suite’s version-independent concept DOI, which always resolves to its latest archived version: 10.5281/zenodo.20846063 (Identifi-ability), .20846073 (RegimeSwitch), .20845980 (Continuous), and .20845982 (Generic-100k); the trained Do-Over-Time-PFN DoTime: A Synthetic Benchmark Generator for Interventional and Counterfactual Time Series 2           
+
+> 0
+> 2
+> treatment  A do( A=v)
+> 20 40 60 80 100 120
+> time t
+> 1
+> 0
+> 1
+> outcome  Y
+> observational counterfactual do( A=v), shared noise
+
+Figure 3: One paired trajectory from the continuous-time back-door generator ( dot-Continuous-v1 ); both arms share one noise realisation. Top: the treatment 𝐴 , clamped to 𝑣 
+
+inside the intervention window (shaded). Bottom: the out-come 𝑌 . Pre-onset the counterfactual arm (red, dashed) is 
+
+bit-identical to the observational arm (blue). It diverges only inside the window and re-synchronizes after it ends as the mean-reverting dynamics forget the clamp. The visible dif-ference is the causal effect — a counterfactual, not an inde-pendent interventional draw. 0 10 20 30 
+
+> query offset (steps after onset)
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> mean | Yint  Yobs | /  Y
+
+Figure 4: Mean absolute intervention effect on the out-come, in units of the outcome’s own standard deviation ( 𝜎 𝑌 ), vs. query offset, averaged over back-door TSCMs from the shared-noise continuous generator (band: ±1 SE). Because the two arms share one noise realisation, the difference is the causal effect alone — it builds during the intervention window, then decays as the mean-reverting dynamics for-get the clamp, justifying the multi-offset query protocol. 
+
+checkpoints are released on the Hugging Face Hub. Every suite regenerates from the committed scripts/build_release.py 
+
+with fixed seeds, recording package version, config hash, and hardware in a build manifest. We adhere to the ACM Artifacts Available badge standard: all data, code, and model weights are public under Apache-2.0 (code) / CC-BY-4.0 (data) with persistent DOIs. 
+
+## 6 Baselines and Reference Results 6.1 Protocol 
+
+We predict the interventional outcome 𝑌 int   
+
+> 𝑡 +offset
+
+on its raw (un-normalized) scale, with per-trajectory normalization applied at evaluation time and bootstrap confidence intervals resampled over trajectories. We bootstrap rather than quote a closed-form in-terval because pooled RMSE aggregates several correlated queries within each episode: treating those queries as independent would understate the true uncertainty, so we resample whole episodes (the independent unit) instead. Near-zero targets ( |𝑌 | < 0.1) are excluded from direction accuracy and reported separately. 
+
+## 6.2 Baselines 
+
+The package registers six baselines evaluated end-to-end in Table 3: Zero (a constant zero prediction, a trivial sanity floor); trajectory heuristics ( TrajMean , the pre-intervention outcome mean; AR1 , the last observed value); a vector autoregression (VAR ); and classical structural adjustment ( BackDoorOLS , a linear back-door adjustment; IV2SLS , two-stage least squares with a weak-instrument guard). A covariate-informed observational forecaster ( Chronos-2 [2]) requires optional dependencies and is evaluated out-of-band in §6.4; a CausalPy [21] piecewise-ITS baseline is a natural fit for dot-RegimeSwitch-v1 and is left as an explicitly supported entry point for external submissions rather than a baseline we report here. Alongside these we report the headline Do-Over-Time-PFN [25] causal foundation model in two training conditions of identical capacity, interventional (PFN int ) and observational ( PFN obs ). Oracle reads off the released ground-truth target, it is an upper bound by construction on the synthetic suites. Direction accuracy scores the sign of the predicted effect against ground truth; a constant prediction ( Zero )has no sign and is assigned 0 by convention. 
+
+## 6.3 Results 
+
+Table 3 reports pooled RMSE and direction accuracy across all four suites. On these nonlinear TSCMs every learned baseline sits far above the Oracle (RMSE floor 0, accuracy ceiling 1): RMSE is hard to beat because the per-trajectory series cluster around their means. Squared-error metrics are in fact near-saturated. In normalized MSE (NMSE = MSE /Var (𝑌 ), so 1.0 is the predict-the-mean floor), the best Identifiability baseline reaches only 0.75 
+
+and every learned method sits in [0.75 , 1.52 ] — absolute error cannot rank causal quality here. This is a property of the task, not a call for a sharper regression metric: when every model is near the predict-the-mean floor, squared error is dominated by the irreducible noise rather than by how well a model answers the 
+
+do -query. It is why our analysis leads with direction accuracy and the interventional-vs-observational gap (§6.4, §6.5): those isolate causal understanding at fixed capacity, where RMSE cannot. Closing the remaining gap to the Oracle is then a modelling problem, but one the benchmark can only score through the causal metrics, not through RMSE. Dennis Thumm, Billy Tim Anthony, and Ying Chen 
+
+We state the uncomfortable consequence plainly: on direction accuracy, PFN int does not beat TrajMean on Identifiability ( 0.66 
+
+vs. 0.67 ) and ties it on Generic ( 0.66 ). A model that commits to an intervention direction pays a small variance penalty relative to a mean predictor, and no absolute comparison against TrajMean 
+
+in Table 3 favors the PFN. The benchmark’s discriminating signal is instead the contrast : the interventional model against its obser-vational twin at identical capacity , where every confound except interventional training cancels. That contrast behaves as causal reasoning predicts. On the two suites closest to the checkpoint’s training distribution the inter-ventional PFN lifts direction accuracy over its observational twin (0.66 vs. 0.57 on Identifiability, +0.08 ; 0.66 vs. 0.62 on Generic, 
+
++0.04 ); on Regime and Continuous whose dynamics this check-point never saw in any form. The advantage washes out (gaps 
+
+−0.01 and +0.02 ), an honest boundary on what a single discrete-prior model transfers to. §6.4 shows this gap is a property of inter-ventional training , not test-time access to the intervention value, and the structure-matched analysis in §6.5 isolates it cleanly. 
+
+## 6.4 Training vs. test-time context 
+
+A skeptic could object that the interventional PFN wins simply be-cause it sees the intervention value at test time. We rule this out by giving the same do-value to two observational foundation mod-els and measuring their interventional-vs-observational direction-accuracy gap on dot-Identifiability-v1 (Table 4). TabPFN [14] runs a back-door / front-door adjustment with the do-value plugged into two (resp. three) in-context regressors. Chronos-2 [2] fore-casts the outcome with the intervened treatment supplied as a known future covariate. Neither observational model shows a gap (−0.01 , −0.01 ): access to the do-value at test time buys nothing. Only the DoTime-trained PFN separates the two conditions ( +0.08 ,well outside its standard error, while both observational models’ gaps sit within theirs). TabPFN in fact posts the highest absolute interventional accuracy of the three while showing no gap at all — absolute levels and the gap measure different things, and the claim under test concerns the gap. The advantage is a property of inter-ventional pre-training, not of conditioning on the intervention at inference 4.
+
+## 6.5 The observational-vs-interventional gap 
+
+Table 5 is the central contrast and the test of our falsifiable claim. We use two hardened priors: codeOSC, an oscillatory 
+
+prior, and BTM , a break-trajectory-mean prior whose trajectories deliberately depart from their running mean (so a mean-predictor cannot succeed by default). For each of the three point-identified structures (back-door, front-door, instrumental-variable; an exploratory probe of two further structures is in Appendix E) we evaluate two structure-matched Do-Over-Time-PFN models of identical capacity — one trained on interventional context, one on observational context only. Both models are trained and evaluated on the same prior configuration. What is held out is the episodes (training and evaluation use disjoint random seeds), so this measures the interventional-training advantage  
+
+> 4Gaps are computed from unrounded values; displayed cells are rounded indepen-dently, so a cell-wise subtraction can differ by up to 0.01 .
+
+in-distribution, not under generator shift. A further protocol fact matters for interpretation: the primary study trains and evaluates without lagged edges (instantaneous-graph dynamics only, –no-tscm-lag ). A lagged replication (identical protocol with lagged edges enabled in both training and evaluation, single seed) preserves the gap on every structure: back-door +0.12 ±.03 ,front-door +0.04 ±.02 , instrumental-variable +0.06 ±.02 , pooled +0.07 
+
+(lagged) vs. +0.08 (lag-free, same 𝑛 =960 evaluation batch; the Table 5 sweep pools to +0.09 at 𝑇 =200 on its smaller 𝑛 =640 batch). The advantage is thus not an artifact of the instantaneous-graph setting. Per-cell standard errors capture evaluation sampling noise; training-seed variance is quantified separately below. To rule out trajectory length as a confounder we sweep 𝑇 ∈{200 , 500 , 1000 , 2000 } (Table 5). The interventional model attains a higher direction accuracy for every structure at every length. On the OSC prior the gap reaches +0.17 on the back-door case and pools to ≈ + 0.09 , essentially flat across a 10 × range of trajectory lengths. On the BTM prior the trend is the same but weaker (pooled 
+
++0.02 to +0.05 across 𝑇 , Appendix E). RMSE is similar across the two models, so the signal is in the sign of the estimated effect: on the back-door case the observational model recovers the direction 
+
+0.63 of the time vs. 0.78 for the interventional model ( 𝑇 =200 , Ta-ble 5 source run). To rule out training-seed luck — the variance the per-cell stan-dard errors do not cover — we retrain every OSC arm from scratch under three seeds and re-evaluate at 𝑇 =200 . The gap is positive in all nine structure ×seed cells; per-structure means ± seed std are back-door +0.14 ±.02 , front-door +0.04 ±.01 , instrumental-variable 
+
++0.09 ±.04 , and the pooled gap is +0.089 with a seed-to-seed std of only 0.005 (per-seed pooled values +0.084 , +0.090 , +0.094 ). Across three training seeds, four trajectory lengths, and three structures, interventional training buys a real and measurable advantage that the benchmark detects 5. Figure 7 (Appendix E) shows the mechanism on one representative SCM per structure: the interventional model’s predictive density shifts toward the ground-truth conditional interventional distribution while its observational twin stays on the observational density — and the visual separation is ordered exactly as the measured gaps, largest for back-door and smallest for IV. 
+
+## 7 Representativeness and Validation 7.1 Representativeness: zero-shot transfer to real systems 
+
+For a synthetic data generator, representativeness is the load-bearing requirement: do models trained only on the prior behave sensibly on real dynamics? We answer by testing external va-lidity: zero-shot transfer to real systems. A causal foundation model trained purely on DoTime-style synthetic TSCMs transfers 
+
+zero-shot (no fine-tuning) to two disjoint real domains [26].    
+
+> 5Gap SEs combine the two arms’ SEs in quadrature; both arms score the same seeded episode stream, so under positively correlated episode difficulty this is conservative. The four 𝑇 columns roll the same evaluation episode population out to longer hori-zons (fixed evaluation seed), isolating horizon length rather than providing inde-pendent replications. Gaps are computed from unrounded values; displayed cells are rounded independently, so a cell-wise subtraction can differ by up to 0.01 .DoTime: A Synthetic Benchmark Generator for Interventional and Counterfactual Time Series
+
+Table 3: Reference results at release scale (full suites: 10 ,800 / 9,999 / 9,999 / 100 ,000 episodes): pooled RMSE (direction accuracy in parentheses); Oracle is the synthetic upper bound. PFN rows use one interventional and one observational checkpoint of identical capacity ( s9ho_all_causal / s9ho_all_obs ; OSC prior, no lagged edges — no suite matches this training distribution exactly, see §6.3). BackDoorOLS /IV2SLS fall back to the outcome mean off their applicable structures; Generic RMSE is on the raw scale. RMSE cells show mean ± std (bootstrap 95% CI width / 3.92 ); direction-accuracy standard errors ( √︁ 𝑝 (1 − 𝑝 )/ 𝑛 ) are ≤ 0.01 
+
+on every full-suite row. Gaps are computed from unrounded values; displayed cells are rounded independently, so a cell-wise subtraction can differ by up to 0.01 .
+
+Baseline Ident. Regime Cont. Generic Oracle (upper bnd) 0.00 (1.00) 0.00 (1.00) 0.00 (1.00) 0.00 (1.00) Zero 0.72 ±.02 (0.00) 1.82 ±.04 (0.00) 2.75 ±.61 (0.00) 46 .2 ±1.4 (0.00) TrajMean 0.62 ±.01 (0.67) 1.84 ±.03 (0.50) 2.74 ±.61 (0.50) 46 .6 ±1.4 (0.66) AR1 0.74 ±.02 (0.60) 2.54 ±.05 (0.49) 3.40 ±.67 (0.51) 49 .4 ±1.5 (0.62) VAR 0.66 ±.01 (0.64) 1.92 ±.04 (0.50) 3.50 ±.56 (0.50) 62 .1 ±4.6 (0.65) BackDoorOLS 0.78 ±.02 (0.65) 1.84 ±.03 (0.50) 2.77 ±.60 (0.53) 46 .6 ±1.4 (0.66) IV2SLS 0.88 ±.06 (0.67) 1.84 ±.03 (0.50) 2.76 ±.60 (0.51) 46 .6 ±1.4 (0.66) PFN obs 0.67 ±.01 (0.57) 2.07 ±.04 (0.51) 2.97 ±.70 (0.49) 46 .3 ±1.4 (0.62) PFN int 0.67 ±.01 (0.66) 1.99 ±.04 (0.49) 4.07 ±.87 (0.51) 48 .2 ±1.4 (0.66) 
+
+Table 4: Interventional vs. observational direction accuracy (± standard error) on dot-Identifiability-v1 , all three models on the same 480 -episode stratified subsample ( 60 per struc-ture; TabPFN and Chronos-2 are too costly per episode for the full suite). Bold marks the gap column — the within-row contrast; absolute accuracies are not comparable across rows (the models differ in capacity, pre-training corpus, and ad-justment machinery). The PFN’s gap is unchanged on the full suite ( 0.66 vs. 0.57 , Table 3), so the subsample is not driv-ing it. 
+
+Model interventional observational gap TabPFN (adjustment) 0.67 ±.02 0.68 ±.02 −0.01 
+
+Chronos-2 0.62 ±.03 0.63 ±.02 −0.01 
+
+Do-Over-Time-PFN 0.64 ±.02 0.55 ±.03 +0.08 
+
+Table 5: Direction-accuracy gap (int − obs, ± standard er-ror) of the structure-matched interventional vs. observa-tional Do-Over-Time-PFN on the OSC prior, evaluated on held-out episodes (disjoint seeds; same prior configuration as training; no lagged edges), across trajectory lengths 𝑇 ∈{200 , 500 , 1000 , 2000 }.
+
+Structure 𝑇 =200 𝑇 =500 𝑇 =1000 𝑇 =2000 
+
+back_door +0.14 ±.03 +0.12 ±.03 +0.17 ±.03 +0.17 ±.03 
+
+front_door +0.08 ±.03 +0.07 ±.03 +0.07 ±.03 +0.07 ±.03 
+
+instrumental_variable +0.05 ±.03 +0.04 ±.03 +0.03 ±.03 +0.04 ±.03 
+
+pooled +0.09 +0.08 +0.09 +0.10 
+
+Physical — Causal Chambers wind tunnel. On the wt_intake_impulse 
+
+benchmark [7] (predicting rpm_in under an intake impulse), the synthetic-trained PFN attains RMSE 661 ±4 vs. a naive last-value baseline at 1265 — a +47 .8% ±0.3% lift over five training seeds — yet its per-episode Pearson correlation is near zero ( 0.12 ± 0.17 ). The two are consistent because they measure different things: the model relocates the post-intervention operating level (with a systematic 11% undershoot in 99% of episodes) but does not track the chamber’s high-frequency micro-oscillations, whose sign flips faster than it can follow. Figure 5 makes the split visible and quantifies both failures; the representativeness signal is regime relocation, not waveform tracking. At panel (a) the predicted and true level distributions sit close together on the scale that matters. The residual gap between them is 198 , against the 1265 a last-value baseline is off by. Meanwhile, panel (b) shows the correlation is bimodal at ±1, with |𝑟 | > 0.9 in 79% of episodes but only 50% of them positive. The model therefore produces a strongly-shaped curve whose phase is close to a coin flip. One further limit is worth stating: within this probe the predicted level is nearly constant (1530 ± 28 ) while the true level varies more ( 1728 ± 63 ), so across episodes the two are uncorrelated ( 𝑟 = −0.01 ); the model relocates the operating point to the right regime rather than tracking each episode’s level. In short, it recovers the intervention’s coarse magnitude and level but neither the per-episode level nor the fine waveform — the representativeness signal here is regime relocation, not oscillation tracking. 
+
+Biological — pharmacokinetics. On real Warfarin plasma-concentration trajectories 6, the same model family co-varies with the dose-driven trajectory: four of five seeds attain 
+
+Pearson 𝑟 ∈ [ 0.72 , 0.89 ] zero-shot, though the fifth collapses to 
+
+𝑟 ≈ − 0.87 . The correlation is real but seed-unstable, and the two halves of that statement need different evidence. Real: pooling the 
+
+160 per-subject correlations gives mean 0.49 , median 0.87 , with 
+
+80% positive — significant against zero by a one-sample 𝑡 -test (𝑡 = 8.7, 𝑝 < 10 −4), a Wilcoxon signed-rank test, and a sign test (𝑝 < 10 −4 each). Seed-unstable: the same claim tested at the seed 
+
+level, on five per-seed means, does not reach significance ( 𝑡 =1.44 ,
+
+𝑝 =0.22 ) — one collapsed seed is enough to erase it. We report both tests rather than the flattering one, since the gap between them is precisely the instability we are disclosing. On error magnitude the  
+
+> 6First-order compartmental dosing — the standard clinical PK model — with dose as the intervention; a mixed-mechanism variant was also run and is weaker/more seed-unstable (see results/reference/transfer/ ). Dennis Thumm, Billy Tim Anthony, and Ying Chen
+
+probe is close to null: RMSE 3.49 ±0.04 against a naive last-value baseline at 3.51 , a lift of 0.5% ± 1.1% — far below the chamber’s 
+
++47 .8% .We report these as five-seed transfer probes, not competitive benchmarks: the RMSE lift on the pharmacokinetic (PK) probe is negligible for the reason just given (the per-subject series cluster tightly around their means, so a last-value baseline is already near-optimal and there is little headroom to win) and the chamber signal is level recovery rather than dynamics tracking. We claim representativeness — synthetic-trained models behave sensibly on real interventional dynamics — not competitive dominance over domain-specific tools. Purely synthetic pretraining is, moreover, no longer an outlier position in time series: TabPFN-TS-3 is trained on synthetic series alone yet ranks second among time-series foundation models on fev-bench [10], and Chronos-2 derives its multivariate and covariate-informed capabilities entirely from synthetic data, with a synthetic-only variant nearly matching its full model [2]. The per-seed transfer metrics behind these numbers ship under results/reference/transfer/ ; the transfer scatter and full tables are in Thumm et al. [26]. 
+
+## 7.2 Internal validation and sanity checks 
+
+Acyclicity and stability. A diverged trajectory is released as an all-zero episode with a zero target, excluded from direction-accuracy scoring by the near-zero rule of the evaluation protocol. In the released v1.0.0 suites the zeroed fraction is 28 .7% on 
+
+dot-Generic-100k and 4.6% on dot-Identifiability-v1 (0% on RegimeSwitch / Continuous) — higher than we consider accept-able at the generic prior’s default configuration, and disclosed here so users can filter on ∥𝑋 ∥ > 0. Appendix C traces the cause to the deliberately relaxed spectral-radius assumption and describes the opt-in fix (deterministic resampling; 0/200 zeroed on a full generic build, regression-tested). 
+
+Identifiability sanity. Oracle attains RMSE ≈ 0 on every syn-thetic suite (asserted in our test suite). 
+
+Distribution shift between suites. Summary statistics of dot-RegimeSwitch-v1 and dot-Generic-100k differ non-trivially, justifying separate evaluation. 
+
+Counterfactual modes. The observed_normal mode yields strictly smaller observational-baseline errors than prior , con-firming the positivity advantage. 
+
+## 8 Responsible Release and Limitations 
+
+Limitations. The frozen suites use 𝑁 ≤ 10 variables and 𝐾 ≤ 3
+
+lags; these are the DEFAULT_CONFIG bounds ( N_max , K_max ) we chose for the released snapshots, not architectural limits. The same generator produces larger graphs and deeper lags from a config override (a regression test in the released package generates at 𝑁 max = 60 , 𝐾 max = 8), so scale is a user choice rather than a ceiling. Divergence rates grow with scale absent the hardening configuration (§7). Non-stationarity enters the suites through switching SCM parameters and time-varying interven-tion profiles, but the exogenous drivers are i.i.d. or mean-reverting: a trending or seasonal confounder — the classic seasonality-confounded-treatment failure mode — is therefore outside the released prior, and is the concrete content of the structured-driver extension we flag as future work (§9). Ground-truth semantics also differ by suite: the continuous-time generator simulates both arms under one shared noise realisation, so its targets are counterfactuals in the strict sense, whereas the discrete-time generators draw the interventional arm with independent noise. The released targets of dot-Identifiability-v1 , dot-RegimeSwitch-v1 , and dot-Generic-100k are exact interventional samples from the same SCM, not counterfactuals of the specific observational run. The prediction task is unchanged (predict the released target from the observational context and the intervention), but the discrete targets carry an independent noise realisation, which raises the irreducible-error floor and is consistent with the near-saturated squared-error metrics of §6.3. Shared-noise discrete counterfactuals require only reusing the pre-sampled noise across arms and are planned for a versioned v2 release (v1 suites stay frozen). The genuine modelling assumptions are additive Markovian noise and no explicit measurement model (the continuous-time suite does support irregular jittered/Poisson observation grids, §4). Two further limitations of the headline ex-periment: the interventional/observational gap of §6.5 is measured on held-out episodes of the training prior (not under generator shift), and its primary study uses models trained without lagged edges (a single-seed lagged replication preserves the gap, §6.5). Training-seed variance of the OSC gap is quantified over three seeds at 𝑇 =200 (pooled seed std 0.005 , §6.5); the 𝑇 -sweep and the 
+
+BTM arms remain single-seed, and §7.1 shows this model family can be seed-unstable in other settings. Finally, DoTime cannot yet validate real-world transportability beyond the proof-of-concept transfer of §7.1. 
+
+Responsible release. Apache-2.0 (code) and CC-BY-4.0 (data); purely synthetic with no PII; fully reproducible from seeds; a frozen Zenodo DOI per suite; Croissant metadata; and a reported energy footprint for generating the 100 k suite (Appendix F). 
+
+## 9 Conclusion 
+
+DoTime is, to our knowledge, the first open, scalable, and theoret-ically grounded benchmark generator for multivariate time-series causal inference under interventions, spanning three intervention types with continuous-time windows, five counterfactual modes, eight identification structures, and four frozen suites with refer-ence baselines. Our headline experiment shows, across three train-ing seeds, four trajectory lengths, and three identification struc-tures, that an interventional foundation model outperforms an ob-servational one of equal capacity on direction accuracy — a gap the benchmark detects consistently (pooled +0.09 , seed std 0.005 ). Future work includes prior-diversity extensions (broader mecha-nism families, structured exogenous drivers, prior-side episode fil-tering), partial observability, learned mechanism priors, and con-nections to causal world-model literature. DoTime: A Synthetic Benchmark Generator for Interventional and Counterfactual Time Series 1300 1400 1500 1600 1700 1800 1900 
+
+> post-intervention mean level (rpm_in)
+> 0
+> 100
+> 200
+> 300
+> episodes
+> residual gap 198 (11% undershoot)
+> last-value baseline errs by 1265
+> (off scale, to the left)
+
+(a) level recovery          
+
+> PFN prediction
+> ground truth
+> 1.00 0.75 0.50 0.25 0.00 0.25 0.50 0.75 1.00
+> per-episode Pearson r
+> 0
+> 100
+> 200
+> 300
+> 400
+> episodes
+> |r| > 0.9 in 79% of episodes,
+> but only 50% are positive
+
+(b) waveform tracking   
+
+> mean r= 0.12
+
+Figure 5: Level recovery versus waveform tracking on the Causal Chambers wt_intake_impulse probe ( 1,000 episode ×seed evaluations, five training seeds). (a) After the impulse the synthetic-trained PFN places the operating level within 198 of ground truth, against the 1265 by which a last-value baseline (anchored at the pre-intervention reading, off scale to the left) misses — but it undershoots systematically, and its predicted level is nearly constant while the true level varies. (b) Within the post-intervention window the per-episode correlation is bimodal at ±1: the model tracks a strongly-shaped curve, but its phase is close to a coin flip. Together the panels are why a large RMSE lift and a near-zero mean correlation are consistent rather than contradictory. 
+
+## A Algorithms 
+
+Algorithm 1 samples a temporal SCM and a paired observational-interventional trajectory; Algorithm 1 covers both rungs of ground truth (§3): the interventional arm either draws fresh noise (Level 2, an interventional twin) or reuses the observational arm’s noise (Level 3, a counterfactual). As released, the continuous-time generator ( dot-Continuous-v1 ) takes the shared-noise branch; the discrete-time suites take the independent-noise branch (§8). Algo-rithm 2 then reads the counterfactual target off the shared-noise run. 
+
+Algorithm 1 Sample a paired (obs, int) trajectory  
+
+> 1:
+
+sample 𝐺 0 (upper-triangular mask over random topo order), 
+
+𝐺 1: 𝐾 (geometric decay)  
+
+> 2:
+
+sample mechanisms 𝑓 𝑖 and noise scales; optionally rescale lag matrices to spectral radius ≤ 𝜆 max (hardening config)  
+
+> 3:
+
+draw noise 𝜀 1: 𝑇 ; simulate 𝑋 obs via Eq. (1) with burn-in  
+
+> 4:
+
+sample intervention (target , window , value ) under the chosen mode + positivity guard  
+
+> 5:
+
+if counterfactual (Level 3): simulate 𝑋 int reusing 𝜀 1: 𝑇 ; else in-terventional (Level 2): draw fresh 𝜀 ′ 
+
+> 1: 𝑇
+
+∼ 𝑃 (𝜀 ) — overriding the target over the window either way  
+
+> 6:
+
+return (𝑋 obs , 𝑋 int , spec )
+
+Algorithm 2 Counterfactual target at a query  
+
+> 1:
+
+given the query (variable index for 𝑌 , time 𝑡 𝑞 ) and the shared-noise (Level 3) interventional run  
+
+> 2:
+
+return 𝑋 int  
+
+> 𝑡 𝑞 ,𝑌
+
+{exact counterfactual, since 𝜀 is shared with the factual run} 
+
+## B Collapsed (continuous-time) structure views 
+
+Figure 2 draws the eight identification structures unrolled over dis-crete slices, which is the right picture for the discrete-time suites but redundant once the dynamics are continuous. Figure 6 gives the complementary collapsed view used for dot-Continuous-v1 (cf. the causal graphs for systems of SDEs of Boeken and Mooij [3]): one node per variable, a self-loop standing for the SDE’s own-value dependence −𝜃 𝑣 𝑋 𝑣 , and an edge 𝑢 →𝑣 wherever 𝑢 enters 𝑣 ’s drift. The two views encode the same identification content; the col-lapsed one makes clear that do (𝑎 ) severs all of 𝑎 ’s incoming edges including its self-loop — the continuous-time analogue of holding the treatment fixed across the intervention window rather than at a single step. 
+
+## C Convergence theorem (restated) 
+
+Under the six assumptions of Thumm et al. [25] (acyclic 𝐺 0;bounded, Lipschitz mechanisms; sub-Gaussian noise; spectral radius < 1 after clipping; positivity over the intervention support; and Markov order 𝐾 ), the simulated process is stationary after burn-in and the empirical counterfactual estimator is consistent. The full proof is reproduced from Thumm et al. [25]. 
+
+Scope on the released suites. The result is stated conditionally, and two of its assumptions are deliberately relaxed by the released v1.0.0 suites, so we make the scope explicit rather than let the theorem be read as a guarantee about the shipped data. First, the spectral-radius condition is enforced only by the optional harden-ing configuration used for PFN training (§1); the released suites apply no such constraint. Computing the reduced-form compan-ion spectral radius 𝜌 directly from the sampled weight matrices of 2,000 freshly drawn generic SCMs (no simulation required), 
+
+𝜌 ≥ 1 in 63% of the 1,715 draws for which a single companion matrix is defined. This is precisely what the divergence disclosed in §7 is: 95% of zeroed episodes have 𝜌 ≥ 1, and divergence is 48% Dennis Thumm, Billy Tim Anthony, and Ying Chen             
+
+> Bi-Variate
+> trivial (RCT)
+> 𝐴 𝑌
+> Observed-Confounder
+> back-door (null)
+> 𝑋
+> 𝐴 𝑌
+> Back-Door
+> back-door
+> 𝑋
+> 𝐴 𝑌
+> Confounder-Mediator
+> back-door
+> 𝑋
+> 𝐴 𝑀 𝑌
+> Mediator
+> front-door
+> 𝐴 𝑀 𝑌
+> Front-Door
+> front-door
+> 𝑈
+> 𝐴 𝑀 𝑌
+> Instrumental-Variable
+> IV
+> 𝑈
+> 𝑋 𝐴 𝑌
+> Unobserved-Confounder
+> non-identifiable
+> 𝑈
+> 𝐴 𝑌
+
+Figure 6: Collapsed continuous-time view of the same eight structures. Each node is one variable; the self-loop is the OU drift’s own-value term ( −𝜃 𝑣 𝑋 𝑣 ), and 𝑢 →𝑣 means 𝑢 enters 𝑣 ’s drift. Red dashed edges are severed by do (𝑎 ) — including 𝑎 ’s own self-loop, since a hard intervention overrides the treatment’s own dynamics for the whole window. Node roles match Figure 2: orange 
+
+= intervened, open = queried outcome, dashed = hidden. 
+
+likely given 𝜌 ≥ 1 against 4.6% given 𝜌 < 1. Because each mech-anism applies a nonlinearity to its linear pre-activation, this 𝜌 is exact only for linear activations and an upper bound otherwise. Re-running the same 1,715 sampled weight matrices with every mechanism restricted to a linear activation — which leaves 𝜌 
+
+unchanged and varies only the nonlinearity — makes the criterion exact, and the relationship becomes essentially deterministic: divergence follows 𝜌 ≥ 1 in 96% of cases, occurs in none of the 
+
+636 draws with 𝜌 < 1, and every zeroed episode has 𝜌 ≥ 1. The difference between the two conditions is the prior’s nonlinearities doing stability work: being contractive, they rescue roughly half of the 𝜌 ≥ 1 draws, which is why overall divergence falls from 
+
+52% to 27% once they are enabled. Second, dot-RegimeSwitch-v1 
+
+switches SCM parameters mid-trajectory by construction — it is non-stationary by design and admits no single companion matrix (such episodes are the excluded remainder above), so the theorem does not cover it and is not intended to. Conditional on an episode surviving divergence detection, however, burn-in does what it is meant to: across the same sample the per-variable variance ratio between the first and last 50 retained steps has median 1.01 
+
+with 94% of variables within a factor of two, and the standardized mean drift | ¯𝑥 late − ¯𝑥 early |/ ˆ𝜎 early has median 0.14 with 96% below 
+
+0.5. The theorem therefore describes the hardened, non-switching configuration; the released suites trade that guarantee for prior diversity, and users needing the stationary regime can rebuild with –stability-retries (§7). Both measurements reproduce from the shipped dotime-diagnose-stationarity console script; the full output is released as 
+
+results/reference/stationarity_diagnostic.json (and 
+
+_identity.json for the linear-activation condition). 
+
+## D Hyperparameters and configuration 
+
+Default prior: 𝑁 ∼ U{ 3, . . . , 10 }, 𝐾 ∼ U{ 1, . . . , 3}, edge prob-ability Beta (2, 5), geometric lag decay 𝛾 (default 0.7), dropout (hidden) probability up to 0.3, burn-in 50 . Per-suite seeds and the regime / continuous configurations are recorded in 
+
+scripts/release_config.yaml ; the build manifest records the config hash and package version. The counterfactual-mode OOD ratios and mean effect magnitudes are tabulated per mode in the released metadata. 
+
+## E Per-structure breakdown 
+
+Table 5 reports the OSC prior. On the BTM prior the same 𝑇 -sweep gives gaps of +0.05 to +0.07 (back-door), +0.03 to +0.09 (front-door), and −0.02 to +0.01 (instrumental-variable), pooling to +0.02 
+
+to +0.05 across 𝑇 ∈ { 200 , 500 , 1000 , 2000 } (per-cell standard errors 
+
+≈ 0.03 , Table 6) — the same non-negative trend as OSC at smaller magnitude, consistent with the BTM generator producing weaker, noisier interventional signals; the IV gap is not distinguishable from zero. Full per-structure RMSE, NMSE, MAE, direction accu-racy, and standard errors ship in the released results JSONs. 
+
+Exploratory: does the gap track identifiability? A natural ques-tion is whether the interventional advantage vanishes where the effect is not identifiable. As a single-seed probe we trained the same structure-matched pair on two further structures and evaluated at 𝑇 =200 : observed_confounder (identified, back-door family) gives a gap of +0.03 ±.03 (0.92 vs. 0.89 ) and 
+
+unobserved_confounder (non-identifiable by design) gives 
+
++0.03 ±.02 (0.89 vs. 0.85 ) — small, similar, and not vanishing under non-identifiability. Two caveats frame this. First, both structures DoTime: A Synthetic Benchmark Generator for Interventional and Counterfactual Time Series 7.5 5.0 2.5 0.0 2.5 5.0 7.5                      
+
+> Yat query time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> normalised density
+> Back-door (BD)
+> 2101
+> Yat query time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Front-door (FD)
+> 0.0 0.5 1.0 1.5 2.0 2.5
+> Yat query time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Instrumental variable (IV)
+> prior CID p(y|do (a), )observational p(y|)DoT-PFN int DoT-PFN obs
+
+Figure 7: Conditional interventional distribution (CID) at the query time for one representative TSCM per structure ( OSC 
+
+prior; the SCM seed is chosen by a deterministic scan targeting a standardized do-effect of 2.5𝜎 — realized 2.5𝜎 / 1.3𝜎 / 0.9𝜎 
+
+for BD/FD/IV). Red, filled: the ground-truth CID 𝑝 (𝑦 | do (𝑎 ),𝜓 ) from 3,000 independent-noise interventional rollouts of the same SCM (Level-2 semantics, §3); blue dashed: the observational density 𝑝 (𝑦 | 𝜓 ); vertical lines mark the two medians. Black: 
+
+DoT-PFN int ’s predictive density; grey dashed: DoT-PFN obs at identical capacity, both conditioned on the same representative ob-servational history. The interventional model shifts its mass toward the CID while its observational twin stays on the obser-vational density, and the visual separation is largest for back-door and vanishes for IV — the same ordering as the measured gaps in Table 5. This is a qualitative single-SCM illustration, not an aggregate: neither model recovers the full density. Table 6: BTM prior: direction-accuracy gap (int − obs, ± stan-dard error) of the structure-matched Do-Over-Time-PFN across trajectory lengths (same protocol as Table 5: held-out episodes, no lagged edges; single training run per arm — BTM seed variance not separately quantified). Gap SEs combine the two arms’ SEs in quadrature; both arms score the same seeded episode stream, so under positively cor-related episode difficulty this is conservative. The four 𝑇 
+
+columns roll the same evaluation episode population out to longer horizons (fixed evaluation seed), isolating hori-zon length rather than providing independent replications. Gaps are computed from unrounded values; displayed cells are rounded independently, so a cell-wise subtraction can differ by up to 0.01 .
+
+Structure 𝑇 =200 𝑇 =500 𝑇 =1000 𝑇 =2000 
+
+back_door +0.07 ±.03 +0.05 ±.03 +0.05 ±.03 +0.05 ±.03 
+
+front_door +0.05 ±.03 +0.09 ±.03 +0.06 ±.03 +0.03 ±.03 
+
+instrumental_variable −0.01 ±.03 +0.01 ±.03 −0.02 ±.03 −0.01 ±.03 
+
+pooled +0.04 +0.05 +0.03 +0.02 
+
+are near-saturated: even the observational model signs the effect 
+
+≥ 0.85 of the time, leaving little headroom for any gap — consistent with the pattern that the gap is largest where the task is hardest (back-door at 0.62 –0.78 ). Second, direction accuracy scores the 
+
+sign of the effect, and sign recovery is a strictly weaker task than effect identification: an unobserved confounder biases the mag-nitude of the naive estimand but need not flip its sign under this generator’s effect-size distribution. A magnitude-sensitive metric may separate the identifiable and non-identifiable structures more sharply; we release the per-cell JSONs ( s9ho_extra/ ) and leave that refinement to future work. 
+
+## F Datasheet (abbreviated) 
+
+Following Gebru et al. [8]: Motivation — to benchmark interven-tional/counterfactual time-series estimation. Composition — purely synthetic temporal SCM trajectories with exact ground truth; no human subjects, no PII. Collection — generated from a committed seed-fixed script. Uses — training and evaluating causal founda-tion models; not for clinical decision-making. Distribution — Zen-odo (DOI) + Hugging Face, under CC-BY-4.0. Maintenance — ver-sioned suites; the GitHub repo tracks issues and the leaderboard. 
+
+Energy footprint — generation is CPU-only (no GPU). A measured 
+
+10 k-episode slice of dot-Generic-100k built in 157 s wall-clock ( 15 
+
+workers, ≈14 active cores) on a 16 -thread AMD Ryzen 7 7840HS laptop; the full 100 k suite therefore takes ≈26 min of wall-clock time ( ≈6.2 core-hours of CPU work). Energy is package-power ×
+
+wall-clock — the ∼45 W figure is the whole-CPU package draw, al-ready covering all active cores, so it is not multiplied by core-hours: 
+
+45 W × 0.44 h ≈0.02 kWh (computed from rated package power, as direct RAPL (per-package energy) counters were unavailable). 
+
+## G Croissant metadata (sample) 
+
+Each suite ships a croissant.json JSON-LD descriptor with the file objects (parquet shards with md5), the record-set fields ( x_obs ,
+
+x_int , y_true , structure , tier ), license, and version, conform-ing to the Croissant specification [1]. Dennis Thumm, Billy Tim Anthony, and Ying Chen 
+
+## H Reproducibility checklist 
+
+Code and seeds are released; pip install dotime installs the generator and loaders on a clean Python 3.10–3.12 envi-ronment; all four suites round-trip through load_benchmark 
+
+with checksum verification; the reference baselines and the Ta-ble 3/Table 4 rows reproduce from the evaluation harness shipped inside the package ( dotime-eval-reference , dotime-eval-pfn ,
+
+dotime-eval-tabpfn , dotime-eval-chronos ); the Appendix C stationarity diagnostics reproduce from dotime-diagnose-stationarity ;and the Do-Over-Time-PFN checkpoints are released on Hug-ging Face ( OSC = s9ho , BTM = s9btm ), including the general 
+
+s9ho_all_* pair behind Table 3/Table 4, the per-structure 
+
+s9ho_* /s9btm_* pairs behind Tables 5/6, the seed-43/44 check-points behind the three-seed result (§6.5), the lagged-replication pairs ( s9ho_*_lag ), and the two extra-structure pairs behind Appendix E. The training codebase, the structure-matched evaluation drivers (scripts/analyze_s9ho.py ), and the 
+
+OSC /BTM hardening configurations are released (anonymized) at https://anonymous.4open.science/r/do-over-time-pfn-EF8D, and every reported cell’s output metrics ship as JSONs under 
+
+results/reference/structure_matched/ .
+
+## Acknowledgments 
+
+We utilized Claude Code to assist in writing, scripting, and gener-ating the PyPI package. All AI-generated code was manually au-dited, tested and validated by the authors. 
+
+## References 
+
+[1] Mubashara Akhtar, Omar Benjelloun, Costanza Conforti, Luca Foschini, Pieter Gijsbers, Joan Giner-Miguelez, Sujata Goswami, Nitisha Jain, Michalis Kara-mousadakis, Satyapriya Krishna, et al. 2024. Croissant: A metadata format for ml-ready datasets. Advances in Neural Information Processing Systems 37 (2024), 82133–82148. [2] Abdul Fatir Ansari, Oleksandr Shchur, Jaris Küken, Andreas Auer, Boran Han, Pedro Mercado, et al. 2025. Chronos-2: From Univariate to Universal Forecast-ing. arXiv:2510.15821 [cs.LG] https://arxiv.org/abs/2510.15821 [3] Philip Boeken and Joris M. Mooij. 2026. Causal Graphs, Markov Properties and Do-calculus for Stochastic Differential Equations. arXiv:2607.12140 [math.ST] https://arxiv.org/abs/2607.12140 [4] Luca Castri, Sariah Mghames, Marc Hanheide, and Nicola Bellotto. 2024. CAn-DOIT: Causal Discovery with Observational and Interventional Data from Time Series. Advanced Intelligent Systems 6, 9 (2024), 2400181. doi:10.1002/aisy. 202400181 [5] Yuxiao Cheng, Ziqian Wang, Tingxiong Xiao, Qin Zhong, Jinli Suo, and Kunlun He. 2024. CausalTime: Realistically Generated Time-series for Benchmarking of Causal Discovery. In The Twelfth International Conference on Learning Repre-sentations (ICLR) . https://openreview.net/forum?id=iad1yyyGme [6] Paul Erdős and Alfréd Rényi. 1960. On the evolution of random graphs. Publi-cationes Mathematicae 5 (1960), 17–61. [7] Juan L. Gamella, Jonas Peters, and Peter Bühlmann. 2024. The Causal Chambers: Real Physical Systems as a Testbed for AI Methodology. arXiv:2404.11341 [cs.AI] https://arxiv.org/abs/2404.11341 [8] Timnit Gebru, Jamie Morgenstern, Briana Vecchione, Jennifer Wortman Vaughan, Hanna Wallach, Hal Daumé III, and Kate Crawford. 2021. Datasheets for datasets. Commun. ACM 64, 12 (Nov. 2021), 86–92. doi:10.1145/3458723 [9] Google Research. 2026. TabFM: A Zero-Shot Foundation Model for Tab-ular Data. https://research.google/blog/introducing-tabfm-a-zero-shot-foundation-model-for-tabular-data/. Code: https://github.com/google-research/tabfm. [10] Léo Grinsztajn, Klemens Flöge, Oscar Key, Felix Birkel, Philipp Jund, Brendan Roof, et al. 2026. TabPFN-3: Technical Report. arXiv:2605.13986 [cs.LG] https: //arxiv.org/abs/2605.13986 [11] P. Richard Hahn, Vincent Dorie, and Jared S. Murray. 2019. At-lantic Causal Inference Conference (ACIC) Data Analysis Challenge 2017. arXiv:1905.09515 [stat.ME] https://arxiv.org/abs/1905.09515 [12] Benjamin Herdeanu, Juan Nathaniel, Carla Roesch, Jatan Buch, Gregor Ramien, Johannes Haux, and Pierre Gentine. 2025. CausalDynamics: A large-scale benchmark for structural discovery of dynamical causal models. In NeurIPS 2025 Workshop on CauScien: Uncovering Causality in Science . https://openreview.net/ forum?id=jR3xBpZ4nJ [13] Jennifer L. Hill. 2011. Bayesian Nonparametric Modeling for Causal Inference. 
+
+Journal of Computational and Graphical Statistics (2011). [14] Noah Hollmann, Samuel Müller, Katharina Eggensperger, and Frank Hutter. 2023. TabPFN: A Transformer That Solves Small Tabular Classification Problems in a Second. In International Conference on Learning Representations (ICLR) .[15] Peter E. Kloeden and Eckhard Platen. 1992. Numerical Solution of Stochastic Differential Equations . Springer-Verlag, Berlin. [16] Daniel Marbach, Robert J Prill, Thomas Schaffter, Claudio Mattiussi, Dario Flo-reano, and Gustavo Stolovitzky. 2010. Revealing strengths and weaknesses of methods for gene network inference. Proceedings of the national academy of sciences 107, 14 (2010), 6286–6291. [17] Vladyslav Moroshan, Julien Siems, Arber Zela, Timur Carstensen, and Frank Hutter. 2025. TempoPFN: Towards Synthetic Pre-training of Linear RNNs for Zero-shot Time Series Forecasting. In EurIPS Workshop: AI for Tabular Data .[18] Samuel Müller, Noah Hollmann, Sebastian Pineda Arango, Josif Grabocka, and Frank Hutter. 2022. Transformers Can Do Bayesian Inference. In Interna-tional Conference on Learning Representations . https://openreview.net/forum? id=KSugKcbNf9 [19] Judea Pearl. 2009. Causality: Models, Reasoning, and Inference (2 ed.). Cambridge University Press, Cambridge, UK. [20] Audrey Poinsot, Panayiotis Panayiotou, Alessandro Leite, Nicolas CHESNEAU, Özgür Şimşek, and Marc Schoenauer. 2025. Position: Causal Machine Learn-ing Requires Rigorous Synthetic Experiments for Broader Adoption. In Forty-second International Conference on Machine Learning Position Paper Track . https: //openreview.net/forum?id=Nr2ulBN50q [21] PyMC Labs. 2026. CausalPy: Causal inference for quasi-experiments in Python .https://github.com/pymc-labs/CausalPy [22] Jake Robertson, Arik Reuter, Siyuan Guo, Noah Hollmann, Frank Hutter, and Bernhard Schölkopf. 2025. Do-PFN: In-Context Learning for Causal Effect Esti-mation. In The Thirty-ninth Annual Conference on Neural Information Processing Systems . https://openreview.net/forum?id=OaNbl9b56B [23] Stephen M Smith, Karla L Miller, Gholamreza Salimi-Khorshidi, Matthew Web-ster, Christian F Beckmann, Thomas E Nichols, Joseph D Ramsey, and Mark W Woolrich. 2011. Network modelling methods for FMRI. Neuroimage 54, 2 (2011), 875–891. [24] Dennis Thumm and Ying Chen. 2026. Interventional Time Series Priors for Causal Foundation Models. In 1st ICLR Workshop on Time Series in the Age of Large Models . https://openreview.net/forum?id=JbTgx2L9Z2 [25] Dennis Thumm, Arik Reuter, Jake Robertson, Shi Bin Hoo, Adrian Weller, Frank Hutter, Ying Chen, and Bernhard Schölkopf. 2026. Causal Foundation Models for Time Series based on Prior-Data fitted Networks. In 2nd ICML Workshop on Foundation Models for Structured Data . https://openreview.net/forum?id= CAaTQAfq7c [26] Dennis Thumm, Ruben Wiedemann, and Ying Chen. 2026. Towards Continuous-time Causal Foundation Models. In 2nd ICML Workshop on Foundation Models for Structured Data . https://openreview.net/forum?id= iZO7RRZDCC

@@ -1,0 +1,1065 @@
+Title: The Confounder Trap: Treatment-Encoding Representations in Causal Inference with Text
+
+URL Source: https://arxiv.org/pdf/2607.26309v1
+
+Published Time: Thu, 30 Jul 2026 00:14:24 GMT
+
+Number of Pages: 31
+
+Markdown Content:
+# The Confounder Trap: Treatment-Encoding Representations in Causal Inference with Text 
+
+Marie Neubrander 
+
+Department of Statistical Science Duke University Durham, NC, 27705 
+
+Graham Tierney 
+
+Department of Statistical Science Duke University Durham, NC, 27705 
+
+Alexander Volfovsky 
+
+Department of Statistical Science Duke University Durham, NC, 27705 
+
+## Abstract 
+
+Estimating causal effects of linguistic properties from observational text is difficult because the same document can contain both the treatment of interest and the non-treatment textual attributes needed for adjustment. Existing approaches often learn representations from the full text to capture latent confounding, but when treatment status is itself encoded by words in the text, these representations can directly encode treatment. This creates a confounder trap: richer representations can make treated and control documents separable, inducing overlap violations even when the underlying causal problem satisfies overlap. We study latent text treatments that are encoded through lexicons or other treatment-defining lexical information, and propose masking-based adjustment representations that remove this lexical treatment signal before representation learning. We formalize representation-induced overlap failure, prove that deletion masking preserves overlap for bag-of-words/topic-model representations, and characterize replacement masking as a natural relaxation for large language models that hides treatment-defining tokens while preserving word order and context. Across simulations, masking improves overlap diagnostics, stabilizes treatment effect estimates, and reduces bias relative to adjustment methods that learn from the unmasked text. 
+
+## 1 Introduction 
+
+In many applications, researchers want to estimate how linguistic properties of text causally affect reader behavior, attitudes, or downstream decisions. For example, prior work studies how positive product reviews affect sales [ 24 ], whether polite complaints receive faster responses [ 24 , 11 ], how candidate descriptions change voter opinions [ 8 ], and how information in clinical notes predicts patient responses to treatment[ 21 ]. These questions are text-as-treatment problems: the intervention of interest is not simply exposure to a document, but exposure to an encoded linguistic property. Text-as-treatment problems are especially difficult because texts vary along many dimensions at once. A review can differ in sentiment, product category, specificity, writing quality, and author style. A political message can differ in humility, topic, argument structure, and ideological content. To isolate the effect of one linguistic property, the analyst must compare texts that differ in the treatment while adjusting for other textual attributes that also affect the outcome or the assignment of treatment; we refer to these as adjustment-relevant non-treatment textual attributes.                 
+
+> Preprint. arXiv:2607.26309v1 [stat.ME] 28 Jul 2026 A. One text, two signals B. Full-text representation C. Masked representation
+> “I loved /hated this book ,
+> but delivery was slow .”
+> treatment /control
+> defining lexical signal adjustment-relevant non-treatment content
+> A useful adjustment representation must keep the second signal without directly encoding the first. b(W)learned from full text
+> lexical shortcut separates arms
+> propensities near 0 or 1
+> control treated
+> b(Wmask )or b(Wdel )
+> topic/product structure
+> style/context structure
+> treated and control remain comparable
+> overlap protected; sufficiency still required
+
+Figure 1: The confounder trap. (A) A document contains both treatment-defining words and adjustment-relevant non-treatment content. (B) Representations learned from full text can collapse overlap. (C) Masking treatment-defining words before representation learning removes this separation while preserving non-treatment structure for adjustment. This creates a tension between two key assumptions in observational causal inference: ignorability and overlap [ 27 ]. The overlap assumption requires that for alladjustment-relevant non-treatment attributes, there is a nonzero probability of the corresponding document being treated or control. Intuitively, this ensures we can compare treated and untreated units that are similar in their covariates. At the same time, we must also satisfy ignorability . This requires measuring and adjusting for enough of the non-treatment textual attributes to remove confounding. Overlap and ignorability have competing interests: we must capture enough confounding information to satisfy ignorability, while not so much that we directly encode treatment status. Once treatment is directly recoverable from the representation, treated and control documents occupy separated regions of the representation space and overlap fails. To illustrate, suppose treatment is lexicon-based positive/negative sentiment in product reviews, and the outcome is whether a reader purchases the product. Product category may be adjustment-relevant: movies and books may differ in baseline purchase rates, and also in the distribution of positive and negative reviews (Figure 1 Panel A). But sentiment words such as "loved" and "hated" are not adjustment variables; they define treatment. An embedding learned from the full review will naturally encode them, enabling the representation to classify treatment status so well that it violates overlap and becomes the wrong object for causal adjustment (Figure 1 Panel B). A growing body of work learns text representations for causal adjustment using topic models, bag-of-words features, or large language models [ 11 , 32 , 24 , 17 ]. However, when the treatment is a component of the text, these representations can induce rather than solve a causal identification problem [ 31 ]: the learned representation encodes the treatment. We call this mechanism direct treatment encoding. We focus empirically on treatments with identifiable lexical treatment signals such as sentiment lexicons, partisan-framing terms, or hedging words and propose a masking framework to avoid direct treatment encoding while learning representations sufficient for adjustment. One natural response is to erase treatment information from learned representations post hoc. For instance, LEACE [ 2] gives a closed-form linear projection that removes a target concept from a representation. Though designed for concept erasure rather than causal inference, it and similar representation-editing methods are natural candidates for this problem. However, erasing all treatment signal is the wrong target: confounders are by definition treatment-predictive, so removing all treatment information also discards adjustment signal needed for identification. The challenge is to remove the lexical shortcut while preserving confounding structure. 
+
+Contributions. First, we formalize representation-induced overlap failure: when a representation predicts treatment better than the true confounders allow, overlap vanishes. Second, for treatments with identifiable removable treatment signals, we develop a masking framework with two variants (Figure 1 Panel C). Deletion masking provably preserves overlap; replacement masking relaxes this setting for use with LLMs. Third, we implement masking for both topic models and large language models, showing that it improves overlap, stabilizes treatment effect estimates, and reduces bias relative to unmasked methods. Sections 2 and 3 formalize the problem and framework. Sections 4 and 5 give implementations and simulations for topic models and LLMs, respectively. Section 6 gives a real-data application. 22 Potential Outcomes and Text-as-Treatment 
+
+We use the potential outcomes framework to define the causal effect of a latent linguistic treat-ment. Suppose an individual reads a document with words Wi from which they perceive a treat-ment of interest Ti ∈ { 0, 1} alongside other textual attributes Zi. After reading, an outcome 
+
+Yi is realized. We additionally assume an observed document label Di related to the treatment of interest, either assigned by an analyst or measured directly from the text. Figure 2 shows the corresponding DAG: a label Di generates the words Wi. The reader perceives latent treat-ment Ti and confounding attributes Zi as deterministic functions of Wi, both of which affect Yi.
+
+Figure 2: DAG. Grey nodes: observed outcome Y , labels D, and words W .White nodes: unobserved latent treat-ment T and confounders Z.We work under the simplifying alignment Di = Ti: the label is assumed to match the latent perceived treatment. For treatments whose defining signal is observable in the text, the assumption is natural: treatment status is determined by the presence of specific words, and it is reasonable to assume a reader correctly identifies those words. This alignment al-lows us to identify the effect of changing the latent treatment while holding fixed the non-treatment textual attributes: 
+
+τt = EZ
+
+Y (T = 1 , Z) − Y (T = 0 , Z).
+
+This differs from the effect of assigning a label D, which may also change non-treatment attributes. Appendix B.1 develops this distinction in more detail. If Zi were observed, standard estimation methods, such as outcome regression or inverse propensity score weighting, could adjust for it. The challenge is that Zi is not directly observed; analysts substitute a learned representation. We write Y (t) for Y (t, Z) and abbreviate τt as τ = E[Y (1) − Y (0)] . Let B = b(W) denote a learned representation of the document. Identification of τ from the observed data requires four assumptions. 
+
+A1: SUTVA If T = t, then Y = Y (t). There is no interference and no hidden versions of treatment. 
+
+A2: Latent mean ignorability For t ∈ { 0, 1}, EY (t) | T = t, Z, B  = EY (t) | Z, B . That is, conditional on the latent confounders Z and the representation B, treatment assignment carries no additional information about mean potential outcomes. 
+
+A3: Outcome sufficiency For t ∈ { 0, 1}, EY (t) | Z, B  = EY (t) | B. B retains all relevant information from Z.
+
+A4: Representation level overlap For t ∈ { 0, 1}, Pr( T = t | B) > 0. Any value of the representation B has a nonzero probability of being associated with either treatment status. 
+
+Theorem 1. Under Assumptions A1-A4, τ = EB
+
+E(Y | T = 1 , B ) − E(Y | T = 0 , B ). That is, 
+
+B is sufficient for mean adjustment for the ATE (proof in Appendix A.1). 
+
+Our contribution concerns ensuring A4 is satisfied, which is uniquely fragile in text settings. 
+
+## 3 Overlap and Masking 
+
+Theorem 1 showed that any representation B satisfying mean ignorability, sufficiency and overlap suffices for identification of τ . The challenge in text settings is that the same words encode both treatment and confounders, so a representation flexible enough to capture confounding (satisfying the ignorability assumption) may also recover treatment exactly (violating the overlap assumption). The key object in our framework is a treatment-removing transformation of the text that preserves adjustment-relevant non-treatment content. We assume that such a transformation is available to the analyst and can be performed prior to the causal analysis pipeline. We assume that the transformed texts carry no direct treatment information beyond the latent adjustment attributes, meaning that T is independent of the transformed text, conditional on Z. When this holds, any treatment predictability remaining in the transformed text is attributable to Z, and is therefore legitimate adjustment signal rather than direct treatment encoding. Lexicon deletion is one concrete case in which such a transformation is easy to define. 33.1 Overlap Bounds 
+
+The true propensity scores e⋆(z) = Pr( T =1 | Z=z) are unobservable ; we assume the true confounders satisfy overlap: α⋆ ≤ e⋆(Z) ≤ 1 − α⋆ for some α⋆ ∈ (0 , 12 ). In its place, a learned representation b(W) induces the propensity score eb(w) = Pr( T =1 | b(w)) . Bayes error is used to measure how much treatment information b(W) carries: 
+
+Rb = EW
+
+ min   Pr( T =1 | b(W)) , 1 − Pr( T =1 | b(W))  . (1) 
+
+Rb is the irreducible error of predicting T from b(W): the lowest misclassification rate achievable by any classifier. It equals 0 when b(W) determines T perfectly and min(Pr( T =1) , Pr( T =0)) when 
+
+b(W) is independent of T (i.e., the best one can do is predict the majority class). It is model free, depending only on the joint distribution of (T, b (W)) .Let R⋆ = EZ[min( e⋆(Z), 1 − e⋆(Z))] denote the (unknown) Bayes error under the true confounders 
+
+Z. The overlap assumption implies R⋆ > 0. Comparing Rb to R⋆ characterizes what a learned representation has captured. If Rb ≈ R⋆, then confounding is captured faithfully. If Rb > R ⋆, then some confounding is missed; ignorability may fail. If Rb < R ⋆ then b(W) classifies T better than the true confounders allow, violating A4 . This is the scenario of interest. 
+
+Theorem 2 (Overlap bound) . For any representation mapping b and any α ∈ (0 , 1/2) , Pr  α ≤
+
+eb(W) ≤ 1 − α ≤ Rb/α. Proof is in Appendix A.2. 
+
+For a fixed margin α, the fraction of documents with propensity scores in the overlap region [α, 1−α]
+
+is at most Rb/α . The bound is informative when the representation is highly predictive of T , i.e., when Rb ≪ α. As b(W) becomes increasingly able to separate treated from control documents, 
+
+Rb → 0 and overlap vanishes. 
+
+Corollary 3 (Exact encoding) . If f (b(W)) = T for some f , then Rb = 0 and eb(W) ∈ { 0, 1} with probability 1. 
+
+We note that the statements above refer to the true propensity scores eb, which are never observed. In practice, eb must be estimated from data. The Bayes error Rb is likewise an unobservable quantity, but any classifier trained to predict T from b(W) provides an upper bound. If the held-out classification error is small, then Rb is at most as small, and Theorem 2 guarantees that overlap is limited. 
+
+3.2 Masking 
+
+For lexicon-based treatments, the text transformation can be constructed by deleting or replacing treatment-defining words. For non-lexical treatments, such as politeness or confidence, the same logic applies if the analyst can identify textual cues that directly define the treatment and remove them from the representation-learning input. The theory below is therefore best read as a guarantee for any transformation satisfying that T is independent of the transformed text, conditional on Z,with lexicon masking providing the cleanest implementation. Theorem 2 implies a design goal: an adjustment representation should be constructed so that Rb
+
+remains bounded away from zero. Lexicon-based treatments arise naturally in many text-as-treatment settings and are appealing for several reasons. Treatment status is directly measurable from the text, the assumption D = T holds by construction, and the treatment effect has a clear actionable interpretation: a writer can impact a desired outcome via word choice. Recall the example in Figure 1. Consider the reviews “I loved this book!" and “I hated this movie!" Embeddings of these documents will lie in different regions of the representation space, separated by their opposing sentiment treatment status. Now suppose we mask these lexicon words, producing "I [MASK] this book!" and "I [MASK] this movie!" Embeddings can still capture confounding content but won’t separate units by sentiment words alone. In the language of Theorem 2, masking keeps propensity scores bounded away from 0 and 1 by preventing Rb from shrinking toward zero. 
+
+Theorem 4 (Preserving overlap) . Let W− be a treatment-removing transformation of W satisfying 
+
+T ⊥ W− | Z.
+
+4Let b−(W) = h(W−) be any representation that depends on W only through W−. Then 
+
+α⋆ ≤ P (T = 1 | b−(W)) ≤ 1 − α⋆.
+
+In particular, every document satisfies overlap with margin α⋆, so the failure mode identified by Theorem 2 is structurally avoided; the proof is in Appendix A.3 We now define the simplest transformation: complete deletion of lexicon words. Suppose treatment is determined by a known lexicon L, so that there exists some g such that T = g(W ∩ L ), and let 
+
+Wdel = W \ L denote the document with lexicon words removed. Specializing the above theorem to W del , we rely heavily on the assumption T ⊥ Wdel | Z. In unmasked text, this is not true: the presence of words in L encodes treatment status. After deletion, Wdel no longer directly encodes 
+
+T , and the assumption holds whenever Z captures any remaining treatment-correlated variation in non-lexicon text. This is the relevant case for bag-of-words topic modelling in Section 4. Deletion masking gives a clean theoretical guarantee but hides information, such as word positions, context around treatment words, and document length, that may be relevant for adjustment. For large language model representations, we therefore adopt a replacement masking strategy. Define Wmask 
+
+as the document with lexicon words replaced by [MASK] tokens rather than deleted. It is no longer clear that T ⊥ Wmask | Z should hold. Replacement masking is best understood as a training-time intervention. Let θM denote parameters learned from masked training inputs, and let bθM (·) denote the resulting representation map. We define the mask-trained representation evaluated on the original (unmasked) text, bM (W) := bθM (W),
+
+with induced propensity score eM (W) := Pr( T = 1 | bM (W)) . We evaluate on the unmasked text as our aim is not to forget that lexicon words exist. Rather, we aim to prevent the encoder from learning a deterministic shortcut from those tokens to treatment status during training while preserving as many adjustment-relevant textual attributes as possible at evaluation. 
+
+Proposition 5 (Full text evaluation can preserve overlap.) . There exist data-generating processes where bM (Wmask ) violates overlap while bM (W) satisfies it. 
+
+Intuitively, when the mask pattern itself reflects T , for instance, if treated documents contain one lexicon token and controls contain none, evaluating on Wmask exposes that signal directly. A mask-trained encoder evaluated on W, by contrast, can fall back on non-lexicon content and avoid the lexicon-to-treatment shortcut. Appendix A.4 gives an explicit DGP and proof. Because the strict conditional independence assumption no longer holds, we cannot guarantee that 
+
+eM (W) remains in [α⋆, 1 − α⋆]. Appendix A.5 formalizes a sensitivity bound showing that overlap degrades smoothly with residual leakage rather than collapsing as in the unmasked case. The bound is not directly estimable, but it makes precise the way that replacement masking is a controlled relaxation of deletion masking. In practice, we assess residual leakage by reporting the fraction of estimated propensity scores in [α, 1 − α] for a chosen margin α.We implement the masking framework in two settings of increasing representational complexity. Section 4 uses topic models, whose bag-of-words structure is a natural fit for deletion masking: removing lexicon words leaves no trace of their count or position, so Theorem 4 applies directly and gives a clean proof of concept. Section 5 moves to fine-tuned large language models, where confounding can operate through word order, syntax, and contextual semantics that topic proportions do not capture. Because deletion would destroy this structure, we adopt replacement masking. 
+
+## 4 Topic Modeling 
+
+Topic models provide low-dimensional, interpretable summaries of text and remain widely used in applied causal inference with text [ 19 , 25 , 29 , 1], and analysts who already use LDA can adopt the masking pipeline with minimal modification. In the spirit of the causal amortized topic model [ 32 ], we assume documents contain K + 2 latent topics. Topics K + 1 and K + 2 map to treatment and control words, respectively; presence or absence of these words indicate treatment status. The remaining K topics are potential confounders. Outcomes Y are assumed to be some function of the K + 2 topics. In the notation of Section 3.2, the 
+
+K confounding topics correspond to confounders Z, while topics K + 1 and K + 2 encode treatment status T . The document’s words W are observed; T and Z must be recovered. 5The topic model is as follows: for each document i ∈ { 1, . . . , N }, draw treatment label Di ∼ Bern (p)
+
+and document length Li ∼ Pois (L). A topic proportion parameter is drawn dependent on treatment status θi ∼ Dirichlet (DiαT + (1 − Di)αC ) where αT̸ = αC are topic distribution parameters. For each word l ∈ { 1, . . . , L i}, a topic qil is drawn qil ∼ Multinomial (θi). Word wil is then drawn from a corresponding topic distribution βqil . A plate diagram is provided in C.1. 
+
+4.1 Estimation Procedure 
+
+Fitting LDA with K + 2 topics to learn confounders appears natural, but two of the resulting proportions encode treatment status, making T perfectly recoverable and collapsing overlap by Corollary 3. Our pipeline identifies treatment-defining words via domain knowledge or by inspecting the top words of treatment/control topics from an initial K + 2 fit, deletes them from each document’s bag-of-words, and fits LDA with K topics on the masked text. Because LDA is bag of words, 
+
+T ⊥ Wdel | Z holds naturally, and Theorem 4 provides that overlap is preserved. To avoid bias, models are fit on a training split and the ATE is estimated on a test set [7]. 
+
+4.2 Simulations 
+
+Since true causal effects are unobserved in real-world data, we use semi-synthetic simulations to establish a ground truth. In each iteration of a simulation, we generate N documents according to the model above, conditioning on treatment or control words being present in each document. Using the drawn topic values qil , we compute the true topic proportions for each document i given by vector 
+
+zi ∈ [0 , 1] K+2 . With true treatment effect τ and coefficients γ ∈ RK+2 , we generate a document’s outcome yi ∼ N (τ D i + γT zi, σ 2).We compute several ATE estimates: (1) naive , the difference in means between treatment and control groups; (2) or_full , or_leace , and or_masked , outcome regression estimates; (3) ipw_full , ipw_leace ,and ipw_masked , Hájek IPW estimates; and (4) aipw_full , aipw_leace and aipw_masked , AIPW estimates. Appendix B.2 gives the full form of each estimator. The *_full estimators use confounders from fitting LDA with K + 2 topics, the *_masked estimators use our pipeline, and the *_leace 
+
+estimators apply LEACE to the full K + 2 proportions to remove linear treatment signal before outcome and propensity modeling. Propensity scores are estimated by logistic regression and winsorized to [0 .1, 0.9] following Crump et al. [6] . We mask treatment/control words identified from the top words of an initial K + 2 -topic LDA fit, then refit LDA with K topics on the masked text using an 80/20 train/test split. Implementation details are in Appendix C. 
+
+Parameters. This section presents results from one illustrative set of parameters. Document generation ( β, α T , α C ) is developed to reflect realistic data based on a data set of Associated Press articles in R topicmodels package [ 10 ]. Full details, plus simulations using more parameters and topic misspecification stress-testing, are in Appendix C. Table 1: MSE, bias, and variance of ATE estimators (true τ = 0 .5) across 1,000 simulations.                                          
+
+> naive IPW OR AIPW
+> full masked leace full masked leace full masked leace MSE .01462 .01464 .00300 .01462 .00606 .00287 .01462 .00697 .00300 .01462 Bias .110 .0895 .00853 .110 .0189 .00927 .110 .0198 .00891 .110 Var .00258 .00664 .00293 .00258 .00570 .00278 .00258 .00658 .00293 .00258
+
+Results. Results across 1,000 simulation iterations are summarized in Table 1. Masking reduces MSE, bias, and variance for every estimator. For OR and AIPW the improvement in MSE comes mostly from reduced variance, while for IPW both bias and variance fall sharply. The full K + 2 IPW estimator performs nearly as poorly as the naive baseline. Iteration-level comparisons (Appendix C.5 Figure 5) confirm the gain is consistent across runs: the masked estimator achieves lower squared error than the full estimator in 64%, 62%, and 83% of iterations for OR, AIPW, and IPW respectively.The LEACE estimators recover the naive estimator across all three adjustment strategies. LEACE erases all linear treatment signal from the K + 2 topic proportions, including necessary adjustment information. 6An overlap diagnostic is the empirical counterpart of Theorem 2. The full K + 2 representation produces propensity scores outside [0 .1, 0.9] for nearly every document in nearly every iteration: the mean fraction of documents with extreme propensities across simulations is 99.98%, and even in the most favorable iteration, 96.2% of documents are extreme. Masking reduces this fraction to 1.7% on average. LEACE drives it to essentially zero at the cost of stripping the representation of adjustment. Table 4 in Appendix C.5 provides a summary of the distributions of extreme propensity scores. 
+
+## 5 Large Language Models 
+
+When confounding operates through context, syntactic structure, or semantic content not captured by topic proportions, a richer representation than topic mixtures is needed. Following prior work, we therefore implement the masking framework with a fine-tuned large language model [32, 24, 12]. 
+
+5.1 Architecture and Masked Input 
+
+We fine-tune DistilBERT: Each document Wi is tokenized into a sequence of subword tokens (using 
+
+DistilBertTokenizer ) and prefixed by the special [CLS] token [ 28 ]. Following standard BERT practice, we use the final-layer hidden state at the [CLS] position as the document embedding. Let Wmask  
+
+> i
+
+denote the document obtained by replacing every token belonging to a treatment- or control-defining lexicon entry with the [MASK] token to leverage the encoder’s existing masked-language-model capabilities. Multi-token lexicon entries are masked together. During fine-tuning, the encoder is applied to the masked input, yielding the representation bMi 
+
+> θ
+
+:= 
+
+bθ (Wmask  
+
+> i
+
+). This representation feeds three heads: an outcome head eQ(t, b Mi 
+
+> θ
+
+), a propensity head 
+
+eg(bMi 
+
+> θ
+
+), and a masked-language-modeling (MLM) head. The outcome and propensity heads are used for causal estimation, while the MLM head preserves general language understanding. The masking intervention is applied only to the text-derived representation. When observed non-text covariates Ci are available, we pass them directly to the outcome and propensity heads by replacing 
+
+bMi 
+
+> θ
+
+with (bMi 
+
+> θ
+
+, C i) [ 24 , 12 ]. We suppress Ci below as the overlap issue studied here arises from learned text representations, not ordinary observed covariates. 
+
+Multi-task loss. The outcome head eQ(t, b Mi 
+
+> θ
+
+) estimates EY | T = t, b θ (Wmask ) for t ∈ { 0, 1},with loss Lout as mean squared error for continuous outcomes and cross-entropy for binary outcomes. The propensity head eg(bMi 
+
+> θ
+
+) estimates Pr  T = 1 | bθ (Wmask ) and contributes two loss terms play-ing complementary roles. The first, LCE , is the cross-entropy loss for predicting Ti from bMi 
+
+> θ
+
+. This term is necessary because genuine confounders are generally treatment-predictive: if the representa-tion were never encouraged to learn treatment signal, it may not learn adjustment-relevant information. The second term is a soft overlap penalty that activates only when the estimated propensity leaves a target overlap band [α, 1 − α]: Lpenalty = E(α − eg)2I{eg < α } + ( eg − (1 − α)) 2I{eg > 1 − α} .
+
+The MLM head contributes LU by randomly masking non-lexicon tokens and training the encoder to recover them. We exclude already masked lexicon tokens from this auxiliary masking procedure. The full training loss combines all four terms: 
+
+L(wi; θ) = λQ Lout + LCE + λP Lpenalty + LU .
+
+The weight λQ is auto-calibrated at initialization so that the outcome and cross-entropy losses contribute equally to the gradient. The penalty weight λP is tuned adaptively during training, targeting a 90% validation overlap rate. 1 Full update rules are in Appendix D.1. 
+
+Training and Estimation. We use 80% /10% /10% training/validation/test splits; fine-tuning uses only the training split. Optimization uses AdamW with learning rate 2 × 10 −5, batch size 32 , and up to 20 epochs. At the end of each epoch we record validation losses and select the epoch with the minimum value. Given a fitted model at the selected checkpoint, the ATE is estimated by outcome regression on the held-out test split: bτ mask = 1
+
+> ntest
+
+P
+
+> i∈test
+
+ eQ(1 , b θ (Wi)) − eQ(0 , b θ (Wi)) .
+
+> 190% is chosen by analogy to Stürmer trimming [30].
+
+7Comparators. We compare against two DistilBERT-based estimators. TextCause [ 24 ] trains outcome heads with an MLM loss but does not use a treatment-prediction loss. We therefore use it as a baseline for outcome-focused representation learning. TI-estimator [ 12 ] jointly trains outcome and propensity heads with an MLM loss and uses the learned outcome summaries in AIPW and outcome regression estimators. It therefore tests whether standard treatment-aware representation learning is sufficient when the treatment-defining lexicon remains visible to the encoder. While Gui and Veitch [12] recommend their AIPW estimator, we also report outcome regression as it is most similar to our approach. Implementation details are in Appendix D.2. 
+
+5.2 Simulations: Amazon Data 
+
+We evaluate the LLM-based masking procedure on a semi-synthetic dataset built from real Amazon reviews, where the underlying text is natural language rather than a bag-of-words draw. We use reviews from the Health and Personal Care category of the Amazon Reviews corpus [ 14 ]. To obtain a cleanly lexicon-identifiable treatment, we retain only reviews whose sentiment words come from exclusively a positive or a negative lexicon [ 18 ], yielding ≈ 13 , 500 reviews ( 87% positive). The unit of analysis is the product, with a single concatenated mega-review reflecting the reader-facing setting in which one evaluates the body of reviews for a single item. Treatment Ti is the lexicon class of product i’s mega-review. 
+
+Confounders and outcome generation. We extract latent confounders from the masked text representing the product categories and usage experience (details and list of semantic labels are in Appendix D.3. Letting Zi ∈ { 0, 1}K indicate whether each covariate is present in document i.Thus, the confounding structure reflects real review content rather than a purely synthetic signal layered on top of the text. Outcomes are generated as yi ∼ f (β0 + βT Ti + Γ⊤Zi), where f is a logit link (binary) or Gaussian mean (continuous). Confounding strength is controlled by Γ; we report a low and high setting for each outcome type.                                                                                                                          
+
+> Low Confounding High Confounding
+> Estimator MSE Bias Var PS MSE Bias Var PS
+> Binary
+> True .0000 .0001 .0000 –.0000 .0006 .0000 –Naive .0230 .1514 .0001 –.0553 .2349 .0001 –Masking .0038 .0287 .0030 96.0% .0115 .1000 .0015 97.7% TextCause .0237 .1531 .0002 –.0565 .2371 .0003 –TI (Trimmed) .0239 .0509 .0213 2.2% .0280 .0491 .0256 2.2% TI (Winsorized) .0363 .1693 .0076 2.2% .0436 .1908 .0072 2.2% TI (Out. Reg.) .0434 .1887 .0078 2.2% .0523 .2124 .0072 2.2%
+> Continuous  True .0229 .0186 .0226 –.0229 .0186 .0226 –Naive .3669 .6058 .0000 –1.1238 1.0601 .0000 –Masking .0195 -.0425 .0177 87.0% .0442 -.0674 .0397 87.9% TextCause .2746 .5219 .0021 –.6132 .7779 .0081 –TI (Trimmed) .0336 -.1072 .0221 2.9% .0615 -.1614 .0355 5.5% TI (Winsorized) .0248 .1420 .0047 2.9% .0422 .1626 .0157 5.5% TI (Out. Reg.) .0380 .1820 .0049 2.9% .0497 .1789 .0177 5.5%
+
+Table 2: Binary (top) and continuous (bottom) outcomes on semi-synthetic Amazon reviews: MSE, bias, variance, and median fraction of held-out test documents with estimated propensity scores (PS) in [0 .1, 0.9] across 100 simulations for models with a PS head during training. 
+
+Results. Table 2 compares the adaptive masking estimator against the naive difference-in-means estimator, TextCause, and TI-estimator across binary and continuous outcomes with low and high confounding. The naive estimator is the unadjusted differences in means between the treatment and control groups; it confirms that the outcomes are meaningfully confounded as its MSE increases with confounding strength. The line labeled “ true " calculates the average difference between the simulated treatment and control outcomes. This retains noise from random outcome generation. The PS column reports the median fraction of held-out test documents with estimated propensity scores in [0 .1, 0.9] across simulation repetitions. 8TextCause closely tracks the naive estimator. Without a treatment-prediction loss, the representation is not encouraged to retain treatment-predictive confounding information. This is analogous to the LEACE failure mode in Section 4. The TI-estimator suffers severe overlap violations: the median fraction of propensities in [0 .1, 0.9] ranges from 2–6%, reflecting direct treatment encoding from the text. The propensity score distributions (Figure 8, Appendix D.2) show near-complete separation between treatment arms. We report trimmed and winsorized variants as the original AIPW produces degenerate estimates. The performance of TI is unstable; in some settings, MSE improves, while in others it remains comparable to or worse than the naive estimator. The masking estimator gives the strongest overall performance. The masking estimator achieves the lowest MSE in three of four settings and is competitive in the fourth (continuous high confounding). Replacement masking with adaptive overlap regularization retains confounding information without collapsing treated and control documents into separated regions. Ablation studies (Appendix D.6) show that token masking and Lpenalty alone each provide improvements over competitors. This analysis of embedding similarity suggests that the penalty encourages the encoder to represent lexicon and [MASK] tokens similarly. Further ablation studies show that the mask-trained encoder evaluated on full text outperforms evaluation on masked text (Appendix D.7). 
+
+## 6 Real Data Application 
+
+We apply the LLM pipeline to complaints filed with the Consumer Financial Protection Bureau (CFPB) 2, using the application data of Pryzant et al. [24] and Gui and Veitch [12] . The treatment is hedging vs. confidence in a complaint; the outcome is if the company gave a timely response. We restrict the CFPB database to complaints with non-empty narratives over a three-year window. Following Mozer et al. [20] , we pair each untimely complaint with its most similar timely complaint We keep the 4,000 highest-similarity pairs (8,000 complaints). Treatment Ti is a lexicon-based confidence indicator built from the politeness package [ 34 ]: complaints in the top quartile of hedge use relative to truth-intensifier use are treated; bottom-quartile are controls. Following Pryzant et al. [24] , Gui and Veitch [12] , we include a covariate Ci indicating if the complaint is about a Mortgage or Bank account/service. We mask hedge terms and truth intensifiers and fit the LLM from Section 5, using 100 bootstrap train/validation/test splits for variance estimation and cross-validation for epoch selection. Table 3: CFPB effect of hedging on timely re-sponse.                 
+
+> Estimator ˆτ95% CI PS Masking −0.006 (−0.035, 0.023) 100% TextCause −0.022 (−0.046, −0.005) –TI (Trim) 0.003 (−0.074, 0.075) 71% TI (Winsor.) −0.017 (−0.096, 0.052) 71%
+
+Table 3 summarizes the results. The naive dif-ference in means shows a small negative effect of hedging ( ˆτ = −0.033 ). The masking estima-tor brings this near zero ( ˆτ = −0.006 ) with a confidence interval comfortably containing zero, and all propensity scores remain in [0 .1, 0.9] .TextCause is the only estimator whose interval excludes zero; this apparent finding may reflect inadequate adjustment. The TI-estimator agrees directionally with masking but exhibits substantial overlap violations. The agreement between masking and TI on a null effect lends credibility to the conclusion that hedging has no effect on timely response. This suggests the interaction of two known opposing mechanisms. Readers are known to engage more with less intellectually humble (more confident) writing [ 31 ], while polite complaints have been found to receive faster responses [ 24 , 12 ]. 
+
+## 7 Discussion and Future Work 
+
+We identify a failure mode in causal inference with text: when treatment is encoded in the document, representations learned from the full text can induce overlap violations. We propose masking as a remedy that removes the lexical shortcut defining treatment that preserves information needed for adjustment. This distinguishes masking from approaches that erase all treatment-predictive information, which can restore overlap at the cost of discarding legitimate confounding signal. 
+
+Limitations. Several limitations point to future work. First, the strongest theoretical guarantee applies to deletion masking in bag-of-words settings; replacement masking for LLMs is necessarily weaker. Sharper diagnostics for residual treatment leakage would be valuable. Second, while they are 
+
+> 2https://www.consumerfinance.gov/data-research/consumer-complaints/search/
+
+9found in many applications and are computationally simple, lexicon-based treatments are restrictive. Extending masking to phrase-level or model-discovered treatment definitions is an important next step, as is understanding how imperfect treatment dictionaries affect identification. Third, treatment-defining words may also carry adjustment-relevant information; our train-on-masked, evaluate-on-full design mitigates but does not eliminate this tension. Despite these limitations, the core message is clear: causal adjustment with text requires representations that encode enough non-treatment structure to control confounding without encoding the lexical signal that defines the treatment itself. Masking provides a simple, practical way to enforce this separation for lexicon-based treatments. 
+
+## References 
+
+[1] Maximilian Ahrens, Julian Ashwin, Jan-Peter Calliess, and Vu Nguyen. Bayesian topic regres-sion for causal inference. In Marie-Francine Moens, Xuanjing Huang, Lucia Specia, and Scott Wen-tau Yih, editors, Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing , pages 8162–8188, Online and Punta Cana, Dominican Republic, Novem-ber 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.emnlp-main.644. URL https://aclanthology.org/2021.emnlp-main.644/ .[2] Nora Belrose, David Schneider-Joseph, Shauli Ravfogel, Ryan Cotterell, Edward Raff, and Stella Biderman. Leace: Perfect linear concept erasure in closed form, 2025. URL https: //arxiv.org/abs/2306.03819 .[3] David M. Blei and John D. Lafferty. Topic models. In Ashok N. Srivastava and Mehran Sahami, editors, Text Mining: Classification, Clustering and Applications , pages 71–93. Chapman & Hall/CRC, 2009. ISBN 978-1-4200-5940-3. doi: 10.1201/9781420059458-12. URL 
+
+https://doi.org/10.1201/9781420059458-12 .[4] David M. Blei, Andrew Y. Ng, and Michael I. Jordan. Latent dirichlet allocation. J. Mach. Learn. Res. , 3(null):993–1022, March 2003. ISSN 1532-4435. [5] Victor Bystrov, Viktoriia Naboka-Krell, Anna Staszewska-Bystrova, and Peter Winker. Choosing the number of topics in lda models — a monte carlo comparison of selection criteria. Journal of Machine Learning Research , 25(79):1–30, 2024. URL http://jmlr.org/papers/ v25/23-0188.html .[6] Richard K Crump, V Joseph Hotz, Guido W Imbens, and Oscar A Mitnik. Dealing with limited overlap in estimation of average treatment effects. Biometrika , 96(1):187–199, 2009. [7] Naoki Egami, Christian J. Fong, Justin Grimmer, Margaret E. Roberts, and Brandon M. Stewart. How to make causal inferences using texts. Science Advances , 8(42):eabg2652, 2022. doi: 10.1126/sciadv.abg2652. URL https://www.science.org/doi/abs/10. 1126/sciadv.abg2652 .[8] Christian Fong and Justin Grimmer. Discovery of treatments from text corpora. In Katrin Erk and Noah A. Smith, editors, Proceedings of the 54th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 1600–1609, Berlin, Germany, August 2016. Association for Computational Linguistics. doi: 10.18653/v1/P16-1151. URL 
+
+https://aclanthology.org/P16-1151/ .[9] Christian Fong and Justin Grimmer. Causal inference with latent treatments. American Journal of Political Science , 67(2):374–389, 2023. [10] Bettina Grün and Kurt Hornik. topicmodels: An r package for fitting topic models. Journal of Statistical Software , 40(13):1–30, 2011. doi: 10.18637/jss.v040.i13. URL https://www. jstatsoft.org/index.php/jss/article/view/v040i13 .[11] Lin Gui and Victor Veitch. Causal estimation for text data with (apparent) overlap violations. 
+
+arXiv preprint arXiv:2210.00079 , 2022. [12] Lin Gui and Victor Veitch. Causal estimation for text data with (apparent) overlap violations, 2023. URL https://arxiv.org/abs/2210.00079 .10 [13] W. John Harker. Literary communication: The author, the reader, the text. Journal of Aesthetic Education , 22(2):5–14, 1988. ISSN 00218510, 15437809. URL http://www.jstor.org/ stable/3333119 .[14] Yupeng Hou, Jiacheng Li, Zhankui He, An Yan, Xiusi Chen, and Julian McAuley. Bridging language and items for retrieval and recommendation. arXiv preprint arXiv:2403.03952 , 2024. [15] Jaroslav Hájek. Comment on "an essay on the logical foundations of survey sampling, part one". In V. P. Godambe and D. A. Sprott, editors, Foundations of Statistical Inference . Holt, Rinehart and Winston, Toronto, 1971. [16] Wolfgang Iser. The Act of Reading: A Theory of Aesthetic Response . Johns Hopkins University Press, Baltimore, 1978. [17] Linsen Li, Aron Culotta, and Nicholas Mattei. Using text-based causal inference to disentangle factors influencing online review ratings. In Luis Chiruzzo, Alan Ritter, and Lu Wang, editors, 
+
+Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) ,pages 11259–11277, Albuquerque, New Mexico, April 2025. Association for Computational Linguistics. ISBN 979-8-89176-189-6. doi: 10.18653/v1/2025.naacl-long.562. URL https: //aclanthology.org/2025.naacl-long.562/ .[18] Bing Liu. Sentiment analysis and subjectivity. In Handbook of Natural Language Processing ,volume 2, pages 627–666. 2010. [19] Seyed Mirlohi Falavarjani, Hawre Hosseini, Zeinab Noorian, and Ebrahim Bagheri. Estimating the effect of exercising on users’ online behavior. Proceedings of the International AAAI Con-ference on Web and Social Media , 11(1):734–738, May 2017. doi: 10.1609/icwsm.v11i1.14975. URL https://ojs.aaai.org/index.php/ICWSM/article/view/14975 .[20] Reagan Mozer, Luke Miratrix, Aaron Russell Kaufman, and L Jason Anastasopoulos. Matching with text data: An experimental evaluation of methods for matching documents and of measuring match quality. Political Analysis , 28(4):445–468, 2020. [21] Reagan Mozer, Aaron R. Kaufman, Leo A. Celi, and Luke Miratrix. Leveraging text data for causal inference using electronic health records, 2024. URL https://arxiv.org/abs/ 2307.03687 .[22] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban Desmaison, Andreas Köpf, Edward Z. Yang, Zach DeVito, Martin Raison, Alykhan Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu Fang, Junjie Bai, and Soumith Chintala. Pytorch: An imperative style, high-performance deep learning library. CoRR , abs/1912.01703, 2019. URL http://arxiv. org/abs/1912.01703 .[23] F. Pedregosa, G. Varoquaux, A. Gramfort, V. Michel, B. Thirion, O. Grisel, M. Blondel, P. Prettenhofer, R. Weiss, V. Dubourg, J. Vanderplas, A. Passos, D. Cournapeau, M. Brucher, M. Perrot, and E. Duchesnay. Scikit-learn: Machine learning in Python. Journal of Machine Learning Research , 12:2825–2830, 2011. [24] Reid Pryzant, Dallas Card, Dan Jurafsky, Victor Veitch, and Dhanya Sridhar. Causal effects of linguistic properties. In Kristina Toutanova, Anna Rumshisky, Luke Zettlemoyer, Dilek Hakkani-Tur, Iz Beltagy, Steven Bethard, Ryan Cotterell, Tanmoy Chakraborty, and Yichao Zhou, editors, 
+
+Proceedings of the 2021 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies , pages 4095–4109, Online, June 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.naacl-main.323. URL 
+
+https://aclanthology.org/2021.naacl-main.323/ .[25] Margaret E. Roberts, Brandon M. Stewart, and Richard A. Nielsen. Adjusting for confounding with text matching. American Journal of Political Science , 64(4):887–903, 2020. doi: https:// doi.org/10.1111/ajps.12526. URL https://onlinelibrary.wiley.com/doi/abs/ 10.1111/ajps.12526 .11 [26] James M. Robins, Andrea Rotnitzky, and Lue Ping Zhao. Analysis of semiparametric regression models for repeated outcomes in the presence of missing data. Journal of the American Statistical Association , 90(429):106–121, 1995. ISSN 01621459, 1537274X. URL http: //www.jstor.org/stable/2291134 .[27] Paul R. Rosenbaum and Donald B. Rubin. The central role of the propensity score in observa-tional studies for causal effects. Biometrika , 70(1):41–55, 1983. ISSN 00063444, 14643510. URL http://www.jstor.org/stable/2335942 .[28] Victor Sanh, Lysandre Debut, Julien Chaumond, and Thomas Wolf. Distilbert, a distilled version of BERT: smaller, faster, cheaper and lighter. CoRR , abs/1910.01108, 2019. URL 
+
+http://arxiv.org/abs/1910.01108 .[29] Dhanya Sridhar and Lise Getoor. Estimating causal effects of tone in online debates. In 
+
+Proceedings of the Twenty-Eighth International Joint Conference on Artificial Intelligence, IJCAI-19 , pages 1872–1878. International Joint Conferences on Artificial Intelligence Organiza-tion, 7 2019. doi: 10.24963/ijcai.2019/259. URL https://doi.org/10.24963/ijcai. 2019/259 .[30] Til Stürmer, Michael Webster-Clark, Jennifer L Lund, Richard Wyss, Alan R Ellis, Mark Lunt, Kenneth J Rothman, and Robert J Glynn. Propensity score weighting and trimming strategies for reducing variance and bias of treatment effect estimates: A simulation study. American Journal of Epidemiology , 190(8):1659–1670, 2021. doi: 10.1093/aje/kwab041. [31] Graham Tierney, Srikar Katta, Christopher Bail, Sunshine Hillygus, and Alexander Volfovsky. A design-based solution for causal inference with text: Can a language model be too large?, 2025. URL https://arxiv.org/abs/2510.08758 .[32] Victor Veitch, Dhanya Sridhar, and David Blei. Adapting text embeddings for causal inference. In Conference on Uncertainty in Artificial Intelligence , pages 919–928. PMLR, 2020. [33] Thomas Wolf, Lysandre Debut, Victor Sanh, Julien Chaumond, Clement Delangue, Anthony Moi, Pierric Cistac, Tim Rault, Rémi Louf, Morgan Funtowicz, and Jamie Brew. Huggingface’s transformers: State-of-the-art natural language processing. CoRR , abs/1910.03771, 2019. URL 
+
+http://arxiv.org/abs/1910.03771 .[34] Michael Yeomans, Alejandro Kantor, and Dustin Tingley. Detecting politeness in natural language. The R Journal , 10(2):489–502, 2018. 
+
+## A Proof of Theorems 
+
+A.1 Theorem 1 
+
+Proof. By the tower property and Assumption A1-A3, 
+
+EB
+
+E(Y | T = t, B ) = EB
+
+E(Y (t) | T = t, B ) (Assumption A1) 
+
+= EB
+
+E(Y (t) | B) (Assumption A2) 
+
+= EY (t).
+
+Assumption A3 ensures that E[Y |T = t, B ] is well-defined for t ∈ { 0, 1} so that the outer expectation exists. The result follows by taking t = 1 and t = 0 and subtracting. 
+
+A.2 Theorem 2 
+
+Proof. Let Aα = {w : α ≤ eb(w) ≤ 1 − α}. On Aα, min( eb(W), 1 − eb(W)) ≥ α. Thus, we have 
+
+Rb = EW
+
+ min   Pr( T =1 | b(W)) , 1 − Pr( T =1 | b(W))  
+
+= EW
+
+ min  eb(W), 1 − eb(W) 
+
+≥ EW
+
+ min  eb(W), 1 − eb(W) · 1(W ∈ Aα) ≥ α · Pr( W ∈ Aα).
+
+12 A.3 Theorem 4 
+
+Proof. Since b−(W) is a function of W−, the assumption T ⊥ W− | Z implies T ⊥ b−(W) | Z,so 
+
+Pr( T =1 | Z, b −(W)) = Pr( T =1 | Z) = e⋆(Z).
+
+By the tower property, 
+
+eb− (W) = Pr( T =1 | b−(W)) = EZ
+
+ET Z, b −(W) b−(W)
+
+= EZ
+
+e⋆(Z) b−(W) .
+
+By the overlap assumption, e⋆(Z) ∈ [α⋆, 1 − α⋆], so eb− (W) ∈ [α⋆, 1 − α⋆].
+
+A.4 Proposition 5 
+
+Construction. Let Z, T ∼ Bernoulli(1 /2) independently, so latent overlap holds. Suppose treated documents contain exactly one lexicon token and controls contain none. Let bM be a mask-trained encoder that is sensitive to [MASK] tokens (encountered during training) but invariant to lexicon tokens (never encountered during training). On masked text, bM (Wmask ) recovers the mask indicator, which equals T in this DGP, so Pr( T = 1 | bM (Wmask )) ∈ { 0, 1} and overlap fails. On full text, bM (W) depends only on non-lexicon content, hence is a function of Z, giving Pr( T = 1 |
+
+bM (W)) = 1 /2 and overlap holds. This construction provides intuition for why masked evaluation may not be safer than full-text evaluation: when the mask pattern itself provides strong information on T , as may be the case in real text, evaluating on W can be preferable. Full-text evaluation is further appealing for LLMs as lexicon words may carry adjustment-relevant outcome information once the direct path to treatment is removed during training. 
+
+A.5 A Sensitivity Bound for Replacement Masking 
+
+Section 3.2 introduces replacement masking as a controlled relaxation of deletion masking but does not formalize the sense in which residual leakage degrades overlap rather than destroying it. This appendix states and proves a sensitivity bound that makes the relaxation precise. Recall the mask-trained representation bM (W) := bθM (W) and its induced propensity score 
+
+eM (W) := Pr( T = 1 | bM (W)) . To compare eM to the deletion-safe case from Theorem 4, we benchmark against the deletion-masked propensity score evaluated on documents that share a common mask-trained representation: 
+
+eedel  
+
+> M
+
+(W) := EW′
+
+ebdel (W′) bM (W′) = bM (W) .
+
+This is the average deletion-masked propensity score among documents that share the same mask-trained representation value. Because ebdel (W) ∈ [α⋆, 1 − α⋆] for every document by Theorem 4, the conditional expectation preserves the bounds: 
+
+eedel  
+
+> M
+
+(W) ∈ [α⋆, 1 − α⋆].
+
+Intuitively, eedel  
+
+> M
+
+(W) is the propensity one would expect for a document with mask-trained repre-sentation bM (W) if the only treatment-relevant information in that representation came through confounding. Deviations of eM (W) from eedel  
+
+> M
+
+(W) measure treatment information present in the mask-trained representation but absent from the deletion-masked representation. We call the average absolute deviation the treatment-information surplus :
+
+ϵM := EW
+
+ eM (W) − eedel  
+
+> M
+
+(W)  .
+
+The quantity ϵM is zero exactly when the mask-trained representation carries no treatment information beyond what the deletion-masked representation provides, and increases as residual leakage grows. 
+
+Theorem 6 (Sensitivity bound for replacement masking) . For any η > 0,
+
+Pr( eM (W) /∈ [α⋆ − η, 1 − α⋆ + η]) ≤ ϵM
+
+η .
+
+13 Proof. Since eedel  
+
+> M
+
+(W) ∈ [α⋆, 1 − α⋆] ⊆ [α⋆ − η, 1 − α⋆ + η], any document with eM (W) outside 
+
+[α⋆ − η, 1 − α⋆ + η] must satisfy |eM (W) − eedel  
+
+> M
+
+(W)| > η . Therefore 
+
+W : eM (W) /∈ [α⋆ − η, 1 − α⋆ + η] ⊆ W : |eM (W) − eedel  
+
+> M
+
+(W)| > η ,
+
+so 
+
+Pr( eM (W) /∈ [α⋆ − η, 1 − α⋆ + η]) ≤ Pr  |eM (W) − eedel  
+
+> M
+
+(W)| ≥ η .
+
+Markov’s inequality applied to the nonnegative random variable |eM (W) − eedel  
+
+> M
+
+(W)| gives 
+
+Pr  |eM (W) − eedel  
+
+> M
+
+(W)| ≥ η ≤ EW
+
+|eM (W) − eedel  
+
+> M
+
+(W)|
+
+η = ϵM
+
+η .
+
+Interpretation and scope. Theorem 6 should be read as a sensitivity bound rather than a usable identification result. The treatment-information surplus ϵM is defined relative to an unobservable benchmark eedel  
+
+> M
+
+and is not directly estimable from data; the safe-overlap margin α⋆ is also unknown. What the bound delivers is a structural statement: as long as ϵM is small relative to a chosen tolerance 
+
+η, the fraction of documents whose propensity scores can drift outside the band [α⋆ − η, 1 − α⋆ + η]
+
+is correspondingly small. Replacement masking can therefore degrade overlap smoothly with leakage, rather than collapsing as in the unmasked case identified by Theorem 2. Because ϵM is not estimable, we treat the empirical fraction of estimated propensity scores in [α, 1 −
+
+α] as the practical diagnostic. Sections 4 and 5 report this diagnostic for every simulation. A high in-band fraction is consistent with small ϵM ; a low fraction signals that the mask-trained representation has retained enough residual treatment information to compromise adjustment, regardless of what the formal bound would assert. 
+
+Lpenalty is the training-time counterpart to the bound here, capping how often the trained representation produces propensity scores outside the overlap region. 
+
+Relation to deletion masking. At ϵM = 0 , every document satisfies eM (W) = eedel  
+
+> M
+
+(W) ∈
+
+[α⋆, 1 − α⋆] almost surely, recovering Theorem 4 as the limiting case of zero residual leakage. Theorem 6 thus situates deletion masking as the boundary point of a one-parameter family in which replacement masking trades exact overlap preservation for richer adjustment information at evaluation. 
+
+## B Potential Outcomes and Text as Treatment 
+
+B.1 Causal Text Estimands 
+
+In Section 2, we introduced τt, the treatment effect of the latent treatment as experienced by the reader. However, it is also possible to investigate τd, the treatment effect of the known document label. Before expanding on the estimands, we first want to emphasize the difference in reader vs. writer perspective shown in Figure 2. This is a distinction unique to text-based causal inference and is line with literary theory separating language into perspectives of author intent and reader perception [ 16 , 13 ]. While the writer develops the text, we are interested in some eventual outcome from the reader. With this perspective in mind, we now present details of and differences between τd and τt; refer to Tierney et al. [31] for an even more thorough development of these ideas. To clearly understand the difference between these two effects, we highlight that τd can be thought of as the effect of exposure to documents with some latent feature. We are intervening on D and seeing the impact of the outcome on Y . In potential outcomes notation, τD is given by 
+
+τd = E[Yi(D = 1) − Yi(D = 0)] = E[Yi(T = 1 , Z = z) − Yi(T = 0 , Z = z′)] .
+
+14 As D varies from 0 to 1, we assume that T does as well. It is also possible (and likely) for Z to vary between some z and z′. Importantly, here, Z is not held fixed as we take the expectation over i (units in the population). As a result, we do not need to adjust for confounding by Z when computing τD .To estimate τD , it is enough to perform a completely randomized experiment: gather collections of documents with D = 1 and D = 0 . Assign individuals randomly to one document (naturally either treatment or control) and measure outcomes; a difference in means suffices to estimate the treatment effect. The same process does not apply to estimating τt. Instead of measuring the effect of documents with a feature, τt isolates the effect of the latent treatment itself and is given by 
+
+τt = E[Yi(T = 1) − Yi(T = 0)] = E[Yi(T = 1 , Z = z) − Yi(T = 0 , Z = z)] .
+
+That is, τt measures how changing the value of T changes the outcome, holding Z = z fixed. In an ideal world, we would change T without changing W (and hence without changing Z), then use a simple randomized experiment. However, changing T requires changing the documents’ words W
+
+and thus possibly changing Z, leading to complications in estimating τt.One approach taken in existing works, such as in Fong and Grimmer [9] and [ 31 ] is to construct or curate texts such that T is believed from domain knowledge and/or empirical validation to be independent of Z. While successful curation of such documents does allow for identification of τt,this is a non-trivial task and strongly limits the ability to use existing documents in an observational setting. Another approach, such as in Gui and Veitch [11] , is the one taken in this paper: learning and adjusting for confounders Z.Regardless of the estimation approach, understanding how to disentangle T and Z for a given document is the core of the challenge in measuring effects of latent features. 
+
+B.2 Full Form of Estimators 
+
+Throughout the paper we reference three estimators of the ATE: outcome regression (OR), inverse propensity weighting (IPW), and the augmented inverse propensity weighting estimator (AIPW). We give their full forms here for reference. 
+
+Outcome regression. Let μt(z) = E[Y (t) | Z = z] for t ∈ { 0, 1}. Given estimators ˆμ0 and ˆμ1,the OR estimator is 
+
+ˆτ reg = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ ˆμ1(Zi) − ˆμ0(Zi).
+
+If treated units are absent for some value of z, ˆμ1(z) is not identifiable from the data; the analogous failure for ˆμ0 occurs when control units are absent. Overlap rules both out. 
+
+Inverse propensity weighting. Let e(Z) = Pr( T = 1 | Z) with estimator ˆe. The Hájek IPW estimator [15] is 
+
+ˆτ hajek =
+
+P 
+
+> i
+
+TiYi/ˆe(Zi)
+
+P 
+
+> i
+
+Ti/ˆe(Zi) −
+
+P
+
+> i
+
+(1 − Ti)Yi/(1 − ˆe(Zi)) 
+
+P
+
+> i
+
+(1 − Ti)/(1 − ˆe(Zi)) .
+
+When overlap fails, ˆe(Zi) is near 0 or 1 for some units and the inverse-weighted terms blow up. 
+
+Augmented IPW. Combining the two [26]: 
+
+ˆτ aipw = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+
+
+ˆμ1(Zi) − ˆμ0(Zi) + Ti (Yi − ˆμ1(Zi)) ˆe(Zi) − (1 − Ti) ( Yi − ˆμ0(Zi)) 1 − ˆe(Zi)
+
+
+
+.
+
+ˆτ aipw is consistent if either the outcome model or the propensity score model is correctly specified. 
+
+## C Appendix: LDA Implementation and Simulations 
+
+C.1 LDA Plate Diagram 
+
+The LDA-based document structure is illustrated in Figure 3. 15 Figure 3: LDA plate diagram for assumed document structure. For a given document i ∈ N , the length Li (number of words) and true document label Di are drawn 
+
+Li ∼ L 
+
+Di ∼ Bern (p)
+
+The topic proportion parameter αi is αT when the document is treated and αC when it is control. That is, αi = DiαT + (1 − Di)αC . From this parameter, document-level topic proportion vector θi
+
+is drawn 
+
+θi ∼ Dirichlet (αi).
+
+Words l ∈ { 1 . . . L i} are drawn by first drawing topic 
+
+qil ∼ M ultinomial (θi)
+
+then word 
+
+Wil ∼ M ultinomial (βqil )
+
+where βk for topic k ∈ { 1 . . . K + 2 } is a topic-specific word probability vector. With a dictionary of size M , this lies in the M − 1 simplex. Generally, we assume 
+
+βk ∼ Dirichlet (η).
+
+C.2 Implementation Details 
+
+Propensity scores are computed via logistic regression and winsorized to [0 .1, 0.9] to mitigate the impact of extreme values. We use an 80/20 train/test split: all models are fit on the training split and the ATE is estimated on the held-out test set to avoid post-selection bias [7]. To identify treatment-defining words for masking, we first fit LDA with K + 2 topics to the full (unmasked) corpus. We then compare the resulting topics to the known treatment and control word lists used in data generation, selecting the two topics with the highest overlap. The top words from these two topics form the masking lexicon. After removing these words from each document’s bag-of-words representation, we refit LDA with K topics on the masked text. The resulting K-dimensional topic proportions serve as the adjustment representation. All LDA models are fit using the lda function from the R topicmodels package (GPL-2 license) with the VEM algorithm [10]. 
+
+C.3 Associated Press Parameters 
+
+The parameters for simulations in section 4.2 are based on an analysis of the Associated Press data in the R topicmodels package. As the aim of this aspect of our work is not to study underlying true causal effects in data, but rather to use the data as a base for choosing parameters, we do not require all parameters to be the underlying true fits to the data. This data originally contains bag of words representations of 10,473 terms over 2,246 documents. Before continuing with parameter selection, we compute tf-idf to filter for words with the highest 16 Figure 4: For each topic (y axis), the distributions of their true proportions across 2500 generated documents. scores [ 3], resulting in a dictionary of size 7,854. Taking K + 2 = 20 , we fit LDA to the data and examine posterior within-document Dirichlet parameter α and within-topic word distribution parameter β. To choose treatment and control topics, we examine each topics’ top 100 words, selecting topics with minimal cross-topic overlap. Using these selections, we modify β:• The top 100 words are selected within treatment and control topics. In each, all other words’ probabilities are set to 0. • The probabilities of these 200 words are then set to 0 in all other topics. • All within-topic word probabilities are rescaled to sum to 1. Additionally, we modify α to form two parameters: αT and αC . To keep documents distinctly treatment or control, we set αT [K + 1] = αC [K + 2] = 0 . This means treatment documents never sample the control topic and vice versa. Remaining entries are chosen such that different confounding topics are more likely in treatment and control documents, inducing confounding. Both αT and 
+
+αC sum to 0.5 (as did α), keeping documents primarily composed of a smaller subset of the topics instead of being more evenly dispersed. Values for confounder topics in αT and αC fall between 0.01 and 0.035; αT [K + 1] and αC [K + 2] are larger to result in treatment and control topics often being slightly more prominent in the text; this models the idea that treatment and control topics might be the focus of the documents. Figure 4 shows an illustrative example after one complete document generation run with N = 2500 of distributions of true within-document topic proportions for each of 20 topics. In outcome generation, confounding coefficients γ = [1 , . . . , 2 
+
+> K
+
+, 1 
+
+> K
+
+, 0, 0] where the last two entries correspond to treatment/control topics. 
+
+C.4 Computational Setup 
+
+Results in Section 4 (and related appendices) were generated using a HPC with 60 cores each assigned 1GB of RAM. The processor was Intel(R) Xeon(R) Gold 6336Y. However, this is not a computationally intensive pipeline and running on a laptop is feasible. 17 C.5 LDA Simulations: Additional Figures 
+
+We provide two additional presentations of results from Section 4.2. Figure 5 compares the squared error values for outcome regression, IPW, and AIPW estimators computed using the full K + 2 topics (x-axis) and masked K topics (y-axis). Points that fall below the x = y line have a higher squared error for the *_full estimators. In outcome regression and AIPW, our masked estimators outperform the full estimator 64 and 62% of the time, respectively. This is particularly impressive as the full covariates align with the underlying document structure and the outcome model was properly specified. For the Hájek estimator, this rises to 83%. 
+
+Figure 5: Squared error of *_full (x-axis) vs. *_masked (y-axis) AIPW (orange), Hajek IPW (blue), and outcome regression (green) estimates. Points below dashed x = y line have lower error with masking. Table 4 summarizes the proportions of documents with such values across iterations. In most masking iterations, there are nearly zero extreme values, whereas in most iterations with the full K + 2 topics, 
+
+all documents have extreme propensity scores. Table 4: Distribution of share of documents with propensity scores outside [0 .1, 0.9] across simula-tions.                         
+
+> Method Min Q1 Median Mean Q3 Max full .962 1.000 1.000 .9998 1.000 1.000 mask .000 .000 .006 .0172 .030 .244 leace .000 .000 .000 .0002 .000 .224
+
+C.6 LDA Sensitivity Analysis: Topic Misspecification 
+
+There are many methods for determining the correct number of topics to use in LDA [ 5 , 4]. The details of each are beyond the scope of this work, however, choosing K is an important aspect of any topic modeling problem. Despite the number of methods to choose an optimal value, misspecification from the latent truth is likely. Here, we investigate how sensitive our method is to an analyst’s proposed value of K + 2 : what happens if we choose the wrong number of topics when running LDA to estimate confounding and find the treatment/control topic words? .Using the same parameters as in Section 4.2, we take the value of K + 2 used in LDA to estimate confounders to be K + 2 ∈ { 10 , 15 , 18 , 22 , 25 , 30 }, showing varying levels of incorrect guesses on the number of topics. We emphasize that in all cases, the true underlying data generation remains with K + 2 = 20 . Figure 6 show the squared error plots comparing the full vs. masked models over 1000 iterations. We see that in all cases, the masking procedure maintains improvement . We see this most notably in the K + 2 = 10 case. While both masking and the full method have larger squared error values due to misspecification, they still improve over non-masked methods. 18 (a) K + 2 = 10 (b) K + 2 = 15           
+
+> (c) K+ 2 = 18 (d) K+ 2 = 22
+> (e) K+ 2 = 25 (f) K+ 2 = 30
+
+Figure 6: Mispecification plots for topics 10, 15, 18, 22, and 25. 
+
+C.7 LDA Results for Varied Simulation Parameters 
+
+We present illustrative results from varying document-generation parameters. Specifically, we vary the word probability parameters β and the sum of αT and αC (denoted P α). Here we show results for K + 2 = 30 and the same dictionary size as above (7854). We take P α ∈{0.5, 5}. When P α = 0 .5, documents are generally dominated by a small set of topics. When P α = 5 , documents contain a wider variety of topics (though still not evenly dispersed). To vary β,we modify Dirichlet parameter η. We take take ηt ∈ { 0.1, 0.5} as the Dirichlet parameter for within-19 (a) β1, P α = 0 .5 (b) β1, P α = 5          
+
+> (c) β5,Pα= 0 .5(d) β5,Pα= 5
+
+Figure 7: Error comparison plots for varying P α and β.topic word distributions of treatment and control topics. These topics have each have probabilities distributed across 100 non-overlapping words. For remaining topics, we take ηt ∈ { 0.1, 0.5} as the Dirichlet parameter for the within-topic distributions of remaining non-treatment, non-control words. We refer to β1 as the word probability parameters drawn when ηt = 0 .1, η z = 0 .01 and β5 as the word probability parameters drawn when ηt = 0 .5, η z = 0 .05 . β1 results in topics dominated by fewer words while β5 spreads words more evenly throughout topics. Figure 7 shows results for each combination of β and P α over 300 iterations each. In all but one case, the masking pipeline improves the error of the AIPW and outcome regression estimators. However, using β5, P α = 5 , the full model has extremely small error that is not improved by masking. In all cases, the masking pipeline again improves the error of the Hájek IPW estimators; this is most notable in the β1, P α = 5 case, where the IPW estimator has lower error 97% of the time. 
+
+## D LLM Additional Simulations 
+
+D.1 Loss Weight Updates 
+
+The weight λQ is a scale-fixing constant. For continuous outcomes, Lout and LCE can operate on very different scales: Lout is an MSE whose magnitude depends on the variance of Y . Without rescaling, the larger term may dominate the gradient and effectively suppress the other. We auto-calibrate λQ
+
+before any parameter update by rescaling 
+
+λQ ← λQ · ¯Lg / ¯LQ
+
+20 where ¯Lg and ¯LQ are the mean per-batch cross entropy and outcome prediction losses at initialization on the training set. After this rescaling, λQ requires no further tuning. The penalty weight λP is tuned adaptively during training to target a specified validation overlap rate. Let pct (e) 
+
+> val
+
+denote the fraction of validation data propensities in [α, 1 − α] at the end of epoch e, and let qe = 1 − pct (e)
+
+> val
+
+denote the validation data violation rate. After each epoch we update 
+
+λ(e+1)  
+
+> P
+
+= clip 
+
+
+
+λ(e) 
+
+> P
+
+· exp  η (qe − q⋆), λmin , λmax 
+
+
+
+, (2) with target violation rate q⋆ = 0 .1, step size η = 1 .0, initialization λ(0)  
+
+> P
+
+= 100 , and guardrails 
+
+[λmin , λ max ] = [1 , 10 5]. This multiplicative update increases λP when too many validation propensi-ties fall outside the overlap band and decreases it when the overlap target is exceeded. We target 90% 
+
+validation overlap rather than forcing all propensities into [α, 1−α] because the overlap penalty is only one part of the causal objective: overly aggressive regularization can suppress treatment-predictive confounding information needed for adjustment 3.
+
+D.2 LLM Comparators 
+
+We provide further details regarding the implementations of comparison LLM methods. Two recent methods fine-tune DistilBERT for causal inference with text: TextCause [ 24 ] and the TI-estimator [ 12 ]. We compare against both because they are the closest existing implementations, and because each makes a different architectural choice that the masking framework speaks to directly. Here, we provide an overview of each method; further details are provided in Appendix D.2. Default hyperparameters are used. 
+
+TextCause The original paper by Pryzant et al. [24] introduces a method for learning proxy treatment labels alongside their text adjustment method. However, in the lexicon based treatment setting, we know the labels—it is known which documents have text from which lexicon, and it is reasonable to assume that readers are able to correctly identify this label (ie, T = D). Thus, we use their version of the algorithm without proxy label adjustment. Default hyper-parameters (batch size, learning rate, loss head weighting, etc.) are maintained. TextCause uses an outcome head trained jointly with an MLM auxiliary loss; the loss contains no propensity term (there is code for a head with the ability to predict T, but it contains zero weight in loss function). Following Tierney et al. [31], we make the following modifications to their code: 1. The original code computes the ATE as the difference between the control and treated outcomes; we flip the direction to be the standard treated minus control outcomes in line with most literature. 2. The original application uses all data for both training and testing. We apply the same data split as in our masking approach, training on the train data and testing on the test data. This provides comparable estimates and avoids inducing post-selection bias. Furthermore, the original algorithm is implemented for binary outcomes only. To modify the code for continuous outcomes, we replace their cross entropy outcome loss with MSE. Furthermore, the original implementation trains to a suggested default of 3 epochs. Understanding that changing the loss may change the suggested number of epochs, we instead select the number of epochs using a cross validation procedure in line with our masking approach. We train the model on the 80% split, select the number of epochs where the validation loss is minimized, and report the ATE on the test split at that number of epochs. 
+
+TI-Estimator The estimator by Gui and Veitch [12] is architecturally closer to ours: outcome heads, a jointly trained propensity head that exists to regularize the embedding, and an MLM auxiliary loss. At inference, however, TI-estimator fits a separate propensity model on the two-dimensional outcome summary ˆη(W ) = ( bQ0(W ), bQ1(W )) and plugs it into an AIPW estimator.  
+
+> 390% specifically is chosen as an analogy to commonly used Sturmer trimming, which trims propensity scores outside of the 95th and 5th percentiles of propensity scores, keeping the middle 90% [30]
+
+21 As in the TextCause estimator, default hyperparameters are used. Following Tierney et al. [31] , the following changes to the original code are made in our implementation: 1. The propensity score estimators fit the propensity scores on the same data used to estimate treatment effects. Again, we use the same training and test split our masking procedure employs. 2. We fit propensity scores using the Random Forest Classifier in scitkit-learn. 3. As discussed in the main body, propensity scores are trimmed and winsorized. Many estimated propensity scores are degenerate (exactly 0 or 1); not doing so leads to unstable and NaN ATE estimates. 
+
+D.3 Amazon simulations: Confounders 
+
+Table 5: Confounding Topic Descriptions 
+
+Topic Title Description 
+
+0 General Product Reviews Overall product satisfaction, purchase experience, shipping, and usage over time 1 Supplements & Energy Vitamins, energy supplements, immune support, taste, and ingredient quality 2 Dental & Eyelash Care Teeth whitening, toothpaste, flossing, and eyelash curlers 3 Household & Beverages Pumps, straws, cups, laundry detergent, coffee, and scented products 4 Brushes & Grooming Tools Toothbrushes, pet grooming brushes, trimmers, and cleaning brushes 5 Sleep & Sound Aids Earplugs, sound machines, night lights, batteries, and charging accessories 6 Mobility & Compression Wear Compression socks, knee braces, walkers, and post-surgery support 7 Scales & Measurement Bathroom scales, weight accuracy, digital displays, and readings 8 Essential Oils & Bath Essential oils, bath bombs, diffusers, and aromatherapy products 9 Water & Hydration Water bottles, hydration reminders, and daily water intake 10 Skincare & Body Wash Soaps, lotions, exfoliators, makeup removers, and moisturizers 11 Footwear & Foot Care Shoe insoles, heel pads, foot cushions, and plantar fasciitis aids 12 Product Failures & Returns Defective products, returns, broken items, and disap-pointment 13 Nail Care Tools Nail clippers, files, manicure sets, scissors, and groom-ing tools 14 Massage & Facial Devices Facial and neck massagers, suction tools, and steamers 15 Mixed Product Feedback General opinions, shipping issues, taste, value, and repeat purchases 16 Seating & Ergonomic Support Seat cushions, car accessories, shower chairs, and lum-bar support 17 Protein & Meal Powders Protein powder, smoothie mixes, flavors, collagen, and meal replacements 18 Bags & Medical Supplies Medical bags, supply organizers, nasal/oxygen aids, and bag quality 19 Personal Care & Baby Beard care, baby products, shaving cream, shampoo, and skincare 
+
+Continued on next page 
+
+22 Table 5 – Continued from previous page 
+
+Topic Title Description 
+
+20 Gifts & Packaging Gift kits, bags, holiday packaging, party supplies, and value sets 21 Masks & Wearable Accessories Face masks, fit and comfort, straps, fabric quality, and sizing 22 Specialty Oils & Wellness Tea tree oil, fish oil, yoga mats, wipes, and natural wellness 23 Cleaning Products Household cleaners, sprays, glass cleaners, car wax, and stain removers 24 Eyewear & Blood Pressure Reading glasses, sunglasses, blood pressure monitors, and gloves 25 Party Supplies & Paper Goods Birthday decorations, balloons, wrapping paper, tape, and bandages 26 Media & Miscellaneous Movies, games, phone accessories, crystals, and lan-guage learning 27 Fitness & Pre-Workout Pre-workout supplements, creatine, posture correctors, and gym gear 28 Replacements & Razors Replacement parts, batteries, razor heads, and brand compatibility 29 Home & Bath Fixtures Shower accessories, pillows, stools, air purifiers, and bath fixtures 30 Pill Storage & Sizing Pill organizers, container sizes, medication storage, and compartments 31 Hair Styling Tools Flat irons, curling irons, hair dryers, heat settings, and styling 32 Children & Celebrations Baby showers, kids’ gifts, wedding supplies, filters, and decor 33 Travel & Vitamin Storage Travel cases, gummy vitamins, canes, and portable organizers 34 Books & Stationery Books, greeting cards, recipes, photo albums, and pa-per goods 
+
+D.4 Compute Resources: LLMs 
+
+Fine-tuning our masking estimator uses DistilBERT (66M parameters) with batch size 32, max sequence length 128, and up to 20 epochs. A single fine-tune-plus-evaluation run of the masking and TextCause estimators on the Amazon dataset ( ≈ 13 , 500 rows) completes in approximately 30 minutes, peaks at around 4 GB of GPU memory, and fits on a single GPU with ≥ 8 GB of VRAM. The TI-estimator uses the default hyperparameters provided by the code of Gui and Veitch [12] . These match our masking configuration except for a batch size of 64. A single fine-tune-plus-evaluation run of this estimator on the Amazon data completes in approximately 10–30 minutes, peaks at around 9 GB of GPU memory, and fits on a single GPU with ≥ 16 GB of VRAM. Reported simulations were run on whichever GPUs were first available on our SLURM cluster: NVIDIA RTX 2080 Ti (11 GB), Tesla P100 (16 GB), RTX A5000 (24 GB), RTX A6000 / RTX 5000 Ada / RTX 6000 Ada (48 GB), and H200 (141 GB). Results are insensitive to GPU choice. The Amazon simulations comprise 100 iterations × 4 settings (binary/continuous × low/high con-founding) × 3 estimators per setting, totaling approximately 600 GPU-hours. The CFPB application uses 100 bootstrap splits across 3 estimators, totaling approximately 100 GPU-hours. Hyperparameter exploration and ablation studies required additional compute hours beyond these reported totals, though the per-run resource requirements are unchanged. 
+
+D.5 Licenses for LLM Resources 
+
+Table 6 lists the licenses for all external resources used in the LLM experiments (Sections 5 and 6). Entries marked by † are from academic articles with linked GitHub pages who do not identify a 23 license file. Entry marked by † is data publically available from government website. Available at 
+
+https://www.consumerfinance.gov/data-research/ .Table 6: Licenses for resources used in LLM experiments. 
+
+Resource Reference License 
+
+Models & Libraries 
+
+DistilBERT Sanh et al. [28] Apache 2.0 HuggingFace Transformers Wolf et al. [33] Apache 2.0 PyTorch (incl. AdamW) Paszke et al. [22] BSD 3-Clause scikit-learn Pedregosa et al. [23] BSD 3-Clause 
+
+Datasets 
+
+Amazon Reviews Hou et al. [14] MIT CFPB Complaint Database – Government Site ‡
+
+Packages & Comparator Code 
+
+politeness R package Yeomans et al. [34] MIT TextCause Pryzant et al. [24] No license identified †
+
+TI-estimator Gui and Veitch [12] No license identified †
+
+D.6 Ablation: Masking Components 
+
+The LLM masking mechanism combines two components: (1) Replacement masking by treatment-defining tokens during training and (2) the adaptive overlap penalty of Lpenalty . This section studies the contribution of each component to model performance. 
+
+D.6.1 Masking Alone; No Penalty 
+
+Tables 7 and 8 compare the full method (Masking Auto) against an ablation that trains on masked text but does not include the penalty loss (Masking: No Penalty). We find that token masking alone reduces bias and MSE relative to the naive estimator, TextCause, and the TI variants across three out of four settings, confirming that removing the lexical shortcut during training is a primary driver of improvement . Compared to masking with a penalty, no penalty masking has in different settings similar, lower, and higher MSE, though it is generally close. The overlap diagnostic require careful interpretation. The median fraction of propensity scores in [0 .1, 0.9] is 16-27% without the penalty, compared to 87-98% with it. However, [0 .1, 0.9] is a diagnostic threshold, not the true overlap band [α∗, 1 − α∗], which is unknown. Propensity scores outside [0 .1, 0.9] are not necessarily overlap violations if the true confounding structure supports more extreme values. The more informative comparison is between masking without penalty and the unmasked TI-estimator. Figure 8 shows the contrast clearly: the TI-estimator produces propensity distributions that are effectively binary, with tall spikes at 0 and 1 and little mass between, while the masking-only estimator yields smoother, overlapping distributions across the unit interval. In fact, in each of the settings, at least 85% of TI propensity scores are exactly 0 or 1, reflecting deterministic treatment encoding. By contrast, masking without penalty produces zero degenerate propensity scores. The distributions retain spread and maintain (imperfect) separation between treatment arms, but without the point masses at the boundaries that indicate complete overlap collapse. The penalty provides additional control for practitioners who require propensity scores within a specific band, such as the [0 .1, 0.9] range commonly used for trimming or winsorization, but it is not necessary to avoid the degenerate encoding that motivates this paper. 
+
+D.6.2 Penalty Alone; No Masking 
+
+Tables 9 and 10 report an ablation that trains on unmasked text but retains the adaptive overlap penalty (Masking: Penalty Only). Unlike the full masking pipeline, this variant requires no treatment-defining lexicon: the penalty regularizes propensity scores toward the interior of [0 , 1] regardless of the source of treatment encoding. This makes it applicable, in principle, to any text-as-treatment setting, including those where treatment is not lexically defined. 24 0.0 0.1 0.2 0.3     
+
+> 0.00 0.25 0.50 0.75 1.00
+
+P(T = 1) 
+
+> proportion
+
+T 0 1
+
+Binary, Low Confounding − pooled (all sims) 
+
+Masking Propensity Scores by Treatment Status 0.00 0.25 0.50 0.75 1.00     
+
+> 0.00 0.25 0.50 0.75 1.00
+
+P(T = 1) 
+
+> proportion
+
+T 0 1
+
+Binary, Low Confounding − pooled (all sims) 
+
+TI Propensity Scores by Treatment Status 0.0 0.1 0.2 0.3     
+
+> 0.00 0.25 0.50 0.75 1.00
+
+P(T = 1) 
+
+> proportion
+
+T 0 1
+
+Binary, High Confounding − pooled (all sims) 
+
+Masking Propensity Scores by Treatment Status 0.00 0.25 0.50 0.75 1.00     
+
+> 0.00 0.25 0.50 0.75 1.00
+
+P(T = 1) 
+
+> proportion
+
+T 0 1
+
+Binary, High Confounding − pooled (all sims) 
+
+TI Propensity Scores by Treatment Status 0.0 0.2 0.4     
+
+> 0.00 0.25 0.50 0.75 1.00
+
+P(T = 1) 
+
+> proportion
+
+T 0 1
+
+Continuous, Low Confounding − pooled (all sims) 
+
+Masking Propensity Scores by Treatment Status 0.00 0.25 0.50 0.75 1.00     
+
+> 0.00 0.25 0.50 0.75 1.00
+
+P(T = 1) 
+
+> proportion
+
+T 0 1
+
+Continuous, Low Confounding − pooled (all sims) 
+
+TI Propensity Scores by Treatment Status 0.0 0.2 0.4     
+
+> 0.00 0.25 0.50 0.75 1.00
+
+P(T = 1) 
+
+> proportion
+
+T 0 1
+
+Continuous, High Confounding − pooled (all sims) 
+
+Masking Propensity Scores by Treatment Status 0.00 0.25 0.50 0.75     
+
+> 0.00 0.25 0.50 0.75 1.00
+
+P(T = 1) 
+
+> proportion
+
+T 0 1
+
+Continuous, High Confounding − pooled (all sims) 
+
+TI Propensity Scores by Treatment Status Figure 8: Estimated propensity score distributions for the masking-only estimator (no penalty; left column) and the TI-estimator (right column), pooled across all 100 simulation iterations. Rows correspond to binary low confounding, binary high confounding, continuous low confounding, and continuous high confounding. Colors indicate treatment status. The TI-estimator concentrates propensity mass at 0 and 1, reflecting deterministic treatment encoding from unmasked text. The masking-only estimator produces no degenerate scores and maintains overlapping support across the unit interval. Notice differences in y-axis scales. 25 Low Confounding High Confounding                                                                         
+
+> Estimator MSE Bias Var PS MSE Bias Var PS True .0000 .0001 .0000 –.0000 .0006 .0000 –Naive .0230 .1514 .0001 –.0553 .2349 .0001 –Masking (Auto) .0038 .0287 .0030 96.0% .0115 .1000 .0015 97.7% Masking: No Penalty .0037 .0362 .0024 26.4% .0051 .0524 .0024 26.5% TextCause .0237 .1531 .0002 100.0% .0565 .2371 .0003 100.0% TI (Trimmed) .0239 .0509 .0213 2.2% .0280 .0491 .0256 2.2% TI (Winsorized) .0363 .1693 .0076 2.2% .0436 .1908 .0072 2.2% TI (Out. Reg.) .0434 .1887 .0078 2.2% .0523 .2124 .0072 2.2%
+
+Table 7: Binary outcomes: comparison of estimators, including an iteration with no penalty loss.                                                                          
+
+> Low Confounding High Confounding
+> Estimator MSE Bias Var PS MSE Bias Var PS True .0229 .0186 .0226 –.0229 .0186 .0226 –Naive .3669 .6058 .0000 –1.1238 1.0601 .0000 –Masking (Auto) .0195 -.0425 .0177 87.0% .0442 -.0674 .0397 87.9% Masking: No Penalty .0136 .0330 .0125 16.4% .0515 .1603 .0258 17.2% TextCause .2746 .5219 .0021 100.0% .6132 .7779 .0081 100.0% TI (Trimmed) .0336 -.1072 .0221 2.9% .0615 -.1614 .0355 5.5% TI (Winsorized) .0248 .1420 .0047 2.9% .0422 .1626 .0157 5.5% TI (Out. Reg.) .0380 .1820 .0049 2.9% .0497 .1789 .0177 5.5%
+
+Table 8: Continuous outcomes: comparison of estimators, including an iteration with no penalty loss. The penalty alone improves overlap relative to the TI-estimator, with 76–90% of propensity scores in 
+
+[0 .1, 0.9] . However, because the encoder still receives treatment-defining tokens as input, the penalty must work against a strong gradient signal pushing the representation toward encoding treatment status. MSE is reduced relative to the naive estimator, TextCause, and most TI variants in all settings. In three of four settings, the full masking pipeline achieves lower MSE, confirming that removing the lexical shortcut at the input level and regularizing the propensity score are complementary. In one setting (continuous, low confounding), the penalty-only variant achieves MSE of .0158 compared to .0195 for masking, suggesting that the penalty can occasionally provide sufficient regularization on its own. The adaptive update rule provides further insight into the division of labor between masking and the penalty. When training on masked text, λP decreases from its initial value of 100 in a majority of iterations (median final value: 78; minimum: 26), indicating that with the lexical shortcut removed, the encoder produces moderate propensity scores without strong regularization. When training on unmasked text (penalty only), λP increases in every iteration (minimum final value: 165; maximum: 738), reflecting the substantially stronger regularization needed to counteract the gradient signal from treatment-defining tokens. This asymmetry confirms that the penalty works harder in the absence of masking. It must suppress treatment encoding that masking would have prevented at the input level. These results frame the penalty not merely as a component of the masking pipeline, but as a lexicon-free tool for mitigating overlap collapse in text-as-treatment problems. While it lacks the theoretical guarantees available for lexicon-based masking, it offers a practical method when no lexicon is available. To investigate the mechanism responsible for this, we perform an exploratory analysis of how the encoder treats L versus [MASK] tokens in producing the [CLS] representation. For a fixed held-out set of test documents, we tokenize each twice — once as Wi and once as Wmask  
+
+> i
+
+— and at every epoch compute the cosine similarity between the average [CLS] vectors produced from the two tokenizations. A value near 1 indicates the encoder has learned an invariance to the L → [MASK] swap; a value near 0 indicates that masking lexicon tokens substantially shifts the representation. We compare three 26 Low Confounding High Confounding                                                                         
+
+> Estimator MSE Bias Var PS MSE Bias Var PS True .0000 .0001 .0000 –.0000 .0006 .0000 –Naive .0230 .1514 .0001 –.0553 .2349 .0001 –Masking (Auto) .0038 .0287 .0030 96.0% .0115 .1000 .0015 97.7% Masking - Penalty Only .0110 .0980 .0014 76.4% .0221 .1435 .0015 79.2% TextCause .0237 .1531 .0002 100.0% .0565 .2371 .0003 100.0% TI (Trimmed) .0239 .0509 .0213 2.2% .0280 .0491 .0256 2.2% TI (Winsorized) .0363 .1693 .0076 2.2% .0436 .1908 .0072 2.2% TI (Out. Reg.) .0434 .1887 .0078 2.2% .0523 .2124 .0072 2.2%
+
+Table 9: Binary outcomes: comparison of estimators, including with penalty and no masking.                                                                          
+
+> Low Confounding High Confounding
+> Estimator MSE Bias Var PS MSE Bias Var PS True .0229 .0186 .0226 –.0229 .0186 .0226 –Naive .3669 .6058 .0000 –1.1238 1.0601 .0000 –Masking (Auto) .0195 -.0425 .0177 87.0% .0442 -.0674 .0397 87.9% Masking - Penalty Only .0158 -.0371 .0144 90.1% .0651 .1519 .0420 90.7% TextCause .2746 .5219 .0021 100.0% .6132 .7779 .0081 100.0% TI (Trimmed) .0336 -.1072 .0221 2.9% .0615 -.1614 .0355 5.5% TI (Winsorized) .0248 .1420 .0047 2.9% .0422 .1626 .0157 5.5% TI (Out. Reg.) .0380 .1820 .0049 2.9% .0497 .1789 .0177 5.5%
+
+Table 10: Continuous outcomes: comparison of estimators, including with penalty and no masking. training regimes: train on Wmask with Lpenalty (production), train on W with Lpenalty (penalty-only ablation), and train on W without Lpenalty .
+
+Figure 9: Exploratory; single simulation on binary high confounding data. 
+
+Interpretation. Figure 9 shows exploratory re-sults from a single simulation on the binary, high-confounding Amazon dataset; replicating across simulations and confounding settings is a direction for future work. Training on W with Lpenalty sustains a high co-sine across epochs ( ∼ 0.84 ), indicating that the penalty induces the encoder to treat L and 
+
+[MASK] similarly at the [CLS] .Training on W without Lpenalty shows the largest representational gap, consistent with the lexicon carrying information whose removal substan-tively shifts the representation. The production regime often falls between the two which we read as further support for the train-on-masked, evaluate-on-full design: evalu-ation on W requires the encoder to set aside its learned representation of the mask pattern and re-engage pretrained knowledge of lexicon tokens. We treat these readings as hypotheses pending further study, and note that they suggest a representation-level analysis of Lpenalty as a potential path toward extending the framework beyond lexicon-based treatments. 
+
+Summary. The two components address complementary failure modes. Masking removes the direct lexical path from treatment-defining tokens to the representation, eliminating the dominant source of overlap collapse. The penalty regularizes residual treatment signal that survives masking, ensuring 27 propensity scores remain in a range suitable for stable inference. Their combination is a reliable method for practitioners to encode textual confounders. We suggest a two-tier recommendation: 1. Lexicon available: Apply masking and the overlap penalty jointly for the strongest and most theoretically grounded performance. 2. No lexicon available: The overlap penalty alone provides a lexicon-free alternative that still substantially reduces bias and improves overlap relative to existing text-as-treatment methods. 
+
+D.7 Evaluation on Masked Text 
+
+Section 3.2 introduced the design choice to train on masked text but evaluate on the original document. Evaluating on W may be beneficial as the mask-trained encoder has not learned to exploit lexicon tokens, yet can still draw on non-lexicon context that those tokens provide. Table 11 compares the results of the proposed LLM procedure from Section 5 evaluating on masked text compared to full text. In three out of four cases, we see a lower MSE when evaluating on full text. This is empirical support that the mask-trained encoder, having encountered [MASK] tokens throughout training, is sensitive to their presence and frequency. Full-text evaluation achieves lower MSE in three of four settings, with the largest gains under continuous outcomes: MSE drops from 0.0637 to 0.0195 under low confounding and from 0.1211 to 0.0442 under high confounding. The overlap diagnostics shift correspondingly, with the fraction of propensity scores in [0 .1, 0.9] rising from 17–18% under masked evaluation to 87–88% under full-text evaluation. Under binary high confounding, masked evaluation achieves a lower MSE (0.0053 vs. 0.0115), though both values represent substantial improvement over the naive baseline. The continuous settings, where the outcome model is more sensitive to representation quality, show the clearer separation between the two strategies and provide the stronger evidence for full-text evaluation as the default.                                                                          
+
+> Low Confounding High Confounding
+> Estimator MSE Bias Var PS MSE Bias Var PS
+> Binary Outcomes
+> True .0000 .0001 .0000 –.0000 .0006 .0000 –Naive .0230 .1514 .0001 –.0553 .2349 .0001 –Masking (Full Eval) .0038 .0287 .0030 96.0% .0115 .1000 .0015 97.7% Masking (Mask Eval) .0048 .0397 .0032 99.3% .0053 .0515 .0027 99.6%
+> Continuous Outcomes
+> True .0229 .0186 .0226 –.0229 .0186 .0226 –Naive .3669 .6058 .0000 –1.1238 1.0601 .0000 –Masking (Full Eval) .0195 -.0425 .0177 87.0% .0442 -.0674 .0397 87.9% Masking adapt (Mask Eval) .0637 .2409 .0057 17.0% .1211 .3163 .0211 18.2%
+
+Table 11: Binary (top) and continuous (bottom) outcomes using the full proposed loss function. Full Eval rows are evaluated on full text; Mask Eval rows are evaluate on masked text. 
+
+D.8 Sensitivity to λp
+
+The overlap penalty weight λp is the primary hyperparameter introduced by our method. Ap-pendix D.6.1 established that replacement masking alone can be beneficial for ATE estimation; the penalty provides additional control over the propensity score distribution. Here, we investigate how the choice of λp affects this control and whether performance is sensitive to its value. We examine the adaptive update rule proposed as our main method with varying initial values λ(0)  
+
+> p
+
+. As further comparison, we provide the same sweep when evaluating on masked data. 
+
+D.8.1 Adaptive Starting Values 
+
+Tables 12 and 13 report results across λ(0)  
+
+> p
+
+∈ { 10 , 30 , 100 , 300 , 1000 } using the adaptive update rule. Two patterns emerge. First, the fraction of propensity scores in [0 .1, 0.9] increases monotonically 28 with λ(0)  
+
+> p
+
+: stronger initial penalization drives propensity scores toward the interior of the unit interval more quickly, and lower starting values may not ramp up fast enough before validation loss is minimized and training stops. Second, MSE does not decrease monotonically. Performance improves as λ(0)  
+
+> p
+
+increases from 10 to an intermediate range (100–300), then degrades at 1000. This reflects a tradeoff: too little penalization allows residual treatment leakage, while too much suppresses treatment-predictive confounding information that the representation needs for outcome adjustment .Figure 10 summarizes this tradeoff by plotting MSE against the median overlap rate for each starting value and setting. The relationship traces an approximate U-shape in MSE as the overlap rate increases, with the minimum consistently falling in the 87–99% range. The pattern is qualitatively similar across binary and continuous outcomes and across confounding strengths, though there appears to be some noise and sharp spikes in the binary high confounding setting, suggesting that moderate penalization enough to prevent extreme propensities but is robust across settings. The default starting value of λ(0)  
+
+> p
+
+= 100 falls within or near this favorable range in all four settings. While binary high confounding actually experiences a spike in MSE at λ(0)  
+
+> p
+
+= 100 , we still see that this method strongly outperforms competitors. The total range of MSE across all starting values in this setting is 0.0070 to 0.0141, a window small enough that simulation noise can shift the ranking. Every value of λ(0)  
+
+> p
+
+in this range reduces MSE by at least half relative to the strongest competitor, and all achieve overlap rates above 78%. The default starting value of λ(0)  
+
+> p
+
+= 100 falls within or near the favorable range in all four settings, and where it is not the single best value, the differences are small relative to the gains over competing methods.                                                       
+
+> Low Confounding High Confounding
+> Estimator MSE Bias Var PS MSE Bias Var PS Masking ( λ(0)
+> p= 10 ).0047 .0517 .0020 69.6% .0076 .0737 .0022 78.3% Masking ( λ(0)
+> p= 30 ).0051 .0573 .0018 86.9% .0089 .0839 .0018 89.7% Masking ( λ(0)
+> p= 100 ).0038 .0287 .0030 96.0% .0115 .1000 .0015 97.7% Masking ( λ(0)
+> p= 300 ).0036 .0093 .0035 99.9% .0070 .0681 .0023 99.9% Masking ( λ(0)
+> p= 1000 ).0054 .0445 .0034 100.0% .0141 .1067 .0027 100.0%
+
+Table 12: Binary outcomes: masking λ(0)  
+
+> p
+
+sweep.                                                       
+
+> Low Confounding High Confounding
+> Estimator MSE Bias Var PS MSE Bias Var PS Masking ( λ(0)
+> p= 10 ).0731 -.2020 .0323 86.5% .1444 -.3162 .0444 84.4% Masking ( λ(0)
+> p= 30 ).0484 -.1492 .0261 86.8% .0732 -.1834 .0396 83.1% Masking ( λ(0)
+> p= 100 ).0195 -.0425 .0177 87.0% .0442 -.0674 .0397 87.9% Masking ( λ(0)
+> p= 300 ).0152 -.0261 .0145 91.1% .0488 .1198 .0344 97.8% Masking ( λ(0)
+> p= 1000 ).0176 .0439 .0157 98.4% .0513 .0516 .0486 99.9%
+
+Table 13: Continuous outcomes: masking λ(0)  
+
+> p
+
+sweep. 
+
+D.8.2 Adaptive Starting Values: Masked Evaluation 
+
+Tables 14 and 15 repeat the λ(0)  
+
+> p
+
+sweep from above but evaluate the trained encoder on masked text rather than full text. The comparison indicates how the evaluation strategy interacts with penalty strength. Two differences from the full-text evaluation sweep stand out. First, MSEs are generally higher across starting values and settings, consistent with that masked evaluation can expose the mask pattern as a treatment signal. Second, the overlap diagnostic responds more sluggishly to the penalty: even at λ(0)  
+
+> p
+
+= 1000, the median fraction of propensity scores in [0.1, 0.9] reaches only 45–50% for continuous outcomes. 29 10 30 100 300 1000 10 30 100 300 1000            
+
+> 10 30 100 300 1000 10 30 100 300 1000
+> continuous binary
+> 85 90 95 100 70 80 90 100
+> 0.006 0.009 0.012
+> 0.05 0.10 0.15
+> PS (% non−extreme propensity)
+> MSE
+> Confounding low high
+
+λp(0) Sweep: PS vs. MSE Figure 10: MSE versus median overlap rate (fraction of propensity scores in [0 .1, 0.9] ) across adaptive starting values λ(0)  
+
+> p
+
+∈ { 10 , 30 , 100 , 300 , 1000 }, evaluated on full text. 
+
+Low Confounding High Confounding 
+
+Estimator MSE Bias Var PS MSE Bias Var PS Masking ( λ(0)  
+
+> p
+
+= 10 ) .0119 .0996 .0019 17.7% .0219 .1418 .0018 17.6% Masking ( λ(0)  
+
+> p
+
+= 30 ) .0082 .0748 .0026 20.7% .0248 .1518 .0018 25.6% Masking ( λ(0)  
+
+> p
+
+= 100 ) .0090 .0829 .0021 42.2% .0172 .1214 .0025 48.3% Masking ( λ(0)  
+
+> p
+
+= 300 ) .0107 .0945 .0018 97.1% .0215 .1393 .0021 95.2% Masking ( λ(0)  
+
+> p
+
+= 1000 ) .0077 .0586 .0043 99.7% .0187 .1250 .0031 99.9% 
+
+Table 14: Binary outcomes evaluated on masked text: masking λ(0)  
+
+> p
+
+sweep 
+
+D.8.3 Fixed Starting Values 
+
+What if instead of an automatically updating λp, we used fixed values? Tables 16 and 17 report results for fixed λP ∈ { 10 , 30 , 100 , 300 , 1000 }. Fixed values in the range 
+
+10 − 300 consistently outperform comparators from Table 2 across both outcome types and con-founding strengths, confirming that the method is not sensitive to precise tuning. With excessive penalization ( λP = 1000 ), overlap reaches 100% but MSE increases, particularly under continuous high confounding. This is consistent with the bias-overlap tradeoff formalized in Section 3. Too little regularization permits residual treatment leakage, while too much suppresses the treatment-predictive confounding signal needed for outcome adjustment. This performance suggest practitioners can choose a fixed value without elaborate tuning. The adaptive rule provides a convenience by automating selection within this range but is not essential to the method’s performance. 30 Low Confounding High Confounding 
+
+Estimator MSE Bias Var PS MSE Bias Var PS Masking ( λ(0)  
+
+> p
+
+= 10 ) .1473 .3790 .0036 13.4% .3251 .5608 .0106 12.9% Masking ( λ(0)  
+
+> p
+
+= 30 ) .0515 .2129 .0062 13.9% .2467 .4842 .0123 15.0% Masking ( λ(0)  
+
+> p
+
+= 100 ) .0637 .2409 .0057 17.0% .1211 .3163 .0211 18.2% Masking ( λ(0)  
+
+> p
+
+= 300 ) .0476 .2021 .0068 22.6% .1388 .3437 .0207 44.1% Masking ( λ(0)  
+
+> p
+
+= 1000 ) .0366 .1716 .0072 45.1% .0497 .1244 .0342 46.8% 
+
+Table 15: Continuous outcomes evaluated on masked text: masking λ(0)  
+
+> p
+
+sweep. 
+
+Low Confounding High Confounding 
+
+Estimator MSE Bias Var PS MSE Bias Var PS Masking ( λp=10) .0054 .0565 .0022 66.1% .0074 .0729 .0021 73.8% Masking ( λp=30) .0059 .0632 .0019 90.8% .0094 .0869 .0018 92.3% Masking ( λp=100) .0048 .0397 .0032 99.3% .0053 .0515 .0027 99.6% Masking ( λp=300) .0037 .0158 .0034 100.0% .0082 .0767 .0023 100.0% Masking ( λp=1000) .0064 .0553 .0033 100.0% .0175 .1212 .0028 100.0% 
+
+Table 16: Binary outcomes: fixed λp sweep. 
+
+Low Confounding High Confounding 
+
+Estimator MSE Bias Var PS MSE Bias Var PS Masking ( λp=10) .0571 -.1945 .0192 27.1% .0431 .1183 .0291 44.1% Masking ( λp=30) .0428 -.1468 .0213 48.0% .0379 -.0645 .0337 65.6% Masking ( λp=100) .0190 -.0467 .0168 93.5% .0440 -.0887 .0362 95.1% Masking ( λp=300) .0148 .0123 .0146 100.0% .0398 -.0219 .0393 100.0% Masking ( λp=1000) .0202 .0789 .0140 100.0% .1050 .2454 .0448 100.0% 
+
+Table 17: Continuous outcomes: fixed λp sweep. 31
