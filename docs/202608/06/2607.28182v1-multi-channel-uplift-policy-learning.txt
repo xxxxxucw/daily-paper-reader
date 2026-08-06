@@ -1,0 +1,1653 @@
+Title: Multi-channel Uplift Policy Learning
+
+URL Source: https://arxiv.org/pdf/2607.28182v1
+
+Published Time: Fri, 31 Jul 2026 01:16:59 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# Multi-channel Uplift Policy Learning 
+
+# Changjian Liu ∗
+
+Peking University Beijing, China cjliu25@stu.pku.edu.cn 
+
+# Tianyu Wang 
+
+Alibaba Group Beijing, China yves.wty@@alibaba-inc.com 
+
+# Xiaoxuan Deng 
+
+Alibaba Group Beijing, China dengxiaoxuan.dxx@alibaba-inc.com 
+
+# Wentao Zhu ∗
+
+Beihang University Beijing, China zy2406229@buaa.edu.cn 
+
+# Yuwei Xu ∗
+
+CUHK-shenzhen Shenzhen, China yuweixu@link.cuhk.edu.cn 
+
+# Junqi Jin ✉
+
+Alibaba Group Beijing, China junqi.jjq@alibaba-inc.com 
+
+# Yong Gao ✉
+
+Peking University Beijing, China gaoyong@pku.edu.cn 
+
+# Chuan Yu 
+
+Alibaba Group Beijing, China yuchuan.yc@alibaba-inc.com 
+
+# Jian Xu 
+
+Alibaba Group Beijing, China xiyu.xj@taobao.com 
+
+# Bo Zheng 
+
+Alibaba Group Beijing, China bozheng@alibaba-inc.com 
+
+## Abstract 
+
+E-commerce platforms must allocate fixed marketing budgets across multiple channels to maximize business utility. However, standard predict-then-optimize (PTO) paradigms fail in this compositional space due to observational confounding and severe extrapolation. We formulate this challenge as a simplex-constrained uplift deci-sion problem and propose ReAlloc , a fast-slow causal framework. Specifically, an agile Orthogonal Teacher extracts unbiased local gra-dients from short-term logs, while an Explanation-Guided Student distills them into a structured marginal field over long-term hori-zons. This design enables support-aware, conservative decisions that capture cross-channel substitutions. Extensive simulations and large-scale online A/B tests on Taobao platform demonstrate that 
+
+ReAlloc achieves simultaneous lifts in both pay order and income. 
+
+## CCS Concepts 
+
+• Applied computing → Electronic commerce ; • Information systems → Decision support systems ; Computational advertis-ing ; • Computing methodologies → Causal reasoning and diagnostics .
+
+## Keywords 
+
+uplift, resource allocation, decision making, e-commerce marketing 
+
+## 1 Introduction 
+
+In modern e-commerce systems, platforms increasingly act as cen-tralized decision makers. Specifically, they must allocate limited marketing resources across heterogeneous items and diverse inter-vention channels [ 2, 5 ]. Moving beyond mere outcome prediction, the core objective is to learn intervention policies that causally drive business utility, such as sales, income, and Gross Merchandise Volume (GMV). This naturally frames an uplift policy learning prob-lem: given a pre-decision state, the platform must allocate resources to maximize the incremental outcome [3, 11, 18]. 
+
+> ∗Work done during an internship at Taobao, Alibaba Group.
+
+Most existing uplift and contextual decision methods focus on binary, discrete, or single-channel treatments [ 29 , 30 ]. However, real-world systems are inherently multi-channel and resource con-strained. This transforms the intervention from an independent scalar action into a compositional allocation vector constrained on a budget simplex. Such a constraint fundamentally alters the decision landscape from the absolute individual treatment effects (ITE) to the relative marginal value of reallocating resources across channels. A concrete example arises in marketing hosting systems [ 26 ], where a fixed total budget is split between traffic-driving channels (e.g., advertising) and conversion enhancing benefits (e.g., coupons and rebates). Although potentially complementary, these channels frequently substitute or cannibalize each other. For in-stance, shifting funds to advertising increases exposure but dilutes conversion incentives. Consequently, the final outcome is governed by a complex joint response surface. A common industrial paradigm is predict-then-optimize (PTO): fit a response model, then search to maximize the predicted out-come [ 9 , 27 ]. However, PTO is fundamentally insufficient for multi-channel uplift learning for three reasons. First , channel-wise mod-els ignore cross-channel interactions; their independent curves can-not recover the optimum of the joint response surface. Second , even a joint black-box model is unsafe under global optimization; the optimizer may exploit extrapolation errors in unsupported regions, yielding aggressive policies. Third , and most critically, prediction accuracy does not imply decision quality. Standard losses (e.g., MSE) optimize average prediction, whereas deployment relies on counter-factual ranking [ 6]. Minor prediction errors in high-uplift regions are severely amplified by the optimizer, ultimately degrading the result. This optimization vulnerability is further exacerbated by ob-servational confounding. Historical allocations are driven by legacy business policies, systematically entangling treatment assignments with item states. Consequently, models achieve strong factual pre-diction but yield biased causal gradients, rendering downstream optimization ineffective. arXiv:2607.28182v1 [cs.LG] 30 Jul 2026 Liu et al. 
+
+Figure 1: Conceptual illustration of ReAlloc . (a) Local response slopes identify promising reallocation directions. (b) Global PTO extrapolation produces unreliable decisions. (c) ReAlloc composes local slopes within support, leading to better decisions. 
+
+To address these challenges, we propose ReAlloc , a framework targeting local reallocation for multi-channel uplift decision prob-lem. It learns the causal marginal gradient of the budget simplex. First, we use an orthogonalized teacher to remove confounding ef-fects and recover unbiased local gradients. These gradients are then distilled into a student marginal field that guides conservative deci-sions within the observed support. ReAlloc turns unsafe PTO into support-aware causal reallocation, enabling precise and stable opti-mization under multi-channel budget constraints. Extensive offline experiments and large-scale online A/B tests on the Taobao plat-form demonstrate its superiority. It significantly outperforms uplift and PTO baselines in counterfactual ranking and decision quality. More importantly, online results reveals substantial improvements in both pay order 3.53 % and income 3.26 pt. Our contributions are: (1) Compositional Uplift. We formulate multi-channel budget allocation as compositional uplift on the simplex, targeting relative marginal effects under zero-sum constraints. (2) Support-Aware Causal Reallocation. We propose ReAlloc ,which decouples causal response learning from support-aware decisions through a distilled conservative marginal field. (3) Industrial-Scale Deployment. Deployed in Taobao’s system, 
+
+ReAlloc simultaneously improves pay order and income. 
+
+## 2 Related Work 2.1 Uplift Modeling 
+
+Uplift modeling and heterogeneous treatment effect (HTE) esti-mation aim to quantify the incremental impact of interventions [11 , 16 , 19 , 25 ]. While classical and modern neural estimators have achieved significant success, they primarily focus on binary or dis-crete treatments, targeting absolute individual treatment effects (ITE) [ 17 , 21 , 23 , 31 ]. Recent extensions consider multiple treat-ments [ 18 , 30 ] or continuous doses [ 12 , 13 , 28 ]. However, these formulations typically model treatments as separate arms or a one-dimensional dose, rather than as a coupled composition. At the intersection of causal estimation and resource allocation, existing methods fall short of our setting. Budget-constrained uplift meth-ods [ 1, 2, 24 ] allocate scarce resources across users via knapsack optimization, but restrict each user to a scalar or discrete treatment. Multi-channel advertising systems [ 5, 22 ] coordinate campaign-level budgets, treating channel responses as aggregate primitives. Multi-touch attribution [ 10 , 15 ] assigns conversion credit across sequences but lacks explicit simplex-constrained optimization. In contrast, our setting requires learning item-level causal substitution under a fixed budget, where increasing one channel’s allocation nec-essarily decreases another’s, demanding a fundamentally different compositional formulation. 
+
+## 2.2 Decision-Focused Optimization 
+
+Offline policy learning evaluates policies from logged data using inverse-propensity or doubly robust estimators [ 3, 7, 8]. In indus-trial pipelines, the dominant paradigm is PTO, which decouples reward prediction from downstream optimization. To bridge the prediction-decision gap, Decision-Focused Learning (DFL) and SPO-style losses directly train predictive models against downstream decision metrics [ 9 , 20 , 27 ]. While PTO and DFL successfully align prediction with decision objectives in deterministic settings, they are fundamentally ill-equipped for causal compositional allocation. First, Factual Objective vs. Counterfactual Gradients. DFL optimizes factual reconstruction end-to-end. However, deployment strictly requires correct counterfactual marginal ranking. Differentiating through the optimizer with factual losses does not guarantee ac-curate causal gradients, especially in high-uplift regions. Second, Lack of Extrapolation Conservatism. Global optimizers over learned black-box surfaces are notoriously aggressive. Unlike Conserva-tive Q-Learning in offline RL [ 14 ], standard DFL lacks mechanisms to penalize out-of-support predictions. On the constrained sim-plex, DFL actively exploits extrapolation errors, yielding disastrous out-of-distribution policies. Third, Confounding Amplification. His-torical allocations are heavily entangled with item states via legacy policies. Because DFL aggressively optimizes these biased factual predictions end-to-end without explicit causal orthogonalization, it amplifies unreliable causal gradients [ 4, 17 ], leading to severe policy degradation. 
+
+## 3 Problem Formulation 3.1 Setup 
+
+Each decision has a fixed budget across 𝐾 channels. Let 𝑋 = (𝐻, 𝐵 )
+
+collect the pre-decision state 𝐻 ∈ H and the available budget 𝐵 > 0.Multi-channel Uplift Policy Learning 
+
+We observe historical decisions: 
+
+D = {( 𝑋 𝑖 , 𝑃 𝑖 , 𝑌 𝑖 )} 𝑛 𝑖 =1, 𝑃 𝑖 ∈ Δ𝐾 −1 := 𝑝 ∈ R𝐾  
+
+> +
+
+: 1⊤𝑝 = 1 , (1) where 𝑃 𝑖 is the allocation proportion and 𝑌 𝑖 is the realized outcome. Uppercase 𝑃 𝑖 denotes a historical action, whereas lowercase 𝑝 de-notes a candidate decision. Writing 𝑌 (𝑝 ) ≡ 𝑌 (𝐵𝑝 ) for the potential outcome under allocation 𝑝 , define 𝜇 (𝑋, 𝑝 ) := E[𝑌 (𝑝 ) | 𝑋 ] and 
+
+𝑉 (𝜋 ) := E𝑋 [𝜇 (𝑋, 𝜋 (𝑋 ))] . Given a policy class Π, our objective is 
+
+𝜋 ★ ∈ arg max   
+
+> 𝜋 ∈Π
+
+𝑉 (𝜋 ), 𝜋 : 𝑋 ↦ → Δ𝐾 −1. (2) 
+
+## 3.2 Local Reallocation Is the Decision Primitive 
+
+Fixed budget makes every feasible first-order perturbation zero-sum. The tangent space of the simplex and its orthogonal projector are: 
+
+T := {𝑣 ∈ R𝐾 : 1⊤𝑣 = 0}, ΠT := 𝐼 𝐾 − 1
+
+𝐾 11 ⊤. (3) For channels 𝑘 ≠ ℓ, an infinitesimal transfer from 𝑘 to ℓ has local effect 
+
+𝐷 𝑘 →ℓ 𝜇 (𝑋, 𝑝 ) = dd𝛿 𝜇 (𝑋, 𝑝 + 𝛿 (𝑒 ℓ − 𝑒 𝑘 )) 𝛿 =0+
+
+= (𝑒 ℓ − 𝑒 𝑘 )⊤∇𝑝 𝜇 (𝑋, 𝑝 ) = (𝑒 ℓ − 𝑒 𝑘 )⊤𝑔 ★ (𝑋, 𝑝 ), (4) where 𝑔 ★ (𝑋, 𝑝 ) = ΠT ∇𝑝 𝜇 (𝑋, 𝑝 ) is the causal reallocation field. The policy signal is therefore not an absolute channel effect, but the relative marginal return from moving budget between channels. 
+
+## 3.3 Production Failure Modes of PTO 
+
+A standard industrial solution to (2) is PTO: 
+
+b𝜃 ∈ arg min 
+
+> 𝜃
+
+1
+
+𝑛 
+
+> 𝑛
+
+∑︁ 
+
+> 𝑖 =1
+
+ℓ (𝑌 𝑖 , b𝜇 𝜃 (𝑋 𝑖 , 𝑃 𝑖 )) , (5) 
+
+b𝜋 PTO (𝑋 ) ∈ arg max    
+
+> 𝑝 ∈Δ𝐾 −1
+
+b𝜇 b𝜃 (𝑋, 𝑝 ). (6) Despite strong factual accuracy, this pipeline faces three failures. 
+
+Observational assignment: historical allocations are selected by legacy policies, so causal interpretation requires adjustment. 
+
+Objective mismatch: factual prediction loss does not control the marginal slopes or candidate rankings consumed by the optimizer. 
+
+Support mismatch: global optimization may exploit response estimates outside the logged action region; These failures motivate the three stages of ReAlloc : orthogonal local estimation, marginal gradient distillation, and support-aware decision. 
+
+## 4 Method 
+
+We propose ReAlloc , a casual teacher-student framework for fixed-budget multi-channel uplift learning; see Fig. 2. To handle the in-herent non-stationarity of marketing environments and the vul-nerabilities of standard PTO, ReAlloc operates as a dual system .At each update round, a fast teacher is trained on recent logs to extract unbiased local causal geometry, while a slow student accu-mulates this through a replay buffer to produce stable decisions. As detailed below, the three stages of ReAlloc systematically address the challenges of observational confounding, prediction-decision mismatch, and extrapolation vulnerability; see Algorithm 1. 
+
+Figure 2: Overview of ReAlloc 
+
+## 4.1 Stage I: Orthogonal Response Teacher 
+
+To address observational confounding (Challenge 1), we use orthog-onalization, akin to Robinson’s transformation in double machine learning (DML). For each recent training window Dshort , we first estimate two nuisance functions via cross-fitting: 
+
+ˆ𝑚 (𝐻, 𝐵 ) ≈ E[𝑌 | 𝐻, 𝐵 ], ˆ𝑒 (𝐻, 𝐵 ) ≈ E[𝑝 | 𝐻, 𝐵 ], (7) where ˆ𝑚 captures the baseline demand and ˆ𝑒 ∈ Δ𝐾 −1 captures the conditional mean action, i.e., the legacy policy tendency. We then construct the residualized outcome and treatment: 
+
+˜𝑌 𝑖 = 𝑌 𝑖 − ˆ𝑚 (𝐻 𝑖 , 𝐵 𝑖 ), ˜𝑝 𝑖 = 𝑝 𝑖 − ˆ𝑒 (𝐻 𝑖 , 𝐵 𝑖 ). (8) Constrained by simplex the simplex, ˜𝑝 𝑖 is a valid tangent-space deviation from the historical allocation, with the predictable com-ponent of treatment assignment removed. The teacher’s response surface is parameterized as: 
+
+ˆ𝜇 𝜓 (𝐻, 𝐵, 𝑝 ) = ˆ𝑚 (𝐻, 𝐵 ) + 𝑟 𝜓 
+
+ 𝐻, 𝐵, 𝑝 − ˆ𝑒 (𝐻, 𝐵 ), (9) where 𝑟 𝜓 is a residual response branch anchored at 𝑟 𝜓 (𝐻, 𝐵, 0) =
+
+0, ensuring that it models only the outcome variation driven by allocation deviations. Let P0 = 𝐼 − 1 
+
+> 𝐾
+
+11 ⊤ be the projection onto the tangent space. The teacher’s local marginal field is 
+
+𝑔 𝜓 (𝐻, 𝐵 ) = P0∇𝑧 𝑟 𝜓 (𝐻, 𝐵, 𝑧 ) 𝑧 =0 . (10) We train the teacher by minimizing the composite objective 
+
+Lteacher = 1
+
+|D short |∑︁ 𝑖 ∈ D short 
+
+h
+
+ℓ  𝑌 𝑖 , ˆ𝜇 𝜓 (𝐻 𝑖 , 𝐵 𝑖 , 𝑝 𝑖 ) + 𝜆 res ℓ   ˜𝑌 𝑖 , 𝑟 𝜓 (𝐻 𝑖 , 𝐵 𝑖 , ˜𝑝 𝑖 )
+
++ 𝜆 grad ℓ   ˜𝑌 𝑖 , ⟨𝑔 𝜓 (𝐻 𝑖 , 𝐵 𝑖 ), ˜𝑝 𝑖 ⟩i
+
+.
+
+(11) The first term maintains factual predictive accuracy, the second forces the residual branch to explain residual outcome variation, and the third explicitly regularizes the local directional derivative, yielding reliable causal gradients in supported neighborhoods. Liu et al. 
+
+## 4.2 Stage II: Student Marginal Distillation 
+
+While the fast teacher adapts to recent dynamics, directly optimiz-ing its response surface remains prone to the PTO failure mode (Challenge 2). We therefore train a slow student to distill the teacher’s local geometry into a globally consistent marginal field. To ensure that the learned marginal field is integrable, i.e., path-consistent, we define the student through a scalar potential function 𝑠 𝜃 (𝐻, 𝐵, 𝑝 ) ∈ 
+
+R. Its projected marginal utility is 
+
+𝑢 𝜃 (𝐻, 𝐵, 𝑝 ) = P0∇𝑝 𝑠 𝜃 (𝐻, 𝐵, 𝑝 ). (12) The predicted local marginal gain for reallocating budget from channel 𝑘 to channel 𝑙 is 
+
+𝑀 𝜃,𝑘 →𝑙 (𝐻, 𝐵, 𝑝 ) = 𝑢 𝜃,𝑙 (𝐻, 𝐵, 𝑝 ) − 𝑢 𝜃,𝑘 (𝐻, 𝐵, 𝑝 ). (13) This parameterization guarantees that finite allocation changes can be scored consistently through potential differences, avoiding cyclic or contradictory gradients. At each round, the teacher generates supervision targets. For a feasible perturbation 𝑝 ′ = 𝑝 + 𝛿 (𝑒 𝑙 − 𝑒 𝑘 ), the finite-difference target is 
+
+𝑦 𝜓 𝑘 →𝑙,𝛿 = ˆ𝜇 𝜓 (𝐻, 𝐵, 𝑝 ′) − ˆ𝜇 𝜓 (𝐻, 𝐵, 𝑝 )
+
+𝛿 . (14) We also extract the teacher’s projected Jacobian 𝑔 𝜓 = P0∇𝑝 ˆ𝜇 𝜓 (𝐻, 𝐵, 𝑝 ).The student is optimized over a replay buffer R of these targets: 
+
+Lstudent = ER
+
+h
+
+𝜆 pair 
+
+ 𝑀 𝜃,𝑘 →𝑙 − 𝑦 𝜓 𝑘 →𝑙,𝛿 
+
+2
+
++ 𝜆 jac 𝑢 𝜃 − 𝑔 𝜓 22
+
+i
+
+.
+
+(15) By accumulating targets in R and updating the deployed student via exponential moving average, 𝜃 (𝑡 ) = 𝛾𝜃 (𝑡 −1) + ( 1 − 𝛾 )𝜃 new , the student learns a stable, decision-focused marginal geometry. 
+
+## 4.3 Stage III: Support-Aware Decision 
+
+To prevent extrapolation vulnerability (Challenge 3), ReAlloc aban-dons unconstrained global maximization and instead performs con-servative local reallocations. Given the current allocation 𝑝 , we enumerate feasible local steps 
+
+C( 𝑝 ) = (𝑘, 𝑙, 𝛿 ) : 𝑝 + 𝛿 (𝑒 𝑙 − 𝑒 𝑘 ) ∈ Δ𝐾 −1 . (16) For a candidate 𝑐 = (𝑘, 𝑙, 𝛿 ), let 𝑝 𝑐 = 𝑝 + 𝛿 (𝑒 𝑙 − 𝑒 𝑘 ). The expected gain is computed from the student’s potential difference: 
+
+b𝐺 𝑐 = 𝑠 𝜃 (𝐻, 𝐵, 𝑝 𝑐 ) − 𝑠 𝜃 (𝐻, 𝐵, 𝑝 ). (17) To penalize unreliable updates, we define the conservative gain 
+
+b𝐺 cons  
+
+> 𝑐
+
+= b𝐺 𝑐 − 𝛽 b𝜎 𝑐 − 𝜆 𝑠 𝜑 (𝜔 𝑐 ), 𝜑 (𝜔 𝑐 ) = − log (𝜔 𝑐 + 𝜖 ). (18) Here, b𝜎 𝑐 is the predictive uncertainty, estimated using ensemble variance or MC Dropout, and 𝜔 𝑐 ∈ [ 0, 1] is a directional support score, computed using kernel density or inverse KNN distance to the replay buffer R. The latter measures whether similar reallocations are empirically supported by historical data. The policy selects the optimal conservative candidate: 
+
+𝑐 ★ = arg max   
+
+> 𝑐 ∈ C ( 𝑝 )
+
+b𝐺 cons  
+
+> 𝑐
+
+. (19) The allocation is updated only if the conservative gain exceeds a safety threshold 𝜏 min ; otherwise, a no-op is executed. This localized, 
+
+Algorithm 1: Implementation of ReAlloc 
+
+Input: Recent logs Dshort , replay buffer R, candidate set S,threshold 𝜏 min , EMA rate 𝛾 
+
+Output: Potential student 𝑠 𝜃 , marginal field 𝑀 𝜃 , policy 𝜋 𝜃  
+
+> 1
+
+Stage I: Fast Orthogonal Teacher ; 
+
+> 2
+
+Estimate nuisances ˆ𝑚 (𝐻, 𝐵 ) and ˆ𝑒 (𝐻, 𝐵 ) on Dshort ; 
+
+> 3
+
+Compute residuals ˜𝑌 𝑖 and ˜𝑝 𝑖 ; 
+
+> 4
+
+Train teacher ˆ𝜇 𝜓 by minimizing Lteacher ; 
+
+> 5
+
+Stage II: Slow Student Distillation ; 
+
+> 6
+
+foreach (𝐻 𝑖 , 𝐵 𝑖 , 𝑝 𝑖 ) ∈ D short do  
+
+> 7
+
+foreach (𝑘, 𝑙, 𝛿 ) ∈ S do  
+
+> 8
+
+𝑝 ′ 
+
+> 𝑖
+
+← 𝑝 𝑖 + 𝛿 (𝑒 𝑙 − 𝑒 𝑘 ); 
+
+> 9
+
+if 𝑝 ′ 
+
+> 𝑖
+
+∈ Δ𝐾 −1 then  
+
+> 10
+
+𝑦 𝜓 𝑖,𝑘 →𝑙,𝛿 ← ˆ𝜇 𝜓 (𝐻 𝑖 , 𝐵 𝑖 , 𝑝 ′ 
+
+> 𝑖
+
+) − ˆ𝜇 𝜓 (𝐻 𝑖 , 𝐵 𝑖 , 𝑝 𝑖 )
+
+𝛿 ; 
+
+> 11
+
+Add (𝐻 𝑖 , 𝐵 𝑖 , 𝑝 𝑖 , 𝑘, 𝑙, 𝛿, 𝑦 𝜓 𝑖,𝑘 →𝑙,𝛿 ) to R; 
+
+> 12
+
+end  
+
+> 13
+
+end  
+
+> 14
+
+end  
+
+> 15
+
+Update potential student 𝑠 𝜃 new on R by minimizing Lstudent ; 
+
+> 16
+
+𝜃 ← 𝛾𝜃 + ( 1 − 𝛾 )𝜃 new ; 
+
+> 17
+
+Stage III: Support-Aware Policy Improvement ; 
+
+> 18
+
+foreach decision instance (𝐻, 𝐵, 𝑝 (0) ) do  
+
+> 19
+
+𝑝 ← 𝑝 (0) ; 𝑟 ← 1; 
+
+> 20
+
+while 𝑟 ≤ 𝑅 max and max 𝑐 b𝐺 cons  
+
+> 𝑐
+
+(𝐻, 𝐵, 𝑝 ) > 𝜏 min do  
+
+> 21
+
+𝑐 ★ ← arg max 𝑐 ∈ C ( 𝑝 ) b𝐺 cons  
+
+> 𝑐
+
+(𝐻, 𝐵, 𝑝 ) ; // Best conservative candidate  
+
+> 22
+
+𝑝 ← 𝑝 + 𝛿 ★ (𝑒 𝑙 ★ − 𝑒 𝑘 ★ ); 𝑟 ← 𝑟 + 1; 
+
+> 23
+
+end  
+
+> 24
+
+𝜋 𝜃 (𝐻, 𝐵 ) ← 𝑝 ; 
+
+> 25
+
+end  
+
+> 26
+
+return 𝑠 𝜃 , 𝑀 𝜃 , 𝜋 𝜃 ;support-regularized search avoids unsupported, high-risk regions of the simplex while enabling conservative policy improvement. 
+
+## 5 Theory 
+
+Let 𝑝 0 (𝑋 ) denote the incumbent allocation and let C( 𝑋 ) ⊆ Δ𝐾 −1
+
+denote the supported region. For an absolutely continuous path 
+
+𝛾 : [0, 1] → Δ𝐾 −1, define the path length: 
+
+𝐿 (𝛾 ) :=
+
+∫ 10
+
+∥ ¤ 𝛾 (𝑡 )∥ 2 d𝑡 . (20) The path is support-admissible if 𝛾 (𝑡 ) ∈ C( 𝑋 ) for all 𝑡 ∈ [ 0, 1].Define the Pointwise Uplift Δ and Uplift Γ:
+
+Δ(𝑋, 𝑝 ) := 𝜇 (𝑋, 𝑝 ) − 𝜇 (𝑋, 𝑝 0 (𝑋 )) , (21) 
+
+Γ(𝜋 ) := E𝑋 [Δ(𝑋, 𝜋 (𝑋 ))] , R := {( 𝑋, 𝑝 ) : 𝑝 ∈ C( 𝑋 )} . (22) Formal assumptions and proofs are deferred to Appendix A. 
+
+## 5.1 Global Uplift Accumulates Local Return 
+
+Theorem 5.1 (Simplex uplift along a feasible path). Let 𝛾 
+
+be an absolutely continuous path with 𝛾 (0) = 𝑝 0 (𝑋 ) and 𝛾 (1) = 𝑝 . If Multi-channel Uplift Policy Learning 
+
+𝜇 (𝑋, ·) is continuously differentiable along 𝛾 , then 
+
+Δ(𝑋, 𝑝 ) =
+
+∫ 10
+
+𝑔 ★ (𝑋, 𝛾 (𝑡 )) ⊤ ¤𝛾 (𝑡 ) d𝑡 . (23) Finite business value is the accumulated marginal return along the allocation moves that the system actually executes. ReAlloc therefore concentrates estimation capacity on supported local traces rather than reconstructing a globally response surface. Crucially, this integral equivalence motivates us to parameterize the student as a scalar potential function, ensuring that its utility difference between allocations exactly equals the path integral of local returns, thus serving as a direct and reliable proxy for the true uplift. The proof is given in Appendix A.2. 
+
+## 5.2 Factual Fit Does Not Certify a Policy 
+
+Proposition 1 (Factual risk does not control decision qality). There exist smooth response surfaces and PTO predictors with zero factual risk under the logging distribution but constant decision regret. Moreover, there exists a sequence b𝜇 𝑛 such that ∥b𝜇 𝑛 −
+
+𝜇 ∥𝐿 2 → 0 while ΠT ∇𝑝 b𝜇 𝑛 − ΠT ∇𝑝 𝜇 ∞ → ∞ .
+
+The constructions are given in Appendix A.3. Let 𝑚 (𝑋, 𝑝 ) :=
+
+E[𝑌 | 𝑋, 𝑃 = 𝑝 ]. A factual response model targets the observational field 
+
+𝑔 obs (𝑋, 𝑝 ) := ΠT ∇𝑝 𝑚 (𝑋, 𝑝 ) = 𝑔 ★ (𝑋, 𝑝 ) + 𝑏 sc (𝑋, 𝑝 ), (24) 
+
+𝑏 sc (𝑋, 𝑝 ) := ΠT ∇𝑝 {𝑚 (𝑋, 𝑝 ) − 𝜇 (𝑋, 𝑝 )} . (25) The exact shortcut bias decomposition is given in Appendix A.4. It vanishes under conditional ignorability; orthogonalization con-trols nuisance-estimation sensitivity after identification, but does not recover omitted confounders. Offline RMSE and calibration are not launch certificates for an allocation policy. An optimizer can amplify small slope errors, and observational selection can make a historically favored channel appear incrementally valuable. Pre-dictive fit, local directional accuracy, support coverage, and policy value must therefore be validated separately. 
+
+## 5.3 Orthogonal Estimation of Supported Local Effects 
+
+Let 𝑑 = 𝐾 − 1 and let 𝑄 ∈ R𝐾 ×𝑑 be an orthonormal basis of T . With 
+
+𝑧 = 𝑄 ⊤𝑝 , 𝑍 = 𝑄 ⊤𝑃 , and e𝑍 = 𝑍 − 𝑧 , let Eℎ,𝑧 [· | 𝑋 ] denote kernel localization around 𝑧 . Define 
+
+𝑒 ℎ,𝑧 (𝑋 ) := Eℎ,𝑧 [ e𝑍 | 𝑋 ], 𝑚 ℎ,𝑧 (𝑋 ) := Eℎ,𝑧 [𝑌 | 𝑋 ]. (26) The orthogonal component of the teacher is characterized by 
+
+Ψℎ,𝑧 (𝛽, 𝑚, 𝑒 ; 𝑋 ) := Eℎ,𝑧 
+
+h
+
+{ e𝑍 − 𝑒 (𝑋 )}{ 𝑌 − 𝑚 (𝑋 )− 𝛽 (𝑋, 𝑧 )⊤ ( e𝑍 − 𝑒 (𝑋 ))} 𝑋 
+
+i
+
+. (27) 
+
+Theorem 5.2 (Orthogonal local-field estimation). Under Assumptions 1–4, the population root 𝛽 † 
+
+> ℎ
+
+of (27) satisfies 
+
+sup  
+
+> (𝑋 ,𝑝 ) ∈ R
+
+𝑄𝛽 † 
+
+> ℎ
+
+(𝑋, 𝑄 ⊤𝑝 ) − 𝑔 ★ (𝑋, 𝑝 ) 2 ≤ 𝜖 loc (ℎ), (28) 
+
+and the score is Neyman orthogonal with respect to (𝑚, 𝑒 ). Let b𝑔 orth  
+
+> 𝑇
+
+:=
+
+𝑄 b𝛽 be the cross-fitted empirical root and let b𝑔 𝑇 be the field returned by the implemented composite teacher. If 
+
+∥b𝑔 𝑇 − b𝑔 orth  
+
+> 𝑇
+
+∥∞,R ≤ 𝜖 comp , (29) 
+
+then, with probability at least 1 − 𝛿 ,
+
+∥b𝑔 𝑇 − 𝑔 ★ ∥∞,R ≤ 𝜖 𝑇 (𝑛, ℎ, 𝛿 ) + 𝜖 comp , (30) 
+
+𝜖 𝑇 (𝑛, ℎ, 𝛿 ) := 𝜖 loc (ℎ) + 𝐶 √︂ ℭG + log (1/𝛿 )
+
+𝑛ℎ 𝐾 +1 + 𝐶𝑟 orth . (31) The normalized second-order remainder 𝑟 orth and the proof are given in Appendix A.5. The rate exposes the production trade-off. A smaller neighborhood reduces local approximation bias but also reduces effective sample size; the ℎ𝐾 +1 term makes channel dimensionality an explicit data requirement. Orthogonality allows the outcome and logging models to be improved modularly, while 
+
+𝜖 comp records approximation and optimization error from the full neural objective. 
+
+## 5.4 Potential Accuracy Controls Regret 
+
+The deployed student is parameterized by a scalar potential: b𝑔 (𝑋, 𝑝 ) :=
+
+ΠT ∇𝑝 𝑠 𝜃 (𝑋, 𝑝 ), bΔ𝜃 (𝑋, 𝑝 ) := 𝑠 𝜃 (𝑋, 𝑝 ) − 𝑠 𝜃 (𝑋, 𝑝 0 (𝑋 )) . For 𝑝 ∈ C( 𝑋 ),let 𝔓 𝑋 (𝑝 ) denote the set of support-admissible paths from 𝑝 0 (𝑋 )
+
+to 𝑝 , and define the reachable action set: 
+
+A𝐿 max (𝑋 ) := {𝑝 : ∃𝛾 ∈ 𝔓 𝑋 (𝑝 ), 𝐿 (𝛾 ) ≤ 𝐿 max } . (32) Let 𝜋 ★ 
+
+> 𝐿 max
+
+(𝑋 ) ∈ arg max 𝑝 ∈ A 𝐿 max (𝑋 ) 𝜇 (𝑋, 𝑝 ) and define 
+
+Reg 𝐿 max (b𝜋 ) := E𝑋 
+
+𝜇 (𝑋, 𝜋 ★ 
+
+> 𝐿 max
+
+(𝑋 )) − 𝜇 (𝑋, b𝜋 (𝑋 ))  . (33) Assume the local search returns b𝜋 (𝑋 ) ∈ A 𝐿 max (𝑋 ) and satisfies 
+
+E𝑋 
+
+"
+
+sup    
+
+> 𝑝 ∈ A 𝐿 max (𝑋 )
+
+bΔ𝜃 (𝑋, 𝑝 ) − bΔ𝜃 (𝑋, b𝜋 (𝑋 )) 
+
+#
+
+≤ 𝜖 search . (34) 
+
+Theorem 5.3 (Trace-wise field error controls value and regret). Suppose ∥b𝑔 −𝑔 ★ ∥∞,R ≤ 𝜖 𝑔 . For any 𝑝 ∈ A 𝐿 max (𝑋 ) and any 
+
+𝛾 ∈ 𝔓 𝑋 (𝑝 ),
+
+bΔ𝜃 (𝑋, 𝑝 ) =
+
+∫ 10
+
+b𝑔 (𝑋, 𝛾 (𝑡 )) ⊤ ¤𝛾 (𝑡 ) d𝑡, (35) 
+
+bΔ𝜃 (𝑋, 𝑝 ) − Δ(𝑋, 𝑝 ) ≤ 𝐿 (𝛾 )𝜖 𝑔 . (36) 
+
+Consequently, 
+
+Reg 𝐿 max (b𝜋 ) ≤ 2𝐿 max 𝜖 𝑔 + 𝜖 search . (37) 
+
+Corollary 5.4 (End-to-end teacher–student regret). Un-der Assumption 5 and the event in Theorem 5.2, 
+
+Reg 𝐿 max (b𝜋 ) ≤ 2𝐿 max {𝜖 𝑇 (𝑛, ℎ, 𝛿 ) + 𝜖 comp + 𝜖 𝑆 } + 𝜖 search . (38) The proofs are given in Appendix A.6. 𝐿 max is a deployment blast-radius control: larger cumulative budget movement creates more upside but also amplifies field error. The term 𝜖 search captures the value lost to finite candidate sets, greedy search, and latency constraints. Because the student is a scalar potential, gains telescope across the actual accepted greedy trace and remain path-consistent. Liu et al. 
+
+## 6 Synthetic Experiment 6.1 Data Generation Process (DGP) 
+
+We construct a synthetic environment with known counterfactual outcomes to evaluate ReAlloc . The DGP is designed to preserve three core challenges: state-dependent assignment, locally identifiable but globally under-supported actions, and complex channel interactions. Each observation is an item-period tuple (𝐻 𝑖𝑡 , 𝐵 𝑖𝑡 , 𝑃 𝑖𝑡 , 𝑌 𝑖𝑡 ), where the allocation 𝑃 𝑖𝑡 ∈ Δ𝐾 −1 lies on a simplex with 𝐾 = 3 channels. 
+
+State-dependent logging. We decompose the state as 𝐻 = (𝐶, 𝐸, 𝑆 ),where 𝐶 acts as the primary confounder, 𝐸 modifies the response, and 𝑆 captures channel preference. To handle compositional al-locations 𝑃 , we map the simplex to a vector space using the iso-metric log-ratio (ILR) transform. The logging policy is specifically designed to induce three critical properties: (1) State-dependent confounding , controlled by a parameter 𝛼 cf , which couples the primary confounder 𝐶 with the allocation; (2) Boundary skew-ness , controlled by 𝛼 bd , which pushes the propensity mean toward simplex boundaries to mimic extreme budget skews; and (3) Strict overlap , achieved via a logistic-normal mixture noise that balances local exploitation (low variance) with sparse global exploration. Crucially, since all confounders are fully observed in 𝐻 , the DGP strictly satisfies conditional ignorability. (See Appendix B.) 
+
+Joint response surface. Outcomes follow 𝑌 = 𝜇 ★ (𝐻, 𝐵, 𝑃 ) + 𝜖 
+
+with 𝜖 ∼ N ( 0, 𝜎 2 
+
+> 𝑌
+
+). The causal response is anchored at a state-independent baseline allocation 𝑐 (𝐻, 𝐵 ). Let 𝑧 denote the allocation deviation from the baseline in the ILR space. The response surface: 
+
+𝜇 ★ (𝐻, 𝐵, 𝑃 ) = 𝑚 0 (𝐻, 𝐵 )+ 𝜌 (𝐻, 𝐵 )
+
+h
+
+𝜔 loc 𝑔 loc (𝐻, 𝑧 ) + 𝜔 int 𝑔 int (𝐻, 𝑧 ) + 𝜔 far 𝑔 far (𝐻, 𝑧 )
+
+i
+
+. (39) This formulation explicitly disentangles the ROI curve into three regimes: (1) The local term 𝑔 loc (𝐻, 𝑧 ) captures linear marginal returns, providing an identifiable first-order reallocation signal. (2) The interaction term 𝑔 int models cross-channel substitution and complementarity. (3) The far-field term 𝑔 far is flat near the anchor but introduces non-linear saturation and cannibalization for out-of-support (OOS) allocations. The component scales ( 𝜔 )are calibrated to ensure local gradients remain learnable from logs, while distant curvature is weakly identified, rigorously testing the model’s extrapolation capability. 
+
+Temporal variations. For the temporal experiment, we keep 𝜇 ★
+
+and all response parameters fixed, and apply a smooth window-specific bias to the logging logits. This rotates the observed action support across channels without introducing sequential treatment effects. Hence, we evaluate the retention of local geometric knowl-edge under changing support, rather than mechanism drift. 
+
+## 6.2 Setup 
+
+We design synthetic experiments to address three questions: RQ1 (Safe Policy Improvement): Under increasingly severe confound-ing and low overlap, can ReAlloc achieve higher deployable uplift than baselines? RQ2 (Mechanism of Improvement): Which com-ponents drive the performance gains? RQ3 (Fast-Slow Temporal Memory): Can the slow student effectively accumulate and retain local geometric knowledge from successive teachers? 
+
+Baselines. We compare ReAlloc against a comprehensive suite of reference, industry-style, and causal baselines: (1) Logging (main-tains historical allocations) and Uniform (equal budget split) serve as reference policies. (2) Additive ROI models channel responses independently, reflecting the decoupled paradigm in industry. (3) 
+
+Joint S-Learner PTO fits a global response surface using a standard S-learner and applies global or local optimization. (4) R-Learner Lo-cal orthogonally residualizes outcomes and treatments to estimate heterogeneous effects, selecting the optimal locally. 
+
+Evaluation Metrics. Standard offline policy evaluation often ig-nores the risk of OOD recommendations. We introduce a fallback mechanism: if a policy ˆ𝜋 recommends an allocation ˆ𝑝 𝑖 that falls out-side the historically supported region S𝑖 , the system safely defaults to the factual logging allocation 𝑃 𝑖 . Let Δ𝑖 ( ˆ𝜋 ) = 𝜇 ★ (𝐻 𝑖 , 𝐵 𝑖 , ˆ𝑝 𝑖 ) − 
+
+𝜇 ★ (𝐻 𝑖 , 𝐵 𝑖 , 𝑃 𝑖 ) be the pointwise oracle uplift. We define the Deploy-able Uplift as our primary metric: 
+
+Uplift dep ( ˆ𝜋 ) = 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+1{ ˆ𝑝 𝑖 ∈ S 𝑖 }Δ𝑖 ( ˆ𝜋 ), (40) To provide a comprehensive evaluation, we additionally report the 
+
+OOS rate (the fraction of rejected recommendations), the Safe Local Recovery ratio (comparing 𝑈 dep against an oracle), and geometric ranking metrics ( EdgeNDCG , TopEdgeAcc , TopEdgeRe-gret , PairwiseCorr ) that evaluate the local directional accuracy independent of policy visitation. 
+
+## 6.3 Results and Analysis 
+
+RQ1 result. Table 1 reports policy quality under decreasing log-ging overlap. Unconstrained PTO attains high raw uplift but con-verts little of it into deployable value, whereas support-constrained S-learners recover most of this loss, showing that unsafe global search is a major source of PTO failure. ReAlloc remains the strongest learned policy across all regimes, achieving deployable uplifts of 
+
+.97 /.79 /.71 /.57 and recovering .88 /.86 /.84 /.83 of the local ora-cle opportunity; its margin over the strongest S-NN variant is 
+
+.04 /.07 /.09 /.06 . Additive ROI and the orthogonal R-Learner remain feasible but obtain substantially lower value. Notably, the R-Learner slightly outperforms ReAlloc on hard-regime logged-anchor NDCG and regret, yet reaches only .21 deployable uplift versus .71 , indicat-ing that single-step edge quality alone does not determine effective multi-step reallocation. Figure 3 complements the aggregate results. For a fixed context and oracle response surface, increasing assignment severity concen-trates the conditional logged actions, isolating support deterioration from changes in the underlying outcome function. The best-edge map further shows that the preferred local transfer depends on the current simplex position. The trajectory comparison illustrates how global PTO moves toward a distant unsupported action, whereas the shared local-support policies remain feasible and follow distinct reallocation paths. 
+
+RQ2 result. Table 2 shows that ReAlloc requires both accurate local geometry and support-aware deployment. The results sepa-rate geometry errors from safety errors. Teacher-only local greedy remains support-safe, but it achieves weak edge correlation and recovers only a small fraction of the local oracle gain, showing that directly deploying noisy teacher targets is insufficient for stable Multi-channel Uplift Policy Learning 
+
+Table 1: Static policy quality under decreasing overlap. Cells show Deployable uplift / Safe Recovery (D/SR). For uncon-strained PTO ( G), Raw uplift (R) is shown as superscript.                                                                                                 
+
+> Uplift (D/SR) Hard Regime Diagnostics Method Benign Medium Hard Extreme Bias NDCG Regret
+> References
+> Logging .00 /–.00 /–.00 /–.00 /––––Uniform −.01 /–−.03 /–−.03 /–−.01 /––––Add. ROI .22 /.20 .21 /.22 .18 /.22 .16 /.23 −.02 .89 .78
+> Unconstrained global PTO
+> S-GBDT G.08 1.0/.07 .03 .8/.03 .01 .6/.01 .02 .7/.02 +.12 .70 2.62
+> S-NN G.02 1.2/.02 .01 1.1/.01 .01 1.0/.01 .00 1.0/.00 −.15 .89 .70
+> Support-constrained PTO
+> S-GBDT C.75 /.68 .46 /.50 .32 /.39 .36 /.52 +.03 .70 2.62
+> S-NN C.93 /.84 .72 /.78 .62 /.74 .50 /.73 −.12 .89 .70
+> Shared local-support search
+> S-GBDT L.01 /.01 .01 /.01 .00 /.00 .00 /.01 +.00 .70 2.62
+> S-NN L.91 /.82 .71 /.76 .61 /.73 .51 /.74 −.11 .89 .70
+> R-Learner L.24 /.21 .22 /.24 .21 /.25 .18 /.27 −.03 .92 .49
+> ReAlloc .97 /.88 .79 /.86 .71 /.84 .57 /.83 +.05 .92 .50
+> Oracle Local 1.10 /1.00 .92 /1.00 .83 /1.00 .68 /1.00 –––
+> Subscripts: G=global, C=constrained, L=local search.
+> (a) Benign (b) Medium (c) Hard (d) Extreme
+> (e) Oracle best local transfer (f) Representative policy trajectories
+
+Figure 3: Orcle response surface and policy behavior. Table 2: Mechanism ablation under hard interaction stress.                                                  
+
+> Variant Local geometry Decision / safety Edge ↑Top ↑Corr ↑Err ↓Dep. ↑OOS ↓Gap ↓Rec. ↑
+> Teacher-only .816 .343 .429 1.173 .144 .000 .000 .129 w/o Orthogonalization .790 .294 .407 .977 .412 .000 .000 .357 w/o Support .784 .291 .407 .922 .001 .984 .589 .001
+> ReAlloc .828 .370 .492 1.011 .522 .000 .000 .455
+
+policy improvement. The most severe safety failure occurs when the support check is removed: despite using a learned local field, the policy frequently leaves the empirical support, leading to high OOS and a non-negligible raw-safe gap. Overall, ReAlloc achieves the best combination of edge-ranking accuracy, deployable uplift, and support safety among learned variants, recovering about 60% of the support-aware local oracle gain without accessing oracle counterfactuals. 
+
+Table 3: Final rolling-window summary.   
+
+> Method Curr.
+
+↑ Past ↑ Union ↑ Memory ↓ Time ↓    
+
+> Fresh Teacher .144 .045 .051
+
+0.50 × 0.34 ×    
+
+> Reset Student .152 .047 .053
+
+0.50 × 0.43 ×    
+
+> Warm-start Teacher .146 .048 .054
+
+0.50 × 0.32 ×    
+
+> Equal-memory Raw Replay .208 .068 .077
+
+1.00 × 0.95 ×    
+
+> Fast-Slow ReAlloc .216 .071 .080
+
+1.00 × 1.00 ×    
+
+> Pooled Teacher .224 .075 .084
+
+8.00 × 2.71 ×
+
+RQ3 result. We finally evaluate periodic support rotation under a fixed response surface. With 𝑁 windows and 𝑛 rows per window, a Pooled Teacher stores Θ(𝑁𝑛 ) rows and incurs Θ(𝑁 2𝑛 ) cumulative fitting work by repeatedly retraining on the growing history. In contrast, Fast-Slow ReAlloc updates a current-window teacher alongside a fixed-memory student, requiring only Θ(𝑛 + 𝐵 ) storage and Θ(𝑁 (𝑛 + 𝐵 )) cumulative work, where 𝐵 is the student’s buffer size. In our configuration ( 𝐵 ≈ 𝑛 , 𝑁 = 16 ), Fast-Slow uses only 
+
+12 .5% of the pooled storage and 36 .9% of its cumulative fitting time, while retaining 94 .9% of its final union uplift ( 0.080 vs. 0.084 ). This bounded update cost becomes increasingly important when full-history retraining grows progressively more expensive. 
+
+## 7 Real-World Evaluation on Taobao 
+
+We evaluate ReAlloc on a 60-day Taobao production dataset com-prising 500K items, each allocating a fixed budget across paid ad-vertising and promotional benefits. Evaluations are conducted via matched prospective replay and online A/B testing. 
+
+## 7.1 Offline Evaluation 
+
+Offline evaluation combines two complementary data because rou-tine production logs suffer from low overlap and unstable IPS esti-mates, as risk controls concentrate reallocations near incumbent allocations with small incremental effects. Thus, we use routine traffic solely for an out-of-time matched replay to evaluate direc-tional ranking. For each moved event 𝑒 = (𝑖, 𝑡 ), we identify no-move controls ( Δp = 0) from the same date and first-level category using caliper-constrained KNN matching on pre-decision covari-ates. An evaluation model 𝑚 eval , trained strictly on dates preceding the replay window, first removes predictable demand variation: 
+
+𝑢 𝑖𝑡 = 𝑦 𝑖𝑡 −𝑚 eval (x𝑖𝑡 ). The matched residual response is then defined as 𝑅 𝑒 = 𝑢 𝑒 − 1 
+
+> | C ( 𝑒 ) |
+
+Í𝑗 ∈ C ( 𝑒 ) 𝑢 𝑗 , where C( 𝑒 ) denotes the matched no-move controls. For method 𝑚 , let 𝐺 𝑚 (𝑒 ) denote its predicted gain for the realized reallocation and let 𝑆 𝑚 (𝑒 ) = 𝐺 𝑚 (𝑒 )∥Δp𝑒 ∥1+𝜖 be the corresponding score. Matching removes predictable demand fluctu-ations and imbalance in observed covariates, but cannot eliminate unobserved confounding. We therefore use 𝑅 𝑒 only for evaluating directional ranking. Causal policy value is evaluated on an exploration set containing 10% of the items. In this set, reallocation directions and magnitudes are randomized with controlled, estimable behavior propensities, which permits DR OPE. We additionally evaluate deployment sup-port using historical reallocations. These evaluations provide three complementary views of a method: score validity, empirical ac-tion support, and policy value. We report 𝜌 (Spearman correlation between 𝐺 𝑚 and 𝑅 𝑒 ), within-item concordance (pairwise 𝑆 𝑚 –𝑅 𝑒 Liu et al. 
+
+Table 4: Offline evaluation on routine production traffic and randomized exploration traffic.   
+
+> A. Routine traffic B. Randomized exploration traffic
+> Method
+
+𝜌 (𝐺, 𝑅 )↑ Within-item conc. ↑ A–R gap ↑ Supp. viol. @ upd. ↓ DR lift ↑ Action rate Lift/act. ↑ Agreement lift ↑ 
+
+> ReAlloc
+
+.028 [.021 ,. 036 ] .512 .023 .000 @.31 .025 [.012 ,. 043 ] .33 .069 .098 [.067 ,. 153 ]  
+
+> ReAlloc w/o Supp.
+
+.028 [.021 ,. 036 ] .512 .023 .678@ .32 −.021 [− .028 ,−.012 ] .96 −.021 −.040 [− .061 ,−.022 ] 
+
+> PTO-Local
+
+.010 [.000 ,. 019 ] .507 .012 .675@ .31 −.019 [− .026 ,−.011 ] .97 −.020 −.025 [− .044 ,−.004 ] 
+
+> Teacher-Only
+
+.017 [.009 ,. 024 ] .509 .011 .663@ .27 −.019 [− .028 ,−.011 ] .92 −.021 −.024 [− .045 ,−.002 ] 
+
+> Context-Only
+
+.019 [.007 ,. 025 ] .506 .007 .696@ .33 −.015 [− .023 ,−.006 ] .97 −.015 −.022 [− .043 ,−.001 ] 
+
+> VCNet
+
+.029 [.021 ,. 039 ] .514 .026 .660@ .34 .022 [.015 ,. 032 ] .98 .023 .073 [.055 ,. 093 ] 
+
+> GIKS
+
+.026 [.018 ,. 035 ] .513 .023 .657@ .33 .022 [.014 ,. 031 ] .98 .022 .070 [.051 ,. 092 ] 
+
+> AdditiveROI
+
+.031 [.022 ,. 040 ] .516 .029 .575@ .34 .023 [.015 ,. 032 ] .97 .024 .078 [.059 ,. 098 ]
+
+agreement within items), aligned–reverse gap (response separation between top and bottom score quantiles), support violation at up-date rate (fraction of executed recommendations outside support, reported with the update rate), DR lift (DR improvement over the logging policy), per-acted lift (DR lift per non-noop action), and agreement lift (response difference when logged actions agree with versus oppose the recommendation). Full definitions and inference details are in Appendix C.2. Table 4 presents the results. On routine traffic, the matched resid-ual 𝑅 = 𝜏 + 𝜖 exhibits a noise floor: the residual standard deviation 
+
+𝑠𝑑 (𝑅 ) ≈ 0.34 vastly overshadows the true per-move causal effect 
+
+𝑠𝑑 (𝜏 ) ≈ 0.018 , yielding a SNR of merely ≈ 0.05 . Even an oracle ranker with perfect knowledge of 𝜏 attains a maximum Spearman 
+
+𝜌 ★ ≈ 𝑠𝑑 (𝜏 )/ 𝑠𝑑 (𝑅 ) ≈ 0.05 (verified via Monte-Carlo: 0.050 ± 0.004 ). Within this highly noisy regime, ReAlloc achieves a competitive 𝜌 
+
+of 0.028 (recovering over 50% of the oracle bound), performing on par with strong baselines like AdditiveROI. More importantly, ReAl-loc ’s explicit support layer completely eliminates historical support violations ( 0.000 vs. 0.678 for the ablated version, and 57 .5% –69 .6% 
+
+for baselines) without sacrificing the update rate. This highlights a critical flaw in existing methods: they frequently recommend actions in regions lacking empirical evidence. The catastrophic failure of ReAlloc w/o Supp. (negative DR lift of −0.021 ) empir-ically proves that constraining decisions within the data support is indispensable for preventing disastrous extrapolation errors. On the randomized exploration set, ReAlloc achieves the highest DR lift ( 0.025 ) while intervening on only 33% of the cases, contrasting sharply with the near-ubiquitous interventions ( 97% ) triggered by AdditiveROI. This translates to a significantly higher per-action lift ( 0.069 vs. 0.024 ). In real-world e-commerce operations, frequent budget or price adjustments incur implicit friction costs, destabi-lize item pricing, and can degrade user trust. Therefore, a “less but more accurate” intervention strategy is highly preferred. By deliv-ering superior aggregate causal lift through fewer, highly targeted, and empirically supported interventions, ReAlloc demonstrates exceptional operational efficiency and deployment readiness. 
+
+## 7.2 Randomized Online A/B Test 
+
+We conducted a 14-day online A/B test on 300K eligible items, assigning 10% to the treatment arm ( ReAlloc ) and the remainder to the control (AdditiveROI). Strict item-level randomization prevents budget interference, with both arms sharing identical eligibility 
+
+Table 5: Online A/B-test results. 
+
+Metric Effect 95% CI (p)-value 
+
+Pay orders +3.5% [+ 2.8%, +5.1%] .001 
+
+GMV −2.6% [− 3.1% , −1.1% ] .003 
+
+Total cost −2.5% [− 2.0% , −0.8% ] .006 
+
+Marketing ROI −0.1% [− 1.8% , +1.5% ] .820 
+
+Profit margin +1.42 pt [+ 0.8pt , +2.0pt ] .001 
+
+Platform income +3.2pt [+ 2.1pt , +4.4pt ] .001 
+
+and risk constraints. As shown in Table 5, ReAlloc increases pay orders by 3.53% . This improvement is achieved without additional marketing expenditure: total realized spend decreases by 2.47% ,while overall marketing ROI remains statistically unchanged. At the same time, profit margin improves by 3.26 percentage points, and the corresponding platform income improves by 3.26 percentage points. The higher transaction volume does not translate into higher aggregate GMV during the current observation, GMV decreases by 2.64% . Thus, ReAlloc generates more transactions with lower total expenditure and improved profitability, but exhibits a trade-off against average order value and GMV. 
+
+## 8 Conclusion 
+
+We formulate fixed-budget multi-channel uplift as policy learning on the simplex and identify supported local causal reallocation as the relevant decision primitive. ReAlloc combines orthogonal local-effect estimation, marginal-field distillation, and support-aware updates. Synthetic and offline studies show improved deployable policy value under confounding and limited overlap. An A/B test on TaoBao increases pay orders and profitability while revealing a GMV trade-off. 
+
+## References          
+
+> [1] Meng Ai, Biao Li, Heyang Gong, Qingwei Yu, Shengjie Xue, Yuan Zhang, Yunzhou Zhang, and Peng Jiang. 2022. LBCF: A Large-Scale Budget-Constrained Causal Forest Algorithm. In Proceedings of the ACM Web Conference 2022 (Virtual Event, Lyon, France) (WWW ’22) . Association for Computing Machinery, New York, NY, USA, 2310–2319. doi:10.1145/3485447.3512103 [2] Javier Albert and Dmitri Goldenberg. 2022. E-Commerce Promotions Personaliza-tion via Online Multiple-Choice Knapsack with Uplift Modeling. In Proceedings of the 31st ACM International Conference on Information & Knowledge Management
+> (Atlanta, GA, USA) (CIKM ’22) . Association for Computing Machinery, New York, NY, USA, 2863–2872. doi:10.1145/3511808.3557100 [3] Susan Athey and Stefan Wager. 2021. Policy Learning with Observational Data.
+> Econometrica 89, 1 (2021), 133–161. doi:10.3982/ECTA15732
+
+Multi-channel Uplift Policy Learning 
+
+[4] Victor Chernozhukov, Denis Chetverikov, Mert Demirer, Esther Duflo, Christian Hansen, Whitney Newey, and James Robins. 2018. Double/Debiased Machine Learning for Treatment and Structural Parameters. The Econometrics Journal 21, 1 (2018), C1–C68. doi:10.1111/ectj.12097 [5] Yuan Deng, Negin Golrezaei, Patrick Jaillet, Jason Cheuk Nam Liang, and Vahab Mirrokni. 2023. Multi-channel Autobidding with Budget and ROI Constraints. In Proceedings of the 40th International Conference on Machine Learning (Proceed-ings of Machine Learning Research, Vol. 202) , Andreas Krause, Emma Brunskill, Kyunghyun Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett (Eds.). PMLR, 7617–7644. https://proceedings.mlr.press/v202/deng23c.html [6] Floris Devriendt, Jente Van Belle, Tias Guns, and Wouter Verbeke. 2022. Learn-ing to Rank for Uplift Modeling. IEEE Transactions on Knowledge and Data Engineering 34, 10 (2022), 4888–4904. doi:10.1109/TKDE.2020.3048510 [7] Miroslav Dudík, Dumitru Erhan, John Langford, and Lihong Li. 2014. Doubly Robust Policy Evaluation and Optimization. Statist. Sci. 29, 4 (2014), 485–511. doi:10.1214/14-STS500 [8] Miroslav Dudík, John Langford, and Lihong Li. 2011. Doubly robust policy evalu-ation and learning. In Proceedings of the 28th International Conference on Interna-tional Conference on Machine Learning (Bellevue, Washington, USA) (ICML’11) .Omnipress, Madison, WI, USA, 1097–1104. [9] Adam N. Elmachtoub and Paul Grigas. 2022. Smart “Predict, then Optimize”. 
+
+Management Science 68, 1 (2022), 9–26. doi:10.1287/mnsc.2020.3922 [10] Sahin Cem Geyik, Abhishek Saxena, and Ali Dasdan. 2015. Multi-Touch Attribution Based Budget Allocation in Online Advertising. arXiv preprint arXiv:1502.06657 (2015). [11] Pierre Gutierrez and Jean-Yves Gérardy. 2017. Causal Inference and Uplift Modelling: A Review of the Literature. In Proceedings of The 3rd International Conference on Predictive Applications and APIs (Proceedings of Machine Learning Research, Vol. 67) , Claire Hardgrove, Louis Dorard, Keiran Thompson, and Florian Douetteau (Eds.). PMLR, 1–13. [12] Keisuke Hirano and Guido W. Imbens. 2004. The Propensity Score with Continuous Treatments . John Wiley & Sons, Ltd, Chapter 7, 73–84. doi:10.1002/0470090456. ch7 [13] Edward H. Kennedy, Zongming Ma, Matthew D. McHugh, and Dylan S. Small. 2017. Non-parametric Methods for Doubly Robust Estimation of Continuous Treatment Effects. Journal of the Royal Statistical Society: Series B 79, 4 (2017), 1229–1245. doi:10.1111/rssb.12212 [14] Aviral Kumar, Aurick Zhou, George Tucker, and Sergey Levine. 2020. Conservative Q-Learning for Offline Reinforcement Learning. In Advances in Neural Information Processing Systems , H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin (Eds.), Vol. 33. Curran Associates, Inc., 1179–1191. https://proceedings.neurips.cc/paper_files/paper/2020/file/ 0d2b2061826a5df3221116a5085a6052-Paper.pdf [15] Sachin Kumar, Garima Gupta, Ranjitha Prasad, Arnab Chatterjee, Lovekesh Vig, and Gautam Shroff. 2020. CAMTA: Causal Attention Model for Multi-touch Attribution. arXiv preprint arXiv:2012.11403 (2020). [16] Sören R. Künzel, Jasjeet S. Sekhon, Peter J. Bickel, and Bin Yu. 2019. Met-alearners for Estimating Heterogeneous Treatment Effects Using Machine Learn-ing. Proceedings of the National Academy of Sciences 116, 10 (2019), 4156–4165. doi:10.1073/pnas.1804597116 [17] Xinkun Nie and Stefan Wager. 2021. Quasi-Oracle Estimation of Heterogeneous Treatment Effects. Biometrika 108, 2 (2021), 299–319. doi:10.1093/biomet/asaa076 [18] Diego Olaya, Kristof Coussement, and Wouter Verbeke. 2020. A Survey and Benchmarking Study of Multitreatment Uplift Modeling. Data Mining and Knowledge Discovery 34, 2 (2020), 273–308. doi:10.1007/s10618-019-00670-y [19] Nicholas Radcliffe. 2007. Using Control Groups to Target on Predicted Lift: Building and Assessing Uplift Model. Direct Marketing Analytics Journal (2007), 14–21. [20] Utsav Sadana, Abhilash Chenreddy, Erick Delage, Alexandre Forel, Emma Fre-jinger, and Thibaut Vidal. 2025. A Survey of Contextual Optimization Methods for Decision-Making under Uncertainty. European Journal of Operational Research 
+
+320, 2 (2025), 271–289. doi:10.1016/j.ejor.2024.03.020 [21] Uri Shalit, Fredrik D. Johansson, and David Sontag. 2017. Estimating individual treatment effect: generalization bounds and algorithms. In Proceedings of the 34th International Conference on Machine Learning (Proceedings of Machine Learning Research, Vol. 70) , Doina Precup and Yee Whye Teh (Eds.). PMLR, 3076–3085. https://proceedings.mlr.press/v70/shalit17a.html [22] Guangyuan Shen, Shenjie Sun, Dehong Gao, Shaolei Li, Libin Yang, Yongping Shi, and Wei Ning. 2023. Cross-channel Budget Coordination for Online Advertising System. arXiv preprint arXiv:2305.06883 (2023). [23] Claudia Shi, David Blei, and Victor Veitch. 2019. Adapting Neural Networks for the Estimation of Treatment Effects. In Advances in Neural Information Processing Systems , H. Wallach, H. Larochelle, A. Beygelzimer, F. d 'Alché-Buc, E. Fox, and R. Garnett (Eds.), Vol. 32. Curran Associates, Inc. https://proceedings.neurips. cc/paper_files/paper/2019/file/8fb5f8be2aa9d6c64a04e3ab9f63feee-Paper.pdf [24] Zexu Sun, Hao Yang, Dugang Liu, Yunpeng Weng, Xing Tang, and Xiuqiang He. 2024. End-to-End Cost-Effective Incentive Recommendation under Budget Constraint with Uplift Modeling. In Proceedings of the 18th ACM Conference on Recommender Systems . 560–569. doi:10.1145/3640457.3688147 [25] Stefan Wager and Susan Athey. 2018. Estimation and Inference of Heterogeneous Treatment Effects Using Random Forests. J. Amer. Statist. Assoc. 113, 523 (2018), 1228–1242. doi:10.1080/01621459.2017.1319839 [26] Bingzhe Wang, Tianyu Wang, Qi Qi, Xiaoxuan Deng, Zhilin Zhang, and Chuan Yu. 2026. Marketing Hosting: From Fixed to Endogenous Budgets. In Proceedings of the ACM Web Conference 2026 (United Arab Emirates) (WWW ’26) . Association for Computing Machinery, New York, NY, USA, 327–338. doi:10.1145/3774904. 3792519 [27] Bryan Wilder, Bistra Dilkina, and Milind Tambe. 2019. Melding the Data-Decisions Pipeline: Decision-Focused Learning for Combinatorial Optimization. 
+
+Proceedings of the AAAI Conference on Artificial Intelligence 33, 01 (Jul. 2019), 1658–1665. doi:10.1609/aaai.v33i01.33011658 [28] Justin R. Williams and Catherine M. Crespi. 2020. Causal Inference for Multiple Continuous Exposures via the Multivariate Generalized Propensity Score. arXiv preprint arXiv:2008.13767 (2020). doi:10.48550/arXiv.2008.13767 [29] Yan Zhao, Xiao Fang, and David Simchi-Levi. 2017. Uplift Modeling with Multiple Treatments and General Response Types. In Proceedings of the 2017 SIAM Interna-tional Conference on Data Mining . SIAM, 588–596. doi:10.1137/1.9781611974973.66 [30] Zhenyu Zhao and Totte Harinen. 2019. Uplift Modeling for Multiple Treatments with Cost Optimization. In 2019 IEEE International Conference on Data Science and Advanced Analytics (DSAA) . IEEE, 422–431. doi:10.1109/DSAA.2019.00057 [31] Kailiang Zhong, Fengtong Xiao, Yan Ren, Yaorong Liang, Wenqing Yao, Xiaofeng Yang, and Ling Cen. 2022. DESCN: Deep Entire Space Cross Networks for Individual Treatment Effect Estimation. In Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (Washington DC, USA) 
+
+(KDD ’22) . Association for Computing Machinery, New York, NY, USA, 4612–4620. doi:10.1145/3534678.3539198 Liu et al. 
+
+## A Formal Assumptions and Proofs A.1 Notation and Assumptions 
+
+Let 𝑑 := 𝐾 − 1, ¯𝑝 := 𝐾 −11, and choose 𝑄 ∈ R𝐾 ×𝑑 such that 
+
+𝑄 ⊤𝑄 = 𝐼 𝑑 , 𝑄𝑄 ⊤ = ΠT, 𝑄 ⊤1 = 0. (41) Write 
+
+𝑝 = ¯𝑝 + 𝑄𝑧, 𝑍 := 𝑄 ⊤𝑃, e𝑍 := 𝑍 − 𝑧, 𝜈 (𝑋, 𝑧 ) := 𝜇 (𝑋, ¯𝑝 + 𝑄𝑧 ), 𝛽 ★ (𝑋, 𝑧 ) := ∇𝑧 𝜈 (𝑋, 𝑧 ). (42) Then 
+
+𝑔 ★ (𝑋, 𝑝 ) = 𝑄𝛽 ★ (𝑋, 𝑄 ⊤𝑝 ). (43) For a bounded, compactly supported kernel K and bandwidth ℎ > 0,define 
+
+Eℎ,𝑧 [𝐴 | 𝑋 ] := E[K(( 𝑍 − 𝑧 )/ ℎ)𝐴 | 𝑋 ]
+
+E[K(( 𝑍 − 𝑧 )/ ℎ) | 𝑋 ] , (44) 
+
+𝑒 ℎ,𝑧 (𝑋 ) := Eℎ,𝑧 [ e𝑍 | 𝑋 ], 𝑚 ℎ,𝑧 (𝑋 ) := Eℎ,𝑧 [𝑌 | 𝑋 ].
+
+(45) Let Ψℎ,𝑧 be the score in (27) and ∥𝑓 ∥∞,R := sup (𝑋 ,𝑝 ) ∈ R ∥𝑓 (𝑋, 𝑝 )∥ 2.
+
+Assumption 1 (Identification). For every 𝑝 ∈ C( 𝑋 ),
+
+𝑌 = 𝑌 (𝑃 ), {𝑌 (𝑝 ) : 𝑝 ∈ C( 𝑋 )} ⊥ 𝑃 | 𝑋, (46) 
+
+and all conditional moments below exist. 
+
+Assumption 2 (Supported paths and local overlap). For al-most every 𝑋 , C( 𝑋 ) ⊆ Δ𝐾 −1 is compact, contains 𝑝 0 (𝑋 ), and contains every path invoked below. Uniformly over (𝑋, 𝑝 ) ∈ R , with 𝑧 = 𝑄 ⊤𝑝 ,
+
+𝑐 0ℎ𝑑 ≤ E[K(( 𝑍 − 𝑧 )/ ℎ) | 𝑋 ] ≤ 𝐶 0ℎ𝑑 (47) 
+
+for all sufficiently small ℎ and constants 0 < 𝑐 0 ≤ 𝐶 0 < ∞.
+
+Assumption 3 (Local smoothness and curvature). The re-sponse is continuously differentiable on C( 𝑋 ). Define 
+
+𝑅 𝑋 ,𝑧 (𝑢 ) := 𝜈 (𝑋, 𝑧 + 𝑢 ) − 𝜈 (𝑋, 𝑧 ) − 𝛽 ★ (𝑋, 𝑧 )⊤𝑢, (48) 
+
+𝑎 ℎ,𝑧 := e𝑍 − 𝑒 ℎ,𝑧 (𝑋 ),
+
+Σℎ,𝑧 (𝑋 ) := Eℎ,𝑧 [𝑎 ℎ,𝑧 𝑎 ⊤ 
+
+> ℎ,𝑧
+
+| 𝑋 ], (49) 
+
+𝐶 ℎ,𝑧 (𝑋 ) := Eℎ,𝑧 
+
+𝑎 ℎ,𝑧 {𝑅 𝑋 ,𝑧 ( e𝑍 ) − Eℎ,𝑧 [𝑅 𝑋 ,𝑧 ( e𝑍 ) | 𝑋 ]} | 𝑋  . (50) 
+
+Uniformly on R,
+
+𝜅ℎ 2𝐼 𝑑 ⪯ Σℎ,𝑧 (𝑋 ) ⪯ ¯𝜅ℎ 2𝐼 𝑑 , ∥Σℎ,𝑧 (𝑋 )−1𝐶 ℎ,𝑧 (𝑋 )∥ 2 ≤ 𝜖 loc (ℎ),
+
+(51) 
+
+where 𝜖 loc (ℎ) → 0.
+
+Assumption 4 (Cross-fitting and empirical complexity). 
+
+The nuisance estimators are cross-fitted. For the population root 𝛽 † 
+
+> ℎ
+
+of 
+
+Ψℎ,𝑧 (𝛽, 𝑚 ℎ,𝑧 , 𝑒 ℎ,𝑧 ; 𝑋 ) = 0, let 
+
+𝛿 𝑚 (𝑋, 𝑧 ) := b𝑚 ℎ,𝑧 (𝑋 ) − 𝑚 ℎ,𝑧 (𝑋 ), 𝛿 𝑒 (𝑋, 𝑧 ) := b𝑒 ℎ,𝑧 (𝑋 ) − 𝑒 ℎ,𝑧 (𝑋 ).
+
+(52) 
+
+Suppressing (𝑋, 𝑧 ), set 
+
+𝑢 ℎ,𝑧 := Σ−1
+
+> ℎ,𝑧
+
+𝛿 𝑒 , 𝑞 ℎ,𝑧 := 𝛿 𝑚 − 𝛽 †⊤  
+
+> ℎ
+
+𝛿 𝑒 ,𝑟 orth := sup  
+
+> (𝑋 ,𝑝 ) ∈ R
+
+∥𝑢 ℎ,𝑧 𝑞 ℎ,𝑧 ∥2. (53) 
+
+With probability at least 1 − 𝛿 ,
+
+sup  
+
+> (𝑋 ,𝑝 ) ∈ R
+
+bΨℎ,𝑧 (𝛽 †
+
+> ℎ
+
+, b𝑚 ℎ,𝑧 , b𝑒 ℎ,𝑧 ; 𝑋 ) − Ψℎ,𝑧 (𝛽 †
+
+> ℎ
+
+, b𝑚 ℎ,𝑧 , b𝑒 ℎ,𝑧 ; 𝑋 ) 2
+
+≤ 𝐶ℎ √︂ ℭG + log (1/𝛿 )
+
+𝑛ℎ 𝑑 . (54) 
+
+The empirical local curvature is at least 𝜅ℎ 2/2, and root-solving error is of smaller order than the right-hand side of (54) .
+
+Assumption 5 (Composite teacher and student approxima-tion). The implemented teacher and deployed student satisfy 
+
+∥b𝑔 𝑇 − b𝑔 orth  
+
+> 𝑇
+
+∥∞,R ≤ 𝜖 comp , ∥b𝑔 − b𝑔 𝑇 ∥∞,R ≤ 𝜖 𝑆 . (55) 
+
+## A.2 Proof of Theorem 5.1 
+
+Proof. Since 1⊤𝛾 (𝑡 ) = 1, ¤𝛾 (𝑡 ) ∈ T almost everywhere. Hence 
+
+Δ(𝑋, 𝑝 ) =
+
+∫ 10
+
+∇𝑝 𝜇 (𝑋, 𝛾 (𝑡 )) ⊤ ¤𝛾 (𝑡 ) d𝑡 
+
+=
+
+∫ 10
+
+{ΠT ∇𝑝 𝜇 (𝑋, 𝛾 (𝑡 ))} ⊤ ¤𝛾 (𝑡 ) d𝑡 
+
+=
+
+∫ 10
+
+𝑔 ★ (𝑋, 𝛾 (𝑡 )) ⊤ ¤𝛾 (𝑡 ) d𝑡 . (56) 
+
+□
+
+## A.3 Proof of Proposition 1 
+
+Proof. Identify the two-channel simplex with [0, 1]. Let 𝑃 = 0
+
+almost surely, 𝜇 (𝑝 ) = −𝑐𝑝 , and b𝜇 (𝑝 ) = 𝑀𝑝 , where 𝑐, 𝑀 > 0. Then 
+
+Elog [{ b𝜇 (𝑃 ) − 𝜇 (𝑃 )} 2] = 0, 𝑝 ★ = 0,
+
+b𝑝 PTO = 1, 𝜇 (𝑝 ★) − 𝜇 (b𝑝 PTO ) = 𝑐. (57) For 𝜇 ≡ 0 and b𝜇 𝑛 (𝑝 ) = 𝑛 −1/2 sin (𝑛𝑝 ),
+
+∥b𝜇 𝑛 − 𝜇 ∥2  
+
+> 𝐿 2( [ 0,1] )
+
+≤ 𝑛 −1 → 0, ∥b𝜇 ′ 
+
+> 𝑛
+
+− 𝜇 ′ ∥∞ = √𝑛 → ∞ . (58) 
+
+□
+
+## A.4 Shortcut-Gradient Decomposition 
+
+Assume 
+
+𝑌 = 𝜙 (𝑋, 𝑃, 𝑈 ) + 𝜀, E[𝜀 | 𝑋, 𝑃, 𝑈 ] = 0, (59) and let 𝜋 𝑏 (𝑝 | 𝑋, 𝑈 ) be the logging density. With 𝐹 𝑝 := 𝐹 (𝑈 | 𝑋, 𝑃 =
+
+𝑝 ) and 𝑠 𝑏 (𝑈 ) := ∇𝑝 log 𝜋 𝑏 (𝑝 | 𝑋, 𝑈 ), Bayes’ rule yields 
+
+∇𝑝 log 𝑓 (𝑈 | 𝑋, 𝑃 = 𝑝 ) = 𝑠 𝑏 (𝑈 ) − E𝐹 𝑝 [𝑠 𝑏 (𝑈 )] . (60) Under dominated differentiation, 
+
+∇𝑝 𝑚 (𝑋, 𝑝 ) = E𝐹 𝑝 [∇ 𝑝 𝜙 (𝑋, 𝑝, 𝑈 )] + Cov 𝐹 𝑝 (𝜙 (𝑋, 𝑝, 𝑈 ), 𝑠 𝑏 (𝑈 )) ,
+
+(61) 
+
+∇𝑝 𝜇 (𝑋, 𝑝 ) = E𝐹 (𝑈 |𝑋 ) [∇ 𝑝 𝜙 (𝑋, 𝑝, 𝑈 )] . (62) Therefore 
+
+𝑏 sc (𝑋, 𝑝 ) = ΠT
+
+∫
+
+∇𝑝 𝜙 (𝑋, 𝑝, 𝑢 ){ d𝐹 𝑝 (𝑢 ) − d𝐹 (𝑢 | 𝑋 )} + ΠT Cov 𝐹 𝑝 (𝜙 (𝑋, 𝑝, 𝑈 ), 𝑠 𝑏 (𝑈 )) . (63) Assumption 1 implies 𝑚 (𝑋, 𝑝 ) = 𝜇 (𝑋, 𝑝 ) on C( 𝑋 ); orthogonality alone does not. Multi-channel Uplift Policy Learning 
+
+## A.5 Proof of Theorem 5.2 
+
+Proof. Fix (𝑋, 𝑧 ) and abbreviate 𝑒 = 𝑒 ℎ,𝑧 (𝑋 ), 𝑚 = 𝑚 ℎ,𝑧 (𝑋 ),
+
+𝑎 = e𝑍 − 𝑒 , 𝑅 = 𝑅 𝑋 ,𝑧 ( e𝑍 ), and ¯𝑅 = Eℎ,𝑧 [𝑅 | 𝑋 ]. Under Assumption 1, 
+
+𝑌 − 𝑚 = 𝛽 ★ (𝑋, 𝑧 )⊤𝑎 + ( 𝑅 − ¯𝑅 ) + 𝜀, Eℎ,𝑧 [𝜀 | 𝑋, 𝑍 ] = 0. (64) Substitution into (27) gives 
+
+Ψℎ,𝑧 (𝛽, 𝑚, 𝑒 ; 𝑋 ) = Σℎ,𝑧 (𝑋 ){ 𝛽 ★ (𝑋, 𝑧 ) − 𝛽 (𝑋, 𝑧 )} + 𝐶 ℎ,𝑧 (𝑋 ),
+
+(65) 
+
+𝛽 † 
+
+> ℎ
+
+(𝑋, 𝑧 ) − 𝛽 ★ (𝑋, 𝑧 ) = Σℎ,𝑧 (𝑋 )−1𝐶 ℎ,𝑧 (𝑋 ). (66) Assumption 3 and ∥𝑄𝑣 ∥2 = ∥𝑣 ∥2 imply (28). Let 𝑟 := 𝑌 −𝑚 −𝛽 †⊤  
+
+> ℎ
+
+( e𝑍 −𝑒 ). Since Eℎ,𝑧 [ e𝑍 −𝑒 | 𝑋 ] = Eℎ,𝑧 [𝑟 | 𝑋 ] = 0,for arbitrary directions 𝜂 𝑚 , 𝜂 𝑒 ,
+
+𝐷 𝑚 Ψℎ,𝑧 [𝜂 𝑚 ] = −𝜂 𝑚 Eℎ,𝑧 [ e𝑍 − 𝑒 | 𝑋 ] = 0, (67) 
+
+𝐷 𝑒 Ψℎ,𝑧 [𝜂 𝑒 ] = −𝜂 𝑒 Eℎ,𝑧 [𝑟 | 𝑋 ] + Eℎ,𝑧 [ e𝑍 − 𝑒 | 𝑋 ]𝛽 †⊤  
+
+> ℎ
+
+𝜂 𝑒 = 0. (68) Direct expansion yields 
+
+Ψℎ,𝑧 (𝛽 †
+
+> ℎ
+
+, b𝑚 ℎ,𝑧 , b𝑒 ℎ,𝑧 ; 𝑋 ) − Ψℎ,𝑧 (𝛽 †
+
+> ℎ
+
+, 𝑚 ℎ,𝑧 , 𝑒 ℎ,𝑧 ; 𝑋 ) = 𝛿 𝑒 {𝛿 𝑚 − 𝛽 †⊤  
+
+> ℎ
+
+𝛿 𝑒 }.
+
+(69) After multiplication by Σ−1 
+
+> ℎ,𝑧
+
+, its norm is bounded by 𝑟 orth . In raw nuisance norms, if |𝛿 𝑚 | ≤ ¯𝑟 𝑚 , ∥𝛿 𝑒 ∥2 ≤ ¯𝑟 𝑒 , and ∥𝛽 † 
+
+> ℎ
+
+∥2 ≤ 𝑀 𝛽 , then 
+
+𝑟 orth ≤ ¯𝑟 𝑒 (¯𝑟 𝑚 + 𝑀 𝛽 ¯𝑟 𝑒 )
+
+𝜅ℎ 2 . (70) Assumption 4 and empirical curvature give 
+
+∥ b𝛽 − 𝛽 † 
+
+> ℎ
+
+∥∞,R ≤ 𝐶 √︂ ℭG + log (1/𝛿 )
+
+𝑛ℎ 𝑑 +2 + 𝐶𝑟 orth . (71) Combining (28) and (71), using 𝑑 + 2 = 𝐾 + 1, yields 
+
+∥b𝑔 orth  
+
+> 𝑇
+
+− 𝑔 ★ ∥∞,R ≤ 𝜖 𝑇 (𝑛, ℎ, 𝛿 ). (72) Finally, (29) and the triangle inequality imply (30). □
+
+## A.6 Proof of Theorem 5.3 
+
+Proof. For any 𝛾 ∈ 𝔓 𝑋 (𝑝 ), ¤𝛾 (𝑡 ) ∈ T almost everywhere; hence 
+
+bΔ𝜃 (𝑋, 𝑝 ) = 𝑠 𝜃 (𝑋, 𝑝 ) − 𝑠 𝜃 (𝑋, 𝑝 0 (𝑋 )) 
+
+=
+
+∫ 10
+
+∇𝑝 𝑠 𝜃 (𝑋, 𝛾 (𝑡 )) ⊤ ¤𝛾 (𝑡 ) d𝑡 
+
+=
+
+∫ 10
+
+b𝑔 (𝑋, 𝛾 (𝑡 )) ⊤ ¤𝛾 (𝑡 ) d𝑡 . (73) Theorem 5.1 and Cauchy–Schwarz give 
+
+|bΔ𝜃 (𝑋, 𝑝 ) − Δ(𝑋, 𝑝 )| ≤ 
+
+∫ 10
+
+∥b𝑔 (𝑋, 𝛾 (𝑡 )) − 𝑔 ★ (𝑋, 𝛾 (𝑡 ))∥ 2 ∥ ¤ 𝛾 (𝑡 )∥ 2 d𝑡 
+
+≤ 𝐿 (𝛾 )𝜖 𝑔 , (74) which proves (36). Let 𝜋 ★ = 𝜋 ★ 
+
+> 𝐿 max
+
+. Adding and subtracting estimated uplift gives 
+
+Reg 𝐿 max (b𝜋 ) = E𝑋 
+
+Δ(𝑋, 𝜋 ★ (𝑋 )) − Δ(𝑋, b𝜋 (𝑋 )) 
+
+≤ 2𝐿 max 𝜖 𝑔 + E𝑋 
+
+hbΔ𝜃 (𝑋, 𝜋 ★ (𝑋 )) − bΔ𝜃 (𝑋, b𝜋 (𝑋 )) 
+
+i
+
+≤ 2𝐿 max 𝜖 𝑔 + 𝜖 search , (75) proving (37). Under Assumption 5 and Theorem 5.2, 
+
+∥b𝑔 − 𝑔 ★ ∥∞,R ≤ 𝜖 𝑆 + 𝜖 comp + 𝜖 𝑇 (𝑛, ℎ, 𝛿 ), (76) which yields (38). □
+
+Implemented greedy trace. Let 𝛾 gr be the piecewise-linear inter-polation of 
+
+𝑝 (0) = 𝑝 0 (𝑋 ), 𝑝 (1) , . . . , 𝑝 (𝑅 ) .
+
+If every accepted segment lies in C( 𝑋 ), then 
+
+𝐿 (𝛾 gr ) =
+
+> 𝑅 −1
+
+∑︁  
+
+> 𝑟 =0
+
+∥𝑝 (𝑟 +1) − 𝑝 (𝑟 ) ∥2, (77) 
+
+> 𝑅 −1
+
+∑︁  
+
+> 𝑟 =0
+
+{𝑠 𝜃 (𝑋, 𝑝 (𝑟 +1) ) − 𝑠 𝜃 (𝑋, 𝑝 (𝑟 ) )} = 𝑠 𝜃 (𝑋, 𝑝 (𝑅 ) ) − 𝑠 𝜃 (𝑋, 𝑝 (0) ). (78) 
+
+## A.7 Conditional Outcome Improvement 
+
+Corollary A.1 (Conditional outcome improvement). Sup-pose 𝑈 (𝑋, 𝑝 ) satisfies, on an event E𝑈 ,
+
+|bΔ𝜃 (𝑋, 𝑝 ) − Δ(𝑋, 𝑝 )| ≤ 𝑈 (𝑋, 𝑝 ), ∀𝑋, 𝑝 ∈ A 𝐿 max (𝑋 ). (79) 
+
+Define 
+
+𝜋 𝑈 (𝑋 ) :=
+
+(b𝜋 (𝑋 ), bΔ𝜃 (𝑋, b𝜋 (𝑋 )) − 𝑈 (𝑋, b𝜋 (𝑋 )) ≥ 0,𝑝 0 (𝑋 ), otherwise . (80) 
+
+Then Δ(𝑋, 𝜋 𝑈 (𝑋 )) ≥ 0 for every 𝑋 on E𝑈 .
+
+Proof. The fallback case has zero uplift. Otherwise, 
+
+Δ(𝑋, 𝜋 𝑈 (𝑋 )) ≥ bΔ𝜃 (𝑋, b𝜋 (𝑋 )) − 𝑈 (𝑋, b𝜋 (𝑋 )) ≥ 0. (81) 
+
+□
+
+Without separate calibration, ensemble or MC-dropout disper-sion is not assumed to satisfy (79). 
+
+## B Additional Details of the Synthetic Experiments B.1 State and Budget Generation 
+
+For each item 𝑖 , we independently sample persistent state blocks: 
+
+𝐶 item  
+
+> 𝑖
+
+∼ N ( 0, 𝐼 𝑑 𝐶 ), 𝐸 item  
+
+> 𝑖
+
+∼ N ( 0, 𝐼 𝑑 𝐸 ), 𝑆 item  
+
+> 𝑖
+
+∼ N ( 0, 𝐼 𝑑 𝑆 ).
+
+For each period 𝑡 , we sample lower-variance temporal shocks: 
+
+𝐶 time  
+
+> 𝑡
+
+, 𝐸 time  
+
+> 𝑡
+
+, 𝑆 time  
+
+> 𝑡
+
+∼ N ( 0, 𝜎 2 
+
+> 𝑡
+
+𝐼 ).
+
+The observed state at time 𝑡 is constructed as: 
+
+𝐶 𝑖𝑡 = 𝐶 item  
+
+> 𝑖
+
++𝐶 time  
+
+> 𝑡
+
+, 𝐸 𝑖𝑡 = 𝐸 item  
+
+> 𝑖
+
++𝐸 time  
+
+> 𝑡
+
+, 𝑆 𝑖𝑡 = 𝑆 item  
+
+> 𝑖
+
++𝑆 time  
+
+> 𝑡
+
+, 𝐻 𝑖𝑡 = [𝐶 𝑖𝑡 , 𝐸 𝑖𝑡 , 𝑆 𝑖𝑡 ].
+
+We set the dimensions 𝑑 𝐶 = 𝑑 𝐸 = 𝑑 𝑆 = 6 and the temporal variance 
+
+𝜎 𝑡 = 0.35 . The total budget is generated via: 
+
+𝐵 𝑖𝑡 = clip  exp {𝑎 ⊤ 
+
+> 𝐵
+
+𝐶 𝑖𝑡 + 𝜁 𝑖𝑡 }, 𝐵 min , 𝐵 max 
+
+ , 𝜁 𝑖𝑡 ∼ N ( 0, 0.22),
+
+(82) with boundary constraints 𝐵 min = 0.2 and 𝐵 max = 5. The train, vali-dation, and test splits consist of mutually disjoint items to prevent data leakage. Liu et al. 
+
+Table 6: Static assignment regimes. The underlying true re-sponse surface is identical across all regimes. Setting 𝛼 cf 𝜎 ov 𝛼 bd 𝜀 exp 
+
+Benign 0.25 0.40 0.0 0.10 Medium 0.75 0.25 0.0 0.05 Hard 1.25 0.15 0.0 0.02 Extreme 1.75 0.10 0.5 0.01 
+
+## B.2 Conditional Logging Policy 
+
+To handle compositional allocations on the simplex, we utilize the isometric log-ratio (ILR) transform. Let 𝑄 ⊤𝑄 = 𝐼 𝐾 −1 and 𝑄 ⊤1 = 0.For an interior simplex point 𝑝 , we define 𝑢 (𝑝 ) = 𝑄 ⊤ log 𝑝 .The logging policy is governed by a state-dependent propensity mean, which was introduced conceptually in the main text and is defined mathematically here as: 
+
+𝑞 (𝐻, 𝐵 ) = softmax  (1 + 𝛼 bd )𝜆 log [𝑊 𝑆 𝑆 + 𝛼 cf 𝑊 𝐶 𝐶 + 𝑤 𝐵 log (1 + 𝐵 )]  .
+
+(83) The context-dependent covariance matrix is formulated as: 
+
+Σ𝐻 = 𝜎 2ov {1 + 0.2 tanh (𝐸 1)} 2 diag (𝜈 1, . . . , 𝜈 𝐾 −1), (84) where 𝜎 ov dictates the overlap scale and 𝜈 𝑗 > 0 ensures every tangent direction remains locally non-degenerate. Given the logging mean 𝑞 (𝐻, 𝐵 ) from Eq. (83) , the final allocation is sampled via a logistic-normal mixture: 
+
+𝑢 (𝑃 ) = 𝑢 (𝑞 (𝐻, 𝐵 )) + 𝜉, 𝜉 ∼ ( 1 − 𝜀 exp )N ( 0, Σ𝐻 ) + 𝜀 exp N ( 0, 𝑐 2exp Σ𝐻 ),
+
+(85) and mapped back to the simplex through 𝑃 = softmax {𝑄 [𝑢 (𝑞 ) + 𝜉 ]} .The broad exploration component uses a scale multiplier 𝑐 exp > 1.Because the policy is logistic-normal, allocations strictly remain in the simplex interior, and no point mass is placed on any vertex. The assignment parameters vary independently to test different regimes: 𝛼 cf controls dependence on the baseline-driving block 𝐶 ;
+
+𝜎 ov controls conditional action dispersion; 𝛼 bd smoothly sharpens the logging mean toward boundaries; and 𝜀 exp controls the rate of broad exploration. Crucially, the true response surface and all response parameters are held fixed across these assignment regimes. 
+
+## B.3 Static Assignment Regimes 
+
+The primary severity curve modulates confounding and overlap, uti-lizing the Hard regime to represent conditional low-overlap settings. The Extreme regime additionally stresses boundary coverage and serves as an assumption-stress test when local overlap assumptions fail. We use a shared logging-logit scale 𝜆 log = 0.45 .
+
+## B.4 Response Surface 
+
+The state-dependent baseline response is: 
+
+𝑚 0 (𝐻, 𝐵 ) = 10 +2𝐶 1 +𝐶 22 +1.25 sin (𝐶 3)+ 0.6𝐶 1𝐶 4 +2 log (1+𝐵 ). (86) The treatment scale modifier is: 
+
+𝜌 (𝐻, 𝐵 ) = 𝛼 𝜌 log (1 + 𝐵 ) { 1 + 0.2 tanh (𝐸 1) + 0.1 tanh (𝐶 1)} . (87) The context-dependent response anchor 𝑐 (𝐻, 𝐵 ) ∈ Δ𝐾 −1 is gener-ated from fixed context coefficients, and the deviation in the ILR space is defined as 𝑧 = 𝑄 ⊤ {𝑝 − 𝑐 (𝐻, 𝐵 )} .The local component captures linear marginal returns: 
+
+𝑔 loc (𝐻, 𝑧 ) = 𝑎 (𝐻 )⊤𝑧, 𝑎 (𝐻 ) = tanh (𝑊 𝐸 𝐸 +0.35 𝑊 𝐶 𝐶 +𝑏 𝑎 ). (88) For the interaction component , let 
+
+𝐴 (𝐻 ) = 𝛾 int 
+
+> 𝑅
+
+∑︁  
+
+> 𝑟 =1
+
+tanh (𝑣 ⊤ 
+
+> 𝑟
+
+𝐸 + 𝑏 𝑟 )𝐴 𝑟 ,
+
+where each 𝐴 𝑟 is a normalized symmetric matrix. We employ a shifted quadratic representation: 
+
+𝑔 int (𝐻, 𝑧 ) = 12𝑧 ⊤𝐴 (𝐻 )𝑧 + 𝑏 int (𝐻 )⊤𝑧, (89) where 𝑏 int (𝐻 ) is induced by a small center shift 𝑠 int = 0.4. This pre-serves smoothness while allowing interaction gradients to remain active around realistic logged allocations. For the far-field component , let 𝑟 = ∥𝑧 ∥2. We define: 
+
+𝑔 far (𝐻, 𝑧 ) = 𝑟 2𝜎 
+
+ 𝑟 − 𝑑 0
+
+𝑠 0
+
+
+
+×
+
+" 𝑀 ∑︁ 
+
+> 𝑚 =1
+
+𝑤 𝑚 (𝐻 ) exp 
+
+
+
+− ∥𝑧 − 𝜈 𝑚 ∥22
+
+2ℓ2
+
+> 𝑚
+
+
+
+− 𝜅 can 
+
+#
+
+.
+
+(90) The 𝑟 2 gate ensures that both the value and the first derivative vanish at the anchor point. Meanwhile, the low-frequency radial ba-sis functions model distant saturation and cannibalization without introducing discontinuities or adversarial high-frequency oscilla-tions. Random coefficient matrices, quadratic bases, and RBF centers are sampled once per seed and subsequently frozen. On an indepen-dent calibration sample, we compute the expected gradient energy for each component: 
+
+E𝑗 = E
+
+h
+
+P0∇𝑝 𝑔 𝑗 (𝐻, 𝑝 ) 22
+
+i
+
+,
+
+and rescale the three components to target normalized gradient-energy shares of Eloc : Eint : Efar ≈ 0.45 : 0 .35 : 0 .20 . We use a treatment-response scale of 4.0 across all regimes. 
+
+## B.5 Conditional Path Support 
+
+Learned policies utilize an estimated conditional support model, whereas synthetic deployability metrics rely on the oracle logging density. For the estimated model, we predict the conditional log-ratio mean ˆ𝑚 𝑢 (𝐻, 𝐵 ) and estimate a regularized local covariance 
+
+ˆΣ𝑢 (𝐻, 𝐵 ) from nearby training contexts, conditioning on both the predicted allocation anchor and the heteroskedastic effect coordi-nate. The pointwise nonconformity score is: 
+
+𝑑 S (𝐻, 𝐵, 𝑝 ) = 12
+
+h
+
+(𝑢 (𝑝 ) − ˆ𝑚 𝑢 )⊤ ˆΣ−1 
+
+> 𝑢
+
+(𝑢 (𝑝 ) − ˆ𝑚 𝑢 )+ log det ˆ Σ𝑢 + ( 𝐾 − 1) log (2𝜋 )
+
+i
+
+.
+
+(91) The threshold 𝜖 S is calibrated from held-out factual actions to obtain a fixed conditional high-density region. Since evaluating endpoint support alone might inadvertently connect disjoint action regions, a recommendation 𝑝 is evaluated Multi-channel Uplift Policy Learning 
+
+along the linear segment from the factual action 𝑃 :
+
+𝑑 path (𝐻, 𝐵, 𝑃, 𝑝 ) = max  
+
+> 𝑠 ∈ G 𝐽
+
+𝑑 S (𝐻, 𝐵, (1 − 𝑠 )𝑃 + 𝑠𝑝 ) , (92) where G𝐽 = {0, 1/𝐽, . . . , 1}. We use at least ten interpolation in-tervals and verify robustness to finer discretizations. The oracle evaluator replaces ( ˆ𝑚 𝑢 , ˆΣ𝑢 ) with the known conditional logistic-normal mixture density. 
+
+## B.6 Oracle Geometry and Evaluation Metrics 
+
+The oracle directed effect of reallocating budget from channel 𝑘 to 
+
+𝑙 is defined as: 
+
+𝐷 ★ 
+
+> 𝑘 →𝑙
+
+(𝐻, 𝐵, 𝑝 ) = 𝜕𝜇 ★ (𝐻, 𝐵, 𝑝 )
+
+𝜕𝑝 𝑙 
+
+− 𝜕𝜇 ★ (𝐻, 𝐵, 𝑝 )
+
+𝜕𝑝 𝑘 
+
+. (93) Let E = {( 𝑘, 𝑙 ) : 𝑘 ≠ 𝑙 }. On a common held-out anchor set: 
+
+• PairwiseCorr is the Pearson correlation between learned and oracle scores over E.
+
+• TopEdgeAcc is the fraction of anchors identifying the cor-rect highest-gain edge. 
+
+• EdgeNDCG evaluates the full ranking of directed edges using nonnegative oracle gains as relevance. The support-aware oracle local-greedy policy uses the identical candidate step set, path-support rule, and total movement budget as the learned local policies, but scores candidates using the true 
+
+𝜇 ★. It defines the denominator of SafeLocalRecovery . The global support-constrained oracle searches all supported grid candidates and is reported strictly as a diagnostic upper bound; it is not directly comparable to the local improvement objective of ReAlloc . We additionally report the mean 𝐿 1 movement and the 90 th percentile of path nonconformity. 
+
+## B.7 Temporal Support Rotation 
+
+For temporal window 𝑤 , we perturb only the logging logits: 
+
+𝑞 (𝑤 ) 
+
+> 𝑖𝑡
+
+= softmax log 𝑞 (𝐻 𝑖𝑡 , 𝐵 𝑖𝑡 ) + 𝜆 temp 𝑏 𝑤 , (94) where 𝑏 𝑤 follows a smooth cyclic schedule across channels and 
+
+𝜆 temp = 1.2. All response parameters and the true surface 𝜇 ★ remain fixed. Consequently, the temporal experiment isolates whether the slow student can retain local geometric gradients learned from different support fragments; it intentionally does not model delayed or sequential causal effects. 
+
+## B.8 Baseline Implementations 
+
+To ensure a fair comparison, all neural baselines share the same backbone architecture (a 3-layer MLP with ReLU activations and Layer Normalization) and are trained with the same optimizer and learning rate schedule. 
+
+• Additive ROI: Models the response as 𝜇 (𝐻, 𝐵, 𝑃 ) = 𝑚 0 (𝐻, 𝐵 )+ 
+
+Í𝐾 𝑘 =1 𝑓 𝑘 (𝐻, 𝐵, 𝑝 𝑘 ). It completely ignores cross-channel in-teractions and optimizes each channel marginally subject to the budget constraint. 
+
+• Joint S-Learner PTO: Predicts the factual outcome ˆ𝑌 =
+
+𝑓 (𝐻, 𝐵, 𝑃 ) using Mean Squared Error (MSE). During infer-ence, it employs a gradient-based global optimizer (L-BFGS) over the learned surface ˆ𝑌 to find the optimal allocation on the simplex. 
+
+• R-Learner Local: Estimates the Conditional Average Treat-ment Effect (CATE) by minimizing the orthogonalized loss: 
+
+E[(( 𝑌 − ˆ𝑚 (𝐻, 𝐵 )) − Í𝑘 ˆ𝜏 𝑘 (𝐻, 𝐵 )( 𝑝 𝑘 − ˆ𝑒 𝑘 (𝐻, 𝐵 ))) 2]. It then selects the local reallocation direction that maximizes the estimated marginal gain, restricted to the estimated support region. 
+
+## B.9 Detailed Evaluation Metrics 
+
+In addition to the Deployable Uplift ( 𝑈 dep ) defined in the main text, we utilize the following metrics for comprehensive evaluation: 
+
+Raw Oracle Uplift. The unconstrained theoretical uplift, ignoring support boundaries: 
+
+𝑈 raw ( ˆ𝜋 ) = 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+Δ𝑖 ( ˆ𝜋 ). (95) 
+
+Out-of-Support (OOS) Metrics. We measure the aggressiveness of the policy via the OOS rate and the corresponding gain lost due to fallback: 
+
+OOS = 1 − 1
+
+𝑁 
+
+> 𝑁
+
+∑︁ 
+
+> 𝑖 =1
+
+1{ ˆ𝑝 𝑖 ∈ S 𝑖 }, OOSGain = 𝑈 raw ( ˆ𝜋 ) − 𝑈 dep ( ˆ𝜋 ).
+
+(96) A high OOSGain indicates that the model is hallucinating high rewards in unsupported regions, which are subsequently clipped by the safety mechanism. 
+
+Safe Local Recovery. To quantify how close the learned policy is to the theoretical best local policy, we define: 
+
+SafeLocalRecovery = 𝑈 dep ( ˆ𝜋 )
+
+𝑈 dep (𝜋 ★
+
+> local
+
+) + 𝜀 , (97) where 𝜋 ★ 
+
+> local
+
+is the support-aware oracle local-greedy policy operat-ing under the identical movement budget constraint. 
+
+Geometric Ranking Metrics. To evaluate the local geometry independently of the final policy deployment, we compute the oracle directed effect of reallocating budget from channel 𝑘 to 𝑙 :
+
+𝐷 ★ 
+
+> 𝑘 →𝑙
+
+(𝐻, 𝐵, 𝑝 ) = 𝜕𝜇 ★ (𝐻, 𝐵, 𝑝 )
+
+𝜕𝑝 𝑙 
+
+− 𝜕𝜇 ★ (𝐻, 𝐵, 𝑝 )
+
+𝜕𝑝 𝑘 
+
+. (98) Based on 𝐷 ★, we report PairwiseCorr (Pearson correlation of edge scores), TopEdgeAcc (accuracy of identifying the highest-gain edge), and EdgeNDCG (ranking quality of all directed edges). 
+
+## C Additional Details of the Taobao Dataset C.1 Matching Protocol and Balance Diagnostics 
+
+Standard IPS is unsuitable for our continuous-action setting due to explosive variance caused by concentrated logging policies. In-stead, we employ a retrospective matched replay to construct a reliable counterfactual baseline. For every item that underwent a budget reallocation (the treated move ), we seek control items that experienced no budget change (∥Δ𝑝 ∥1 ≈ 0) on the same date and within the same product category. To ensure the treated and control items are highly comparable before the move, we perform nearest-neighbor matching based on key pre-treatment business features, primarily: baseline GMV , total assigned budget , and historical traffic trends . This ensures that any observed post-move difference in outcomes can be reasonably attributed to the budget reallocation Liu et al. 
+
+itself, rather than pre-existing differences in item popularity or scale. To verify the quality of our matching, we measure the Standard-ized Mean Difference (SMD) for all matching covariates. An SMD below 0.1 is widely accepted as indicating excellent balance between the treatment and control groups, and our matching-relaxation se-lector enforces this exact threshold as a guardrail. As shown in Table 7, before matching, the reallocated (treated) items differed substantially from the general pool of no-move items on their pre-move covariates—most notably in their starting paid-ad share and assigned budget / price level. After applying our category × date stratified, caliper nearest-neighbour matching protocol, the max-imum absolute SMD across all five covariates drops well below the 0.1 threshold (specifically to 0.018 ). This confirms that, on all measured pre-move covariates, our matched control group is well balanced and serves as an unbiased counterfactual baseline for evaluating the directional accuracy of our uplift models. 
+
+Table 7: Covariate balance before and after matching.                
+
+> Business Feature SMD Before SMD After
+> Ad Share Prev 0.375 0.018 Log Price 0.257 0.005 Log budget 0.199 0.05 Recent Sales Level 0.047 0.008
+> 𝑚 pred 0.082 0.007
+> Maximum Absolute SMD 0.375 0.018
+
+## C.2 Evaluation Metrics 
+
+Let 𝑒 = (𝑖, 𝑡 ) denote an observed local reallocation event, with start-ing allocation 𝑝 𝑒 , realized movement Δ𝑝 𝑒 , and post-move outcome 
+
+𝑌 + 
+
+> 𝑒
+
+. For each event, the predicted directional score is 
+
+𝑆 (𝑏 ) 
+
+> 𝑒
+
+=
+
+b𝑀 𝑏 (𝐻 𝑒 , 𝑝 𝑒 )⊤Δ𝑝 𝑒 
+
+∥Δ𝑝 𝑒 ∥1
+
+, for marginal-field methods ,
+
+b𝜇 𝑏 (𝐻 𝑒 , 𝑝 𝑒 + Δ𝑝 𝑒 ) − b𝜇 𝑏 (𝐻 𝑒 , 𝑝 𝑒 )∥Δ𝑝 𝑒 ∥1
+
+, for response-surface methods ,
+
+where 𝑏 indexes the evaluated method. This formulation evaluates all methods on the same realized movement and normalizes out the movement magnitude. To remove predictable demand variation, we train an indepen-dent evaluation model b𝑚 eval using only data preceding the evalua-tion period. The residualized outcome of event 𝑒 is 
+
+e𝑌 𝑒 = 𝑌 + 
+
+> 𝑒
+
+− b𝑚 eval (𝐻 𝑒 ).
+
+Let C( 𝑒 ) be its matched no-move controls and 𝑤 𝑒𝑐 their normalized matching weights, where Í𝑐 ∈ C ( 𝑒 ) 𝑤 𝑒𝑐 = 1. We define the matched residual response as 
+
+𝑅 𝑒 = e𝑌 𝑒 −∑︁   
+
+> 𝑐 ∈ C ( 𝑒 )
+
+𝑤 𝑒𝑐 e𝑌 𝑐 .
+
+We use 𝑅 𝑒 only as an observational proxy for evaluating directional ranking. 
+
+Marginal Rank Correlation. We measure the global alignment between predicted directions and empirical responses using Spear-man’s rank correlation: 
+
+𝜌 (𝑏 ) 
+
+> MR
+
+= Spearman 
+
+n 
+
+𝑆 (𝑏 )
+
+> 𝑒
+
+o  
+
+> 𝑒 ∈ E
+
+, {𝑅 𝑒 }𝑒 ∈ E 
+
+
+
+,
+
+where E denotes all successfully matched reallocation events. A larger value indicates that the model more accurately ranks the relative value of observed local movements. 
+
+Within-Item Concordance. To test whether a model adapts to the current allocation rather than assigning a fixed channel preference to each item, we compare repeated events from the same item. Let P contain pairs (𝑒, 𝑒 ′) from the same item whose pre-decision contexts satisfy the prescribed similarity caliper. We compute 
+
+𝐶 (𝑏 ) 
+
+> WI
+
+= 1
+
+|P | ∑︁ (𝑒,𝑒 ′ ) ∈ P 
+
+
+
+I
+
+ 𝑆 (𝑏 ) 
+
+> 𝑒
+
+− 𝑆 (𝑏 )
+
+> 𝑒 ′
+
+   𝑅 𝑒 − 𝑅 𝑒 ′
+
+ > 0
+
+
+
++ 12 I
+
+ 𝑆 (𝑏 ) 
+
+> 𝑒
+
+− 𝑆 (𝑏 )
+
+> 𝑒 ′
+
+   𝑅 𝑒 − 𝑅 𝑒 ′
+
+ =
+
+The metric equals 0.5 under random pairwise ordering and ap-proaches 1 when score differences consistently agree with response differences. 
+
+Aligned–Reverse Response Gap. Let 𝑞 (𝑏 ) 
+
+> 𝛼
+
+and 𝑞 (𝑏 ) 
+
+> 1−𝛼
+
+denote the lower and upper 𝛼 -quantiles of the score distribution, with 𝛼 = 0.2.We define 
+
+E+ 
+
+> 𝑏
+
+=
+
+n
+
+𝑒 : 𝑆 (𝑏 ) 
+
+> 𝑒
+
+≥ 𝑞 (𝑏 )
+
+> 1−𝛼
+
+o
+
+, E− 
+
+> 𝑏
+
+=
+
+n
+
+𝑒 : 𝑆 (𝑏 ) 
+
+> 𝑒
+
+≤ 𝑞 (𝑏 )
+
+> 𝛼
+
+o
+
+.
+
+The response gap is 
+
+𝐺 (𝑏 ) 
+
+> AR
+
+= 1
+
+|E + 
+
+> 𝑏
+
+|∑︁ 𝑒 ∈ E +
+
+> 𝑏
+
+𝑅 𝑒 − 1
+
+|E − 
+
+> 𝑏
+
+|∑︁ 𝑒 ∈ E −
+
+> 𝑏
+
+𝑅 𝑒 .
+
+This metric directly compares the empirical responses of move-ments most aligned with the model against those ranked least favorably by the model.
