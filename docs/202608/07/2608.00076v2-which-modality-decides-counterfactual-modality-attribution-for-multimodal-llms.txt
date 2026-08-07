@@ -1,0 +1,371 @@
+Title: Which Modality Decides? Counterfactual Modality Attribution for Multimodal LLMs
+
+URL Source: https://arxiv.org/pdf/2608.00076v2
+
+Published Time: Wed, 05 Aug 2026 00:44:07 GMT
+
+Number of Pages: 9
+
+Markdown Content:
+# Which Modality Decides? Counterfactual Modality Attribution for Multimodal LLMs 
+
+Vahidin Hasić 1∗, Chao Wang 2, Luis C. Garcia-Peraza-Herrera 2, David Watson 2†, Senka Krivic 1†
+
+> 1
+
+Faculty of Electrical Engineering, University of Sarajevo, Bosnia and Herzegovina 
+
+> 2
+
+King’s College London, United Kingdom vahidin.hasic@etf.unsa.ba, chao.wang@kcl.ac.uk, luis_c.garcia_peraza_herrera@kcl.ac.uk, david.watson@kcl.ac.uk, senka.krivic@etf.unsa.ba 
+
+Abstract 
+
+Multimodal large language models (MLLMs) increasingly support high-stakes decision making by combining comple-mentary information from images and text. While existing explainability methods identify influential image regions or text tokens, they cannot answer a fundamental question: which modality drives a prediction? Consequently, a model may pro-duce the correct output while relying on the wrong source of evidence, masking shortcut learning and unsafe reasoning. We formulate modality attribution as a complementary ex-plainability objective for multimodal foundation models and propose Counterfactual Modality Attribution (CMA) , the first framework for quantifying modality-level contributions in MLLMs. CMA generates image-only, text-only, and joint multimodal counterfactuals using coupled diffusion priors and converts them into principled modality attribution scores through a cooperative game-theoretic formulation based on Shapley values. We evaluate CMA on controlled synthetic benchmarks with known ground-truth modality reliance and on a real-world multimodal clinical dataset. CMA correctly identifies the decision-driving modality in 98% of controlled cases and consistently outperforms baselines, revealing fail-ures of cross-modal reasoning that remain invisible to predic-tive accuracy alone. Our results establish modality attribution as a complementary dimension of explainability beyond fea-ture attribution, providing a principled framework for auditing multimodal foundation models in safety-critical applications. 
+
+Introduction 
+
+Multimodal large language models (MLLMs) are increas-ingly deployed in high-stakes applications where images and text provide complementary evidence for decision making. In clinical decision support, for example, models combine radiological images with electronic health records (EHRs), laboratory measurements, medication histories, and physi-cian notes to assist diagnosis and treatment recommenda-tions (Acosta et al. 2022; Soenksen et al. 2022; Simon et al. 2025). Although integrating multiple modalities often im-proves predictive performance, benchmark accuracy alone does not reveal how a model reached its decision. A pre-diction may be correct while relying disproportionately on a single modality, ignoring clinically decisive information con-tained in another. Such hidden modality reliance can lead to 
+
+> ∗
+
+Corresponding author. 
+
+> †
+
+These authors contributed equally. 
+
+Figure 1: Illustration of modality attribution failure in a medi-cal MLLM. A patient with pneumonia is correctly diagnosed from chest X-ray imaging. However, the EHR specifies a se-vere penicillin allergy. When the model properly integrates both image and text modalities, it recommends azithromycin ,leading to safe recovery. If the model relies predominantly on the image modality and ignores the allergy information, it prescribes amoxicillin , potentially triggering life-threatening anaphylaxis. unsafe or unreliable behavior that remains invisible to con-ventional performance metrics. Thus, understanding which modality actually drives a prediction is as important as de-termining whether the prediction itself is correct. This concern is especially acute when different modalities provide complementary but functionally distinct information for downstream decision-making. For example, a chest X-ray may support a diagnosis of community-acquired pneumonia, while the accompanying EHR records a severe penicillin allergy that should alter the recommended treatment (Fig. 1). A model that correctly diagnoses pneumonia but ignores the allergy information may recommend an unsafe beta-lactam antibiotic despite making the correct diagnosis. Recent studies show that strong predictive performance does not necessarily imply faithful multimodal reasoning. Models may exploit modality-specific shortcuts instead of in-tegrating complementary evidence (Joshi et al. 2026; Asadi et al. 2026), making benchmark accuracy insufficient for de-termining whether predictions genuinely rely on multiple modalities. This motivates a fundamental question that ex-arXiv:2608.00076v2 [cs.CV] 4 Aug 2026 isting evaluation protocols cannot answer: which modality actually drives the prediction? 
+
+Existing explainability methods identify influential im-age regions or textual tokens (Selvaraju et al. 2017; Ben Melech Stan et al. 2024; Li et al. 2025), explaining where 
+
+evidence is located within individual modalities. However, because they operate locally within single channels, they do not quantify the relative contribution of entire modalities or determine whether a prediction was driven primarily by the image, the text, or their interaction. In clinical settings, for instance, a saliency map may highlight a lung opacity while failing to reveal that critical text notes were completely dis-regarded. We argue that modality attribution constitutes a distinct explainability problem, complementary to feature attribution. Moreover, measuring modality attribution with naive interventions on individual modalities introduces out-of-distribution artifacts that corrupt model representations and distort confidence estimates. Faithful attribution instead requires counterfactual reasoning with manifold perturba-tions alongside a game-theoretic formulation to isolate both individual and non-linear joint modality contributions. To address this challenge, we introduce Counterfactual Modality Attribution (CMA) , a model-agnostic framework for quantifying modality-level contributions in pretrained MLLMs. CMA generates realistic image-only, text-only, and joint counterfactuals using coupled diffusion priors. These define a two-player cooperative game whose Shapley values provide principled modality attribution scores, quantifying each modality’s causal contribution to the final prediction. Unlike existing explainability methods, CMA explicitly sep-arates reliance on individual modalities from their joint in-teraction, enabling direct auditing of multimodal reasoning at the modality level. The source code is provided in the sup-plementary material and will be released upon acceptance. Our main contributions are summarized as follows: 
+
+• A complementary explainability objective. We formu-late modality attribution as a complementary objective for multimodal foundation models, alongside feature at-tribution, and show how it can identify which modality drives a prediction. 
+
+• A novel multimodal counterfactual framework. We propose Counterfactual Modality Attribution (CMA), the first framework that generates synchronized image-only, text-only, and joint counterfactuals for pretrained MLLMs, enabling principled modality-level attribution. 
+
+• A principled attribution formulation. We introduce a cooperative game-theoretic formulation that converts multimodal counterfactuals into interpretable Shapley-based modality attribution scores, quantifying individual modality contributions and cross-modal interactions. 
+
+• Extensive experimental validation. We demonstrate on controlled synthetic benchmarks and a real-world clinical dataset that CMA accurately identifies decision-driving modalities and uncovers multimodal reasoning failures that remain hidden to conventional explainability methods and predictive accuracy alone. 
+
+Related Work 
+
+Existing work on explainability for multimodal models spans feature attribution, counterfactual explanations, and diffusion-based models. We briefly review these directions and discuss their relation to modality-level attribution. 
+
+Feature-level explainability for MLLMs. Most explain-ability methods for multimodal large language models aim to identify where predictive evidence is located within an input. Gradient- and attention-based approaches such as LVLM-Interpret (Ben Melech Stan et al. 2024) generate spatial attri-bution maps over visual tokens, while TAM (Li et al. 2025) improves token-level explanations by suppressing contex-tual noise. EAGLE (Chen et al. 2026) analyzes the relative influence of linguistic priors and perceptual evidence dur-ing autoregressive generation, and recent surveys summa-rize advances in multimodal explainability and mechanis-tic interpretability (Dang et al. 2024; Lin et al. 2025). A complementary research direction studies internal represen-tations through sparse autoencoders, attribution graphs, and circuit analysis (Gao et al. 2024; Marks et al. 2025; Dunef-sky, Chlenski, and Nanda 2024; Ameisen et al. 2025; Lou et al. 2025; Olson et al. 2025). MM-SHAP (Parcalabescu and Frank 2023) and MultiViz (Liang et al. 2022) provide multimodal comparisons by aggregating token-, patch-, or segment-level importance across the image and text modali-ties. MM-SHAP estimates modality shares from token- and patch-level Shapley values, whereas MultiViz fits separate local LIME surrogates for the two modalities. These meth-ods provide useful feature-level or local importance signals, but their modality summaries depend on fine-grained coali-tion choices or surrogate fits. These methods explain fea-ture importance within modalities, whereas our objective is modality-level attribution of the final prediction. 
+
+Counterfactual explanations. Counterfactual explanations characterize model behavior by identifying minimal input changes that alter a prediction, providing intuitive expla-nations in the input space (Wachter, Mittelstadt, and Rus-sell 2018; Boreiko et al. 2022; Guidotti 2024). Diffusion-based approaches such as DiME (Jeanneret, Simon, and Jurie 2022), DVCE (Augustin et al. 2022), ACE (Jeanneret, Simon, and Jurie 2023), FastDiME (Weng et al. 2024), and UVCE (Augustin, Neuhaus, and Hein 2023) generate realistic image counterfactuals, while recent work extends this paradigm to video (Wang et al. 2026). For text, methods including MiCE (Ross, Marasovic, and Peters 2021), Polyjuice (Wu et al. 2021), and recent LLM-based approaches (Nguyen, Seifert, and Schlötterer 2025) generate minimal label-flipping textual edits. However, these methods intervene on a single modal-ity and therefore cannot capture cross-modal dependencies or quantify how multiple modalities jointly contribute to a prediction. CMA instead generates synchronized image-only, text-only, and joint multimodal counterfactuals within a unified framework, enabling principled estimation of both modality contributions and cross-modal interactions. 
+
+Diffusion models. Recent advances in diffusion modeling have enabled high-quality generation across both continu-ous and discrete domains. DDPMs (Ho, Jain, and Abbeel 2020) provide powerful image priors, while RDLM (Jo and Hwang 2025), NeoDiff (Li, Gao, and Xu 2025), EvoToken-DLM (Zhong et al. 2026), Efficient-DLM (Fu et al. 2025), and LLaDA (Nie et al. 2025) extend diffusion to language generation. Omni-Diffusion (Li et al. 2026) further demon-strates unified multimodal diffusion across images, text, and speech. These methods focus on generation rather than ex-planation and do not perform counterfactual attribution of model decisions. In contrast, CMA synchronizes pretrained image and text diffusion priors under classifier guidance to generate coordinated multimodal counterfactuals rather than multimodal synthesis. 
+
+Background 
+
+Our framework builds upon two established diffusion mod-els, one for images and one for text. This section briefly sum-marizes the formulations required for the proposed method, while full details can be found in the original works. 
+
+Image Diffusion For the image modality, we employ the Denoising Diffusion Probabilistic Model (DDPM) of Ho, Jain, and Abbeel (2020), which provides a realistic image prior for generating plausible counterfactuals. Given a clean image xI
+
+> 0
+
+, the forward diffusion process progressively cor-rupts the image with Gaussian noise according to 
+
+q(xIs | xI
+
+> 0
+
+) = N  √¯αsxI
+
+> 0
+
+, (1 − ¯αs)I,
+
+where ¯αs = Qsr=1 (1 − βr ) is determined by the variance schedule {βs}Ts=1 , and I denotes the identity matrix. The reverse process is parameterized by a denoising network 
+
+ϵθ (xIs , s ) that predicts the injected noise. Following Ho, Jain, and Abbeel (2020), the corresponding estimate of the clean image and the reverse-process posterior mean are 
+
+ˆxI 
+
+> 0
+
+= xIs − √1 − ¯αs ϵθ (xIs , s )
+
+√¯αs
+
+and 
+
+μθ (xIs , s ) = 1
+
+√αs
+
+
+
+xIs − βs
+
+√1 − ¯αs
+
+ϵθ (xIs , s )
+
+
+
+,
+
+used during the guided reverse diffusion process. 
+
+Text Diffusion. For the text modality, we adopt the Rie-mannian Diffusion Language Model (RDLM) (Jo and Hwang 2025), which enables diffusion-based generation over dis-crete text while remaining differentiable. RDLM represents tokens on a hyperspherical manifold using base-b decompo-sition, allowing realistic text counterfactuals to be generated through a continuous diffusion process. The forward pro-cess progressively transforms token representations toward a masked prior, while the reverse process predicts token distri-butions by solving the corresponding reverse-time stochastic differential equation on the manifold. The denoising network outputs per-digit logits ℓθ (XTs , s ), which are converted into a probability distribution pθ via the softmax transformation. The reverse diffusion process is driven by the drift 
+
+bθ (XTt , t ) = c(t)
+
+> b−1
+
+X
+
+> k=0
+
+pθ,k 
+
+ϑk
+
+sin ϑk
+
+ ek − cos( ϑk)XTt
+
+ ,
+
+where ϑk = arccos ⟨XTt , e k⟩ and c(t) is the time-dependent scaling function defined by Jo and Hwang (2025). One re-verse diffusion step is computed using the exponential map 
+
+XTt−∆t = Exp XTt
+
+
+
+bθ ∆t + pβ(t)∆ t z ⊥
+
+
+
+,
+
+where z⊥ denotes Gaussian noise projected onto the tangent space of the hypersphere. The predicted token distribution pθ
+
+is later modified by our guidance mechanism during coun-terfactual generation. 
+
+Shapley-Based Modality Attribution. To quantify modality-level contributions, we adopt the Shapley value from cooperative game theory (Shapley 1953; Lundberg and Lee 2017), which provides a principled attribution of each player’s contribution to a cooperative outcome. Given a set of players N and a value function v : 2 N → R assigning a utility to every coalition S ⊆ N , the Shapley value of player 
+
+i is defined as 
+
+ϕv (i) = X 
+
+> S⊆N\{ i}
+
+|S|! ( |N | − | S| − 1)! 
+
+|N |! [v(S ∪ { i}) − v(S)] .
+
+The Shapley value measures the average marginal contri-bution of a player to all possible coalitions. It is uniquely characterized by four desirable axioms: efficiency , ensuring that attributions sum to the total coalition value; symmetry ,assigning equal attribution to players with identical contri-butions; dummy , assigning zero attribution to players that never affect the outcome; and additivity , ensuring consis-tency across combined value functions. In CMA, the two players correspond to the image and text modalities, while coalition values are computed from classifier predictions on the generated counterfactuals. 
+
+Methodology 
+
+Let f denote a pretrained multimodal classifier that maps an image–text pair x = ( xI , x T ) to logits over C classes, where 
+
+xI ∈ R3×H×W is an image and xT = ( w1, . . . , w L) ∈ V L is a sequence of text tokens from vocabulary V. The predicted class is 
+
+ˆy = arg max  
+
+> c
+
+fc(xI , x T ).
+
+Our objective is to quantify the contribution of each modality to the prediction ˆy, distinguishing whether the decision is primarily driven by the image, the text, or their interaction. As illustrated in Fig. 2, CMA consists of three stages. First, independently pretrained diffusion priors provide real-istic image and text priors for generating plausible counter-factuals. Second, synchronized reverse diffusion generates image-only, text-only, and joint multimodal counterfactuals under the guidance of a pretrained classifier, producing min-imal prediction-changing interventions that remain close to the data manifold. Finally, these counterfactuals define a two-player cooperative game in which the image and text modal-ities act as players, and Shapley values quantify both their individual contributions and their interaction. The resulting modality attribution scores reveal which modality primarily drives the model’s prediction. 
+
+Counterfactual Generation 
+
+Unlike existing diffusion-based counterfactual methods that operate on a single modality, CMA jointly optimizes syn-chronized image and text diffusion processes, enabling image-only, text-only, and joint multimodal counterfactual generation within a unified framework. 1. Coupled Diffusion & Guided CF Search                                            
+
+> DDPM ϵθ
+> image prior
+> MLLM classifier
+> RDLM ℓθ
+> text prior
+> guided reverse ×T
+> Image xI
+> Input text xT
+> CF img xI′
+> CF text xT′
+> −∇L CW both arms same step t
+> 2. Counterfactual Coalition Grid
+> both orig
+> v({I, T })
+> text CF
+> v({I})
+> image CF
+> v({T})
+> both CF
+> v(∅)
+> xT(orig) xT′(CF)
+> xI (orig) xI′ (CF)
+> 3. Two-player Shapley attribution
+> θM=∑
+> S⊆{ I,T }\{ M}|S|! (1 −| S|)! 2
+> [v(S∪ { M})−v(S)]
+> M∈ { I, T }
+> IMAGE %= 100 |θI|/(|θI|+|θT|)
+> TEXT %= 100 |θT|/(|θI|+|θT|)
+> 90% 10%
+> Image Text
+> Modality bias: Image
+
+Figure 2: Overview of the proposed Counterfactual Modality Attribution (CMA) framework. (1) Independently pretrained image and text diffusion priors are synchronized during reverse diffusion and jointly guided by gradients from the pretrained MLLM to generate realistic image-only, text-only, and joint counterfactuals. (2) Combining original and counterfactual modalities forms the four coalitions required for modality attribution. (3) Treating image and text as players in a two-player cooperative game, Shapley values quantify their relative contributions to the model prediction, producing Image% and Text% attribution scores. Let ˆy denote the original prediction. Counterfactual gen-eration is formulated as an untargeted optimization problem using the Carlini–Wagner (2017) margin 
+
+LCW (xI , x T ) = fˆy (xI , x T ) − max  
+
+> c̸=ˆ y
+
+fc(xI , x T ),
+
+which becomes negative once a competing class exceeds the confidence of the original prediction. During reverse diffu-sion, the image and text diffusion models are synchronized at the same diffusion timestep. Synchronization ensures that each modality is optimized while conditioned on the evolv-ing state of the other, enabling coherent multimodal coun-terfactuals and capturing cross-modal interactions. The cur-rent image estimate ˆxI 
+
+> 0
+
+and predicted text distribution pθ are jointly evaluated by the pretrained classifier, allowing both modality-specific gradients to be computed from a single backward pass, 
+
+gI = ∇ˆxI 
+
+> 0
+
+LCW , gT = ∇ℓθ LCW .
+
+The gradients are normalized independently to prevent dif-ferences in gradient magnitude across modalities from dom-inating the optimization, and are incorporated into the corre-sponding reverse diffusion processes. By selectively enabling classifier guidance (Dhariwal and Nichol 2021) for one or both diffusion models, CMA naturally supports image-only, text-only, and joint counterfactual generation within the same optimization framework. 
+
+Image-only counterfactuals. To estimate the contribution of the visual modality, classifier guidance is applied only to the image diffusion model while the accompanying text remains fixed. The image posterior mean is updated using the normalized classifier gradient together with an ℓ1 proximity regularizer, 
+
+μ ← μθ (xIs , s ) − βs
+
+
+
+λc ˆgI + λ1
+
+1
+
+N sign(ˆ xI 
+
+> 0
+
+− xI
+
+> 0
+
+)
+
+
+
+,
+
+followed by the standard DDPM sampling step. Dynamic inpainting further preserves unchanged regions by restoring pixels whose predicted changes remain below a threshold. The resulting counterfactual is (x′I , x T ), where only the image has been modified. 
+
+Text-only counterfactuals. To isolate the textual contri-bution, guidance is applied only to the text diffusion model while the image remains unchanged. The predicted token distribution is updated before computing the RDLM reverse drift, 
+
+pθ ← softmax  log pθ −  λTc ˆgT + λT 
+
+> 1
+
+(pθ − 1d0 ) ,
+
+where 1d0 denotes the original token representation. Tokens whose predicted change falls below a threshold remain un-changed throughout reverse diffusion. The generated coun-terfactual is (xI , x ′T ), where only the textual modality is modified. 
+
+Joint counterfactuals. The proposed framework also sup-ports simultaneous optimization of both modalities. In this setting, the image and text diffusion models evolve simulta-neously under shared classifier guidance while remaining synchronized throughout reverse diffusion, allowing each modality to adapt to changes in the other during optimization. This coordinated generation captures cross-modal dependen-cies that independent unimodal counterfactuals cannot repre-sent, producing faithful multimodal counterfactual explana-tions. The resulting multimodal counterfactual is (x′I , x ′T ).
+
+Modality Attribution 
+
+The generated image-only, text-only, and joint counterfac-tuals naturally define a modality attribution problem. We formulate this as a two-player cooperative game in which the image and text modalities act as players, while the logit output of the classifier assigned to the original predicted class de-fines the coalition value. Unlike feature attribution methods, this formulation directly attributes the classifier prediction to entire modalities rather than individual features or tokens. For a coalition S ⊆ { I, T }, modalities in S remain un-changed, while the remaining modalities are replaced by their counterfactual counterparts, i.e., ˜xMS = xM if M ∈ S,and ˜xMS = x′M otherwise. The coalition value is de-fined as the logit assigned to the original predicted class 
+
+ˆy, v(S) = fˆy (˜ xIS , ˜xTS ). Evaluating the classifier on the origi-nal sample together with the three generated counterfactuals yields the four coalition values, 
+
+v({I, T }) = fˆy (xI , x T ), v({I}) = fˆy (xI , x ′T ),v({T }) = fˆy (x′I , x T ), v(∅) = fˆy (x′I , x ′T ).
+
+Since modality attribution involves only two players, the Shapley values admit the following closed-form solution, 
+
+θI = 12 (v({I}) − v(∅) + v({I, T }) − v({T })) ,θT = 12 (v({T }) − v(∅) + v({I, T }) − v({I})) ,
+
+ensuring that the total attribution equals the logit score change produced by jointly perturbing both modalities. For interpretability, we additionally report normalized modality contributions, 
+
+Image% = 100 |θI ||θI | + |θT | , Text% = 100 |θT ||θI | + |θT | .
+
+which quantify the relative influence of the image and text modalities on the prediction. The larger normalized attribu-tion identifies the modality that primarily drives the classifier prediction. Because the attribution is computed from realis-tic counterfactual interventions rather than feature pertur-bations, the resulting scores are directly comparable across samples and modalities. 
+
+Results 
+
+Code for reproducing all results is included in the supple-ment and will be released publicly on a dedicated GitHub repository upon acceptance. Further implementation details, including network architectures, training configurations, dif-fusion schedules, and other model hyperparameters, are pro-vided in the supplementary material. 
+
+Experimental Setup We evaluate CMA on two com-plementary multimodal benchmarks: a controlled synthetic benchmark with known ground-truth modality reliance, en-abling quantitative evaluation of attribution accuracy, and a real clinical benchmark representing the high-stakes multi-modal setting illustrated in Fig. 1. 
+
+Synthetic Multimodal MNIST To enable quantitative evaluation of modality attribution, we construct a controlled multimodal benchmark by pairing colored MNIST (LeCun et al. 1998) digits with textual prompts specifying a per-sample color-to-code mapping. Solving the task requires combining visual and textual information to determine the target label. Prompt templates and mappings are random-ized, and train, validation, and test splits use disjoint source images. We create three variants with known modality dependence. The Balanced variant requires both modalities and predicts the concatenation of the digit and mapped code (100 classes). The Image-Biased variant predicts only the digit, while the 
+
+Text-Biased variant predicts only the mapped code. These controlled settings provide ground-truth modality attribu-tions, enabling direct quantitative evaluation of CMA. 
+
+Multiclass OpenI We additionally evaluate CMA on the publicly available OpenI chest X-ray dataset (Demner-Fushman et al. 2016), where each sample consists of a frontal chest radiograph paired with its corresponding radiology re-port. Since OpenI provides neither classification labels nor official data splits, we construct a reproducible single-label multiclass benchmark by mapping the annotated Problems 
+
+field, or MeSH terms when unavailable, to a curated set of canonical pathologies. Reports with multiple or ambiguous labels are excluded, and stratified train, validation, and test splits are generated. 
+
+Multimodal Classifier We use Gemma-3-4B-IT (Gemma Team 2025) with a lightweight two-layer MLP classifica-tion head. Unless stated otherwise, the backbone remains pretrained. During counterfactual generation, the pretrained classifier provides shared gradients for both image and text modalities using differentiable image inputs and soft text em-beddings. Separate classifiers are trained for each Synthetic MNIST variant and the OpenI benchmark. 
+
+Counterfactual Generation 
+
+We evaluate CMA across three counterfactual generation modes: image-only, text-only, and joint generation. Fig. 3 shows representative examples on the Synthetic MNIST (top row) and OpenI (bottom row) datasets. The OpenI exam-ple demonstrates that CMA can expose clinically irrelevant shortcuts learned by the classifier. The original radiograph is labeled and predicted as Nodule . To reach the target class 
+
+Normal , CMA removes the ECG leads and electrodes, af-ter which the classifier changes its prediction to Normal .Because these devices are not diagnostic evidence of a pul-monary nodule, the counterfactual reveals that the model relies on a spurious correlation between monitoring equip-ment and the Nodule label. This provides direct evidence that CMA identifies decision-critical features. Additionally, if we look at the modalities individually in Fig. 3, the text-only counterfactual edit for OpenI (Fig. 3g) does not flip the decision because the shortcut feature (the ECG leads) in the unperturbed image input is highly crucial to the Nodule 
+
+prediction and is sufficient to sustain it. Synthetic MNIST provides a controlled complementary result. Image-only and text-only counterfactuals affect only their respective modali-ties, whereas joint generation modifies both in a coordinated manner. The resulting predictions cannot be explained as the independent sum of unimodal edits, demonstrating that CMA captures cross-modal interactions rather than treating the modalities independently. 
+
+Modality Attribution 
+
+We evaluate CMA on the controlled Synthetic MNIST bench-mark with known ground-truth modality dependence. Two biased multimodal classifiers are trained: an Image-Biased 
+
+model that relies only on image information and a Text-Biased model that relies only on text. We compare CMA against feature-, perturbation-, subset-selection-, and multimodal-attribution baselines. These methods represent different explainability techniques applied Color codes: green = 6 yellow = 4 red = 1 blue = 2 Task: find the digit shown in the image, read the code assigned to the digit’s color, then write digit followed by code. (a) Original (pred = 34) Color codes: green = 6 yellow = 4 red = 1 blue = 2 Task: find the digit shown in the image, read the code assigned to the digit’s color, then write digit followed by code. (b) Image-only CF (pred = 54) Color codes: blue = 9 yellow = 0 red = 1 blue = 2 Task: find the digit shown in the image, read the code assigned to the digit’s color, then write digit followed by code. (c) Text-only CF (pred = 30) Color codes: blue = 9 yellow = 3 red = 1 blue = 2 Task: find the digit shown in the image, read the code assigned to the digit’s color, then write digit followed by code. (d) Joint CF (pred = 53) Heart size normal. Mediastinal silhouettes and pulmonary vascularity are within normal limits. Calcified lingular granuloma. No focal consolidations or pleural effusions. No pneumothorax. Breast implants there is a moderate wedge XXXX deformity of the midthoracic vertebrae, XXXX T6, age-indeterminate. 
+
+(e) Original (Nodule) Heart size normal. Mediastinal silhouettes and pulmonary vascularity are within normal limits. Calcified lingular granuloma. No focal consolidations or pleural effusions. No pneumothorax. Breast implants there is a moderate wedge XXXX deformity of the midthoracic vertebrae, XXXX T6, age-indeterminate. (f) Image-only CF (Normal) Heart size normal. Mediastinal contour and pulmonary vascularity are within normal limits. Calcified lingu-lar granuloma. No focal consolidations or pleural effu-sions. No pneumothorax. Breast implantsific is a or apex XXXX deformity of the anteriorms Hyp grossly vertebrae. XXXX right8y age-. (g) Text-only CF (Nodule) Heart size normal. Mediastinal contour and pulmonary vascularity are within normal limits. Calcol opacity of the chest. No focal consolidations or pleural effusions. No pneumothorax. Stablehr there or a moderate wedge XXXX deformity of theacidth the right lateral, XXXX TG, -indeterminate. (h) Joint CF (Normal) 
+
+Figure 3: Qualitative comparison of generated counterfactuals across different generation modes for Synthetic MNIST (top row, a–d) and Multiclass OpenI dataset (bottom row, e–h): Image-only mode generates counterfactual images while keeping text fixed; Text-only mode modifies text while keeping images fixed; and Joint mode simultaneously updates both image and text modalities to flip the prediction. Notably, the text-only counterfactual for OpenI (g) does not flip the decision to Normal because the shortcut feature in the image input remains unperturbed and determines the model’s Nodule prediction in this case. to MLLMs. However, none was originally designed to pro-duce modality-level attribution scores; instead, they assign importance to individual pixels, tokens, patches, or input subsets. To enable a direct comparison with CMA, we adapt each baseline by aggregating its native fine-grained attribu-tions into a single attribution share for each modality and evaluate all methods under a common protocol: 
+
+1. Input × Gradient (Ancona et al. 2017). Local fea-ture attributions are aggregated over image pixels and text embeddings to obtain modality-level attribution scores. 
+
+2. Perturbation SHAP. We use the same two-player Shap-ley formulation as CMA but replace diffusion-generated counterfactuals with static perturbations (constant back-ground image and masked text), isolating the benefit of real-istic counterfactual generation. 
+
+3. EAGLE (Chen et al. 2026). We adapt EAGLE’s sub-modular subset-selection framework to multimodal inputs and aggregate selected image regions and text spans into modality-level attribution scores. 
+
+4. MM-SHAP (Parcalabescu and Frank 2023). We adapt MM-SHAP’s fine-grained Shapley game, using text tokens and image patches as players, and aggregate the absolute Shapley values within each modality. 
+
+5. MultiViz (Liang et al. 2022). We adapt its unimodal LIME analysis by fitting local surrogates separately to image segments and text words, then normalize the two coefficient masses into modality shares. Fig. 4 compares CMA with these baselines. Across both controlled settings baseline methods fail to recover the known model bias reliably. MM-SHAP and MultiViz achieve 100% 
+
+hits on the text-biased samples, but achieve only 0% and 3% 
+
+hits, respectively, on the image-biased setting. MM-SHAP’s fine-grained token–patch game can distribute importance ac-cording to local feature effects rather than the whole-modality decision rule, while MultiViz derives its split from two local linear surrogates whose coefficient masses need not reflect causal reliance. These results complement the failure modes of gradient-, perturbation-, and subset-selection-based meth-
+
+Figure 4: Modality attribution accuracy on image-biased and text-biased Synthetic MNIST benchmarks. A hit indicates that the identified dominant modality matches the known ground-truth model bias. Whiskers denote 95% Wilson con-fidence interval across evaluation samples. ods where local sensitivity, static replacements, feature gran-ularity, and surrogate fit cannot correctly identify the biased modality. In contrast, CMA correctly identifies the ground-truth modality in 98% of samples by using minimal, realistic counterfactual interventions to directly test whether changing a modality changes the prediction. 
+
+Ablation Study We perform a controlled per-modality cor-ruption study to evaluate whether CMA tracks the evidence available to the model rather than assigning a fixed preference to either modality. Image and text are progressively corrupted from 0% to 100% in 10% increments. Image corruption pro-gressively replaces pixels with the background value, while text corruption masks increasing numbers of tokens through the attention mechanism. Figure 5 presents the results on OpenI and the balanced Synthetic MNIST benchmark. As information in one modality is progressively removed, its attribution decreases toward 0% , while the complementary modality receives the remaining attribution. This behaviour (a) OpenI Medical Dataset (b) Synthetic MNIST Dataset 
+
+Figure 5: Modality attribution share ( %) under progressive corruption of image and text modalities for (a) OpenI medical dataset and (b) Synthetic MNIST dataset. Error bands indicate standard error across test samples. As corruption increases, attribution share decays to 0% , shifting entirely to the uncorrupted modality. demonstrates that CMA is input-faithful and adapts its at-tribution to the evidence available for each prediction rather than assigning fixed modality preferences. When one modal-ity is completely corrupted, the intact modality naturally receives 100% attribution. Rather than indicating successful multimodal reasoning, this reveals a collapse to unimodal decision-making, where the prediction is supported solely by the remaining modality. Such failure modes can remain hidden when evaluating only prediction accuracy but are made explicit by modality attribution. 
+
+Discussion 
+
+CMA introduces modality attribution as a complementary perspective on explainability for multimodal large language models. Existing methods primarily explain where evidence is located by highlighting important pixels, tokens, or internal representations. In contrast, CMA explains which modality 
+
+ultimately drives a prediction by combining realistic mul-timodal counterfactual generation with Shapley value attri-bution. Our results demonstrate that these two forms of ex-planation capture different properties of model behavior and should be viewed as complementary rather than competing approaches. The experiments also provide broader insights into multi-modal reasoning. Image-only and text-only counterfactuals isolate the contribution of individual modalities, while joint counterfactuals reveal non-additive interactions that cannot be recovered from independent unimodal interventions. Fur-thermore, the corruption experiments show that modality attribution adapts continuously to the evidence available to the model rather than assigning fixed preferences to individ-ual modalities. Together, these findings suggest that reliable auditing of multimodal foundation models requires reason-ing about modality interactions in addition to feature-level explanations. Beyond medical applications, CMA is applicable to any differentiable multimodal architecture and can support au-diting in domains such as autonomous systems, document understanding, robotics, and multimodal decision support, where understanding the relative contribution of different information sources is critical for trustworthy deployment. 
+
+Limitations 
+
+CMA has several limitations. First, the quality of the attribu-tion depends on the quality of the generated counterfactuals. Although manifold-constrained diffusion priors substantially improve the realism of generated edits, imperfect counterfac-tual generation may affect attribution quality. Second, CMA provides model-relative, reference-dependent counterfactual attributions rather than causal effects in the underlying data-generating process, and different valid counterfactual refer-ences may lead to different attribution scores. The current framework also operates at the modality level and therefore does not identify which individual image re-gions or textual spans within a modality are responsible for a prediction. Extending CMA to hierarchical explanations that jointly attribute importance across modalities and within-modality features is an important direction for future work. Finally, diffusion-based counterfactual generation introduces additional computational cost compared with gradient- or perturbation-based explainability methods, limiting the cur-rent implementation to offline analysis. 
+
+Conclusion 
+
+We introduced Counterfactual Modality Attribution (CMA), a novel explainability framework that, to the best of our knowledge, provides the first principled modality attribution method for multimodal large language models. By combining synchronized multimodal counterfactual generation with a two-player cooperative Shapley formulation, CMA quantifies the contribution of each modality to a model’s prediction while explicitly accounting for cross-modal interactions. Experiments on controlled synthetic benchmarks with known ground-truth modality reliance and a real clinical chest X-ray benchmark demonstrate that CMA accurately identifies the modality driving a prediction and substantially outperforms existing feature-, perturbation-, and subset-selection-based explainability methods. We hope CMA pro-vides a foundation for more transparent, trustworthy, and systematically auditable multimodal AI systems deployed in high-stakes decision-making environments. References 
+
+Acosta, J. N.; Falcone, G. J.; Rajpurkar, P.; and Topol, E. J. 2022. Multimodal biomedical AI. Nature Medicine , 28(9): 1773–1784. Ameisen, E.; Lindsey, J.; Pearce, A.; Gurnee, W.; Turner, N. L.; Chen, B.; Citro, C.; Abrahams, D.; Carter, S.; Hosmer, B.; et al. 2025. Circuit Tracing: Revealing Computational Graphs in Language Models. Transformer Circuits Thread .Ancona, M.; Ceolini, E.; Öztireli, C.; and Gross, M. 2017. Towards better understanding of gradient-based attribu-tion methods for deep neural networks. arXiv preprint arXiv:1711.06104 .Asadi, M.; O’Sullivan, J. W.; Cao, F.; Nedaee, T.; Raja-balifardi, K.; Li, F.-F.; Adeli, E.; and Ashley, E. 2026. MI-RAGE: The Illusion of Visual Understanding. arXiv preprint arXiv:2603.21687 .Augustin, M.; Boreiko, V.; Croce, F.; and Hein, M. 2022. Diffusion visual counterfactual explanations. Advances in Neural Information Processing Systems , 35: 364–377. Augustin, M.; Neuhaus, Y.; and Hein, M. 2023. DiG-IN: Diffusion Guidance for Investigating Networks– Uncovering Classifier Differences Neuron Visualisations and Visual Counterfactual Explanations. arXiv preprint arXiv:2311.17833 .Ben Melech Stan, G.; Aflalo, E.; Bhatt, G.; Chen, S.-Y. T.; Tseng, S.-Y.; Sod-Moriah, G.; Tsiper, S.; Yaniv, Y.; and Lal, V. 2024. LVLM-Interpret: An Interpretability Tool for Large Vision-Language Models. In IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops ,8182–8187. Boreiko, V.; Augustin, M.; Croce, F.; Berens, P.; and Hein, M. 2022. Sparse visual counterfactual explanations in image space. In DAGM German Conference on Pattern Recogni-tion , 133–148. Springer. Carlini, N.; and Wagner, D. 2017. Towards Evaluating the Robustness of Neural Networks . In 2017 IEEE Symposium on Security and Privacy (SP) , 39–57. Los Alamitos, CA, USA: IEEE Computer Society. Chen, R.; Guo, X.; Liu, K.; Liang, S.; Liu, S.; Zhang, Q.; Wang, L.; Zhang, H.; and Cao, X. 2026. Where MLLMs Attend and What They Rely On: Explaining Autoregressive Token Generation. In IEEE/CVF Conference on Computer Vision and Pattern Recognition .Dang, Y.; et al. 2024. Explainable and Interpretable Multi-modal Large Language Models: A Comprehensive Survey. 
+
+arXiv preprint arXiv:2412.02104 .Demner-Fushman, D.; Kohli, M. D.; Rosenman, M. B.; Shooshan, S. E.; Rodriguez, L.; Antani, S.; Thoma, G. R.; and McDonald, C. J. 2016. Preparing a collection of radiology examinations for distribution and retrieval. Journal of the American Medical Informatics Association , 23(2): 304–310. Dhariwal, P.; and Nichol, A. 2021. Diffusion models beat gans on image synthesis. Advances in neural information processing systems , 34: 8780–8794. Dunefsky, J.; Chlenski, P.; and Nanda, N. 2024. Transcoders Find Interpretable LLM Feature Circuits. In Advances in Neural Information Processing Systems .Fu, Y.; Whalen, L.; Ye, Z.; Dong, X.; Diao, S.; Liu, J.; Wu, C.; Zhang, H.; Xie, E.; Han, S.; et al. 2025. Efficient-DLM: From Autoregressive to Diffusion Language Models, and Beyond in Speed. arXiv preprint arXiv:2512.14067 .Gao, L.; la Tour, T. D.; Tillman, H.; Goh, G.; Troll, R.; Radford, A.; Sutskever, I.; Leike, J.; and Wu, J. 2024. Scal-ing and Evaluating Sparse Autoencoders. arXiv preprint arXiv:2406.04093 .Gemma Team. 2025. Gemma 3 Technical Report. arXiv preprint arXiv:2503.19786 .Guidotti, R. 2024. Counterfactual explanations and how to find them: literature review and benchmarking. Data Mining and Knowledge Discovery , 38(5): 2770–2824. Ho, J.; Jain, A.; and Abbeel, P. 2020. Denoising Diffusion Probabilistic Models. In Advances in Neural Information Processing Systems , volume 33, 6840–6851. Jeanneret, G.; Simon, L.; and Jurie, F. 2022. Diffusion mod-els for counterfactual explanations. In Proceedings of the Asian conference on computer vision , 858–876. Jeanneret, G.; Simon, L.; and Jurie, F. 2023. Adversar-ial counterfactual visual explanations. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 16425–16435. Jo, J.; and Hwang, S. J. 2025. Continuous Diffusion Model for Language Modeling. In Advances in Neural Information Processing Systems .Joshi, S.; Yin, H.; Adiga, R.; Monti, R.; Carranza, A.; Fang, A.; Deng, A.; Abbas, A.; Larsen, B.; Blakeney, C.; et al. 2026. DatBench: Discriminative, Faithful, and Efficient VLM Eval-uations. arXiv preprint arXiv:2601.02316 .LeCun, Y.; Bottou, L.; Bengio, Y.; Haffner, P.; et al. 1998. Gradient-based learning applied to document recognition. 
+
+Proceedings of the IEEE , 86(11): 2278–2324. Li, B.; Gao, Z.; and Xu, L. 2025. Unifying Continuous and Discrete Text Diffusion with Non-simultaneous Diffu-sion Processes. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics , 565. Li, L.; Long, Z.; Shen, Y.; Gao, H.; Cao, H.; Sun, X.; Shan, C.; He, R.; and Fu, C. 2026. Omni-Diffusion: Unified Multi-modal Understanding and Generation with Masked Discrete Diffusion. In International Conference on Machine Learn-ing .Li, Y.; et al. 2025. Token Activation Map to Visually Explain Multimodal LLMs. In IEEE/CVF International Conference on Computer Vision .Liang, P. P.; Lyu, Y.; Chhablani, G.; Jain, N.; Deng, Z.; Wang, X.; Morency, L.-P.; and Salakhutdinov, R. 2022. Multiviz: Towards visualizing and understanding multimodal models. 
+
+arXiv preprint arXiv:2207.00056 .Lin, Y.; et al. 2025. A Survey on Mechanistic Interpretabil-ity for Multi-Modal Foundation Models. arXiv preprint arXiv:2502.17516 .Lou, H.; Li, C.; Ji, J.; and Yang, Y. 2025. SAE-V: Inter-preting Multimodal Models for Enhanced Alignment. In 
+
+International Conference on Machine Learning .Lundberg, S. M.; and Lee, S.-I. 2017. A unified approach to interpreting model predictions. In Advances in Neural Information Processing Systems , volume 30. Marks, S.; Rager, C.; Michaud, E. J.; Belinkov, Y.; Bau, D.; and Mueller, A. 2025. Sparse Feature Circuits: Discover-ing and Editing Interpretable Causal Graphs in Language Models. In International Conference on Learning Represen-tations .Nguyen, V. B.; Seifert, C.; and Schlötterer, J. 2025. Guiding LLMs to Generate High-Fidelity and High-Quality Counter-factual Explanations for Text Classification. arXiv preprint arXiv:2503.04463 .Nie, S.; Zhu, F.; You, Z.; Zhang, X.; Ou, J.; Hu, J.; Zhou, J.; Lin, Y.; Wen, J.-R.; and Li, C. 2025. Large Language Diffusion Models. arXiv preprint arXiv:2502.09992 .Olson, M. L.; Hinck, M.; Ratzlaff, N.; Li, C.; Howard, P.; Lal, V.; and Tseng, S.-Y. 2025. Probing the Representational Power of Sparse Autoencoders in Vision Models. arXiv preprint arXiv:2508.11277 .Parcalabescu, L.; and Frank, A. 2023. Mm-shap: Aperformance-agnostic metric for measuring multimodal con-tributions in vision and language models & tasks. In Pro-ceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , 4032– 4059. Ross, A.; Marasovic, A.; and Peters, M. E. 2021. MiCE: Explaining NLP Models via Minimal Contrastive Editing. In 
+
+Findings of the Association for Computational Linguistics: ACL-IJCNLP 2021 , 3094–3109. Selvaraju, R. R.; Cogswell, M.; Das, A.; Vedantam, R.; Parikh, D.; and Batra, D. 2017. Grad-cam: Visual expla-nations from deep networks via gradient-based localization. In Proceedings of the IEEE international conference on com-puter vision , 618–626. Shapley, L. S. 1953. A value for n-person games. In Contri-butions to the Theory of Games , volume 2, 307–317. Prince-ton University Press. Simon, P.; et al. 2025. The future of multimodal AI in medicine: a pragmatic roadmap. arXiv preprint arXiv:2505.20316 .Soenksen, L. R.; Ma, Y.; Zeng, C.; Boussiarès, L.; Ting, D. S. W.; Rajpurkar, P.; and Shah, N. H. 2022. Integrated multimodal artificial intelligence framework for healthcare applications. npj Digital Medicine , 5(1): 149. Wachter, S.; Mittelstadt, B.; and Russell, C. 2018. Counter-factual Explanations Without Opening the Black Box: Auto-mated Decisions and the GDPR. Harvard Journal of Law & Technology , 31(2): 841–887. Wang, C.; Che, C.; Chen, X.; Tsoka, S.; and Garcia-Peraza-Herrera, L. C. 2026. Back to the Feature: Explaining Video Classifiers with Video Counterfactual Explanations. In IEEE/CVF Conference on Computer Vision and Pattern Recognition .Weng, N.; Pegios, P.; Petersen, E.; Feragen, A.; and Bigdeli, S. 2024. Fast Diffusion-Based Counterfactuals for Short-cut Removal and Generation. In European Conference on Computer Vision , 351–368. Springer. Wu, T.; Ribeiro, M. T.; Heer, J.; and Weld, D. 2021. Polyjuice: Generating Counterfactuals for Explaining, Evaluating, and Improving Models. In Proceedings of the 59th Annual Meet-ing of the Association for Computational Linguistics , 6707– 6723. Zhong, L.; Wu, L.; Fang, B.; Feng, T.; Jing, C.; Wang, W.; Zhang, J.; Chen, H.; and Shen, C. 2026. Beyond Hard Masks: Progressive Token Evolution for Diffusion Language Mod-els. In Proceedings of the 64th Annual Meeting of the Asso-ciation for Computational Linguistics .

@@ -1,0 +1,628 @@
+Title: Implementing Causal Perception: Competing SCMs and Situated Fairness
+
+URL Source: https://arxiv.org/pdf/2608.03917v1
+
+Published Time: Wed, 05 Aug 2026 01:21:10 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# Implementing Causal Perception: Competing SCMs and Situated Fairness 
+
+José M. Álvarez [0000 −0001 −9412 −9013] ⋆
+
+Santander AI Lab, Madrid, Spain 
+
+jm.alvarez.colmenares@gmail.com 
+
+Abstract. Causal perception occurs when agents with competing Struc-tural Causal Models (SCMs) of the same system infer different proba-bility distributions, including the hypothetical distributions implied by each agent’s SCM under the same set of interventions. It shapes how agents reason about the system and how they perceive its fairness. Causal perception is a promising probabilistic framework, but it has remained purely theoretical. This work provides the first implementation of the causal perception framework of Álvarez and Ruggieri [2]. We operational-ize structural (agents disagree on the causal graph) and parametrical (agents agree on the causal graph but disagree on its weights) causal per-ception. We design algorithms for computing interventional and counter-factual distributions and propose suitable distance measures to quantify the disagreement. Using the German Credit dataset, we illustrate how causal perception affects accuracy and fairness in a multi-expert decision setting. We show that the perception verdict is sensitive to the choice of distance metric and threshold. We also show that causal perception changes fairness assessments and threshold-based decisions. Bias proves situated with respect to the agent’s SCM, demonstrating that competing worldviews in fairness problems cannot be ignored. 
+
+Keywords: Responsible AI · Structural Causal Models · Fairness 
+
+## 1 Introduction 
+
+Responsible AI often relies on Structural Causal Models (SCMs) to reason about the fairness of a system [19,10,13,4,1,3]. SCMs are graphical models that repre-sent the causal relationships between variables as cause-effect pairs and allow us to reason about hypothetical “what if” scenarios in a system. Each SCM repre-sents context-specific knowledge or assumptions, encoding individual or group beliefs on how the system works and, thus, summarizing a worldview. Multi-ple SCMs can represent the same system, but the literature typically relies on a single SCM. This practice is problematic because different SCMs can imply different fairness interpretations of the same system [26]. Dealing with multiple SCMs should be the norm rather than the exception, especially in settings in which competing worldviews are possible or even encouraged [25].  
+
+> ⋆
+
+Forthcoming in BIAS 2026 at ECML/PKDD. arXiv:2608.03917v1 [cs.AI] 4 Aug 2026 2 J.M. Álvarez 
+
+Recent work by Álvarez and Ruggieri [2] tackles the problem of multiple and competing SCMs by introducing an SCM-based probabilistic framework to model perception. Perception refers to the cognitive phenomenon in which the same information is interpreted differently by individuals [15]. Álvarez and Rug-gieri [2] repurpose the term for machine learning and introduce the notion of causal perception, or the difference in observed and/or hypothetical probability distribution(s) on the same information due to competing SCMs. Here, indi-viduals interpret and reason about this information using probabilistic causal reasoning through individual-specific SCMs. Each SCM represents a worldview and conditions how each individual acts given a context. Álvarez and Ruggieri [2] propose two kinds of causal perception: structural perception when individuals disagree on the cause-effect pairs (i.e., the graph) and parametrical perception when individuals agree on these pairs but disagree on the nature of the causal relationship (i.e., the weights). The framework is useful but remains theoretical, with its practical viability yet to be explored. In this paper, we provide the first implementation of the causal perception framework. We operationalize both structural and parametrical causal percep-tion, proposing a set of algorithms for the interventional and counterfactual levels of causal reasoning, with the observational level covered as the empty in-tervention. We illustrate the phenomenon on a real-world financial dataset using two model-based agents with competing SCMs, or worldviews, to examine how causal perception materializes and affects accurate and fair decision-making on the same pool of credit applicants (Example 1). The experiments are illustra-tive, motivating the impact of causal perception in decision flows with multiple experts. We find, for instance, that two receivers differing on a single causal edge reach demographic parity gaps of −0.594 vs. −0.170 and disagree on 21.7% of individual loan decisions. Our implementation is the first practical step toward applied causal perception research in AI systems. 
+
+Example 1. Consider two credit officers evaluating a pool of loan applicants. Officers have access to the applicants’ gender, age, financial status, and credit information and use this information to make their decisions (see Fig. 1). Each officer decides the creditworthiness of an applicant, often relying on hypothetical scenarios to justify their decisions. Suppose that one officer believes that gender affects the information considered, while the other officer believes that it does not. This divergence in reasoning materializes in competing SCMs and induces different hypothetical distributions about the same applicant pool and the per-ceived fairness of the decision-making process. This disagreement is precisely what the causal perception framework captures. Our contributions are threefold. First, we operationalize causal perception for single- and multi-intervention settings at both the interventional and counterfac-tual levels of Pearl’s causal ladder, providing two algorithms that translate the framework’s definitions into executable procedures. Second, we illustrate both structural and parametrical causal perception on real data, revealing that the perception verdict is sensitive to the choice of distance metric and threshold. Implementing Causal Perception 3
+
+Third, we show that even minor SCM disagreements propagate into different fairness verdicts, substantiating the notion that bias is situated with respect to a receiver’s worldview in the form of a SCM. Moving forward, Section 2 introduces the background, Section 3 presents the causal perception implementation, Section 4 illustrates the implementation on real data, and Section 5 concludes this paper. 
+
+## 2 Background 
+
+2.1 Preliminaries 
+
+Structural Causal Models. Let P (X) denote the joint probability distribution of the set of random variables X = {X1, . . . , X p}. The SCM describes how these 
+
+p variables relate to each other as cause-effect pairs. Formally, an SCM M [21] is a tuple M = ⟨U, X, F⟩ that transforms a set of p latent variables U ∼ P (U)
+
+into a set of p observed variables X based on a set of structural equations F:
+
+P (U) = P (U1, . . . , U p) Xj := fj (Xpa (j), U j ), j = 1 , . . . , p (1) where Uj ∈ U, Xj ∈ X, and fj ∈ F. Each function fj maps the parents Xpa (j)
+
+and the latent variable Uj to Xj . Through M we can draw a causal graph G where each node represents a variable and each directed edge a causal relationship. For simplicity, we assume G to be a directed acyclic graph (DAG). 
+
+Probabilistic reasoning. When reasoning about P (X) given an SCM M (or a causal graph G), we deal with observed ( what is ) and hypothetical ( what if and 
+
+what could have been ) distributions. 1 For the unique observed distribution, we use M to factor P (X) into parent-child, or cause-effect, pairs: 
+
+P (X) = 
+
+> p
+
+Y
+
+> j=1
+
+P (Xj | Xpa (j)). (2) For the hypothetical distributions, we use M and the do-operator do (Xi =
+
+xi), which replaces the structural equation in F for Xi with the value xi, to manipulate P (X). Each intervention implies a new distribution P (X)do (i) for 
+
+i ∈ I X, called the i-interventional distribution, where IX denotes the set of all interventions. We represent these distributions as the poset of all interventional distributions implied by M:
+
+PX := 
+
+n 
+
+P (X)do (i) : i ∈ I X
+
+o
+
+, ≤X
+
+
+
+(3) where ≤X is the natural partial ordering inherited from IX [24]. Note that 
+
+P (X) ∈ P X and that PX is a singleton comprising P (X) when IX = {∅} .    
+
+> 1We assume that reasoning about Xis probability-based, a common practice in fields that model human behavior like cognitive psychology [29] and machine learning [21]. 4J.M. Álvarez
+
+Equation 3 represents all the possible ways we can reason about P (X) given an SCM M. It captures all three levels of Pearl’s causal ladder: association (1st rung), intervention (2nd rung), and counterfactual (3rd rung) [22]. Álvarez and Ruggieri [2] discuss causal perception at two levels: observational and hypothetical. The latter summarizes the 2nd and 3rd rungs under hypothet-ical distributions. What separates these two levels is the additional abduction step performed in the 3rd rung in which we use the evidence, meaning the ob-served data, to infer the latent variables U. Abduction implies approximating the posterior distribution P (U | X) and drawing ˆU at the individual level. Both 2nd and 3rd rungs rely on the same i-intervention (hence, the approach in [2]). What changes is whether U is inferred and used to compute the distribution. In the 2nd rung, we intervene and propagate the downstream effects without inferring U. In the 3rd rung, we do the same but adjust this propagation with individual-level ˆU drawn from P (U | X). Whether the manipulation is interven-tional or counterfactual is clear from the context. 
+
+Causal perception. Causal perception centers on the receiver R ∈ R , where R is the set of all possible receivers, and the sender S ∈ S , where S is the set of all possible senders. These are “agents”, in the widest sense of the word, that receive and send, respectively, the information X. Receivers, notably, interpret it as a probability distribution P (X) with a corresponding SCM M.Consider Ri, R j ∈ R with SCMs MRi and MRj for information X provided by S ∈ S . Causal perception occurs when: 
+
+¯d
+
+
+
+PXRi , PXRj
+
+
+
+> ϵ (4) where PXRi and PXRj represent the poset of all distributions of X induced by 
+
+MRi and MRj ; ¯d(·, ·) represents a suitable aggregated distance measure between two sets of probability distributions; and ϵ ∈ R+ represents a threshold [2]. We can also define causal perception on an l -intervention IX = {l}:
+
+d
+
+
+
+PRi (X)do (l), P Rj (X)do (l)
+
+> ϵ (5) where we study the disagreement of the interventional distributions resulting from the l -intervention via the SCMs MRi and MRj .By treating fj as an additive noise model (ANM), two kinds of causal per-ception are proposed. Formally, fj is a linear transformation such that fj := 
+
+P|pa (j)| 
+
+> i=1
+
+βij · Xpa (j)i + Uj with βij ∈ R denoting the causal weight of the i-th parent pa (j)i of Xj . These are: structural perception , where agents disagree on the causal graph G for P (X); and parametrical perception , where agents agree on the causal graph G for P (X) but disagree on the causal weights βij .
+
+Remark 1. We use a broad interpretation of receivers Ri and Rj : these can range from humans to machine learning models that, within a certain context, act based on their causal interpretation of X. Further, we take for granted how the agents’ SCMs are constructed and focus our efforts on the perception im-plementation aspect. Furthermore, we avoid the notion of a ground-truth SCM when it comes to human-based systems as these represent worldviews. Implementing Causal Perception 5
+
+Situated bias. Álvarez and Ruggieri [2] also use causal perception to revisit the implicit stance that bias is objective, static, and universal. Most responsible AI methods speak of bias and, in turn, of fairness as a shared fact. In reality, however, this seems not to be the case as what is fair to some may not be fair to others [27,33,5]. Bias is always situated as, at a minimum, it requires a reference worldview. Causal perception, thus, would apply to the context of bias once we rank one receiver’s interpretation of X over the others. We revisit three popular fairness metrics, demographic parity (DP) [8], equal-ized odds (EO) [12], and counterfactual fairness (CF) [19], by situating each relative to a receiver (see Appendix A). For instance, DP for Ri would amount to PRi ( ˆY = 1 | A = a′) = PRi ( ˆY = 1 | A = a) with A denoting the non-trivial binary protected attribute and ˆY denoting the predicted outcome by Ri. It in-troduces the possibility for a second Rj to have its own reading of DP. In either case, we would say that the potential bias detected from DP would be situated relative to Ri or Rj as two receivers with different SCMs may satisfy or violate the same criterion. This would apply to other fairness metrics [31]. 
+
+2.2 Related Work 
+
+Most causal fairness works focus on what might be missing in an SCM and how that impacts the CF [19] assessment of a system. Works range from graph uncertainty [30] and missing variables [17] to misspecified functional forms [13]. The implicit focus is on, one, the existence of a ground-truth SCM to aim for and, two, consolidating all possible assessments on a single SCM. Russell et al. [26] is a good example of this mono-model approach centered on CF. Recent work [6] goes beyond CF, but the focus remains on a single SCM as the worldview. Causal perception challenges this dominant approach. It rejects the premise that competing SCMs must be consolidated, whether by selecting one or by fusing them into a consensus model, before any inference is drawn. Consolidation presupposes a single ground-truth SCM and treats disagreement as noise to average away. The concern echoes predictive multiplicity, where distinct models fit the same data equally well yet disagree on individual predictions [7,20]. The framework instead addresses the complementary setting in which the disagreement itself is the object of study. In multi-expert decision flows, like Example 1, each expert acts on their own worldview rather than on a consensus model. Fusion asks which model, or combination of models, is best; perception quantifies what is at stake when the models differ. Previous work [27,33,5] raises concerns around assuming single, shared notions of fairness in practice. Álvarez and Ruggieri [2] extend this view to the causal realm, embracing the setting of competing worldviews. We extend this line of work by implementing causal perception for the first time. 
+
+## 3 Implementing Causal Perception 
+
+Causal perception requires a set of interventions, a distance measure, and a threshold. Given the individual SCMs, it reduces to measuring distributional 6 J.M. Álvarez 
+
+Algorithm 1 Single-Intervention Causal Perception 
+
+Require: SCMs MRi = ⟨Ui, X, Fi⟩ and MRj = ⟨Uj , X, Fj ⟩
+
+Require: Intervention l ∈ I X such that l = do (Xk = xk )
+
+Require: Distance function d(·, ·), threshold ϵ ∈ R+
+
+Require: Rung r ∈ { 2, 3}; if r=3 : factual evidence xobs 
+
+Ensure: Distance δ ∈ R+, perception flag ϕ ∈ { 0, 1}
+
+1: if r = 3 then ▷ Abduction (3rd rung only) 2: Compute P (Ui | X=xobs ) from MRi and P (Uj | X=xobs ) from MRj
+
+3: end if 
+
+4: Replace fk ∈ Fi and fk ∈ Fj with Xk := xk ▷ Action 5: if r = 2 then ▷ Prediction 6: Compute PRi (X)do (l) and PRj (X)do (l)
+
+7: else 
+
+8: Compute PRi (X( ˆUi)) do (l) and PRj (X( ˆUj )) do (l)
+
+9: end if 
+
+10: δ ← d
+
+
+
+P do (l) 
+
+> Ri
+
+, P do (l)
+
+> Rj
+
+
+
+11: ϕ ← 1[δ > ϵ ]
+
+12: return (δ, ϕ )
+
+divergence under a chosen set of interventions. Importantly, receivers share the variable set X and, thus, any disagreement in causal perception is about the edges, not the nodes. 
+
+3.1 Algorithms 
+
+Algorithm 1 operationalizes causal perception for a single l-intervention (Equa-tion 5). It handles both the interventional (2nd rung) and counterfactual (3rd rung) levels of Pearl’s causal ladder [22] via the rung parameter r. When r=3 ,an abduction step infers the latent U from the observed data before intervening. Algorithm 2 extends this to the multi-intervention case (Equation 4), aggregat-ing per-intervention distances into a single measure via ¯d. Both algorithms are direct translations of Equations 5 and 4. The implementation of Algorithm 1 is straightforward. It depends on a single manipulation over the SCMs. Algorithm 2, instead, can become computationally expensive. For instance, if all variables in X are binary, then there are at least 2p
+
+possible interventions. This can become infeasible for large p or when variables are continuous. In practice, rather than considering the full set of interventions 
+
+IX, we consider a subset of interventions that are most relevant for the analysis of interest, I∗ 
+
+> X
+
+⊂ I X, based on domain knowledge or prior assumptions. We leave the development of more efficient algorithms for future work. The nature of I∗ 
+
+> X
+
+will depend on which variables to manipulate (variable selection) and how to manipulate them (value selection). For the former, we may want to intervene on a subset of variables (for example, gender and income ). For the latter, we may want to intervene on specific values of the variables ( gender = male and income = avg. income ). Following the ordering induced by IX [24], interventions inherit the structure of the SCM. Implementing Causal Perception 7
+
+Algorithm 2 Multi-Intervention Causal Perception                                                                 
+
+> Require: SCMs MRi=⟨Ui,X,Fi⟩and MRj=⟨Uj,X,Fj⟩
+> Require: Set of interventions IX
+> Require: Distance function d(·,·), aggregation function ¯d, threshold ϵ∈R+
+> Require: Rung r∈ { 2,3}; if r=3 : factual evidence xobs
+> Ensure: Aggregated distance ¯δ∈R+, per-intervention distances ∆, perception flag
+> ϕ∈ { 0,1}
+> 1: ∆← {}
+> 2: for each l∈ I Xdo
+> 3: (δl,_)←Algorithm 1 (MRi,MRj, l, d, ϵ, r )4: ∆←∆∪ { δl}
+> 5: end for
+> 6: ¯δ←¯d(∆)
+> 7: ϕ←1[¯δ > ϵ ]
+> 8: return (¯δ, ∆, ϕ )
+
+3.2 Distance Measure 
+
+The framework places no restriction on d(·, ·). We consider three distance mea-sures commonly used in machine learning [11]. Each distance captures a different notion of distributional divergence. The Wasserstein-2 distance W2(P, Q ) [32] is defined for multivariate distri-butions P and Q over Rp as: 
+
+W2(P, Q ) = 
+
+
+
+inf  
+
+> γ∈Γ(P,Q )
+
+Z
+
+∥x − y∥2 dγ (x, y)
+
+1/2
+
+(6) where Γ (P, Q ) denotes the set of all couplings of P and Q. It captures both location and shape differences between distributions. It measures the minimum “cost” of transporting probability mass from one distribution to the other. The Kullback-Leibler divergence DKL (P ∥Q) [18] measures the information lost when Q is used to approximate P :
+
+DKL (P ∥Q) = 
+
+Z
+
+p(x) log p(x)
+
+q(x) dx. (7) Unlike W2, DKL is asymmetric and unbounded; it is the standard information-theoretic baseline. It quantifies how “surprised” an observer would be if they expected data from Q but instead observed data from P . We include it as a ro-bustness check capturing a different notion of divergence: distributional surprise rather than geometric displacement. The total variation distance TV( P, Q ) [28] provides the maximum difference in probability assigned to any event based on P and Q:
+
+TV( P, Q ) = 12
+
+Z
+
+|p(x) − q(x)| dx. (8) 
+
+TV is bounded in [0 , 1] , giving a normalized, probability-scale measure. It an-swers the question: for the event on which P and Q disagree the most, how large 8 J.M. Álvarez 
+
+is that disagreement? This is useful for interpreting the threshold ϵ: a value of 
+
+TV = 0 .1 means the two distributions differ by at most 10% on any event. 
+
+3.3 Aggregation Function and Threshold Choice 
+
+For the multi-intervention case (Algorithm 2), the aggregation function ¯d sum-marizes the per-intervention distances ∆ = {δl : l ∈ I X} into a scalar. Natural candidates include the mean ¯d(∆) = 1
+
+> |I X|
+
+P 
+
+> l
+
+δl, the maximum ¯d(∆) = max l δl,or a weighted average that assigns more importance to certain interventions. The choice of ¯d is normative. For instance, the mean captures average-case disagreement, the maximum captures worst-case disagreement, and a weighted average reflects domain priorities. We adopt the mean as our default and, abusing notation slightly, write ¯d(W2) for the aggregated W2 distance (similarly for DKL 
+
+and TV ). The aggregate complements, rather than replaces, per-intervention reasoning: Algorithm 2 returns the per-intervention distances ∆ alongside ¯δ.The aggregate serves questions that need a single system-level verdict, such as auditing whether two receivers perceive the same system differently, while ∆
+
+supports reasoning on specific interventions. The threshold ϵ determines when two receivers are deemed to perceive dif-ferently (Equations 4 and 5). Rather than fixing ϵ a priori, we treat it as a parameter to be swept: for a range of ϵ values, we classify each SCM pair as exhibiting causal perception ( ϕ = 1 ) or not ( ϕ = 0 ). This sweep reveals the sensitivity of the classification to the tolerance level. 
+
+## 4 Illustration: German Credit 
+
+We illustrate causal perception using the German Credit dataset. 2 It contains 20 attributes of 1,000 loan applicants: each applicant is classified as a good (Y = 1 ) or bad ( Y = 0 ) credit risk. We adopt the causal graph in Fig. 1 from Chiappa [10], focusing on eight of these attributes: A represents gender, 
+
+C age, S status of checking account, savings, and housing, R credit amount and repayment duration, and Y credit classification. Gender is derived from the dataset’s personal-status attribute, which conflates sex and marital status; we follow Chiappa’s preprocessing convention [10]. We use a 70%–30% train-test split. We set ϵ = 0 .1 as an illustrative threshold. Since the three metrics live on different scales, ϵ is not a universal calibration; each distance may require a metric-specific threshold. Since ϕ = 1 exactly when a distance exceeds ϵ, each reported distance also summarizes the full threshold sweep: perception is flagged for every ϵ below the reported value and not flagged above it. We estimate W2 with the exact one-dimensional quantile formula on paired samples, DKL via Gaussian kernel density estimation with Scott’s band-width, and TV via histograms with 50 common-support bins; the latter two estimates are sensitive to bandwidth and binning choices.  
+
+> 2https://github.com/SantanderAI/causal-perception-implementation .
+
+Implementing Causal Perception 9
+
+A
+
+C
+
+S
+
+R
+
+Y
+
+Fig. 1. A: gender; C: age; S: status of checking account, savings, and housing; R:credit amount and repayment duration; Y : good or bad credit risk [10]. 
+
+Table 1. Distances for structural perception around A. Top panel: interventional (2nd rung) distributions. Bottom panel: counterfactual (3rd rung) distributions. Bracketed values are 95% bootstrap confidence intervals. Comparison Intervention W2 DKL TV 
+
+Interventional (2nd rung) 
+
+M1 vs. M2 do( A=0) 0.052 [.052,.052] 0.911 [.774,1.12] 0.460 [.443,.550] 
+
+M1 vs. M2 do( A=1) 0.026 [.025,.027] 0.272 [.230,.332] 0.397 [.387,.520] 
+
+M1 vs. M2 ¯d (mean) 0.039 [.038,.040] 0.591 [.502,.727] 0.428 [.415,.535] 
+
+Counterfactual (3rd rung) 
+
+M1 vs. M2 do( A=0) 0.050 [.049,.052] 0.063 [.058,.087] 0.243 [.260,.387] 
+
+M1 vs. M2 do( A=1) 0.024 [.023,.026] 0.014 [.012,.027] 0.200 [.217,.340] 
+
+M1 vs. M2 ¯d (mean) 0.037 [.036,.039] 0.039 [.035,.057] 0.222 [.238,.363] 
+
+Distances are accompanied by 95% bootstrap confidence intervals ( B=1000 ,percentile method, paired resampling of test-set indices). Because these are per-centile bootstrap intervals, they need not contain the full-sample point estimate. In each experiment, we instantiate two model-based receivers R1 and R2, each holding a competing SCM, who evaluate the same 300 test applicants. We stress that these receivers are idealized computational agents rather than observed human decision-makers. We focus on the binary protected attribute A (0 for female, 1 for male) when looking at I∗
+
+> X
+
+. We focus on the predicted probability of good credit risk and the predicted risk classification. We provide additional experiments in Appendix B. 
+
+4.1 Structural Causal Perception 
+
+Under structural perception, the two receivers disagree on the causal graph. Suppose R1 specifies the graph in Fig. 1, while R2 specifies the same graph except that the edge A → Y is removed. In other words, R1 and R2 disagree on the direct effect of gender on credit risk. For each causal graph G1 and G2, we estimate the structural equations for each SCM M1 and M2 by fitting ordinary least squares models for continuous variables and logistic regression models for binary 10 J.M. Álvarez 0.2 0.4 0.6 0.8 1.0               
+
+> 0
+> 2
+> 4
+> 6
+> 8
+> Density
+> (a) Interventional dist. under do( A=0)
+> 1
+> 2
+> 0.2 0.4 0.6 0.8 1.0
+> (b) Interventional dist. under do( A=1)
+> 1
+> 2
+> 0.2 0.4 0.6 0.8 1.0
+> Y(predicted risk probability)
+> 0
+> 1
+> 2
+> 3
+> Density
+> (c) Counterfactual dist. under do( A=0)
+> 1
+> 2
+> 0.2 0.4 0.6 0.8 1.0
+> Y(predicted risk probability)
+> (d) Counterfactual dist. under do( A=1)
+> 1
+> 2
+
+Fig. 2. Hypothetical distributions of predicted risk probability for structural causal perception. Top row: interventional (2nd rung). Bottom row: counterfactual (3rd rung). 
+
+variables on the training data. For the counterfactual computations, abduction is residual-based, which is exact for linear ANMs: the mediator noise terms are recovered as regression residuals. Table 1 reports the distances for interventional (top panel) and counterfactual (bottom panel) distributions of the predicted credit risk, focusing on intervening on the protected attribute A. For both rungs, we compare the single-intervention setting for A = 1 and A = 0 (Algorithm 1) as well as the multi-intervention setting for A as a whole (Algorithm 2). Fig. 2 visualizes the distributions. These represent settings in which the loan officers arrive at different “what if” and “what could have been” hypothetical distributions of credit risk about the applicant pool being male or female. The results reveal moderate divergence between the two SCMs at both rungs. At the interventional level , the aggregated distance is ¯d(W2) = 0 .039 , with the female intervention ( do( A=0) , W2 = 0 .052 ) producing a larger gap than the male one ( do( A=1) , W2 = 0 .026 ). Under ϵ = 0 .1, the W2 distance does not detect structural causal perception, whereas DKL and T V do. This disagree-ment across metrics arises because the interventional distributions are narrow and slightly shifted in location: even a modest shift produces poor tail overlap and non-coinciding peaks, inflating DKL and T V relative to W2. The percep-tion verdict therefore depends on which aspect of distributional divergence the chosen metric emphasizes. Reading the sweep off Table 1: at the interventional Implementing Causal Perception 11     
+
+> Table 2. Distances for parametrical perception under do( A=1) (male). Distances under
+> do( A=0) are zero and omitted. Top panel: interventional. Bottom panel: counterfactual. Bracketed values are 95% bootstrap confidence intervals.
+
+Comparison Intervention W2 DKL TV 
+
+Interventional (2nd rung) 
+
+M1 vs. M2 do( A=1) 0.079 [.078,.080] 1.098 [1.002,1.29] 0.653 [.610,.717] 
+
+Counterfactual (3rd rung) 
+
+M1 vs. M2 do( A=1) 0.076 [.074,.077] 0.115 [.106,.155] 0.257 [.277,.390] 
+
+level, W2 flags perception only for ϵ < 0.039 , whereas DKL and TV flag it for any ϵ up to 0.591 and 0.428 , respectively. At the counterfactual level , the pat-tern is preserved but attenuated: ¯d(W2) = 0 .037 , and only T V exceeds ϵ. The attenuation reflects the fact that the abduction step preserves individual het-erogeneity in the mediators S and R via the inferred noise terms, producing wider distributions that absorb the between-model shift. Despite this, the rank ordering of per-intervention distances is unchanged, confirming that the struc-tural disagreement on A → Y manifests consistently across both rungs of the causal ladder. We repeat the structural exercise for disagreement on C → Y in Appendix B.2. The age experiment shows that causal perception is not specific to direct disagreement about gender. We also show that the pattern is robust to using a nonlinear outcome model in Appendix B.3, using a GBM instead of a logistic regression. 
+
+4.2 Parametrical Causal Perception 
+
+Under parametrical perception, the two receivers agree on the causal graph but disagree on its causal weights. Suppose both R1 and R2 adopt the causal graph in Fig. 1. Here, to obtain two competing SCMs, we first estimate an SCM under this causal graph using the training set. Receiver R1 holds this baseline SCM, 
+
+M1. For R2’s SCM M2, we again focus on the edges from A to other variables. In line with the previous section, we consider the edge A → Y . There are multiple ways to define the second SCM M2. We perturb the estimated causal weight of A → Y in M1 ( ˆβ = 0 .383 ) by drawing plausible values from its confidence interval. For SCM M2, we consider ˆβ − 2SE , where SE is the standard error of the estimated causal weight, leading to a causal weight of 0.003. Table 2 reports the distances between the distributions at the interventional and counterfactual levels. Because the perturbed coefficient multiplies A, setting 
+
+A=0 nullifies the perturbation: all distances under do( A=0) are exactly zero and are omitted. The divergence therefore concentrates entirely on do( A=1) . We do not plot the distributions. At the interventional level , W2 = 0 .079 , which does not exceed ϵ = 0 .1; DKL and T V , however, both exceed the threshold, echoing the metric-sensitivity observed under structural perception. At the counterfac-12 J.M. Álvarez 0.0 0.2 0.4 0.6 0.8 1.0              
+
+> False Positive Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> True Positive Rate
+> (a) ROC Curve
+> R1(1): AUC = 0.563
+> R2(2): AUC = 0.555
+> Random
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Recall
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Precision
+> (b) Precision-Recall Curve
+> R1(1): AP = 0.722
+> R2(2): AP = 0.728
+> Baseline = 0.70
+
+Fig. 3. ROC and PR curves for factual predictions of two receivers under structural causal perception: G1 as in Fig. 1 and G2 without the edge A → Y .
+
+tual level , W2 = 0 .076 remains comparable, but both DKL and T V drop sub-stantially ( DKL : 1.098 → 0.115 ; T V : 0.653 → 0.257 ), and only T V still exceeds 
+
+ϵ. As in the structural case, the abduction step widens the distributions and ab-sorbs part of the between-model shift, attenuating all divergence measures. The overall pattern confirms that even a subtle coefficient change (here, within the 95% confidence interval of the same estimator) can trigger parametrical causal perception under certain metrics, and that the counterfactual rung consistently dampens the signal relative to its interventional counterpart. 
+
+4.3 On Accurate and Fair Decisions 
+
+We focus again on the test set, where we now use the ground-truth labels Y . For context, we consider the two credit officers (i.e., our R1 and R2) from Example 1. We consider structural causal perception as a way to understand how different SCMs lead to different decisions even when applied to the same data. Receiver 
+
+R1 holds M1 (Fig. 1); R2 holds M2, which excludes the edge A → Y . Both models are estimated on the training set. We are not interested in whether the internal models of these loan officers are the fairest or most accurate standalone models, but that they disagree with each other and can lead to different accuracy and fairness assessments. 
+
+Accuracy. We use each receiver’s SCM to produce factual predicted risk prob-abilities ˆY and compare them against the ground-truth labels Y .3 Since the test set is imbalanced (70% good credit), we report both the ROC AUC and the Precision-Recall AUC (average precision). Fig. 3 shows the corresponding curves as we discretize the predicted risk probabilities over a range of thresholds.  
+
+> 3
+
+Factual predictions are obtained by propagating the test data through the SCM. We speak of “factual” because no manipulations are performed on the SCMs. Implementing Causal Perception 13                   
+
+> Table 3. Fairness metrics for the receivers based on factual predictions with τ= 0 .70 .The DP gap is the difference in acceptance rates between female and male applicants; TPR and FPR gaps are the corresponding differences in true positive and false positive rates. Negative values indicate that females are disadvantaged. Accept. rate EO gaps Receiver Female Male DP gap TPR gap FPR gap
+> R1(M1)0.240 0.833 −0.594 −0.567 −0.643
+> R2(M2)0.438 0.608 −0.170 −0.134 −0.228
+> Table 4. Within-model distances for counterfactual distributions (i.e., a population-level counterfactual sensitivity summary across applicants) for the receivers. Bracketed values are 95% bootstrap confidence intervals.
+
+Receiver 3rd Rung W2 DKL TV 
+
+R1 (M1) do( A=0) vs. do( A=1) 0.061 [.060,.063] 0.088 [.081,.123] 0.207 [.247,.360] 
+
+R2 (M2) do( A=0) vs. do( A=1) 0.013 [.012,.013] 0.004 [.003,.008] 0.173 [.197,.320] 
+
+Receivers achieve near-identical ranking performance: ROC AUC is 0.563 for 
+
+R1 and 0.555 for R2. The PR AUC values, 0.722 and 0.728, appear higher but should be read against the 0.70 base rate. The gap confirms that the presence or absence of the direct edge A → Y has a negligible impact on predictive accuracy. This modest performance is expected: the models are linear ANMs, not optimized classifiers. Structural perception, in this setting, does not affect predictive ranking performance. 
+
+Fairness. Do the two receivers also reach similar fairness assessments? Let us first focus again on the factual predicted distributions and apply a decision rule: grant the loan if ˆY ≥ τ . Given the imbalanced test set (70% good credit), we set τ = 0 .70 so that the threshold coincides with the base rate. Table 3 reports DP [8] and EO [12] metrics for each receiver around A, as well as the decision disagreement rate between R1 and R2.The two receivers reach different fairness verdicts. Under R1, which includes the direct edge A → Y , only 24% of female applicants are approved compared to 83.3% of males, yielding a DP gap of −0.594 . The EO gaps are equally large: the true positive rate (TPR) gap ( −0.567 ) and the false positive rate (FPR) gap ( −0.643 ) indicate that R1’s decisions systematically disadvantage women on both correctly and incorrectly classified applicants. Under R2, which removes 
+
+A → Y , the gender disparity is less pronounced: acceptance rates are 43.8% (female) vs. 60.8% (male), with a DP gap of −0.170 . The EO gaps follow the same pattern as DP. Notably, 65 of the 300 applicants (21.7%) receive a different loan decision depending on which receiver processes their application. Together, these results show that causal perception is not merely a distributional abstraction: it 14 J.M. Álvarez 0.0 0.2 0.4 0.6 0.8 1.0              
+
+> Threshold
+> 0.6
+> 0.5
+> 0.4
+> 0.3
+> 0.2
+> 0.1
+> 0.0
+> 0.1
+> DP gap (do(A=0, female)  do(A=1, male))
+> (a) Interventional
+> R1(1)
+> R2(2)
+> = 0.70
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Threshold
+> (b) Counterfactual
+> R1(1)
+> R2(2)
+> = 0.70
+
+Fig. 4. DP gap as a function of the decision threshold τ for the two receivers under structural causal perception, where A=0 is female and A=1 is male. (a) Interventional: 
+
+P ( ˆY ≥ τ | do (A=0)) − P ( ˆY ≥ τ | do (A=1)) . (b) Counterfactual: same quantity under abduction. The dashed line marks τ = 0 .70 .
+
+translates into different decisions for the same individuals at the factual level. It also changes fairness assessments of the same system. Let us now turn to the interventional and counterfactual predicted distribu-tions . Rather than fixing a single threshold, we sweep τ from 0 to 1 and compute the causal DP gap at each point: P ( ˆY ≥ τ | do (A=0)) − P ( ˆY ≥ τ | do (A=1)) ,where A=0 denotes female and A=1 male. Fig. 4 plots these curves for both re-ceivers at the interventional (2nd rung) and counterfactual (3rd rung) levels. The pattern is consistent across all thresholds. Under R1, the interventional DP gap is negative throughout the relevant range of τ , peaking at −0.450 at τ = 0 .70 : if everyone were set to female, far fewer applicants would be approved than if every-one were set to male. Under R2, the gap is near zero or slightly positive ( +0 .097 
+
+at τ = 0 .70 ), indicating that removing the direct edge A → Y substantially reduces the causal gender effect on decisions in this setup. At the counterfactual level, the same divergence holds but less: R1 shows a gap of −0.150 and R2 of 
+
++0 .037 at τ = 0 .70 . The attenuation reflects the fact that counterfactual rea-soning preserves individual-specific noise, partially absorbing the gender effect through observed mediators. Table 4 also reports within-model distances for the 3rd rung. These distances are population-level counterfactual sensitivity sum-maries, not individual-level tests of counterfactual fairness in the strict sense of Kusner et al. [19]. We once again see a difference in fairness interpretation with 
+
+R1 showing larger distances than R2.These competing fairness results stress the notion of situated bias (Section 2). Under a fairness view that disfavors a direct A → Y path, one may prefer receiver 
+
+R2 over R1. This preference is a normative judgment about the reference SCM, not an output of the causal perception metric itself. In Example 1, even if both loan officers have equal standing, the framework lets us state explicitly that R1
+
+appears biased with respect to the reference worldview represented by R2.Implementing Causal Perception 15 
+
+## 5 Discussion 
+
+We presented the first implementation of the causal perception framework [2]. We designed two algorithms for single- and multi-intervention settings at both the interventional and counterfactual levels (the 2nd and 3rd rungs of Pearl’s causal ladder, respectively), and we studied a set of distance functions. These allowed us to measure causal perception at different levels under competing SCMs. We showcased the proposed implementation on real data, motivating the need to consider causal perception as a phenomenon that can affect accurate and fair decision-making in multi-expert settings. In practice, implementing causal perception requires choosing a distance measure, an aggregation function, and a threshold. Our results give practical guidance for these choices. The three distances answer different questions: W2
+
+measures how far apart the distributions sit on the probability scale, making it suitable when the magnitude of the disagreement matters; DKL reacts to mis-matches in density overlap, making it sensitive at the interventional level, though it attenuates under abduction and depends on the stability of the density esti-mate; and TV is bounded in [0 , 1] , giving the threshold ϵ a direct probability-scale reading. Because the perception verdict can flip across metrics for the same pair of SCMs (Section 4), auditors should report all three distances with their con-fidence intervals rather than commit to one. The same holds for the threshold: sweeping ϵ exposes how robust a verdict is to the tolerance level. When a single system-level verdict is required, the aggregate ¯d should be read alongside the per-intervention distances ∆ to locate where the disagreement concentrates. 
+
+5.1 Limitations 
+
+Three limitations are worth noting for the current implementation. First, we take the causal graph for granted and do not provide a method for learning it. Although we view causal perception as a consequence of competing causal worldviews, drawing the causal graph is a valid and contested concern when using SCMs in practice. The use of causal discovery algorithms [23] or even LLMs [16] is an interesting direction for future work. Second, we work with ANMs to parametrize the structural equations. This is a strong functional assumption on the SCM that may not hold in all cases. Alternative parametrizations, such as causal normalizing flows [13], are worth exploring. It remains an open question whether parametrical causal perception materializes under more lax functional forms for the causal relationships. Third, we explore a case of competing SCMs. Our baseline is Fig. 1 of Chiappa [10], which is one of many possible SCMs for the German Credit dataset. From it, we present an alternative SCM for structural and parametrical causal perception based on the edge A → Y . These alternatives are straightforward for illustrative purposes. The experimental results remain limited by our choice of competing SCMs. The illustrative nature of the experiments is intentional: we choose a well-understood manipulation precisely to validate the implementation against known intuitions before applying it to more complex disagreements. 16 J.M. Álvarez 
+
+5.2 Future Work 
+
+As the state of the art aims for agentic systems, it remains to be seen whether causal perception emerges within such a context. This direction would require extending the implementation of causal perception and, potentially, revisiting the original formulation by Álvarez and Ruggieri [2]. It will also align with that work’s proposed theory on how and why agents construct competing SCMs through the processes of signification and categorization. Recent work [14,16,9] already explores whether LLMs can reason causally in the Pearlian sense. A natural next step would be to link this line of work with causal perception, exploring the possibility that different models reason differently in a causal sense about the same information. This too extends to agentic systems, where we may want to explore if agents, each equipped with its own SCM, can exhibit causal perception when interacting with each other or if causal perception itself is an emergent property of causal agents. Beyond this line of work, more complex implementations should be explored, including efficient algorithms and the problem of exploring a large space of pos-sible interventions. Future work should also explore reconciliation strategies for multi-expert settings where causal perception is detected. 
+
+Disclosure of Interests. The author has no competing interests to declare that are relevant to this paper. The paper reflects only the author’s views. The Santander AI Lab is not responsible for any use that may be made of the information it contains. 
+
+## References 
+
+1. Álvarez, J.M., Ruggieri, S.: Counterfactual situation testing: From single to mul-tidimensional discrimination. J. Artif. Intell. Res. 82 , 2279–2323 (2025) 2. Álvarez, J.M., Ruggieri, S.: Toward a causal framework for modeling perception. In: Proceedings of the AAAI/ACM Conference on AI, Ethics, and Society. vol. 8, pp. 166–178 (2025) 3. Álvarez, J.M., Ruggieri, S.: Mutatis mutandis: Revisiting the comparator in dis-crimination testing. Computational Intelligence 42 (4), e70238 (2026) 4. Baumann, J., Castelnovo, A., Crupi, R., Inverardi, N., Regoli, D.: Bias on demand: A modelling framework that generates synthetic data with bias. In: FAccT. pp. 1002–1013. ACM (2023) 5. Bertrand, A., Belloum, R., Eagan, J.R., Maxwell, W.: How cognitive biases af-fect xai-assisted decision-making: A systematic review. In: AIES. pp. 78–91. ACM (2022) 6. Bothmann, L., Boustani, P.A., Alvarez, J.M., Casalicchio, G., Bischl, B., Dandl, S.: Privilege scores. In: FAccT. pp. 4293–4341. ACM (2026) 7. Breiman, L.: Statistical modeling: The two cultures. Statistical Science 16 (3), 199– 231 (2001) 8. Calders, T., Kamiran, F., Pechenizkiy, M.: Building classifiers with independency constraints. In: ICDM Workshops. pp. 13–18. IEEE Computer Society (2009) 9. Chatzi, I., Benz, N.L.C., Straitouri, E., Tsirtsis, S., Gomez-Rodriguez, M.: Coun-terfactual token generation in large language models. In: CLeaR. pp. 1291–1315. Proceedings of Machine Learning Research, PMLR (2025) Implementing Causal Perception 17 10. Chiappa, S.: Path-specific counterfactual fairness. In: AAAI. pp. 7801–7808. AAAI Press (2019) 11. Goldenberg, I., Webb, G.I.: Survey of distance measures for quantifying concept drift and shift in numeric data. Knowl. Inf. Syst. 60 (2), 591–615 (2019) 12. Hardt, M., Price, E., Srebro, N.: Equality of opportunity in supervised learning. In: NIPS. pp. 3315–3323 (2016) 13. Javaloy, A., Sánchez-Martín, P., Valera, I.: Causal normalizing flows: from theory to practice. In: NeurIPS (2023) 14. Jin, Z., Chen, Y., Leeb, F., Gresele, L., Kamal, O., Lyu, Z., Blin, K., Adauto, F.G., Kleiman-Weiner, M., Sachan, M., Schölkopf, B.: Cladder: A benchmark to assess causal reasoning capabilities of language models. In: NeurIPS (2023) 15. Kahneman, D.: Neurips 2021: A conversation on human and machine intelligence. 
+
+https://nips.cc/virtual/2021/invited-talk/22284 (2021) 16. Kiciman, E., Ness, R.O., Sharma, A., Tan, C.: Causal reasoning and large language models: Opening a new frontier for causality. Trans. Mach. Learn. Res. 2024 (2024) 17. Kilbertus, N., Ball, P.J., Kusner, M.J., Weller, A., Silva, R.: The sensitivity of coun-terfactual fairness to unmeasured confounding. In: UAI. Proceedings of Machine Learning Research, vol. 115, pp. 616–626. AUAI Press (2019) 18. Kullback, S., Leibler, R.A.: On information and sufficiency. The Annals of Math-ematical Statistics 22 (1), 79–86 (1951) 19. Kusner, M.J., Loftus, J.R., Russell, C., Silva, R.: Counterfactual fairness. In: NIPS. pp. 4066–4076 (2017) 20. Marx, C.T., Calmon, F.P., Ustun, B.: Predictive multiplicity in classification. In: ICML. Proceedings of Machine Learning Research, vol. 119, pp. 6765–6774. PMLR (2020) 21. Pearl, J.: Causality: Models, Reasoning, and Inference. Cambridge University Press, 2nd edn. (2009) 22. Pearl, J., Mackenzie, D.: The Book of Why: The New Science of Cause and Effect. Basic Books (2018) 23. Peters, J., Janzing, D., Schölkopf, B.: Elements of Causal Inference: Foundations and Learning Algorithms. MIT Press (2017) 24. Rubenstein, P.K., Weichwald, S., Bongers, S., Mooij, J.M., Janzing, D., Grosse-Wentrup, M., Schölkopf, B.: Causal consistency of structural equation models. In: UAI. AUAI Press (2017) 25. Ruggieri, S., Álvarez, J.M., Pugnana, A., State, L., Turini, F.: Can we trust fair-AI? In: AAAI. pp. 15421–15430. AAAI Press (2023) 26. Russell, C., Kusner, M.J., Loftus, J.R., Silva, R.: When worlds collide: Integrating different counterfactual assumptions in fairness. In: NIPS. pp. 6414–6423 (2017) 27. Srivastava, M., Heidari, H., Krause, A.: Mathematical notions vs. human percep-tion of fairness: A descriptive approach to fairness for machine learning. In: KDD. pp. 2459–2468. ACM (2019) 28. Tsybakov, A.B.: Introduction to Nonparametric Estimation. Springer (2009) 29. Tversky, A., Kahneman, D.: Judgment Under Uncertainty: Heuristics and Biases. Science 185 (4157), 1124–1131 (1974) 30. Valério, D., Zerva, C., Pinto, M., Santos, R., Carreiro, A.V.: Counterfactual fairness with graph uncertainty. CoRR abs/2601.03203 (2026) 31. Verma, S., Rubin, J.: Fairness definitions explained. In: FairWare@ICSE. pp. 1–7. ACM (2018) 32. Villani, C.: Optimal Transport: Old and New. Springer (2009) 18 J.M. Álvarez 33. Yaghini, M., Krause, A., Heidari, H.: A human-in-the-loop framework to construct context-aware mathematical notions of outcome fairness. In: AIES. pp. 1023–1033. ACM (2021) Implementing Causal Perception 19 
+
+## A Supplementary Material 
+
+Let A denote the protected attribute and Y the outcome, with Y = 1 denoting a positive outcome like being approved for a loan. Let ˆY , in turn, denote the predicted outcome or decision. 4 Consider a receiver Ri with SCM MRi and its implied PXRi . For our purposes, A ∈ { a′, a } is binary and Ri constructs ˆY .
+
+Demographic parity (DP) [8] requires that ˆY is independent of A:
+
+PRi ( ˆY = 1 | A = a′) = PRi ( ˆY = 1 | A = a). (9) The DP gap, in turn, measures the violation of demographic parity: ∆DP =
+
+PRi ( ˆY =1 | A=a′) − PRi ( ˆY =1 | A=a).
+
+Equalized odds (EO) [12] requires that ˆY is independent of A conditional on Y :
+
+PRi ( ˆY = 1 | Y = y, A = a′) = PRi ( ˆY = 1 | Y = y, A = a), ∀ y ∈ { 0, 1}. (10) This decomposes, in practice, into a true positive rate (TPR) gap at Y = 1 and a false positive rate (FPR) gap at Y = 0 .
+
+Counterfactual fairness [19] requires that Ri’s prediction would remain the same had the individual belonged to a different group, given Ri’s SCM: 
+
+PRi ( ˆYA←a(U) | X = x, A = a) = PRi ( ˆYA←a′ (U) | X = x, A = a). (11) All three fairness criteria are situated with respect to Ri. They depend on the decisions (or predictions) produced by a specific receiver’s SCM. Two receivers with different SCMs may satisfy or violate the same criterion to different degrees, which is precisely what causal perception captures in the fairness domain. This point is illustrated in Section 4. 
+
+## B Additional Experiments 
+
+B.1 Parametrical Causal Perception 
+
+Tables 5 to 8 report parametrical perception distances when M2 uses ˆβ+1SE and 
+
+ˆβ + 2SE for the A → Y coefficient, respectively. The main text uses ˆβ − 2SE . As in the main text, distances under do( A=0) are exactly zero for all parametrical variants because setting A=0 nullifies the perturbed coefficient; these rows are omitted from the tables.      
+
+> 4We can also treat it as a predicted probability that we then discretize using a thresh-old τ∈R+.20 J.M. Álvarez
+
+B.2 Alternative Structural Disagreement: Age 
+
+The main text considers structural disagreement on the edge A → Y (gender 
+
+→ credit risk). Here, we test whether causal perception arises when receivers disagree on the edge C → Y (age → credit risk), a non-protected variable. Receiver R1 holds M1 (the full DAG in Fig. 1, which includes C → Y ), and 
+
+R2 holds M2 (identical except that C → Y is removed: age affects Y only indirectly through mediators S and R). We intervene on age using do( C=26) 
+
+(P25, “young”) and do( C=43) (P75, “old”). 
+
+Interventional distributions. Table 9 reports the distances. The pattern is qual-itatively similar to the A → Y case: W2 remains below ϵ = 0 .1 ( ¯d = 0 .037 ), while DKL and T V exceed the threshold by large margins. The within-model distances confirm that removing C → Y nearly eliminates the direct age effect (W2 = 0 .002 for M2 vs. W2 = 0 .074 for M1). The interventional distributions are very narrow (std ≈ 0.03 ), producing T V = 1 .000 because the histogram bins do not overlap despite close support ranges. 
+
+Counterfactual distributions. Table 10 reports the counterfactual distances. The wider counterfactual distributions (std ≈ 0.14 ) yield more informative T V val-ues. The W2 distances ( ¯d = 0 .035 ) are comparable to the A → Y case ( ¯d =0.037 ), and the within-model pattern is preserved: M1 shows a substantial age effect ( W2 = 0 .071 ) while M2’s is negligible ( W2 = 0 .002 ). These results con-firm that causal perception is not specific to the protected attribute A; it arises whenever the receivers disagree on a structurally consequential edge. 
+
+B.3 Nonlinear Robustness Check 
+
+The main-text experiments model Y with logistic regression, which is linear in the log-odds. To test whether the perception pattern is an artifact of this linearity, we replace the outcome model with a gradient boosting model (GBM), implemented as a GradientBoostingClassifier (100 trees, depth 3, learning rate 0.1), while keeping the mediator equations linear (OLS). The same two structural DAGs ( M1: full, M2: no A → Y ) and the same German Credit data are used. 
+
+Interventional distributions. Table 11 reports the distances. The aggregated 
+
+W2 = 0 .041 is nearly identical to the logistic baseline ( W2 = 0 .039 ); DKL and 
+
+T V again exceed ϵ = 0 .1. The qualitative verdict is unchanged: causal perception is detected by DKL and T V but not by W2. A notable difference is the within-model pattern: with GBM, M2 exhibits a larger within-model gender effect (W2 = 0 .111 ) than M1 (W2 = 0 .077 ). This reversal occurs because GBM cap-tures nonlinear interactions through mediators that partially recover the gender signal even when the direct A → Y edge is absent. Implementing Causal Perception 21 
+
+Counterfactual distributions. Table 12 reports the counterfactual distances. The between model W2 ( ¯d = 0 .018 ) is roughly half the logistic value ( ¯d = 0 .037 ), and DKL ≈ 0. Thus, neither W2 nor DKL detects causal perception at the counterfactual level under GBM. However, T V ( ¯d = 0 .185 ) still exceeds ϵ =0.1, so causal perception is detected by at least one metric. The within-model distances are also attenuated: with GBM, M1 and M2 produce nearly identical within-model gender effects ( W2 ≈ 0.02 ). Overall, the nonlinear outcome model dampens counterfactual differences but does not eliminate them. The metric-dependent verdict underscores a practical lesson: whether causal perception is flagged depends on the outcome model, the choice of distance metric, and the perception threshold. 
+
+Table 5. Parametrical perception (interventional) with ˆβA→Y +1SE = 0 .573 . Distances under do( A=0) are zero and omitted. Bracketed values are 95% bootstrap confidence intervals. Comparison Intervention W2 DKL TV 
+
+M1 vs. M2 do( A=1) 0.035 [.035,.036] 0.787 [.659,.988] 0.420 [.410,.517] 
+
+Within M1 do( A=0) vs. do( A=1) 0.064 [.063,.065] 2.734 [2.329,3.350] 0.583 [.563,.683] 
+
+Within M2 do( A=0) vs. do( A=1) 0.099 [.098,.100] 10.146 [8.763,11.832] 0.773 [.733,.823] 
+
+Table 6. Parametrical perception (counterfactual) with ˆβA→Y + 1SE = 0 .573 . Dis-tances under do( A=0) are zero and omitted. Bracketed values are 95% bootstrap con-fidence intervals. Comparison Intervention W2 DKL TV 
+
+M1 vs. M2 do( A=1) 0.035 [.034,.036] 0.034 [.031,.048] 0.183 [.223,.353] 
+
+Within M1 do( A=0) vs. do( A=1) 0.061 [.060,.063] 0.088 [.081,.123] 0.207 [.247,.360] 
+
+Within M2 do( A=0) vs. do( A=1) 0.096 [.094,.098] 0.221 [.206,.298] 0.280 [.307,.403] 22 J.M. Álvarez 
+
+Table 7. Parametrical perception (interventional) with ˆβA→Y +2SE = 0 .763 . Distances under do( A=0) are zero and omitted. Bracketed values are 95% bootstrap confidence intervals. Comparison Intervention W2 DKL TV 
+
+M1 vs. M2 do( A=1) 0.067 [.066,.068] 5.349 [4.579,6.569] 0.653 [.617,.723] 
+
+Within M1 do( A=0) vs. do( A=1) 0.064 [.063,.065] 2.734 [2.309,3.414] 0.583 [.560,.677] 
+
+Within M2 do( A=0) vs. do( A=1) 0.131 [.129,.132] 17.021 [15.498,18.585] 0.877 [.843,.917] 
+
+Table 8. Parametrical perception (counterfactual) with ˆβA→Y + 2SE = 0 .763 . Dis-tances under do( A=0) are zero and omitted. Bracketed values are 95% bootstrap con-fidence intervals. Comparison Intervention W2 DKL TV 
+
+M1 vs. M2 do( A=1) 0.067 [.065,.069] 0.133 [.122,.192] 0.287 [.280,.393] 
+
+Within M1 do( A=0) vs. do( A=1) 0.061 [.060,.063] 0.088 [.079,.122] 0.207 [.250,.360] 
+
+Within M2 do( A=0) vs. do( A=1) 0.128 [.125,.132] 0.426 [.395,.552] 0.373 [.377,.477] 
+
+Table 9. Alternative structural perception ( C → Y ): interventional distances under 
+
+do( C=26) (young) and do( C=43) (old). Bracketed values are 95% bootstrap confidence intervals. Comparison Intervention W2 DKL TV 
+
+M1 vs. M2 do( C=26) 0.038 [.037,.038] 4.553 [4.021,5.292] 1.000 [1.000,1.000] 
+
+M1 vs. M2 do( C=43) 0.036 [.035,.037] 2.873 [2.777,3.096] 1.000 [1.000,1.000] 
+
+M1 vs. M2 ¯d (mean) 0.037 [.036,.037] 3.713 [3.399,4.194] 1.000 [1.000,1.000] 
+
+Within M1 do( C=26) vs. do( C=43) 0.074 [.073,.074] 9.096 [8.087,10.249] 1.000 [1.000,1.000] 
+
+Within M2 do( C=26) vs. do( C=43) 0.002 [.002,.002] 0.014 [.013,.016] 1.000 [1.000,1.000] 
+
+Table 10. Alternative structural perception ( C → Y ): counterfactual distances under 
+
+do( C=26) (young) and do( C=43) (old). Bracketed values are 95% bootstrap confidence intervals. Comparison Intervention W2 DKL TV 
+
+M1 vs. M2 do( C=26) 0.037 [.035,.038] 0.043 [.038,.059] 0.223 [.237,.357] 
+
+M1 vs. M2 do( C=43) 0.033 [.031,.035] 0.029 [.023,.050] 0.183 [.213,.343] 
+
+M1 vs. M2 ¯d (mean) 0.035 [.033,.036] 0.036 [.030,.055] 0.203 [.225,.350] 
+
+Within M1 do( C=26) vs. do( C=43) 0.071 [.069,.073] 0.154 [.136,.208] 0.293 [.297,.423] 
+
+Within M2 do( C=26) vs. do( C=43) 0.002 [.002,.002] 0.000 [.000,.001] 0.057 [.060,.140] Implementing Causal Perception 23 
+
+Table 11. Nonlinear robustness check (GBM for Y ): interventional distances under 
+
+do( A=0) (female) and do( A=1) (male). Bracketed values are 95% bootstrap confidence intervals. Comparison Intervention W2 DKL TV 
+
+M1 vs. M2 do( A=0) 0.052 [.049,.056] 0.582 [.458,.776] 0.837 [.797,.873] 
+
+M1 vs. M2 do( A=1) 0.030 [.027,.033] 0.194 [.169,.239] 0.373 [.323,.447] 
+
+M1 vs. M2 ¯d (mean) 0.041 [.038,.044] 0.388 [.313,.507] 0.605 [.560,.660] 
+
+Within M1 do( A=0) vs. do( A=1) 0.077 [.070,.084] 0.983 [.696,1.450] 0.753 [.710,.813] 
+
+Within M2 do( A=0) vs. do( A=1) 0.111 [.107,.116] 1.172 [1.006,1.463] 0.937 [.907,.963] 
+
+Table 12. Nonlinear robustness check (GBM for Y ): counterfactual distances under 
+
+do( A=0) (female) and do( A=1) (male). Bracketed values are 95% bootstrap confidence intervals. Negative DKL estimates, a KDE estimation artifact, are reported as 0.000. Comparison Intervention W2 DKL TV 
+
+M1 vs. M2 do( A=0) 0.021 [.018,.029] 0.000 [.000,.004] 0.183 [.203,.327] 
+
+M1 vs. M2 do( A=1) 0.014 [.012,.021] 0.007 [.002,.019] 0.187 [.193,.293] 
+
+M1 vs. M2 ¯d (mean) 0.018 [.015,.025] 0.000 [.000,.012] 0.185 [.198,.310] 
+
+Within M1 do( A=0) vs. do( A=1) 0.024 [.017,.047] 0.000 [.000,.017] 0.250 [.247,.373] 
+
+Within M2 do( A=0) vs. do( A=1) 0.021 [.017,.047] 0.001 [.000,.032] 0.183 [.207,.327]

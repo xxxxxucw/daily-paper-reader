@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-08-06</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-07</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 38 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 22 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>25</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>13</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-08-06 08:24:20 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-08-07 07:08:15 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,7 +62,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精选38篇论文，聚焦高 stakes 决策下的成本敏感预测与贝叶斯因果发现。最值得关注：两类满分工作分别提出共形预测的弃权机制与结构化变分因果推断，显著提升不平衡数据与因果结构的可靠性。建议读者优先精读这两篇，并辅以速读中的反事实学习与双重稳健分位数估计。</p>
+<p>今日完成22篇论文筛选，精读9篇、速读13篇，重点关注多模态大模型与随机对象分析。</p>
+<p>最值得关注的是两篇9分精读：多模态LLM的因果模态归因、随机对象的单调响应方法。</p>
+<p>建议普通读者优先了解多模态模型中的模态决策机制，理解不同信息源的影响。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -71,12 +73,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">25 篇</strong>
+    <strong class="dpr-home-dashboard-count">9 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Cost-Sensitive Conformal Prediction and Human-in-the-Loop Abstention for Imbalanced High-Stakes Decision Support: A Multi-Domain Benchmark">Cost-Sensitive Conformal Prediction and Human-in-the-Loop Abstention for Imbalanced High-Stakes Decision Support: A Multi-Domain Benchmark</span></li><li><span class="dpr-home-dashboard-paper-title" title="SVI-DAG: A Structured Variational Inference Approach to Bayesian Causal Discovery">SVI-DAG: A Structured Variational Inference Approach to Bayesian Causal Discovery</span></li><li><span class="dpr-home-dashboard-paper-title" title="Uncertainty-Guided LLM Semantic Augmentation for Heterogeneous Treatment Effect Estimation">Uncertainty-Guided LLM Semantic Augmentation for Heterogeneous Treatment Effect Estimation</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Which Modality Decides? Counterfactual Modality Attribution for Multimodal LLMs">Which Modality Decides? Counterfactual Modality Attribution for Multimodal LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Monotone Response for Random Objects">Monotone Response for Random Objects</span></li><li><span class="dpr-home-dashboard-paper-title" title="Bayesian hierarchical bootstrap framework for causal subgroup estimation with a time-to-event outcome">Bayesian hierarchical bootstrap framework for causal subgroup estimation with a time-to-event outcome</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">two-sided <strong>14</strong></span><span class="dpr-home-dashboard-tag">cp <strong>6</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>5</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">two-sided <strong>6</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -87,7 +89,7 @@
     <strong class="dpr-home-dashboard-count">13 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="CHILL-Harness: Counterfactual Harness Learning for Efficient Reasoning in Long-Horizon Agents">CHILL-Harness: Counterfactual Harness Learning for Efficient Reasoning in Long-Horizon Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Same Evidence, Different Target: Decoding How Diagnostic Evidence Bears on Causal Questions from Language-Model States">Same Evidence, Different Target: Decoding How Diagnostic Evidence Bears on Causal Questions from Language-Model States</span></li><li><span class="dpr-home-dashboard-paper-title" title="Doubly Robust Estimators of Quantile Treatment Effects With Semiparametric Cumulative Probability Models">Doubly Robust Estimators of Quantile Treatment Effects With Semiparametric Cumulative Probability Models</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="The Role of Causality in Algorithmic Recourse">The Role of Causality in Algorithmic Recourse</span></li><li><span class="dpr-home-dashboard-paper-title" title="Distance Profile Embedding for Independence and Conditional Independence Testing of Random Objects">Distance Profile Embedding for Independence and Conditional Independence Testing of Random Objects</span></li><li><span class="dpr-home-dashboard-paper-title" title="Bridging the English-Arabic Medical Knowledge Gap: Targeted Low-Rank Adaptation via Causal Layer Selection">Bridging the English-Arabic Medical Knowledge Gap: Targeted Low-Rank Adaptation via Causal Layer Selection</span></li></ul>
   </div>
   <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">two-sided <strong>7</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>6</strong></span></div>
 </section>

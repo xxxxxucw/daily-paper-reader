@@ -1,0 +1,1032 @@
+Title: The Role of Causality in Algorithmic Recourse
+
+URL Source: https://arxiv.org/pdf/2607.28497v1
+
+Published Time: Fri, 31 Jul 2026 01:28:31 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# THE ROLE OF CAUSALITY IN ALGORITHMIC RECOURSE ∗
+
+A P REPRINT 
+
+Srikanth Avasarala 
+
+Georgia Institute of Technology 
+
+savasarala9@gatech.edu 
+
+Varun Gupta 
+
+Vector Institute 
+
+varun.gupta@vectorinstitute.ai 
+
+Shahin Jabbari 
+
+Drexel University 
+
+shahin@drexel.edu 
+
+Saber Salehkaleybar 
+
+Leiden University 
+
+s.salehkaleybar@liacs.leidenuniv.nl 
+
+Juba Ziani 
+
+Georgia Institute of Technology 
+
+jziani3@gatech.edu 
+
+# ABSTRACT 
+
+Algorithmic recourse aims to provide individuals with actionable changes to improve their predicted outcomes in high-stakes classification settings, such as loan and mortgage applications. However, most existing approaches do not consider whether proposed feature changes lead to actual improvement to an agent’s true label or qualifications (such as their ability to repay loans on time) as opposed to gaming the system to obtain a better outcome without truly improving the label (e.g., by opening dummy credit card accounts to increase one’s credit score). As a result, deployed recourse policies may incentivize agents to game the deployed model, leading to strategic behavior that degrades predictive accuracy and ultimately renders the recourse itself ineffective after model retraining. In this work, we formalize this failure mode through a causal and performative framework for recourse. We model how recourse-induced actions propagate through a structural causal model and explicitly model how feature modifications affect one another and the true label. Such causal responses lead to a non-convex optimization problem, even under standard and convex losses. To address this, we characterize conditions under which performatively stable solutions exist and can be efficiently computed via simple dynamics. Our analysis highlights a key tradeoff: recourse policies that ignore causal structure can induce large, misaligned behavioral responses, whereas causal recourse leads to equilibria that lower the impact of gaming. We empirically demonstrate, across both semi-synthetic and real credit datasets, that accounting for causal responses yields models that reduce incentives to game or manipulate non-causal features. 
+
+# 1 Introduction 
+
+Machine learning models are deployed in high-stakes decision-making settings, including lending, hiring, insurance, healthcare, and criminal justice, where their predictions directly affect individuals’ opportunities and access to resources. As these models have grown increasingly opaque and complex, there has been growing interest in making their predictions more transparent and explainable [Doshi-Velez and Kim, 2017]. In particular, individuals affected by algorithmic decisions increasingly expect explanations not only for why a prediction was made, but also for how they might improve their outcomes . As a result, a major direction in explainable machine learning is algorithmic recourse —the goal of which is to provide actionable recommendations to individuals receiving an unfavorable prediction, suggesting changes to their features that would alter the model’s decision [Wachter et al., 2018, Ustun et al., 2019, Pawelczyk et al., 2023]. However, existing recourse methods typically optimize only for changing the prediction of the deployed model, without considering whether the recommended actions are actually beneficial. They treat the deployed model as fixed and ignore whether the suggested actions invalidate the deployed model. For example, if these modifications constitute strategic gaming, then they improve an agent’s outcome with respect to the deployed model without improving their 
+
+true qualifications. Generally, Goodhart’s law implies that recourse can create a misalignment between the true and 
+
+> ∗Authors are listed alphabetically. arXiv:2607.28497v1 [cs.LG] 30 Jul 2026
+
+The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+the predicted label; then, deployed models become progressively less accurate, learners must repeatedly redesign their predictive models, and recourse recommendations often become ineffective moving goalposts. This work addresses this challenge by explicitly incorporating causality into algorithmic recourse to understand how interventions change not only agent features but also their true labels. We ask: how can we jointly design a model and a recourse policy that simultaneously promote meaningful improvement while maintaining high predictive accuracy? Building on tools from performative prediction, we characterize conditions under which stable and optimal solutions exist and can be computed efficiently, and we demonstrate both theoretically and empirically that causal recourse substantially reduces incentives for gaming while significantly improving predictive performance. 
+
+Summary of Contributions. Our contributions are: 
+
+• In Section 2, we introduce a causal performative recourse framework that models the interaction between the learner and strategic agents through a structural causal model, capturing the effects of recourse interventions. 
+
+• In Section 3, we show that the resulting learning problem can be formulated as a performative prediction problem. We leverage this performative prediction framework to provide algorithms to obtain causal recourse with formal convergence guarantees. 
+
+• In Section 4, we empirically evaluate the proposed framework on semi-synthetic and real-world datasets. We demonstrate the convergence of the proposed algorithms, quantify the benefits of stable recourse over naive policies, and examine the impact of causality and the intervention cost structure on the computed recourse. 
+
+1.1 Related Work Algorithmic Recourse. Algorithmic recourse is a post-hoc counterfactual explanation that provides minimal-cost modifications needed to change a model’s prediction for an input with an undesirable label [Wachter et al., 2018, Ustun et al., 2019]. Several formulations and variants have been proposed [Looveren and Klaise, 2021, Pawelczyk et al., 2023, Garg et al., 2025, Karimi et al., 2020a, 2021, Poyiadzi et al., 2020, Noorani et al., 2025, Kenny et al., 2026, Russell, 2019]. For example, Wachter et al. [2018] consider score-based classifiers and develop feature modifications to help instances reach a target score. Meanwhile, Ustun et al. [2019] focus on binary classifiers and require recourse actions that alter the predicted label. We focus on a regression setting where higher scores are desirable, and our recourse formulation aims to maximize this score. See [Verma et al., 2020, Karimi et al., 2023] for surveys. 
+
+Robust Recourse. The robust recourse literature ensures that following recourse leads to desirable outcomes even when the underlying predictive model changes slightly [Upadhyay et al., 2021]. Similar to algorithmic recourse, various formulations and extensions of robust recourse have been explored [Yetukuri et al., 2024, Jiang et al., 2024, Nguyen et al., 2023, Dutta et al., 2022, Mochaourab et al., 2022, Cheon et al., 2025, Hamman et al., 2023, Bewley et al., 2024, Guo et al., 2023, Kyaw et al., 2026, Kayastha et al., 2026]. See [Jiang et al., 2024] for a survey. 
+
+Strategic Classification. A closely related area to algorithmic recourse is strategic classification, where individuals (or agents) manipulate or modify their features to improve their outcomes [Hardt et al., 2016, Braverman and Garg, 2020, Dong et al., 2018, Sundaram et al., 2023]. Despite similarities in formulations, the main premise in strategic classification is to design decision-making strategies that are robust to manipulation (or gaming), while the recourse focuses on actionable instructions on how to legitimately change the features to reverse an unfavorable decision. 
+
+Performative Prediction. Related to our work and one of the main tools we leverage in this paper is the idea of “performative prediction”. In performative prediction, model predictions influence behavior and thereby shift the data distribution [Perdomo et al., 2020, Kim and Perdomo, 2023, Perdomo et al., 2025, Mendler-Dünner et al., 2022, Hardt and Mendler-Dünner, 2023]; this is similar to our setting where recommended actions also shift agent behavior. Perdomo et al. [2020] show that standard empirical risk minimization can fail under such feedback and distinguish between performative optimality, which minimizes loss on the induced distribution, and performative stability, where model deployment reproduces the same model. They propose algorithms and conditions for computing stable points and show that optimal models lie near stable ones. Follow-up work provided algorithms for computing performatively optimal models under parametric assumptions on data distributions [Izzo et al., 2021, 2022]. Our formulation corresponds to computing performatively optimal solutions, and our main techniques rely on tools from performative prediction. 
+
+The Role of Improvement and Causality. Tools from causality have been used to account for interdependence between features [Shavit et al., 2020, Haghtalab et al., 2020, Gois et al., 2026] and to incentivize actions that focus on improvement rather than manipulation [Kanamori et al., 2025, Efthymiou et al., 2025a,b, Kleinberg and Raghavan, 2The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+2019, Bechavod et al., 2021]. König et al. [2023] propose improvement-focused causal recourse, leveraging causal knowledge to compute interventions that guarantee improvement in the underlying state. Finally, through a causality lens, König et al. [2025] study conditions under which recourse remains valid after a distribution change. Unlike these works, we study the interaction between recourse interventions and model retraining, formulating causal recourse as a performative prediction problem. 
+
+# 2 Model 
+
+We study a recourse setting in which a learner deploys a scoring rule and provides agents with actionable recommen-dations to improve their predicted outcomes. Agents respond by taking these actions that modify their features and potentially their underlying qualifications. These strategic responses induce a model-dependent distribution shift, and the learner’s goal is to optimize the deployed model while accounting for the resulting behavioral adaptations. We next provide a formal description of the model. 
+
+Learner-Agent Model We denote X ⊆ Rd the feature space and Y ⊆ R the space of real-valued scores; larger values correspond to better outcomes. We assume an underlying distribution D over X × Y . The learner deploys a linear predictor from hypothesis class H = {hw(x) = w⊤x | w ∈ W} , with W ⊆ Rd compact. Following the deployment of the model, the learner recommends a recourse action for each agent. The recommended action specifies interventions on the agent’s features that are intended to improve the prediction produced by the deployed model. We model a recourse action as a vector a ∈ A ⊆ Rd, where each coordinate corresponds to one of the observable features. E.g., in a hiring setting, recourse actions may correspond to acquiring additional qualifications or work experience, whereas in a lending setting they may correspond to reducing debt or increasing savings. Since interventions on one feature can propagate and influence other features, it is crucial to model the causal relationships between features. 
+
+Causal Model of Features. We model causal dependencies using a weighted directed graph G = ( V, E, ω ), where V
+
+denotes the set of features, E the set of directed causal dependencies, and ω : E → R assigns edge weights representing causal strengths. We assume that G is a directed acyclic graph (DAG), as is common in the related literature [Efthymiou et al., 2025b, Karimi et al., 2020b]. The causal structure is represented by an adjacency matrix A ∈ Rd×d, where 
+
+Aij = ω(i, j ) if (i, j ) ∈ E , and Aij = 0 otherwise. An intervention on one feature may induce both direct changes and indirect changes through downstream causal pathways. To capture these cumulative effects, we define the feature contribution matrix Gx, which maps an intervention to the resulting feature changes after accounting for all causal propagation through the graph. The resulting feature and label changes are then given by ∆x(a) = G⊤ 
+
+> x
+
+a, and ∆y(a) = G⊤ 
+
+> y
+
+a. Here, the feature changes can be interpreted as arising from additive interventions on an underlying structural causal model (SCM); details and computation of Gx
+
+from the causal graph are provided in Appendix B.1. 
+
+Agent’s Response. After deploying a scoring rule hw, the learner recommends a recourse action to each agent. We model this recommendation as the utility-maximizing intervention a ∈ A ⊆ Rd, with cost cκ(a) = κ−1c(a), where 
+
+c : Rd → R≥0 and κ > 0 controls the intervention strength. The recommended action is 
+
+a∗(x, w) ∈ arg max 
+
+> a∈A
+
+
+
+w⊤ x + ∆ x(a) − 1
+
+κ c(a)
+
+
+
+. (1) Writing a∗ when dependencies are clear, the resulting feature and score values are x + G⊤ 
+
+> x
+
+a∗, y + G⊤ 
+
+> y
+
+a∗. Appendix A presents an alternative formulation that minimizes intervention cost subject to a prescribed prediction improvement. 
+
+Learner’s Optimization Problem. Implementing the recommended recourse induces a predictor-dependent distribu-tion Dw. The learner therefore seeks a predictor that minimizes the expected loss under the induced distribution: 
+
+w∗ ∈ arg min  
+
+> w∈W
+
+E(x,y )∼D w
+
+ℓ(w⊤x, y ) . (2) In practice, the learner observes only samples S = {(xi, y i)}mi=1 drawn from D. Applying the recommended recourse to each sample produces the induced dataset S′ = {(xi + ∆ x(a∗), y i + ∆ y(a∗)) }mi=1 , which approximates Dw. The resulting empirical optimization problem is 
+
+w∗ ∈ arg min 
+
+> w∈W
+
+1
+
+m
+
+> m
+
+X
+
+> i=1
+
+ℓ
+
+
+
+w⊤(xi + ∆ x(a∗)) , y i + ∆ y(a∗)
+
+
+
+. (3) 3The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+# 3 Algorithm and Analysis 
+
+Our goal in this section is to solve the optimization problem in Equation 3. We first state the assumptions used throughout that make the framework amenable to analysis. All omitted proofs are provided in Appendix B.3. 
+
+Assumption 1. The loss function ℓ(x, y ) is jointly convex in both of its arguments. 
+
+Assumption 2. The cost function c is assumed to be quadratic , i.e., c(a) = a⊤Ca, where C ∈ Rn×n is a positive-definite cost matrix. This choice is standard in the strategic classification and algorithmic recourse literature [Bechavod et al., 2022, Avasarala et al., 2025, Efthymiou et al., 2025a]. 
+
+Characterization of the Agents’ Best Response First, we show that the optimization problem in Equation 3 can be non-convex. We first observe that under Assumption 2, there is a closed-form solution for the recourse actions. 
+
+Lemma 1. Under Assumption 2, the optimal recourse action admits the closed-form expression, a∗ = κ 
+
+> 2
+
+C−1Gxw.
+
+In turn, Equation 3 becomes: 
+
+w∗ ∈ arg min 
+
+> w∈W
+
+1
+
+m
+
+> m
+
+X
+
+> i=1
+
+ℓ
+
+
+
+w⊤
+
+xi + κ
+
+2 G⊤ 
+
+> x
+
+C−1Gxw
+
+
+
+, y i + κ
+
+2 G⊤ 
+
+> y
+
+C−1Gxw
+
+
+
+. (4) This optimization problem can be difficult to solve: 
+
+Lemma 2. The optimization problem in Equation 4 can be non-convex even if ℓ and c satisfy Assumptions 1 and 2. 
+
+I.e., standard convex optimization techniques do not directly apply. Instead, we leverage the performative prediction framework [Perdomo et al., 2020] to develop iterative algorithms that account for the distribution shift induced by agents’ recourse responses. 
+
+Performative Formulation. The deployed predictor determines the agents’ recourse actions and therefore induces a predictor-dependent data distribution. Consequently, our learning problem is an instance of performative prediction [Per-domo et al., 2020]. The optimizer of Equation 2 is referred to as a performatively optimal solution, which minimizes the performative risk over its induced distribution. Since computing performative optima is generally challenging, we instead seek performatively stable solutions, which are fixed points of the retraining dynamics, i.e., ws is performatively stable if deploying model ws and retraining on the distribution induced by the deployed predictor yields the exact same predictor ws. Formally, it is defined as 
+
+ws ∈ arg min  
+
+> w∈W
+
+E(x,y )∼D ws
+
+ℓ  wT x, y  . (5) For the specific form of feature and score changes induced by Lemma 1, the corresponding finite-sample optimization problem for a performatively stable solution is 
+
+ws ∈ arg min 
+
+> w∈W
+
+1
+
+m
+
+> m
+
+X
+
+> i=1
+
+ℓ
+
+
+
+w⊤
+
+xi + κ
+
+2 G⊤ 
+
+> x
+
+C−1Gxws
+
+, y i + κ
+
+2 G⊤ 
+
+> y
+
+C−1Gxws
+
+. (6) To prove convergence guarantees, we impose the following standard regularity assumptions on the loss function ℓ.These assumptions are satisfied by several standard loss functions used in practice, including the mean squared error (MSE) loss and logistic regression loss under bounded feature norms. 
+
+Assumption 3. ℓ is γ-strongly convex in w ∀(x, y ).
+
+Assumption 4. ℓ is β-jointly smooth 2 in w and (x, y ).
+
+Computing Stable and Near-optimal Solutions 
+
+We now present iterative algorithms for computing performatively stable decision models under the induced performative recourse problem, and establish conditions under which the resulting stable solutions are close to performatively optimal. 
+
+Repeated Risk Minimization. Algorithm 1 is a finite-sample adaptation of Repeated Risk Minimization (RRM) [Per-domo et al., 2020] augmented with our causal recourse framework. It incorporates the causal response model through induced feature and score shifts governed by Gx, G y .We next present Repeated Gradient Descent (RGD) [Perdomo et al., 2020] in Algorithm 2. RGD is a gradient-based approximation to RRM—instead of solving the empirical risk minimization problem exactly at each iteration, we perform a gradient descent update on the empirical objective.   
+
+> 2A function is β-jointly smooth if its gradient is β-Lipschitz with respect to its arguments.
+
+4The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+Algorithm 1 Repeated Risk Minimization (RRM) 
+
+1: Input : C, Gx, Gy , λ, number of rounds T , and sample sizes n for t ∈ [T ]
+
+2: Output : Weight vector wT
+
+3: w0 ← a random vector from W
+
+4: A ← κ 
+
+> 2
+
+G⊤ 
+
+> x
+
+C−1Gx
+
+5: B ← κ 
+
+> 2
+
+G⊤ 
+
+> y
+
+C−1Gx
+
+6: for t = 1 , . . . , T do 
+
+7: S ← a sample of size n drawn from D
+
+8: Compute S′ by changing (x, y ) ∈ S to (x′, y ′) = ( x + Awt−1, y + Bwt−1) ∈ S′
+
+9: wt ← arg min w∈W Σ(x′,y ′)∈S′ ℓ  wT x′
+
+> i
+
+, y ′
+
+> i
+
+
+
+10: end for 
+
+11: return wT
+
+Algorithm 2 Repeated Gradient Descent (RGD) 
+
+1: Input : C, Gx, Gy , λ, step size η, Euclidean projection operator onto W: ΠW (·), number of rounds T , and sample sizes n for t ∈ [T ]
+
+2: Output : Weight vector wT
+
+3: w0 ← a random vector from W
+
+4: A ← κ 
+
+> 2
+
+G⊤ 
+
+> x
+
+C−1Gx
+
+5: B ← κ 
+
+> 2
+
+G⊤ 
+
+> y
+
+C−1Gx
+
+6: for t = 1 , . . . , T do 
+
+7: S ← a sample of size n drawn from D
+
+8: Compute S′ by mapping each (x, y ) ∈ S to (x′, y ′) =  x + Awt−1, y + Bwt−1 ∈ S′
+
+9: Compute the empirical gradient gt = ∇w
+
+h 1
+
+> nt
+
+P 
+
+> (x′,y ′)∈S′
+
+ℓ  w⊤x′, y ′i
+
+> w=wt−1
+
+10: wt ← ΠW
+
+ wt−1 − ηgt
+
+
+
+11: end for 
+
+12: return wT
+
+Convergence to a Stable Solution. We now establish sufficient conditions under which Algorithms 1 and 2 converge to a performatively stable solution. 
+
+Theorem 1. Suppose Assumptions 2, 3, 4 hold. Additionally, if there exist constants α > 0 and μ > 0 such that 
+
+ξα,μ = R 
+
+> Rd
+
+eμ∥x+Aw∥α 
+
+> 2
+
+d(D) < ∞ for all w ∈ W , then for nt = O
+
+ 1 
+
+> δd
+
+log 
+
+ tp
+
+ 
+
+samples for all t ∈ [T ], and with 
+
+Λ( C, G x, G y ) := ∥Gx∥22∥C−1∥2 + ∥Gx∥2∥C−1∥2∥Gy ∥2:1. if κ < γβΛ , then with probability at least 1 − p, Algorithm 1 will return a vector wT such that ∥wT − ws∥2 ≤ δ
+
+for all T ≥ log    
+
+> 1
+> δ∥w0−ws∥2
+> 
+> 1−κβ Λ
+> γ
+
+.2. if κ < 2γ 
+
+> Λ( β+γ)(1+1 .5ηβ )
+
+, then with probability at least 1 − p, Algorithm 2 will return a vector wT such that 
+
+∥wT − ws∥2 ≤ δ for all T ≥ log        
+
+> 1
+> δ∥w0−ws∥2
+> 
+> η
+> βγ β+γ−κΛ
+> 32ηβ 2+β
+> 
+
+.Proof Sketch. The proof follows from the convergence analysis of Perdomo et al. [2020]. The main technical step in this paper is to provide a characterization of the sensitivity of the induced response distribution map in our causal recourse setting (see Appendix B.2). The proofs are deferred to Appendix B.3. 
+
+Remark 1. If we assume that the initial data distribution D0 has a finite exponential α-moment, i.e., 
+
+E(x0,y 0)∼D 0 [exp(¯ μ∥x0∥α 
+
+> 2
+
+)] < ∞, then the quantity ξα,μ is finite. 
+
+The above exponential moment condition is an alternative, distributional assumption that guarantees ξα,μ < ∞.
+
+Connections to Optimal Solutions. Finally, we characterize convergence to performatively optimal solutions. 5The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+Theorem 2. Suppose Assumptions 2, 3, and 4 hold. Furthermore, assume that the loss function ℓ(u, v ) is Lu-Lipschitz in its first argument. Finally, suppose there exist constants α > 0 and μ > 0 such that ξα,μ =R 
+
+> Rd
+
+eμ∥x+Aw∥α 
+
+> 2
+
+d(D) < ∞, ∀ w ∈ W . Let w∗ denote a performative optimum. Then, with Λ( C, G x, G y ) := 
+
+∥Gx∥22∥C−1∥2 + ∥Gx∥2∥C−1∥2∥Gy ∥2, the following holds. 1. If κ < γβΛ , then with probability at least 1 − p, Algorithm 1 returns a vector wT such that ∥wT − w∗∥2 ≤
+
+δ + κL uΛ 
+
+> γ
+
+for all T ≥ log ( 1 
+
+> δ∥w0−ws∥2
+
+) 
+
+> 1−κβ Λ
+> γ
+
+.
+
+2. If κ < 2γ 
+
+> Λ( β+γ)(1+1 .5ηβ )
+
+, then with probability at least 1 − p, Algorithm 3 returns a vector wT such that 
+
+∥wT − w∗∥2 ≤ δ + κL uΛ 
+
+> γ
+
+for all T ≥ log ( 1 
+
+> δ∥w0−ws∥2
+
+)
+
+> η
+
+( βγ β+γ −κΛ( 32 ηβ 2+β)) .
+
+The convergence conditions reveal the role of the learner–agent feedback. While optimization parameters γ and β
+
+are inherited from performative prediction, our characterization shows that the feedback strength is governed by κΛ.Stronger interventions (larger κ) or greater causal propagation (larger Λ) amplify the induced distribution shift, leading to more restrictive sufficient conditions for convergence. 
+
+# 4 Numerical Experiments 
+
+We now perform numerical experiments to study the convergence properties of RRM and RGD in our framework. We consider two datasets for bank loan approval: (i) a synthetic 7-dimensional dataset generated from a structural causal model, and (ii) the empirical Taiwan credit dataset. 
+
+4.1 Datasets 7D Semi-Synthetic Loan Approval Dataset. We evaluate our method on a 7-dimensional semi-synthetic dataset constructed using the same structural causal model as [Karimi et al., 2020b], while adapting the labels to a regression setting. The feature vector is given by x = ( G, A, E, L, D, I, S ), where G denotes gender, A age, E education level, 
+
+L loan amount, D loan duration, I income, and S savings. Using standardized variables, we estimate signed edge weights by regressing each child node on its parents, and subsequently construct the causal contribution matrices Gx as described in Section 2. We construct Gy by regressing features on the output scores. See Appendix C.1 for the causal graph (Figure 5a) and full graph construction with edge weights. 
+
+Taiwan Credit Dataset. We also evaluate our methods on the Default of Credit Card Clients dataset from the UCI Machine Learning Repository [Yeh, 2009]. The dataset contains records of 30 ,000 credit card clients in Taiwan, including demographic information, repayment history, bill statements, and payment amounts collected over six months. The original dataset contains 23 input variables. To obtain a lower-dimensional representation suitable for our experiments, we aggregate related variables into the following 6 features: PAY_HISTORY , BILL_PAY , AGE , SEX_MAR ,
+
+EDU , and LIMIT_BAL . The output scores are generated for the labels by scores from logistic regression on the feature scores. As in the synthetic setting, signed edge weights are estimated via regression on standardized variables, and the feature contribution matrices Gx and Gy are constructed the same way as done for the semi-synthetic data. Details regarding feature construction and the causal graph (Figure 5b) are provided in Appendix C.2. 
+
+4.2 Experimental Design 
+
+Our experiments analyze how strategic adaptation and causal structure influence performative effects. We use the Mean Squared Error (MSE) with ℓ2 regularization as our loss. Table 1 summarizes the intervention cost profiles considered in this work. In all profiles, the immutable features A and G in the semi-synthetic data, and AGE and SEX_MAR in the Taiwan data, are assigned infinite intervention costs and are thus not actionable. Unless otherwise specified, we use the default profile; results for the remaining profiles are deferred to Appendix D, where we show that the conclusions are robust across intervention cost structures. All reported quantities are averaged over 20 independently generated cost realizations, where each realization is obtained by independently perturbing the finite diagonal entries of the corresponding cost profile uniformly within a fixed radius about the profile center. Error bars denote one standard deviation. 6The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+Semi-synthetic                                    
+
+> Cost profile GAELDIS
+> Default ∞∞3.0 2.0 2.0 1.5 1.0 Uniform ∞∞1.0 1.0 1.0 1.0 ∞
+> Upstream cheap ∞∞0.6 0.8 1.0 1.4 2.2 Downstream cheap ∞∞2.2 1.4 1.0 0.8 0.6
+
+Taiwan                               
+
+> Cost profile PH BP ASM ELB
+> Default 1.0 1.0 ∞∞2.0 0.1 Uniform 1.0 1.0 ∞∞1.0 ∞
+> Upstream cheap 0.8 1.0 ∞∞1.5 2.5 Downstream cheap 2.5 1.5 ∞∞1.0 0.8
+
+Table 1: Relative feature modification costs used in the semi-synthetic and Taiwan experiments. Here, PH = PAY_HISTORY, BP = BILL_PAY, SM = SEX_MAR, and LB = LIMIT_BAL. Entries with ∞ denote immutable features. All finite costs are normalized to have unit mean before constructing the inverse cost matrix.   
+
+> (a) Semi-synthetic (RRM) (b) Semi-synthetic (RGD)
+> (c) Taiwan (RRM) (d) Taiwan (RGD)
+
+Figure 1: Convergence of RRM and RGD for varying values of κ, corresponding to different colored lines. Each curve reports the mean step norm over randomized cost matrix realizations centered around the default cost profile. Top row: semi-synthetic data. Bottom row: Taiwan data. The stable model is computed using both RRM and RGD, with RGD employing a step size of η = 5 × 10 −4. Iterations terminate once ∥w(t+1) − w(t)∥2 < 10 −8 or the maximum number of iterations is reached. We use a maximum of 100 
+
+iterations for RRM and 8000 iterations for RGD. We approximate the performatively optimal model using adaptive random search followed by local refinement. Can-didate models are sampled uniformly from progressively smaller neighborhoods (radii 1.5, 0.5, and 0.15 ) around the current best solution using 5,000 , 20 ,000 , and 50 ,000 samples, respectively. The best candidate is then refined through 3,000 iterations of Gaussian perturbation search (i.e. w′ = w + ξ, ξ ∼ N (0 , 0.05 2I)), accepting only objective-improving updates. We refer to this as Grid-search .7The Role of Causality in Algorithmic Recourse A P REPRINT  
+
+> (a) Semi-synthetic dataset. (b) Taiwan dataset.
+
+Figure 2: Ratio of the naive ERM performative objective to the corresponding performative objective as a function of the performativity parameter κ. Results are shown for the stable (RGD) and near-optimal models on the semi-synthetic and Taiwan datasets. Values greater than one indicate improvement over the naive ERM model. Error bars denote one standard deviation over randomized cost matrix realizations. 
+
+4.3 Experimental Results Convergence of RRM and RGD. Figure 1 reports the successive iterate difference ∥w(t+1) − w(t)∥2 for RRM and RGD across different values of the performativity parameter κ. On the semi-synthetic dataset, RRM converges rapidly for smaller values of κ, while for κ ∈ { 5, 10 , 15 } the iterates fail to converge to a fixed point, consistent with the theoretical requirement that the performative sensitivity remain sufficiently small for the RRM contraction guarantee to hold. In contrast, RRM converges within a few iterations for all values of κ on the Taiwan dataset. RGD exhibits a more gradual but consistent decrease in the update norm on both datasets. Although the stopping tolerance is not reached within 1000 iterations in every setting, the monotonic decay indicates stable optimization progress. The small oscillations visible near the numerical tolerance in the RRM plots are numerical artifacts arising from finite optimization precision. Using empirically estimated values of the strong-convexity and joint-smoothness constants (see Appendix B.4), the sufficient convergence conditions in Corollary 1 and Theorem 2 certify convergence only for κ ≲ 10 −8 on both datasets. This is considerably more conservative than the empirical convergence behavior in Figure 1, since the analysis relies on a worst-case global estimate of the joint-smoothness constant. 
+
+Performative Improvement. We next evaluate the benefit of accounting for performative effects by comparing the stable (RGD) and performative-optimal (Grid-search) models against the naive Expected Risk Minimization (ERM) baseline in terms of the performative objective, as shown in Figure 2. As the performativity parameter κ increases, the ratio between the performative objective of the naive ERM solution and that of the corresponding stable (or performative-optimal) model also increases, indicating progressively larger improvements over the naive ERM solution. As strategic adaptation becomes stronger, the distribution shift induced by recourse grows, causing the naive ERM model to become increasingly misaligned with the induced data distribution. Consequently, explicitly accounting for performative feedback becomes increasingly important, yielding substantial improvements over standard ERM. The model distance results in Appendix D further support this conclusion, showing that the relative distance between the stable and Grid-search models remains small across all values of κ. Together with Figure 2, this shows that the stable solution is consistently near-optimal in our test scenarios. 
+
+Causal Propagation. We next investigate how the intervention cost geometry influences the distribution of recourse actions and the resulting feature changes while keeping the causal graph fixed. Specifically, we consider the Uniform ,
+
+Upstream-cheap , and Downstream-cheap cost profiles from Table 1. The Uniform profile assigns equal costs to all actionable features, the Upstream-cheap profile favors interventions on upstream variables, and the Downstream-cheap 
+
+profile favors downstream variables. The corresponding action and feature-change distributions are shown in Figure 3. As expected, the intervention cost geometry directly governs the allocation of actions. Under the Upstream-cheap 
+
+profile, the stable model concentrates interventions on upstream variables, whereas the Downstream-cheap profile shifts interventions toward downstream variables. The Uniform profile yields a more balanced allocation. Without 8The Role of Causality in Algorithmic Recourse A P REPRINT   
+
+> (a) Semi-synthetic: normalized action magnitudes. (b) Semi-synthetic: induced feature changes.
+> (c) Taiwan: normalized action magnitudes. (d) Taiwan: induced feature changes.
+
+Figure 3: Normalized RGD action magnitudes and induced feature changes on the semi-synthetic and Taiwan datasets for κ = 7 under the Uniform (blue), Upstream-cheap (orange), and Downstream-cheap (green) intervention cost profiles. Bars denote the mean normalized magnitude across randomized cost realizations, with error bars indicating one standard deviation. causal propagation (i.e., Gx is the identity matrix), the action and feature-change distributions would coincide. Yet, the induced feature changes are governed by causal propagation rather than intervention costs alone. Under the Uniform 
+
+profile, the terminal downstream feature (Savings S in the semi-synthetic dataset and LIMIT_BAL in the Taiwan dataset) is assigned infinite intervention cost and therefore receives no direct intervention. Nevertheless, both features undergo substantial changes due to upstream interventions propagating through the structural causal model. Consequently, the feature-change distribution differs markedly from the action distribution, indicating the distinct roles of the cost matrix in determining where interventions are applied and the causal graph in determining how those interventions affect the feature space. 
+
+# 5 Discussion and Future Work 
+
+In this work, we introduced a causal performative framework for algorithmic recourse that explicitly models how recommended actions propagate through a structural causal model and influence both observed features and the underlying outcome. We showed that these causal responses naturally induce a performative prediction problem, established conditions under which stable and near-optimal solutions can be efficiently computed, and demonstrated the convergence and practical effectiveness of the proposed approach on both semi-synthetic and real-world datasets. Our framework assumes access to a structural causal model describing how interventions propagate through the feature space. An important direction for future work is to jointly learn or account for uncertainty in the causal graph while 9The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+computing stable recourse policies, rather than having access to the graph. Another important direction is extending the framework to richer classes of predictive models and recourse objectives. 
+
+# Acknowledgments 
+
+Avasarala and Ziani thank the National Science Foundation for their support through the CAREER-2336236 and IIS-2504990 awards. Part of this work was supported by the Simons Institute for the Theory of Computing and conducted when Ziani was visiting the Institute. 
+
+# References 
+
+Srikanth Avasarala, Serena Wang, and Juba Ziani. The disparate effects of partial information in Bayesian strategic learning. In 8th AAAI/ACM Conference on AI, Ethics, and Society , 2025. Yahav Bechavod, Katrina Ligett, Zhiwei Steven Wu, and Juba Ziani. Gaming helps! Learning from strategic interactions in natural dynamics. In 24th International Conference on Artificial Intelligence and Statistics , pages 1234–1242, 2021. Yahav Bechavod, Chara Podimata, Zhiwei Steven Wu, and Juba Ziani. Information discrepancy in strategic learning. In 
+
+39th International Conference on Machine Learning , pages 1691–1715, 2022. Tom Bewley, Salim Amoukou, Saumitra Mishra, Daniele Magazzeni, and Manuela Veloso. Counterfactual metarules for local and global recourse. In 41st International Conference on Machine Learning , 2024. Mark Braverman and Sumegha Garg. The role of randomness and noise in strategic classification. In 1st Symposium on Foundations of Responsible Computing , pages 9:1–9:20, 2020. Seung Hyun Cheon, Anneke Wernerfelt, Sorelle Friedler, and Berk Ustun. Feature responsiveness scores: Model-agnostic explanations for recourse. In 13th International Conference on Learning Representations , 2025. Jinshuo Dong, Aaron Roth, Zachary Schutzman, Bo Waggoner, and Zhiwei Steven Wu. Strategic classification from revealed preferences. In 19th ACM Conference on Economics and Computation , pages 55–70, 2018. Finale Doshi-Velez and Been Kim. A roadmap for a rigorous science of interpretability. CoRR , abs/1702.08608, 2017. Sanghamitra Dutta, Jason Long, Saumitra Mishra, Cecilia Tilli, and Daniele Magazzeni. Robust counterfactual explanations for tree-based ensembles. In 39th International Conference on Machine Learning , volume 162, pages 5742–5756, 2022. Valia Efthymiou, Ekaterina Fedorova, and Chara Podimata. Desirable effort fairness and optimality trade-offs in strategic learning. CoRR , abs/2510.19098, 2025a. Valia Efthymiou, Chara Podimata, Diptangshu Sen, and Juba Ziani. Incentivizing desirable effort profiles in strategic classification: The role of causality and uncertainty. In Advances in Neural Information Processing Systems 38 ,2025b. Prateek Garg, Lokesh Nagalapatti, and Sunita Sarawagi. From search to sampling: Generative models for robust algorithmic recourse. In 13th International Conference on Learning Representations , 2025. Antonio Gois, Sophia Gunluk, Nir Rosenfeld, Nidhi Hegde, Simon Lacoste-Julien, and Dhanya Sridhar. The role of causal features in strategic classification for robustness and alignment. In 29th Annual Conference on Artificial Intelligence and Statistics , 2026. Hangzhi Guo, Feiran Jia, Jinghui Chen, Anna Squicciarini, and Amulya Yadav. RoCourseNet: Robust training of a prediction aware recourse model. In 32nd ACM International Conference on Information and Knowledge Management , pages 619–628, 2023. Nika Haghtalab, Nicole Immorlica, Brendan Lucier, and Jack Wang. Maximizing welfare with incentive-aware evaluation mechanisms. In 29th International Joint Conference on Artificial Intelligence , pages 160–166, 2020. Faisal Hamman, Erfaun Noorani, Saumitra Mishra, Daniele Magazzeni, and Sanghamitra Dutta. Robust counterfactual explanations for neural networks with probabilistic guarantees. In 40th International Conference on Machine Learning , pages 12351–12367, 2023. Moritz Hardt and Celestine Mendler-Dünner. Performative prediction: Past and future. CoRR , abs/2310.16608, 2023. Moritz Hardt, Nimrod Megiddo, Christos Papadimitriou, and Mary Wootters. Strategic classification. In Madhu Sudan, editor, 7th Conference on Innovations in Theoretical Computer Science , pages 111–122, 2016. 10 The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+Zachary Izzo, Lexing Ying, and James Zou. How to learn when data reacts to your model: Performative gradient descent. In 38th International Conference on Machine Learning , pages 4641–4650, 2021. Zachary Izzo, James Zou, and Lexing Ying. How to learn when data gradually reacts to your model. In 25th International Conference on Artificial Intelligence and Statistics , pages 3998–4035, 2022. Junqi Jiang, Francesco Leofante, Antonio Rago, and Francesca Toni. Robust counterfactual explanations in machine learning: A survey. In 33rd International Joint Conference on Artificial Intelligence , pages 8086–8094, 2024. Kentaro Kanamori, Ken Kobayashi, Satoshi Hara, and Takuya Takagi. Algorithmic recourse for long-term improvement. In 42nd International Conference on Machine Learning , 2025. Amir-Hossein Karimi, Gilles Barthe, Borja Balle, and Isabel Valera. Model-agnostic counterfactual explanations for consequential decisions. In 23rd International Conference on Artificial Intelligence and Statistics , pages 895–905, 2020a. Amir-Hossein Karimi, Julius Von Kügelgen, Bernhard Schölkopf, and Isabel Valera. Algorithmic recourse under imperfect causal knowledge: a probabilistic approach. Advances in neural information processing systems , 33: 265–277, 2020b. Amir-Hossein Karimi, Bernhard Schölkopf, and Isabel Valera. Algorithmic recourse: from counterfactual explanations to interventions. In 4th ACM Conference on Fairness, Accountability, and Transparency , pages 353–362, 2021. Amir-Hossein Karimi, Gilles Barthe, Bernhard Schölkopf, and Isabel Valera. A survey of algorithmic recourse: Contrastive explanations and consequential recommendations. ACM Computing Surveys , 55(5):95:1–95:29, 2023. Kshitij Kayastha, Vasilis Gkatzelis, and Shahin Jabbari. Learning-augmented robust algorithmic recourse. Transactions on Machine Learning Research , 2026. Eoin Kenny, Allan Anzagira, Tom Bewley, Freddy Lecue, and Manuela Veloso. An evaluation of cost functions for algorithmic recourse. In 29th Annual Conference on Artificial Intelligence and Statistics , 2026. Michael Kim and Juan Perdomo. Making decisions under outcome performativity. In 14th Innovations in Theoretical Computer Science Conference , pages 79:1–79:15, 2023. Jon Kleinberg and Manish Raghavan. How do classifiers induce agents to invest effort strategically? In 20th ACM Conference on Economics and Computation , pages 825–844, 2019. Gunnar König, Timo Freiesleben, and Moritz Grosse-Wentrup. Improvement-focused causal recourse (ICR). In 37th AAAI Conference on Artificial Intelligence , pages 11847–11855, 2023. Gunnar König, Hidde Fokkema, Timo Freiesleben, Celestine Mendler-Dünner, and Ulrike von Luxburg. Performative validity of recourse explanations. In Advances in Neural Information Processing Systems 38 , 2025. Phone Kyaw, Kshitij Kayastha, and Shahin Jabbari. Optimal robust recourse with L p -bounded model change. In 4th IEEE Conference on Secure and Trustworthy Machine Learning , 2026. Arnaud Van Looveren and Janis Klaise. Interpretable counterfactual explanations guided by prototypes. In Machine Learning and Knowledge Discovery in Databases , pages 650–665, 2021. Celestine Mendler-Dünner, Frances Ding, and Yixin Wang. Anticipating performativity by predicting from predictions. In Advances in Neural Information Processing Systems 35 , 2022. Rami Mochaourab, Sugandh Sinha, Stanley Greenstein, and Panagiotis Papapetrou. Demonstrator on counterfactual explanations for differentially private support vector machines. In European Conference on Machine Learning and Knowledge Discovery in Databases , pages 662–666. Springer, 2022. Duy Nguyen, Ngoc Bui, and Viet Anh Nguyen. Distributionally robust recourse action. In 11th International Conference on Learning Representations , 2023. Erfaun Noorani, Pasan Dissanayake, Faisal Hamman, and Sanghamitra Dutta. Counterfactual explanations for model ensembles using entropic risk measures. In 24th International Conference on Autonomous Agents and Multiagent Systems , pages 1566–1575, 2025. Martin Pawelczyk, Teresa Datta, Johannes van den Heuvel, Gjergji Kasneci, and Himabindu Lakkaraju. Probabilistically robust recourse: Navigating the trade-offs between costs and robustness in algorithmic recourse. In 11th International Conference on Learning Representations , 2023. Juan Perdomo, Tijana Zrnic, Celestine Mendler-Dünner, and Moritz Hardt. Performative prediction. In 37th Interna-tional Conference on Machine Learning , pages 7599–7609, 2020. Juan Perdomo, Tolani Britton, Moritz Hardt, and Rediet Abebe. Difficult lessons on social prediction from wisconsin public schools. In 8th ACM Conference on Fairness, Accountability, and Transparency , 2025. 11 The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+Sello Dalton Pitso and Taryn Michael. Bayesian causal inference for credit default risk. Risks , 14(2):38, 2026. Rafael Poyiadzi, Kacper Sokol, Raúl Santos-Rodríguez, Tijl De Bie, and Peter Flach. FACE: feasible and actionable counterfactual explanations. In 3rd AAAI/ACM Conference on AI, Ethics, and Society , pages 344–350, 2020. Chris Russell. Efficient search for diverse coherent explanations. In 2nd ACM Conference on Fairness, Accountability, and Transparency , pages 20–28. ACM, 2019. Yonadav Shavit, Benjamin Edelman, and Brian Axelrod. Causal strategic linear regression. In 37th International Conference on Machine Learning , pages 8676–8686, 2020. Ravi Sundaram, Anil Vullikanti, Haifeng Xu, and Fan Yao. Pac-learning for strategic classification. J. Mach. Learn. Res. , 24:192:1–192:38, 2023. Sohini Upadhyay, Shalmali Joshi, and Himabindu Lakkaraju. Towards robust and reliable algorithmic recourse. In 
+
+Advances in Neural Information Processing Systems 34 , pages 16926–16937, 2021. Berk Ustun, Alexander Spangher, and Yang Liu. Actionable recourse in linear classification. In 3rd ACM Conference on Fairness, Accountability, and Transparency , pages 10–19, 2019. Sahil Verma, John Dickerson, and Keegan Hines. Counterfactual explanations for machine learning: A review. CoRR ,abs/2010.10596, 2020. Sandra Wachter, Brent Mittelstadt, and Chris Russell. Counterfactual explanations without opening the black box: automated decisions and the GDPR. Harvard Journal of Law and Technology , 31(2):841–887, 2018. I-Cheng Yeh. Default of Credit Card Clients. UCI Machine Learning Repository, 2009. DOI: https://doi.org/10.24432/C55S3H. Jayanth Yetukuri, Ian Hardy, Yevgeniy Vorobeychik, Berk Ustun, and Yang Liu. Providing fair recourse over plausible groups. In 38th AAAI Conference on Artificial Intelligence , pages 21753–21760, 2024. 
+
+# A Alternative Improvement-Constrained Action Model 
+
+In our main formulation, an agent selects an action by maximizing the utility in Equation 1, which trades off predicted score improvement against intervention cost. We now consider an alternative action model in which the agent minimizes intervention cost subject to attaining a prescribed improvement in predicted score. This formulation is closely related to several minimum-cost recourse formulations in the literature, including improvement-focused causal recourse [König et al., 2023], but is incorporated here within our performative learning framework. Unlike a fixed-model recourse baseline, we incorporate this alternative action model into our performative framework. Thus, for any deployed model w, the agent first computes a minimum-cost improvement-constrained action, and the learner then accounts for the distribution shift induced by this action. The resulting stable model is computed using RRM or RGD, while a performative optimum is approximated using grid search followed by local refinement. Let the deployed scoring rule be hw(x) = w⊤x. Under our causal response model, an action a ∈ Rd induces 
+
+x′ = x + G⊤ 
+
+> x
+
+a and y′ = y + G⊤ 
+
+> y
+
+a. Consequently, the increase in predicted score is hw(x′) − hw(x) = w⊤G⊤ 
+
+> x
+
+a. 
+
+For a desired score improvement ¯γ > 0, the corresponding action associated with model w is defined as 
+
+aI (w) ∈ arg min 
+
+> a∈Rd
+
+a⊤Ca : w⊤G⊤ 
+
+> x
+
+a ≥ ¯γ . (7) 
+
+Proposition 1 (Closed-form improvement-constrained action) . Suppose C ≻ 0, ¯γ > 0, and Gxw̸ = 0 . Then the optimization problem in Equation 7 has a unique solution given by 
+
+aI (w) = ¯γ
+
+w⊤G⊤ 
+
+> x
+
+C−1Gxw C−1Gxw.
+
+Moreover, the improvement constraint is active at the optimum: w⊤G⊤ 
+
+> x
+
+aI (w) = ¯ γ. 
+
+Proof. Let q = Gxw. Since C ≻ 0, the objective is strictly convex. The KKT stationarity condition gives 2Ca − μq =0, and hence a = ( μ/ 2) C−1q. Because ¯γ > 0, the constraint is active at the optimum. Imposing q⊤a = ¯ γ yields  
+
+> μ
+> 2
+
+= ¯γq⊤C−1q , which gives the stated expression. Uniqueness follows from strict convexity. The corresponding feature and label shifts are ∆xI (w) = G⊤ 
+
+> x
+
+aI (w), ∆yI (w) = G⊤ 
+
+> y
+
+aI (w). Hence, deployment of 
+
+w maps each observation (xi, y i) to (xi + ∆ xI (w), y i + ∆ yI (w)) . We then define the corresponding performative 12 The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+objective analogously to Equation 3: 
+
+w∗ ∈ arg min 
+
+> w∈W
+
+1
+
+m
+
+> m
+
+X
+
+> i=1
+
+ℓ
+
+
+
+w⊤(xi + ∆ xI (aI )) , y i + ∆ yI (aI )
+
+
+
+. (8) Similarly, the corresponding performatively stable model satisfies 
+
+ws ∈ arg min 
+
+> w∈W
+
+1
+
+m
+
+> m
+
+X
+
+> i=1
+
+ℓ
+
+
+
+w⊤(xi + ∆ xI (ws)) , y i + ∆ yI (ws)
+
+
+
+. (9) We compute this stable solution using the same RRM and RGD procedures as in Algorithms 1 and 2, replacing the utility-maximizing action from Equation 1 with aI (w) from Proposition 1. The corresponding control parameters admit complementary interpretations. In our main framework, the parameter κ
+
+scales the inverse cost matrix and controls the overall actionability of the environment, with larger values of κ leading to stronger recourse actions and consequently greater performative effects. In contrast, ¯γ specifies the desired improvement that the prescribed action must achieve. Consequently, κ governs how much agents can change , whereas ¯γ governs how much improvement is required . These parameters therefore capture complementary aspects of the recourse problem: actionability versus desired improvement. 
+
+# B Theory 
+
+B.1 Structural Equations and Causal Propagation 
+
+We model the causal relationships among the input features using a Structural Causal Model (SCM). Let x =(x1, . . . , x d)⊤ denote the vector of input features. Each feature xi is generated according to a structural equation of the form xi = fi(Pa( xi), u i), where Pa( xi) denotes the set of direct causal parents of xi in the causal graph and ui is an exogenous noise variable. Throughout the paper, we consider a linear SCM, which can be written compactly as 
+
+x = A⊤x + u, where A is the weighted adjacency matrix of the causal graph. Entry Aij represents the direct causal influence of feature i on feature j.
+
+∆y
+
+a1
+
+a2
+
+...
+
+ad
+
+∆x1
+
+∆x2
+
+...
+
+∆xd
+
+Gy
+
+Gx
+
+Figure 4: The actions a and how they affect features and label changes using a linear relationship, i.e., ∆x(a) = GTx a
+
+and ∆y(a) = GTy a.We model recourse actions as additive interventions on the structural equations. Given an intervention vector a =(a1, . . . , a d)⊤, the post-intervention features satisfy x′ = A⊤x′ + u + a. Thus, the intervention ai acts as an additive shift to the structural equation generating feature i.Unlike independent feature perturbations, an intervention on one feature propagates through the causal graph and may induce changes in downstream features. Besides direct effects, interventions also produce indirect effects through multi-hop causal paths. For example, if feature i influences an intermediate feature k, which in turn influences feature 
+
+j, then the indirect contribution from i to j is given by the product Aik Akj . More generally, higher powers of the adjacency matrix capture the effects of increasingly long causal paths. Defining the feature change as ∆x = x′ − x, subtracting the pre- and post-intervention structural equations gives 
+
+∆x = A⊤∆x + a = ( I − A⊤)−1a. (10) We therefore define the feature contribution matrix as G⊤ 
+
+> x
+
+:= ( I − A⊤)−1, so that ∆x = G⊤ 
+
+> x
+
+a. Thus, the matrix G⊤
+
+> x
+
+captures both the direct and indirect effects of interventions, mapping an intervention vector to the resulting changes in the features. The following result provides a closed-form characterization of Gx for directed acyclic graphs. 13 The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+Remark 2. For a directed acyclic graph, Gx = Pd−1 
+
+> k=0
+
+Ak.Proof of Remark 2. We first show that, for every integer k ≥ 0, the (i, j )-th entry of Ak equals the total contribution of all directed paths of length exactly k from feature i to feature j. The proof is by induction on k.For the base case, k = 0 , we have A0 = I. Hence, 
+
+(A0)ij =
+
+1, i = j, 
+
+0, i̸ = j, 
+
+which corresponds to the unique path of length zero from a node to itself. Suppose the claim holds for some k ≥ 0. By matrix multiplication, 
+
+(Ak+1 )ij =
+
+> d
+
+X
+
+> ℓ=1
+
+(Ak)iℓ Aℓj .
+
+By the induction hypothesis, (Ak)iℓ aggregates the contribution of all directed paths of length k from feature i to feature ℓ, while Aℓj represents the direct influence from feature ℓ to feature j. Therefore, each product (Ak)iℓ Aℓj 
+
+corresponds to extending every length-k path ending at ℓ by one additional edge to j. Summing over all intermediate features ℓ accounts for every directed path of length exactly k + 1 from i to j, establishing the induction. Since the underlying causal graph is acyclic, every directed path contains at most d − 1 edges. Consequently, Ak = 0 
+
+for all k ≥ d, and summing over all feasible path lengths gives 
+
+Gx =
+
+> d−1
+
+X
+
+> k=0
+
+Ak.
+
+Finally, computing Gx requires evaluating the powers A, A2, . . . , Ad−1. Each matrix multiplication requires O(d3)
+
+operations, and there are O(d) such products. Hence, the contribution matrix can be computed in polynomial time. 
+
+B.2 Sensitivity Characterization Definition 1. A distribution map D(·) is ϵ-sensitive if 
+
+EMD( Dw, D w′ ) ≤ ϵ∥w − w′∥2, for all w, w′ ∈ W ,
+
+where EMD denotes the earth mover’s distance, equivalently the Wasserstein-1 distance with ℓ2 transportation cost. 
+
+The following lemma provides the main connection between our causal recourse model and the performative prediction framework. In particular, it explicitly characterizes the sensitivity parameter in terms of the feature contribution matrices and the intervention cost matrix. 
+
+Lemma 3. Under Assumption 2, the distribution map D(·) is ϵ-sensitive with ϵ = κ 
+
+> 2
+
+Λ( C, G x, G y ), where 
+
+Λ( C, G x, G y ) := ∥Gx∥22∥C−1∥2 + ∥Gx∥2∥C−1∥2∥Gy ∥2.
+
+Proof. Define A = GTx C−1
+
+Gx/(2 λ) and B = GTy C−1
+
+Gx/(2 λ). Any (x, y ) ∼ D will get mapped to (x+Aw, y +Bw)
+
+and (x + Aw′, y + Bw′) when using w and w′, respectively. Hence, the earth mover’s distance is bounded by 
+
+EMD ( Dw, D w′ ) ≤ ∥  A (w − w)′ , (w − w′) B ∥2
+
+≤ ∥ (A (w − w)′ ∥2 + ∥ (w − w′) B)∥2
+
+≤ ∥ A∥2∥w − w′∥2 + ∥w − w′∥2∥B∥2
+
+= ( ∥A∥2 + ∥B∥2) ∥w − w′∥2,
+
+where the first inequality is by the definition of the earth mover’s distance, the second is by the triangle inequality, and the last is by the operator norm inequality. The proof is completed by noting that ∥A∥2 ≤ ∥ Gx∥22∥C−1
+
+∥2/(2 λ) and 
+
+∥B∥2 ≤ ∥ Gx∥2∥C−1
+
+∥2∥Gy ∥2/(2 λ)
+
+Lemma 3 shows that stronger causal amplification, corresponding to larger ∥Gx∥2 or ∥Gy ∥2, and lower intervention costs, corresponding to larger κ or ∥C−1∥2, increase the sensitivity of the induced distribution. 14 The Role of Causality in Algorithmic Recourse A P REPRINT  
+
+> (a) (b)
+
+Figure 5: Causal graph for a) Semi-synthetic dataset, and b) Taiwan dataset 
+
+B.3 Missing Proofs 
+
+Proof of Lemma 1. The agent solves 
+
+max  
+
+> a
+
+w⊤(x + G⊤ 
+
+> x
+
+a) − 1
+
+κ a⊤Ca.
+
+Dropping the term independent of a, this is equivalent to maximizing 
+
+w⊤G⊤ 
+
+> x
+
+a − 1
+
+κ a⊤Ca.
+
+Since C is positive definite, the objective is strictly concave in a. The first-order condition gives 
+
+Gxw − 2 1
+
+κ Ca = 0 ,
+
+and hence 
+
+a∗ = κ
+
+2 C−1Gxw.
+
+Proof of Lemma 2. Consider the special case where ℓ is the squared loss and consider a sample S = {(x, y )} which contains a single labeled example in one dimension with one available action, i.e., d = 1 and n = 1 . For this case, the optimization problem in Equation 4 can be simplified as 
+
+min  
+
+> w∈R
+
+f (w) where f (w) = ( w(x + aw ) − (y + bw )) 2 =  aw 2 + ( x − b)w − y2 ,
+
+where a = κG 2
+
+> x
+
+/(2 C) and b = κG y Gx/(2 C) are scalars as Gx, Gy and C(C−1
+
+) all become scalars when d = n = 1 .The function f (w) is non-convex when a = 1 , x = 0 , b = 1 , y = 1 (can be verified by plotting (x2 − x − 1) 2). This combination can be achieved by setting C = 1 , Gx = 1 , Gy = 1 , and κ = 2 .
+
+Proof of Theorem 1. The proof is a direct corollary of Theorem 3.10 in Perdomo et al. [2020] and Lemma 3. 
+
+Proof of Theorem 2. Under Assumptions 2, 3, 4, and the stated additional assumption, from Theorem 4.3 of [Perdomo et al., 2020] performatively stable point and performative optimum satisfy ∥ws − w∗∥2 ≤ 2Lz ϵγ . Further, by Theorem 2, under the respective conditions for RRM and RGD, we have ∥wT − ws∥2 ≤ δ with probability at least 1 − p after the stated number of iterations, where ws denotes the performatively stable point. Therefore, by the triangle inequality, 
+
+∥wT − w∗∥2 ≤ ∥ wT − ws∥2 + ∥ws − w∗∥2 ≤ δ + 2Lz ϵγ .
+
+15 The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+B.4 Computation of Theoretical Bounds 
+
+We next specialize the strong-convexity and joint-smoothness constants to the regularized squared loss used in our experiments. For a sample (x, y ), let 
+
+ℓ(w; x, y ) = ( w⊤x − y)2 + ρ∥w∥22,
+
+and define the empirical objective 
+
+L(w) = 1
+
+m
+
+> m
+
+X
+
+> i=1
+
+ℓ(w; xi, y i) = 1
+
+m ∥Xw − y∥22 + ρ∥w∥22,
+
+where X ∈ Rm×d and y ∈ Rm.
+
+Strong Convexity. Since 
+
+∇2
+
+> w
+
+L(w) = 2
+
+m X⊤X + 2 ρI ⪰ 2ρI, 
+
+the objective is γ-strongly convex with γ ≥ 2ρ. We therefore use the distribution-independent choice γ = 2 ρ.
+
+Joint Smoothness. Assume that ∥w∥2 ≤ Bw, ∥x∥2 ≤ Bx, and |y| ≤ By . The gradient of the pointwise loss is 
+
+∇wℓ(w; x, y ) = 2( w⊤x − y)x + 2 ρw.
+
+For fixed (x, y ), its variation with respect to w satisfies 
+
+∥∇ wℓ(w; x, y ) − ∇ wℓ(w′; x, y )∥2 ≤ (2 B2 
+
+> x
+
++ 2 ρ)∥w − w′∥2.
+
+For fixed w, its variation with respect to the data satisfies 
+
+∥∇ wℓ(w; z) − ∇ wℓ(w; z′)∥2 ≤ (4 BxBw + 2 By + 2 Bx) ∥z − z′∥2,
+
+where z = ( x, y ), z ′ = ( x′, y ′), Thus, a valid joint-smoothness constant is 
+
+β = max 2B2 
+
+> x
+
++ 2 ρ, 4BxBw + 2 By + 2 Bx .
+
+For each value of κ, we record the optimization trajectories of both RRM and RGD. At every iteration, we compute the induced dataset and evaluate the largest feature norm, score magnitude, and model norm. The maximum values observed over the trajectories are used as Bx, By , and Bw, respectively. 
+
+# C Datasets 
+
+C.1 Semi-synthetic Dataset 
+
+We use the same structural causal model as [Karimi et al., 2020b], while adapting the labels to a regression setting. The feature vector is given by 
+
+x = ( G, A, E, L, D, I, S ),
+
+where G denotes gender, A age, E education level, L loan amount, D loan duration, I income, and S savings. The variables are generated according to the structural equations 
+
+G = 0 .5 + εG
+
+A = 0 + εA
+
+E = −0.062 + 0 .123 G + 0 .0062 A + εE
+
+L = 1 .25 + 0 .1A + G + εL
+
+D = 1 .25 + 0 .1A + 2 G + L + εD
+
+I = 0 .469 + 0 .1A + 1 .938 G + 0 .5E + εI
+
+S = −3.2965 + 1 .5I + εS ,
+
+where εG ∼ Bernoulli(0 .5) , εA ∼ Gamma(10 , 3.5) , εE ∼ N (0 , 0.5) , εL ∼ N (0 , 2) , εD ∼ N (0 , 3) , εI ∼ N (0 , 2) ,and εS ∼ N (0 , 5) are mutually independent noise variables. The continuous outcome score is generated as 
+
+y = −0.3 ( −L − D + I + S + IS ) ,
+
+which defines the loan-approval score used in the MSE objective. 16 The Role of Causality in Algorithmic Recourse A P REPRINT 
+
+Figure 6: Convergence behavior of RRM and RGD under randomized cost matrices for the semi-synthetic and Taiwan datasets. The columns correspond to RRM (semi-synthetic), RGD (semi-synthetic), RRM (Taiwan), and RGD (Taiwan), respectively. Solid curves denote the mean over randomized cost realizations. The top, middle, and bottom rows correspond to the uniform, upstream-cheaper, and downstream-cheaper cost profiles, respectively (Table 1). 
+
+C.2 Taiwan Dataset 
+
+We construct six features from the Taiwan credit dataset. The feature PAY_HISTORY is defined as the average of the historical repayment status variables PAY_1 ,. . . , PAY_6 . To summarize repayment behavior, we define BILL_PAY . Let 
+
+BILL and PAY denote the averages of BILL_AMT1 ,. . . , BILL_AMT6 and PAY_AMT1 ,. . . , PAY_AMT6 , respectively, and let 
+
+LIMIT_BAL denote the assigned credit limit. Following the preprocessing of Pitso and Michael [2026], we define 
+
+BILL_PAY = 12BILL 
+
+LIMIT_BAL + 12PAY BILL .
+
+The remaining features are AGE , LIMIT_BAL , EDU , obtained directly from the education category, and SEX_MAR , formed by combining the sex and marital-status variables. Samples containing invalid or missing values are discarded. 
+
+Continuous label generation. The original Taiwan credit dataset provides a binary default label. Since our objective is to model how repayment likelihood changes under strategic feature modifications, we instead construct a continuous target. Let X ∈ Rn×d denote the feature matrix and Y ∈ { 0, 1}n the default labels. After standardizing the features, we fit an ℓ2-regularized logistic regression model to predict Y and use the predicted probabilities as continuous semisynthetic labels, ˜yi = P( Yi = 1 | xi).
+
+# D Additional Experimental Results 
+
+We additionally evaluate the remaining cost profiles listed in Table 1. Figure 6 shows the convergence behavior of the proposed algorithms, Figure 7 reports the corresponding improvement ratio, and Figure 8 presents the relative distance between the stable (RGD) and near-optimal (Grid-search) models. Across all cost profiles, we observe behavior that is qualitatively consistent with our main experiments. In particular, the dependence of convergence, performative improvement, and the relative model distance on the performativity parameter κ remains largely unchanged, indicating that the proposed algorithms are robust to different specifications of the action cost matrix. 17 The Role of Causality in Algorithmic Recourse A P REPRINT   
+
+> (a) Uniform costs (b) Upstream features cheap (c) Downstream features cheap
+
+Figure 7: Ratio of the performative objective under the naive model to that under the stable (RGD) and Grid-search models across three intervention cost profiles. The top row corresponds to the semi-synthetic dataset, while the bottom row corresponds to the Taiwan credit dataset. From left to right, the columns represent uniform costs, upstream features being cheaper to intervene on, and downstream features being cheaper to intervene on.    
+
+> (a) Default costs (b) Uniform costs (c) Upstream features cheap (d) Downstream features cheap
+
+Figure 8: Relative model-weights’ distance ∥wRGD − wgrid ∥2/∥wgrid ∥2 as a function of the performativity parameter 
+
+κ under four intervention cost profiles. Each panel reports results for both the semi-synthetic and Taiwan datasets. Error bars denote one standard deviation over randomized cost matrix realizations. 18
