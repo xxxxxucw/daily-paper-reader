@@ -1,0 +1,1098 @@
+Title: CLAM: Causal Spatial Disaggregation to Infer Local Effects From Coarse Data
+
+URL Source: https://arxiv.org/pdf/2608.08064v1
+
+Published Time: Tue, 11 Aug 2026 00:36:59 GMT
+
+Number of Pages: 33
+
+Markdown Content:
+# CLAM :Causal Spatial Disaggregation to Infer Local Effects From Coarse Data 
+
+Gerrit Großmann 
+
+DFKI ∗
+
+Kaiserslautern, Germany 
+
+> Gerrit.Grossmann@dfki.de
+
+Sumantrak Mukherjee 
+
+DFKI ∗
+
+Kaiserslautern, Germany 
+
+> Sumantrak.Mukherjee@dfki.de
+
+Sebastian Vollmer 
+
+DFKI ∗
+
+, RPTU Kaiserslautern, Germany 
+
+> Sebastian.Vollmer@dfki.de
+
+## Abstract 
+
+Learning fine-grained spatial patterns from coarse-resolution data is challenging, especially in causal settings where high-resolution effects must be inferred from aggregated interventions and outcomes. We introduce C LAM , a method for estimat-ing localized causal effects from coarse observations by exploiting high-resolution contextual covariates that modulate these effects. By jointly learning the causal mechanism and a disaggregation mapping, C LAM captures interactions that are missed when addressing these problems independently. The method supports localized effect estimation, counterfactual reasoning, and principled outcome dis-aggregation, and reliably captures spatially varying causal effects across diverse settings. This is particularly relevant for applications such as public health and environmental policy, where decisions are made at broad scales despite substantial local heterogeneity. Code is available at github.com/gerritgr/clam .
+
+## 1 Introduction Treatment Locations  Outcomes  Contextual Data  High-Res. Outcomes  Local Causal Effects  Counterfactual Samples 
+
+Figure 1: Motivating example. CLAM takes regional treatments (e.g., a vaccination awareness cam-paign) and outcomes (e.g., vaccination levels), along with subregional covariates (e.g., demographics), to learn treatment–outcome relationships and estimate local causal effects or sample counterfactuals. Going from high-resolution (HR) to low-resolution (LR) data is typically straightforward, as it can be done via aggregation or pooling functions such as sums or means. These operations generally remove information. In contrast, going from LR to HR data is fundamentally difficult because it requires restoring information that has been lost. This generally necessitates some form of prior knowledge about the HR data. This inverse problem is typically studied under terms such as spatial disaggregation [1], downscaling [2], ecological inference [3], or super-resolution [4]. It is relevant across many fields involving spatio-temporal statistics, including earth science [5], public health [6], and the social sciences [7]. Causality [8], on the other hand, studies the effects of interventions on a system. Its core insight is that statistical associations do not imply causal relationships. In other words, observational patterns 
+
+> ∗
+
+DFKI: Deutsches Forschungszentrum für Künstliche Intelligenz GmbH (German Research Center for Artificial Intelli-gence). Preprint. arXiv:2608.08064v1 [cs.LG] 8 Aug 2026 may be useful for prediction, but they do not, in general, tell us how outcomes will change under intervention. Answering causal questions is often attempted using LR data, but this data is frequently insufficient for this [9]. For example, interventions, like vaccination campaigns, might be applied across broad regions, yet their impact could vary significantly at the subregional level. Surprisingly little effort has been made to properly combine spatial disaggregation with the quest to answer causal questions. 
+
+Our hypothesis is that causal inference and spatial disaggregation are better solved together than apart, and that doing so makes questions answerable that neither can address alone. Contribution. This work addresses the gap between spatial disaggregation and causal inference by introducing a unified framework grounded in structural causal models (SCMs) and Pearl’s do-calculus [8]. We argue that jointly tackling causal inference and disaggregation is natural in many real-world settings, where interventions are implemented at coarse scales but effects manifest locally. While our primary focus is the formulation of this framework, we illustrate its capabilities and limitations through a series of simulation studies that mimic realistic data-generating processes, as well as a case study based on real-world data on the impact of heat waves on gun violence. CLAM (Causa l dis aggregation method) can be summarized as follows: We learn a mechanistic func-tion that maps an intervention indicator and contextual information to high-resolution (HR) outcomes. In doing so, we treat HR contextual data (or covariates ) as an auxiliary variable that implicitly defines a prior over the HR outcome (cf. Figure 1). The model is trained by aggregating the predicted HR outcomes and enforcing consistency with the observed low-resolution (LR) measurements. This enables causal effect estimation, counterfactual reasoning, and the computation of HR estimates from LR inputs. Because no existing method targets this estimand, our contribution is the problem formulation first and the algorithm second, and we prioritize making the assumptions and limits of the setting explicit over benchmarking against methods built for a different task. 
+
+## 2 Problem Setup 
+
+For notational simplicity and without loss of generality, we assume that all regions share the same subregion structure, interventions are binary, and all variables are scalar rather than vector-valued. We consider N regions, each divided into M subregions. The LR treatment data is a vector 
+
+bT ∈ { 0, 1}N , where each entry bti indicates whether an intervention occurred in region i. We assume that, when present, the intervention affects all subregions within that region. The LR outcome data is a vector bY ∈ RN , obtained by applying a row-wise aggregation function (e.g., summation or averaging) to an unobserved HR outcome matrix Y ∈ RN ×M , where yi,j denotes the outcome value for subregion j within region i. The HR contextual data (covariates) is given by a matrix C ∈ RN ×M , where ci,j denotes the contextual value for subregion j in region i.Finally, we assume that N and M are perfect squares, allowing us to represent the spatial structure as a √N × √N grid of regions, each containing a √M × √M grid of subregions (see Figure 1 for an example with N = M = 16 and √N = √M = 4 ). 
+
+Goal. Our goal is to learn a function that estimates local causal effects and to disaggregate coarse outcomes into fine-grained predictions. We formalize this objective in the next section. 
+
+Generalizations. The setup admits several natural extensions. Variables (such as cij ) can be vector-valued, treatments can be continuous instead of binary, and the observed LR treatment bT
+
+can be interpreted as an aggregation of an underlying HR treatment matrix that varies within a region. The framework also extends to spatio-temporal settings, where T , Y , and C evolve over time. More generally, additional structure such as hidden confounding, mediation, or non-trivial treatment assignment can be incorporated; we discuss these cases in Section 4. Naturally, the spatial layout need not follow a regular grid, which we adopt only for illustration. 2ti, 1 ci, 1 ϵi, 1 c′                      
+
+> i, 1
+> yi, 1
+> ti, 2ci, 2ϵi, 2c′
+> i, 2
+> yi, 2
+> · · ·
+> ti,m ci,m ϵi,m c′
+> i,m
+> yi,m
+> Aggregation
+> bYi
+> Index (i, j )denotes region i, subregion jti,j ∈ { 0,1}: intervention indicator
+> ci,j ∈R: context variable
+> ϵi,j ∈R: noise
+> c′
+> i,j ∈R: unobserved contextual covariate
+> yi,j ∈R: subregion outcome
+> bYi∈R: aggregated regional outcome
+
+Figure 2: Causal graph for one region. All functional relations are shared among subregions and regions. Variables could also be vector-valued. Unobserved covariates and a causal link from context to treatment are optional. The aggregation is typically a mean or a sum. 
+
+Causal Assumptions. Depending on the experimental setting, different assumptions may hold or be relaxed. We may assume a known causal graph, which constrains the model and reduces the risk of spurious explanations, particularly important when contextual variables are high-dimensional and correlated, but only a subset is causally relevant. We typically assume no hidden confounding, meaning all relevant variables affecting the outcome are observed, allowing interventions to be interpreted causally up to reasonable noise. Causal effect identification also requires variation in interventions across regions. If the aggregation function from subregional to regional outcomes is known (e.g., a mean or sum), disaggregation becomes more tractable. Moreover, we typically assume that the treatment does not depend on the context values. 
+
+## 3 Our Method: C LAM 
+
+Our method combines two insights. First, we represent the causal disaggregation problem using a structural causal model formalism. This formalism encodes assumptions and specifies the missing pieces (functions, parameters). Second, we train an ML model to infer the missing pieces where we use the LR data as a loss signal to estimate the most likely HR data and functional relationships. 
+
+3.1 Structural Causal Model 
+
+Each region–subregion pair (i, j ) is associated with a treatment ti,j , context ci,j , noise ϵi,j , and an optional hidden confounder (or non-confounding covariate) c′ 
+
+> i,j
+
+(cf. Figure 2). A shared structural function maps these inputs to a subregional outcome yi,j , and then aggregates the subregional outcomes to a regional outcome bYi:
+
+yi,j = fθ (ti,j , c i,j , ϵ i,j , c ′ 
+
+> i,j
+
+), bYi = gϕ
+
+ {yi,j }Mj=1 
+
+. (1) Each subregion is modeled by a local functional mechanism, with uncertainty captured via ϵi,j .Although the functions fθ (·) and gϕ(·) are shared across regions, region-specific dynamics can still be modeled through context variables (e.g., region indicators or positional encodings). The difference between c′ 
+
+> i,j
+
+and ϵi,j is that ϵi,j is i.i.d. noise, while c′ 
+
+> i,j
+
+is structured, for example spatially autocorrelated or shared across observations in time. In general, gϕ(·) can be any function parameterized by ϕ. For simplicity, we typically assume the aggregation is a sum, the noise is additive, and there are no hidden confounders. Then the model simplifies to: 
+
+bYi =
+
+> M
+
+X
+
+> j=1
+
+ fθ (ti,j , c i,j ) + ϵi,j 
+
+ =
+
+> M
+
+X
+
+> j=1
+
+fθ (ti,j , c i,j ) + 
+
+> M
+
+X
+
+> j=1
+
+ϵi,j . (2) If we want to simplify further, we can replace the flexible estimator fθ (·) with a linear one, where 
+
+θ = ( α1, β 1, α 2, β 2). Conceptually, we use two linear models, one for treated regions and one for untreated regions, each relating the local context ci,j to the outcome: 
+
+bYi =
+
+> M
+
+X
+
+> j=1
+
+ ti,j (α1 + β1ci,j ) + (1 − ti,j ) ( α2 + β2ci,j ) +
+
+> M
+
+X
+
+> j=1
+
+ϵi,j . (3) 33.2 Training 
+
+The model is trained by minimizing the discrepancy between the observed LR outcomes bY and the predicted aggregated outcomes μ, typically using an MSE loss: Lθ,ϕ = 1
+
+> N
+
+PNi=1 
+
+ μi − bYi
+
+2. Note that we use bYi for the observed regional outcome and μi for the corresponding prediction, which under zero-mean additive noise is the conditional expectation of the aggregate. Importantly, the loss is only observed at the aggregated (region) level. The model therefore does not receive direct supervision for individual subregions; instead, it must learn a subregional mechanism that, when combined, is consistent with the observed aggregated outcomes. When relaxing the assumptions from Section 2, training becomes more complicated. For example, if the aggregation function, gϕ(·), is unknown, it must be learned jointly with the local mechanism 
+
+fθ (·), which leads to a coupled estimation problem. In general, gϕ(·) can be implemented using an (order-invariant) set neural network (e.g., [10]). This is conceptually similar to settings in graph neural networks, where both the message-passing mechanism and the aggregation function are learned [11]. Similarly, if treatments are not uniformly applied across subregions, the underlying HR treatment matrix must be inferred jointly during training. More generally, additional latent variables (e.g., unobserved confounders) can be incorporated and estimated within the same framework. This includes uneven delivery, for example a vaccination campaign reaching subregions to differing degrees. 
+
+3.3 Downstream Applications 
+
+Training yields the predictive mechanism fθ (·), from which several causal quantities can be derived. The most direct is what we call the local conditional average treatment effect (LOCATE), a version of the conditional average treatment effect (CATE) conditioned on subregion-specific factors: 
+
+Ei,j = fθ (1 , c i,j ) − fθ (0 , c i,j ), (4) i.e., the treatment–control difference at the subregional level. Aggregating these quantities yields ATEs for regions, populations, or environments; with continuous treatments, the same mechanism gives conditional dose–response curves. Note that LOCATE is noise-marginalized. Beyond effect estimation, the framework supports outcome disaggregation —mapping coarse regional outcomes back to fine-grained predictions—and counterfactual reasoning, e.g., predicting outcomes under hypothetical intervention placements or alternative contexts. In the simplest case, this amounts to evaluating fθ (·) under new inputs. For counterfactuals, when the noise term is believed to carry realization-specific information, inferred noise values can be reused to produce sharper, sample-specific counterfactuals rather than population-level averages. The framework can also recover latent HR treatment locations by representing them as trainable variables (cf. Exp. 2 in Appendix D.2). With time-series data, C LAM can further infer latent variables that modulate causal effects, provided temporal variation supplies enough constraints (cf. Exp. 3 in Appendix D.3). 
+
+3.4 Identifiability 
+
+We do not provide a general identifiability result, and a complete treatment is left as an open problem. Appendix A distinguishes causal identification, statistical identification from aggregate observations, and finite-sample recovery by the optimizer, and characterizes several tractable special cases. In short, recovery of the mechanism and recovery of the high-resolution outcome map have to be distinguished, and simple counterexamples show that neither is pinned down without further assumptions. In a noise-free saturated setting with known sum aggregation, the problem reduces to a linear equation system, which makes the required variability in the data explicit through a rank condition. Beyond that, the closest existing result is the consistency analysis of Zhang et al. [12], which applies to an idealized version of our setting. How these results extend to spatially dependent covariates, latent variables, and more general aggregation functions, and what the optimizer actually recovers in finite samples, remain open. 43.5 Relationship to Causal Deabstraction 
+
+We view C LAM as an instance of causal deabstraction : recovering a fine-grained causal mechanism from coarse, aggregated observations. While prior work studies when causal structure is preserved under abstraction [9, 13], we consider the inverse direction: inferring a high-resolution model that is consistent with observed aggregates. Appendix B formalizes this view and clarifies the causal semantics. Aggregation deletes the pairing between outcomes and subregions. HR covariates and an invariant causal mechanism [14, 15] can partially restore it when covariate compositions vary across regions. 
+
+## 4 Exploiting Context Across Motifs in the Causal Graph 
+
+Throughout the paper, we focus on the simplest causal motif: a treatment T acting on an outcome 
+
+Y , with a contextual covariate C that modulates the effect. Real-world settings can exhibit a much richer variety of causal structures, and the role of high-resolution context, C, shifts with the motif: sometimes it must be conditioned on, sometimes ignored, sometimes leveraged for new identification strategies. Do-calculus tells us whether an effect is identifiable given the graph, this section asks how 
+
+the LR/HR distinction interacts with that question. Here, we provide an outlook in which we sketch how HR context can be exploited in common causal graph motifs. 
+
+Baseline: C as a Pure Effect Modifier: T → Y , C → Y . The default setting throughout this paper is the simplest motif: T and C are independent inputs, both pointing into Y , with no edge between them. C is not a confounder, only a covariate that modulates the local effect of T , and the backdoor criterion holds trivially and gives rise to the LOCATE in Eq. (4). Thus, C provides multiple “views” of the same regional outcome and thereby constrains the shared mechanism fθ (·).
+
+Confounder: C → T , C → Y , T → Y . When the context C also drives whether (or by how much) a region is treated, it becomes a confounder. The backdoor criterion then requires conditioning on C.Treating T as exogenous yields biased estimates. Modeling the treatment-assignment mechanism at HR is what makes the adjustment correct. Exp. 5 (Appendix F) instantiates this motif and shows that ignoring the dependence inflates the MSE on local effects. A concrete real-world example to illustrate this problem is a wildfire-prevention program: forested counties with dry summers are more likely to receive funding, and those same counties also have higher baseline fire incidence, so the program’s effect is conflated with the underlying risk. 
+
+Collider: T → C, Y → C. A collider is a variable influenced by both the treatment and the outcome. Conditioning on such a variable opens a spurious path between T and Y , so naïvely passing 
+
+C as an input to fθ (t, c ) would bias the estimated effect. Nevertheless, HR collider information may still be useful: since C is partly determined by the HR data yi,j , it can provide fine-grained information for the reconstruction of Y or serve as a diagnostic check. For example, consider a regional vaccination campaign ( T ), where the outcome of interest is infection rates ( Y ), and the HR variable C is neighborhood-level pharmacy purchases of rapid tests. The campaign may increase public attention and test purchases through its messaging, while actual local infections also increase demand for rapid tests. A possible way to exploit this structure is to invert the usual roles: instead of using C as a covariate of the outcome, we treat C itself as the HR target and learn a local mechanism f inv (t, y ) = c that maps treatment and outcome to the collider. Under this setup, C LAM ’s aggregation-consistency principle still applies, but it is used to jointly learn the mechanism and the disaggregation of T and Y against the observed HR values of C.
+
+Mediator: T → C, C → Y , T → Y . A mediator C lies on the causal pathway from T to Y , so part of the treatment effect is transmitted through C rather than acting directly. Naïve estimation that conditions on C cannot separate the direct effect of T from the indirect effect through C. When the high-resolution mediator is observed, one can instead jointly learn the treatment-to-mediator, mediator-to-outcome, and direct treatment-to-outcome mechanisms. Only the two outcome-side mechanisms rely on the aggregated regional observations, since the treatment-to-mediator mechanism is supervised directly by the observed ci,j . This enables a decomposition of the learned effect into a direct component T → Y and an indirect component T → C → Y . A concrete example is a regional 5advertising campaign observed at low resolution, whose effect on regional sales, also observed at low resolution, is partly direct and partly mediated by word-of-mouth dynamics reflected in local online discourse observed at high resolution. 
+
+Instrumental variable: C → T , T → Y , U → T , U → Y . If a hidden confounder links treatment and outcome, but the HR covariate acts on the outcome only through the treatment, that covariate may play the role of an instrument. An HR instrument is unusual but plausible. Consider subregional weather ( C, HR), which influences whether a vaccination campaign is deployed ( T , observed at LR), but does not affect the infection rate ( Y , observed at LR) in any other way. One possible extension of C LAM would then be to disaggregate treatment and outcome jointly, as yi,j = f2(f1(ci,j )) ,where f1(·) maps weather to local deployment and is trained against the LR treatment totals, and 
+
+f2(·) maps deployment to local infections and is trained against the LR outcome totals. In such a construction, f2(·) would only see the deployment predicted from the weather, which may help isolate the component of treatment variation attributable to the instrument rather than the hidden confounder. 
+
+Spill-over. A subregional outcome may depend on neighboring treatments and contexts: interven-tions can spill over across space. The local mechanism is then no longer purely local, and aggregated observations alone cannot distinguish a strong local effect from a weaker effect that diffuses outward. HR context can help by exposing spatial structure. Technically, one can replace the pointwise fθ (·)
+
+with a grid-based model. In principle, the model can learn both direct local effects and spill-over patterns from aggregated outcomes. A concrete example is a driving ban in one district that displaces traffic into adjacent ones, so regional air quality depends on both the ban location and surrounding road and vegetation patterns. 
+
+Time-Varying Confounding. In spatiotemporal settings, confounders may evolve over time and be shaped by past treatments. Present context can then no longer be treated as a fixed pre-treatment covariate, because it may already encode earlier interventions. This makes estimation harder: naïve adjustment can block part of the causal pathway or introduce bias [16]. C LAM can be extended by indexing fθ (·) over time and by explicitly modeling how past treatments, outcomes, and HR covariates affect the current state. Exp. 3 already uses temporal variation to recover a stable latent spatial factor; a natural next experiment would make this factor dynamic and treatment-dependent. For example, neighborhoods with high prior infection rates may receive additional public-health resources, which then change later vulnerability and influence future allocation decisions. 
+
+Summary. Across all motifs, the role of HR data can be summarized as follows: it provides 
+
+variation within regions that translates into observable differences at the aggregated level. This variation can be exploited to constrain and identify fine-grained causal mechanisms, but only when the causal graph permits it. More concretely: (i) for effect modifiers and confounders, HR structure is highly informative and can be directly leveraged for identification and adjustment; (ii) for mediators, it remains informative but requires explicitly modeling the underlying causal pathways; (iii) for colliders, it can be actively misleading if the framework is not changed accordingly. CLAM does not replace causal identification via do-calculus: the causal graph determines whether a target effect is identifiable in principle, while C LAM estimates the corresponding fine-grained structure from aggregated data. Identifiability in principle, however, does not guarantee recovery in practice, which further requires sufficient variability in the HR covariates, a well-behaved optimization problem, and effective training of the chosen function class. See Appendix A and Section 7. 
+
+## 5 Related Work 
+
+CLAM sits at the intersection of multiple research strands; an extended discussion is provided in Appendix C. 
+
+Spatial Disaggregation and Downscaling. A long line of work in statistical downscaling and spatial disaggregation infers high-resolution estimates from coarse data using interpolation, regression, or learning-based techniques [1, 2, 17, 18]. These methods are predominantly associational, recent 6Exp. 1: Political Campaigning  Exp. 2: Unknown Intervention Locations  Exp. 3: Hidden Spatial Heterogeneity    
+
+> LOCATE Performance Estimated Treatment
+> Location
+> GT Treatment
+> Location
+> Hidden Confounder Estimation Loss Curve and MSE
+> CLAM
+> Baseline
+
+Figure 3: Results Overview. Top: Input of LR intervention locations (red), LR outcomes (blue), and HR context (green). Bottom: Selected inference results. extensions integrate causally relevant predictors [19, 20] but still rely on relatively fine-grained information and do not target interventional or counterfactual queries. 
+
+Causal Inference under Aggregation and Abstraction. Reasoning causally with aggregated data is well known to be hazardous: results on the ecological fallacy show that aggregate statistics may obscure or invert relationships at the unit level [21–24]. Work on causal abstraction formalizes when mappings between models at different granularities preserve interventional or counterfactual semantics [9, 25, 13], and spatiotemporal causal inference [26–32] addresses related challenges with different data regimes. None of these directly target the joint problem of disaggregating outcomes 
+
+and estimating local causal effects from coarse interventions. 
+
+Invariant Mechanisms, GNNs, and Hierarchical Models. Conceptually, C LAM relies on the principle of invariant causal mechanisms [14, 15, 33, 34]: the local mechanism fθ (·) is shared across subregions while contextual covariates drive heterogeneity. This turns aggregation into a constraint and connects our architecture to message-passing GNNs [11] and Deep Sets [10], as well as to hierarchical Bayesian models that pool information across groups [35, 36]. It also places C LAM in the setting of learning from aggregate observations [12], whose training loss coincides with ours under mean aggregation (cf. Appendix A). 
+
+## 6 Experiments 
+
+We evaluate C LAM on three synthetic studies and one real-world study. In the synthetic studies the ground truth mechanism is available isolate distinct capabilities of the framework under controlled conditions: heterogeneous local-effect recovery, latent intervention localization, and the reconstruc-tion of unobserved covariates. The real-world study then probes the method on U.S. gun-violence data, where we assume that only coarse regional outcomes are observed. Full experimental details, per-experiment figures, and additional analyses are provided in Appen-dices D and E, with the ablation study included in Appendix D. Two additional studies—covering confounded treatment allocation and an unknown aggregation function—are deferred to Appendix F. Our focus is qualitative: we aim to characterize the behavior of the method. Figure 3 provides an overview of the inputs and headline results. Code that runs off-the-shelf on Google Colab is provided. 
+
+6.1 Synthetic Studies Exp. 1: Political Campaigning. We first ask whether C LAM can recover heterogeneous local causal effects from aggregated outcomes when the effect of treatment depends on subregional context. We model a binary regional intervention (campaign spending) whose impact varies with subregional wealth (z-scored income values). Regional-level covariates largely remain uninformative by construction. The reported outcome is the candidate’s relative improvement, observed only at the regional level. We compare against a naïve baseline (Figure 3, with confidence intervals in the 7Appendix) that applies a uniform disaggregation mechanism to the regional outcome and then learns the causal mechanism. In the limiting case where all regional outcomes are identical, uniform, bicubic, and ecological-regression [37] baselines necessarily reach the same LOCATE error floor: without informative HR context, they cannot distinguish subregions and can at best assign the regional average effect. Exp. 1 is constructed close to this regime, with only minimal regional outcome variation, so explicitly evaluating these additional baselines provides little additional information. C LAM operates below this floor because the shared mechanism ties each outcome to the context of its subregion. This is the gain hypothesized in the introduction, where treating disaggregation and causal inference separately caps what is achievable. We use a simple neural network to estimate the causal mechanism. CLAM accurately recovers the underlying subregional causal effects, with the MAE to the ground-truth LOCATE matrix (cf. Eq. (4)) decreasing alongside the training loss. The learned model supports coherent counterfactual reasoning at both regional and subregional resolutions and correctly identifies regions whose outcome differences arise purely from contextual heterogeneity rather than mean effects. Full setup and per-subregion visualizations are given in Appendix D.1 (Figure 5). 
+
+Exp. 2: Public School Funding. Next, we test whether C LAM can recover latent intervention locations jointly with local causal effects when only aggregated intervention totals and outcomes are observed. Each of the 30 × 30 regions consists of 4 × 4 subregions and receives binary funding in either no subregion or exactly one unobserved subregion. Treatment effects vary with subregional socioeconomic status, and the outcome is education-score improvement. We implement fθ (·) using either a parametric function or a small neural network. In both cases, C LAM jointly identifies the treated subregions and accurately recovers the underlying causal-effect function. To sample a treated subregion, we use the common Gumbel-Max trick. Details are provided in Appendix D.2 and Figure 7. 
+
+Exp. 3: Spatiotemporal Effects of Heat Waves. Finally, we ask whether C LAM can reconstruct an unobserved spatial effect modifier from aggregated outcomes in a spatiotemporal setting. Heat waves negatively affect school performance, with heterogeneous impact depending on parental education (observed) and vegetation coverage (unobserved), the latter mitigating heat exposure. Only region-level outcomes are observed over time. Under a correctly specified linear mechanism, both the regional prediction loss and the MSE converge rapidly, and the estimated disaggregation of the vegetation is visually indistinguishable from the ground-truth vegetation map. With a flexible MLP, CLAM still recovers meaningful spatial structure but with substantially higher error. This reflects an identifiability trade-off whereby expressive models can absorb transformations of the vegetation while preserving aggregated predictions. Details are provided in Appendix D.3 (Figure 8). 
+
+Takeaways. Across the three studies, C LAM performs well in the synthetic setting, particularly for estimating causal effects. The recovery of latent variables, such as intervention locations or unobserved effect modifiers, depends on the specific experiment. Overfitting may occur, when large amounts of data is available. 
+
+6.2 Semi-Synthetic Case Study With Real-World Data: Heat and Gun Violence 
+
+We evaluate C LAM on U.S. gun-violence data from the Gun Violence Archive (GVA) for 2022– 2023 [38], motivated by prior evidence linking higher ambient temperatures to increased firearm violence [39]. We treat temperature as a continuous exposure. Urbanization is the high-resolution (HR) contextual covariate, and gun-incident counts are observed at weekly resolution. A core difficulty in evaluating disaggregation methods on real data is the absence of ground truth at the fine scale. We work around this by starting from data that is natively HR (incident counts at the cell level) and artificially aggregating it into LR regional counts, which serve as the inputs to C LAM .To construct a high-quality reference baseline , the original HR counts are only used for fitting an “oracle” that we use for evaluation. We use N = 100 regions and M = 100 cells per region, indexed by region i, subregion j, and week w. Let Y LR  
+
+> i,w
+
+be the aggregated regional count in region i during week w ≤ 52 , ci,j the HR urbanization covariate, and eti,w the standardized regional temperature. We model subregion-level rates 8CLAM: Trained on Aggregated Data  Oracle NN: Trained on High-res. Data  
+
+> Urbanization
+> Temperature (°C) Temperature (°C)
+> Predicted Outcome Rate
+
+Figure 4: Side-by-side comparison of the learned rate functions fθ (temp , urban ) for the disaggrega-tion from C LAM (left) and the oracle (a NN with the ground truth subregional data; right). Predictions are generated across a temperature range of [−15 , 45] ◦C and an urbanization scale of [0 , 1] .as λi,j,w = fθ (eti,w , c i,j ) and aggregate them as μi,w = PMj=1 λi,j,w , with Y LR  
+
+> i,w
+
+∼ Poisson( μi,w ).Training minimizes the regional Poisson negative log-likelihood. Figure 4 shows that C LAM recovers a qualitatively similar temperature–urbanization interaction to the oracle. The spatial comparison in Appendix Figure 9 shows the same pattern: plausible structure, but inflated and more diffuse local intensities, reflecting an aggregation-induced identifiability gap. 
+
+## 7 Limitations 
+
+CLAM relies on assumptions that are necessary given the nature of inferring fine-grained causal effects from aggregated data, but are nonetheless restrictive. We discuss the main limitations here. 
+
+Prerequisite: Do-Calculus Identifiability. CLAM is not a substitute for causal identification. The method should only be applied in settings where do-calculus (applied to a known or expert-specified causal graph) establishes that the causal effect is identifiable in principle. If the causal graph is unknown or the required identification conditions fail (e.g., the backdoor criterion is violated by unmodeled confounders), C LAM will fit a model to the data that does not carry a causal interpretation. 
+
+No Identification Guarantee from Optimization Alone. Even when do-calculus certifies identifia-bility in principle, we do not provide a formal guarantee that our optimization procedure recovers the true causal effect. The training objective is non-convex, and the best we can reasonably claim is that, under good initialization and sufficient covariate diversity, gradient descent finds a local minimum whose value is close to the true causal effect. It is easy to come up with pathological cases in which different fine-grained disaggregations are equally consistent with the observed regional outcomes. How to detect or avoid them in practice, remains an open question. 
+
+Assumptions and Their Scope. Successful recovery of the local mechanism generally relies on (i) an invariant causal mechanism across subregions, (ii) sufficient diversity in subregional covariate distributions across regions, (iii) no hidden confounding, or its explicit modeling, and (iv) a known or sufficiently constrained aggregation function. The invariance assumption (i) is less restrictive than it may appear: although fθ (·) is shared across regions and subregions, region-specific dynamics can still be captured through contextual covariates such as region indicators or positional encodings. Apparent heterogeneity across regions is absorbed by the context, yielding a conditionally invariant model. The stronger requirement is that the contex-tual covariates provide sufficient variation to constrain the shared mechanism and capture sources of heterogeneity that are correlated with the treatment. Unobserved factors that are uncorrelated with the treatment can effectively act as additional noise: they make recovery harder but need not bias the estimated effect. Unobserved confounders, by contrast, will generally lead to incorrect causal estimates unless they are explicitly modeled. The aggregation function (iv) need not be perfectly known in advance: as demonstrated in Exp. 4 (Appendix F), it can be jointly learned alongside the 9local mechanism when it is sufficiently parameterized and the available variation allows the two components to be distinguished. 
+
+Identifiability Gap and Latent Variable Recovery. Even when all assumptions hold, aggregation induces an intrinsic identifiability gap: matching aggregated predictions to aggregated observations may admit multiple equally valid solutions. Our real-world study illustrates this, with C LAM 
+
+systematically inflating local effect magnitudes relative to the cell-supervised oracle. The problem is amplified when latent variables are jointly inferred (e.g., intervention locations in Exp. 2, unobserved covariates in Exp. 3), since different inferred values can each correspond to a mechanism that explains the data equally well. We discuss this further in Appendix A and regard a rigorous treatment, together with practical diagnostics, as the most important direction for future work. 
+
+Limited Real-World Validation. Our evaluation is primarily qualitative and relies substantially on synthetic studies, where the data-generating assumptions are known and can be matched to the model. The real-world study uses a subregion-supervised oracle as a reference rather than a true causal benchmark. However, the identified causal effect of temperature on gun-violence intensity is also supported by prior literature [39]. Robustness to noise, measurement error, and treatment–context dependence is explored in the additional experiments, but a more systematic benchmarking remains an important direction for future work. 
+
+## 8 Conclusions and Future Work 
+
+The primary contribution of this work is not a single algorithm but the articulation of a problem class : estimating high-resolution causal effects from low-resolution interventions and outcomes by exploiting high-resolution context. We frame this as causal deabstraction , inverting the standard notion of causal abstraction and recasting spatial aggregation as a constraint satisfaction problem, thereby bridging structural causal models and spatial statistics. In many real-world settings such as public health, environmental policy, and education, spatial disaggregation and causal estimation are inseparable, since interventions are implemented at coarse scales but their effects manifest locally. Treating them jointly within a structural causal model makes assumptions explicit, clarifies what is and is not identifiable, and turns causal inference into a tractable optimization problem. CLAM is one concrete instantiation of this framework. It explicitly adjusts for subregional treatment-context confounding using only coarse regional supervision, a challenging problem in ecological inference, and jointly learns latent high-resolution variables such as exact intervention locations and latent spatial effect modifiers alongside the causal mechanism. Across synthetic and real-world studies, we recover meaningful spatial and functional structure from aggregated data, while exposing the inherent limits of the setting: relative structure and causal dependencies are recoverable, but absolute local magnitudes may be systematically overestimated without fine-grained outcome supervision. Because the problem class is, to our knowledge, new in this explicit form, principled baselines are scarce and a complete identification theory does not yet exist. We see both as consequences of stating a new problem, and hope this paper motivates methods that supersede ours. Although this paper primarily proposes a research framework, misuse in high-stakes domains such as epidemiology could cause harm if poorly identified local effects guided interventions or resource allocation; outputs should be accompanied by uncertainty estimates, sensitivity analyses, and domain expertise. Disaggregation itself may also raise privacy concerns, since inferred high-resolution patterns can reveal sensitive local information. Several directions stand out. Theoretically, the most pressing need is a rigorous identifiability analysis: which combinations of aggregation function, contextual diversity, and structural restrictions guarantee recovery of the local mechanism, and which only up to monotone or scale transformations? Method-ologically, principled regularization, hierarchical priors, or Bayesian formulations could control aggregation-induced bias and provide uncertainty quantification. Relaxing the shared-mechanism as-sumption, integrating causal discovery over contextual variables, incorporating instrumental-variable settings, and extending to spatiotemporal aggregation are natural next steps. We hope that framing CLAM as a first concrete entry in a broader problem class makes these extensions easier to pursue. 10 References 
+
+[1] Shruthi Patil, Noah Pflugradt, Jann M Weinand, Detlef Stolten, and Jürgen Kropp. A systematic review of spatial disaggregation methods for climate action planning. Energy and AI , 17:100386, 2024. [2] Yongjian Sun, Kefeng Deng, Kaijun Ren, Jia Liu, Chongjiu Deng, and Yongjun Jin. Deep learning in statistical downscaling for deriving high spatial resolution gridded meteorological data: A systematic review. ISPRS Journal of Photogrammetry and Remote Sensing , 208:14–38, 2024. [3] Alexander A Schuessler. Ecological inference. Proceedings of the National Academy of Sciences , 96(19): 10578–10581, 1999. [4] Saeed Anwar, Salman Khan, and Nick Barnes. A deep journey into super-resolution: A survey. ACM computing surveys (CSUR) , 53(3):1–34, 2020. [5] Bipin Kumar, Kaustubh Atey, Bhupendra Bahadur Singh, Rajib Chattopadhyay, Nachiketa Acharya, Manmeet Singh, Ravi S Nanjundiah, and Suryachandra A Rao. On the modern deep learning approaches for precipitation downscaling. Earth Science Informatics , 16(2):1459–1472, 2023. [6] Timothy C Matisziw, Tony H Grubesic, and Hu Wei. Downscaling spatial structure for the analysis of epidemiological data. Computers, Environment and Urban Systems , 32(1):81–93, 2008. [7] Xinyue Ye, Qunying Huang, and Wenwen Li. Integrating big social data, computing and modeling for spatial social science, 2016. [8] Judea Pearl. Causality . Cambridge university press, 2009. [9] Sander Beckers and Joseph Y Halpern. Abstracting causal models. In Proceedings of the aaai conference on artificial intelligence , volume 33, pages 2678–2685, 2019. [10] Manzil Zaheer, Satwik Kottur, Siamak Ravanbakhsh, Barnabas Poczos, Russ R Salakhutdinov, and Alexander J Smola. Deep sets. Advances in neural information processing systems , 30, 2017. [11] Justin Gilmer, Samuel S Schoenholz, Patrick F Riley, Oriol Vinyals, and George E Dahl. Neural message passing for quantum chemistry. In International conference on machine learning , pages 1263–1272. Pmlr, 2017. [12] Yivan Zhang, Nontawat Charoenphakdee, Zhenguo Wu, and Masashi Sugiyama. Learning from aggregate observations. Advances in Neural Information Processing Systems , 33:7993–8005, 2020. [13] Fabio Massimo Zennaro. Abstraction between structural causal models: A review of definitions and properties. arXiv preprint arXiv:2207.08603 , 2022. [14] Jonas Peters, Peter Bühlmann, and Nicolai Meinshausen. Causal inference by using invariant prediction: identification and confidence intervals. Journal of the Royal Statistical Society Series B: Statistical Methodology , 78(5):947–1012, 2016. [15] Bernhard Schölkopf, Francesco Locatello, Stefan Bauer, Nan Rosemary Ke, Nal Kalchbrenner, Anirudh Goyal, and Yoshua Bengio. Toward causal representation learning. Proceedings of the IEEE , 109(5): 612–634, 2021. [16] James Liley, Samuel Emerson, Bilal Mateen, Catalina Vallejos, Louis Aslett, and Sebastian Vollmer. Model updating after interventions paradoxically introduces bias. In International Conference on Artificial Intelligence and Statistics , pages 3916–3924. PMLR, 2021. [17] Douglas Maraun. Statistical downscaling for climate science. In Oxford Research Encyclopedia of Climate Science . 2019. [18] Siu Lun Chau, Shahine Bouabid, and Dino Sejdinovic. Deconditional downscaling with gaussian processes. 
+
+Advances in Neural Information Processing Systems , 34:17813–17825, 2021. [19] Angel Vázquez-Patiño, Esteban Samaniego, Lenin Campozano, and Alex Avilés. Effectiveness of causality-based predictor selection for statistical downscaling: a case study of rainfall in an ecuadorian andes basin. 
+
+Theoretical and Applied Climatology , 150(3):987–1013, 2022. [20] Riya Dutta and Rajib Maity. Identification of potential causal variables for statistical downscaling models: effectiveness of graphical modeling approach. Theoretical and Applied Climatology , 142(3):1255–1269, 2020. 
+
+11 [21] David A Freedman. Ecological inference and the ecological fallacy. International Encyclopedia of the social & Behavioral sciences , 6(4027-4030):1–7, 1999. [22] David F Rogers, Robert D Plante, Richard T Wong, and James R Evans. Aggregation and disaggregation techniques and methodology in optimization. Operations research , 39(4):553–582, 1991. [23] Eli N Weinstein and David M Blei. Hierarchical causal models. Journal of Machine Learning Research ,27(37):1–73, 2026. [24] Xintong Li, Haoran Zhang, and Xiao Zhou. Spatio-temporal hierarchical causal models. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 40, pages 23230–23238, 2026. [25] Sander Beckers, Frederick Eberhardt, and Joseph Y Halpern. Approximate causal abstractions. In 
+
+Uncertainty in artificial intelligence , pages 606–615. PMLR, 2020. [26] Rune Christiansen, Matthias Baumann, Tobias Kuemmerle, Miguel D Mahecha, and Jonas Peters. Toward causal inference for spatio-temporal data: Conflict and forest loss in colombia. Journal of the American Statistical Association , 117(538):591–601, 2022. [27] Lingxiao Zhou, Kosuke Imai, Jason Lyall, and Georgia Papadogeorgou. Estimating heterogeneous treatment effects for spatio-temporal causal inference: How economic assistance moderates the effects of airstrikes on insurgent violence. arXiv preprint arXiv:2412.15128 , 2024. [28] Mitsuru Mukaigawara, Kosuke Imai, Jason Lyall, and Georgia Papadogeorgou. Spatiotemporal causal inference with arbitrary spillover and carryover effects. arXiv preprint arXiv:2504.03464 , 2025. [29] Zhaoyan Song and Georgia Papadogeorgou. Bipartite causal inference with interference, time series data, and a random network. arXiv preprint arXiv:2404.04775 , 2024. [30] Miruna Oprescu, David Park, Xihaier Luo, Shinjae Yoo, and Nathan Kallus. Gst-unet: A neural framework for spatiotemporal causal inference with time-varying confounding. Advances in Neural Information Processing Systems , 38:17295–17322, 2026. [31] Urmi Ninad, Jonas Wahl, Andreas Gerhardus, and Jakob Runge. Causal discovery on vector-valued variables and consistency-guided aggregation. arXiv preprint arXiv:2505.10476 , 2025. [32] Salvador V Balkus, Scott W Delaney, and Nima S Hejazi. The causal effects of modified treatment policies under network interference. arXiv preprint arXiv:2412.02105 , 2024. [33] Christina Heinze-Deml, Jonas Peters, and Nicolai Meinshausen. Invariant causal prediction for nonlinear models. Journal of Causal Inference , 6(2):20170016, 2018. [34] Mateo Rojas-Carulla, Bernhard Schölkopf, Richard Turner, and Jonas Peters. Invariant models for causal transfer learning. Journal of Machine Learning Research , 19(36):1–34, 2018. [35] Avi Feller and Andrew Gelman. Hierarchical models for causal effects. Emerging trends in the social and behavioral sciences , 1:16, 2015. [36] Ronaldo Dias, Nancy L Garcia, and Alexandra M Schmidt. A hierarchical model for aggregated functional data. Technometrics , 55(3):321–334, 2013. [37] Leo A Goodman. Ecological regressions and behavior of individuals. American sociological review , 18(6): 663, 1953. [38] Gun Violence Archive. Gun violence archive gva. Web Archive, 2015. URL https: //www.loc.gov/item/lcwaN0016293/ . United States. Retrieved from Library of Congress: https://www.loc.gov/item/lcwaN0016293/. [39] Vivian H Lyons, Emma L Gause, Keith R Spangler, Gregory A Wellenius, and Jonathan Jay. Analysis of daily ambient temperature and firearm violence in 100 us cities. JAMA network open , 5(12):e2247207– e2247207, 2022. [40] Robert E. Fay and Roger A. Herriot. Estimates of income for small places: an application of James-Stein procedures to census data. Journal of the American Statistical Association , 74(366):269–277, 1979. [41] Jian Peng, Alexander Loew, Olivier Merlin, and Niko EC Verhoest. A review of spatial downscaling of satellite remotely sensed soil moisture. Reviews of Geophysics , 55(2):341–366, 2017. [42] Carol A. Gotway and Linda J. Young. Combining incompatible spatial data. Journal of the American Statistical Association , 97(458):632–648, 2002. 
+
+12 [43] Ho Chung Leon Law, Dino Sejdinovic, Ewan Cameron, Tim C.D. Lucas, Seth Flaxman, Katherine Battle, and Kenji Fukumizu. Variational learning on aggregate outputs with Gaussian processes. In Advances in Neural Information Processing Systems , 2018. [44] William S. Robinson. Ecological correlations and the behavior of individuals. American Sociological Review , 15(3):351–357, 1950. [45] Gary King. A Solution to the Ecological Inference Problem: Reconstructing Individual Behavior from Aggregate Data . Princeton University Press, 1997. [46] Jakob Runge, Sebastian Bathiany, Erik Bollt, Gustau Camps-Valls, Dim Coumou, Ethan Deyle, Clark Glymour, Marlene Kretschmer, Miguel D Mahecha, Jordi Muñoz-Marí, et al. Inferring causation from time series in earth system sciences. Nature communications , 10(1):2553, 2019. 
+
+## A Identifiability 
+
+Identification in C LAM depends on the target of interest and on the model assumptions. We distinguish causal identification under an assumed graph, statistical identification from aggregate observations, and finite-sample recovery by the optimizer. The last is an estimation problem rather than an identification question. A complete theory for statistical identification from aggregates is beyond the scope of this work. Below, we characterize several tractable special cases and discuss the main remaining open problems. 
+
+A.1 Identifiability of What 
+
+First, causal identification asks whether a quantity such as LOCATE can be expressed in terms of the observed distribution under the assumed causal graph. We treat the graph as given and do not consider causal discovery. This is separate from whether the required fine-grained mechanism can be recovered from aggregate observations. Second, statistical identification asks whether the local mechanism f (·) is uniquely determined by the population distribution of the aggregate data. We are generally interested in the function itself rather than the parameter vector θ, since different parameterizations may represent the same function. Third, one can ask whether the high-resolution outcome map {yi,j } is identified. Even with a known mechanism, exact local outcomes may remain unknown because the individual noise realizations 
+
+ϵi,j and possibly latent inputs c′ 
+
+> i,j
+
+are unobserved. Conversely, aggregates can sometimes determine particular local outcomes without identifying the full mechanism. 
+
+A.2 General Non-Identifiability 
+
+Without restrictions, neither the mechanism nor the high-resolution outcome map is identified from aggregates. Consider a noise-free setting similar to Equation (2) in which no region receives treatment. Take two regions A and B, each with two subregions, with context values (0 , 1) and (0 .5, 0.5) , respectively, and suppose both observed regional aggregates equal 1.If both the local mechanism fθ (·) and the aggregation function gϕ(·) are unknown, infinitely many pairs are compatible with these observations. For example, fθ (0 , c ) = c together with sum aggre-gation yields subregional outcomes (0 , 1) for region A and (0 .5, 0.5) for region B. Equally, the constant mechanism fθ (0 , c ) ≡ 1 together with mean aggregation yields (1 , 1) for both regions. Both explain the observed aggregates while implying different high-resolution outcomes. The ambiguity remains even when the aggregation function is known. Suppose gϕ(·) is a sum. Then 
+
+fθ (0 , c ) = c is compatible with the data, but so is fθ (0 , c ) ≡ 0.5. The former yields (0 , 1) in region 
+
+A, whereas the latter yields (0 .5, 0.5) , while both sum to 1.
+
+A.3 A Saturated View 
+
+A useful limiting case is to think of fθ (·) as a dictionary lookup: each distinct observed input 
+
+(ti,j , c i,j ) is assigned an independent unknown value. With known sum aggregation and no noise, the 13 aggregate observations define a linear system 
+
+Y = Av,
+
+where v contains the unknown values of fθ (·) at the observed inputs. Identification is therefore a rank question: the local values are identified exactly when A has full column rank. Otherwise, multiple local-value assignments produce the same aggregates. A neural network departs from this saturated case by tying values at different inputs together through its parameterization and inductive bias. The linear model in Equation (3) imposes an even stronger restriction; there, identification analogously reduces to full rank of the corresponding low-dimensional design matrix. 
+
+A.4 Aggregate Regression 
+
+The saturated view above is deliberately pessimistic because it treats the value at every distinct input as unrelated. With a shared mechanism and sufficiently varied aggregate observations, much more can be identified. This is closely related to learning from aggregate observations as studied by Zhang et al. [12]. The additive model in Equation (2) has a direct connection to their framework. Consider the special case of known sum aggregation, fixed M , additive homoscedastic Gaussian noise, no latent c′, and the sampling assumptions of Zhang et al. [12]. Since fixed-size sum and mean aggregation differ only by a constant scaling, the resulting aggregate MSE is equivalent to their regression-from-mean objective. Let [W0] denote the equivalence class of all parameter values that are observationally equivalent to 
+
+W0, meaning that they induce the same population likelihood. Their Proposition 7 characterizes this class as 
+
+[W0] = {W ∈ W : f (X; W ) = f (X; W0) a.e. } . (5) Thus, the parameterization W0 need not be unique, but all observationally equivalent parameters represent the same function almost everywhere under the distribution of X.There is one subtlety in translating this result to our setting. Treatment is assigned at the regional level and is therefore shared by all subregions in a region. The result is therefore most naturally interpreted separately within each treatment arm. For a fixed t ∈ { 0, 1}, define 
+
+ft(c) = f (t, c ).
+
+If the subregional contexts within that treatment arm satisfy the sampling assumptions of Zhang et al. [12], Proposition 7 identifies ft(·) almost everywhere under the corresponding context distribution. Consequently, recovering both f0(c) and f1(c) does not automatically identify LOCATE everywhere. The contrast 
+
+f1(c) − f0(c)
+
+is supported by this result only where the context distributions of the treated and untreated populations overlap. Outside this overlap, a flexible model relies on interpolation or extrapolation induced by its function class rather than on the identification result. The independence assumptions are also restrictive for spatial data. The model of Zhang et al. [12] assumes conditional independence of the individual targets and treats the features within an aggregate as independent draws. Their proof of Proposition 7 uses this independence to factorize the cross terms in the population loss. Spatially structured covariate compositions need not satisfy these assumptions. Zhang et al. [12] themselves note that their independence assumption can fail when observations are collected group by group, explicitly naming spatially aggregated data as an example. Their theory therefore provides a useful base case and suitable language for functional equivalence, but it does not cover the full spatial setting considered here. The counterexample above does not contradict this result: it uses only two fixed aggregate observa-tions, which leave multiple mechanisms possible. Under the sampling assumptions of Zhang et al. [12], many independently varying aggregates provide additional constraints that identify the shared function in the population limit. 14 A.5 Open Problems 
+
+The cases above provide a general counterexample and tractable results for restricted settings. Several important aspects of the general model remain open. 
+
+Spatio-Temporal Extensions and Latent Structure. Repeated spatio-temporal observations pro-vide different information from additional independent aggregate groups. The same spatial units may recur over time with largely persistent spatial structure. A latent quantity c′ that is shared across observations therefore enters many aggregate constraints, whereas an idiosyncratic noise realization 
+
+ϵi,j enters only one observation. Repeated observations can consequently make persistent latent structure estimable while observation-specific noise remains unrecoverable. Exp. 3 illustrates this empirically: the same latent vegetation field contributes to regional outcomes over many time points, allowing constraints on it to accumulate. We do not claim a general identification theorem for this setting; recovery depends on temporal variation, the functional form, and how the latent variable enters the mechanism. 
+
+Unknown Aggregation. If gϕ(·) is unknown and learned jointly with fθ (·), different combinations of the local mechanism and aggregation function may induce the same observed regional outcomes, as illustrated by the first counterexample. Identification therefore requires restrictions on at least one of these functions, sufficient variation to distinguish them, or prior knowledge of the aggregation process. This is one reason why known sum or mean aggregation is substantially easier than the unrestricted model in Equation (1). 
+
+Nonlinear Aggregation and Noise. Linear aggregation has the convenient property that, with additive zero-mean noise, aggregation commutes with expectation. For a nonlinear aggregation function this generally fails: 
+
+gϕ
+
+
+
+{E[yi,j | T, C ]}j
+
+̸
+
+= E [gϕ ({yi,j }j ) | T, C ] . (6) Applying a nonlinear aggregator directly to noise-free conditional-mean predictions therefore does not generally target the conditional mean of the observed aggregate. A statistically correct objective must propagate the noise through the aggregation, for example through the induced likelihood or a Monte Carlo approximation. This removes the objective mismatch but does not by itself establish identification. If fθ (·), gϕ(·), or the noise distribution are simultaneously unknown, further observational equivalences may remain. 
+
+Causal Structure. The statistical arguments above concern recovery of a function from aggregate data and do not, by themselves, give that function a causal interpretation. We do not attempt to discover the causal graph. Instead, we assume a graph and ask whether, under that graph, the recovered function corresponds to the desired interventional quantity. For the baseline motif, where C is an observed effect modifier and treatment is unconfounded conditional on the relevant variables, f (t, c ) can represent the conditional interventional mean required for LOCATE. If C is a confounder, the treatment-assignment mechanism must be handled appropriately. If C is a mediator or collider, conditioning on it has a different causal meaning and may not correspond to the desired treatment effect. Thus, changing the assumed causal structure need not change the aggregate regression problem mathematically, but it changes which recovered functions correspond to identified causal estimands. 
+
+Identification Versus Optimization. Even when the population objective identifies the desired function, this does not imply that a finite-sample non-convex optimizer will recover it. Neural-network parameterization, jointly inferred latent variables, and learned aggregation functions may create multiple local optima or flat regions of the objective. Conversely, failure of one optimizer to recover the ground truth does not itself imply non-identifiability. We therefore treat optimization stability as an empirical question separate from identification. In Exp. 1, repeated random initializations produce similar LOCATE estimates when the aggregate loss is 15 low, but this is evidence about the estimator in that experiment, not proof that the population problem is identified. 
+
+A.6 Practical Diagnostics 
+
+No finite-sample diagnostic can prove structural identification. Nevertheless, several checks can reveal that the aggregate observations do not sufficiently constrain the fine-grained quantity of interest. We recommend comparing recovered LOCATE estimates across random restarts, architectures, regu-larization choices, and plausible aggregation or noise specifications. Large disagreement is evidence of an underdetermined problem. Agreement is reassuring but does not establish identification, since the same inductive bias may repeatedly select the same solution. External validation against higher-resolution observations should be used whenever available. Sensi-tivity analyses under plausible violations of the causal assumptions provide complementary infor-mation; our hidden-confounding ablation is one example. Bootstrap intervals quantify sampling variability but should not be interpreted as a test of structural identification. 
+
+Summary of Claims. The discussion can be summarized in three levels. 1. For the linear model in Equation (3), identification reduces to a rank condition on the aggregate design matrix. 2. For the additive model in Equation (2), the i.i.d. mean-aggregation special case connects directly to the functional consistency result of Zhang et al. [12]. Within each treatment arm, their result identifies the conditional-mean function almost everywhere under the corresponding context distribution. Identification of LOCATE additionally requires sufficient overlap between the treatment arms. 3. For the general model in Equation (1), including dependent spatial designs, structured latent variables, unknown or nonlinear aggregation, and extrapolation outside the observed treatment–context support, we do not claim a general identification theorem. Recovery in these regimes is studied empirically and remains an important theoretical problem. Causal identification under the assumed graph is separate from all three statements: even a statistically identified fine-grained mechanism has the desired causal interpretation only under the assumptions encoded by that graph. 
+
+## B Causal Deabstraction Framework 
+
+In this section, we situate our work within the broader causal inference literature. Specifically, we frame this as a novel instance of causal deabstraction [9, 13]. Our methodology is informed by the framework of SCMs and is guided by the principle of ICM. 
+
+B.1 Structural Causal Framework 
+
+The structural causal model introduced in Section 3.1 can be formalized in generative form as follows. Each spatial unit (region) i ∈ { 1, . . . , N } is composed of M subregions indexed by j ∈ { 1, . . . , M }.For each subregion (i, j ), we posit the following SCM: 
+
+ci,j observed (exogenous) 
+
+ϵi,j ∼ Pϵ
+
+ti,j = Ti ∈ { 0, 1}
+
+yi,j = fθ (ti,j , c i,j , ϵ i,j )
+
+bYi = gϕ({yi,j }Mj=1 )
+
+Here, ci,j denotes a high-resolution contextual covariate for subregion j within region i, which is observed and exogenous, meaning it is not caused by T or Y , and ϵi,j represents exogenous noise drawn from Pϵ. The binary intervention ti,j = Ti ∈ { 0, 1} is assigned at the regional level and shared across all subregions. The function fθ (·) encodes the local causal mechanism, shared across 16 all subregions, that maps the intervention, context, and noise to the subregional outcome yi,j . The aggregation function gϕ(·) maps the collection of subregional outcomes {yi,j }Mj=1 to the regional outcome bYi.In the main section, we considered simplified cases, such as sum aggregation, additive noise, and the absence of hidden confounders, to provide intuition. The formulation here generalizes that view by expressing the structural causal model in explicit stochastic form, specifying how interventions, contextual variables, and noise are generated, while making clear that both fθ (·) and gϕ(·) are shared across regions. 
+
+B.2 Invariant Causal Mechanism Assumption 
+
+A central assumption in C LAM is that the causal function fθ (·) is invariant across all subregions and regions. That is, while the covariates {ci,j } may vary across regions due to differences in local composition, the functional form fθ (t, c ) does not change. This assumption reflects the principle of invariant causal mechanisms [15, 14, 33], which posits that causal relations are stable across environments unless directly intervened upon. We treat each region i as an environment defined by its observed covariate composition ci,j ∗ j = 1 M ,but governed by a shared mechanism f ∗ θ(·). The variability in covariate composition across regions provides information for estimating fθ (·) from the observed aggregated outcomes bYi.
+
+B.3 Deabstraction via Invariance 
+
+We propose to view the task of estimating fθ (·) from aggregated outcomes as an instance of causal deabstraction , that is, inferring a latent, high-resolution causal model that is consistent with a lower-resolution aggregated model. This perspective is dual to recent work on causal abstraction [9, 13], which studies when a coarse model preserves the counterfactual semantics of a fine-grained one. Here, we reverse the direction: we seek to recover a fine-grained causal mechanism that is compatible 
+
+with the observed coarse-level effects. This is possible due to two key properties: 1. The aggregation function gϕ(·) is consistent and applied uniformly across regions. 2. The observed covariate compositions {ci,j }Mj=1 differ across regions, which induces identifi-able variation in the aggregates bYi under the shared mechanism fθ (·).Given sufficient diversity and the assumption of causal invariance, the aggregated outputs provide a supervisory signal to recover the latent causal function (although we do not provide a general correctness guarantee). 
+
+B.4 Causal Semantics via Do-Calculus 
+
+Under the assumption of no hidden confounding, the causal effect of the intervention Ti on a subregional outcome yi,j is identified via the backdoor criterion: 
+
+E[yi,j | do (Ti = t), c i,j ] = 
+
+Z
+
+fθ (t, c i,j , ϵ i,j ) p(ϵi,j ) dϵ i,j 
+
+In Exps 1–4, we assume Ti ⊥⊥ ϵi,j | ci,j , and that Ti is either randomized or independent of Ci,j .Under this setting, the expectation can be approximated via observational data. However, because only the aggregate outcome bYi is observed, we must rely on the consistency constraint: 
+
+bYi ≈
+
+> M
+
+X
+
+> j=1
+
+fθ (Ti, c i,j )
+
+The training procedure thus finds the function fθ (·) that jointly explains all observed aggregates under this constraint, while enforcing that fθ (·) is invariant across regions. In this sense, the estimation of 
+
+fθ (·) becomes a constraint satisfaction problem, where causal invariance and aggregation consistency define the feasible solution space. In Exp 5, this conditional independence assumption is deliberately violated by construction, and valid estimation requires explicitly modeling the treatment allocation mechanism. 17 B.5 Implications 
+
+The assumption of an invariant subregional mechanism plays a central role in enabling causal inference in our disaggregated setting. By treating the coarse observations as aggregates of fine-grained causal effects and leveraging variation in covariate compositions, C LAM performs inference not merely on statistical associations but on causal mechanisms that are meaningful and robust to changes in population structure. All in all, we contribute a formal and algorithmic instantiation of 
+
+causal deabstraction from low-resolution outcomes and high-resolution covariates. 
+
+## C Extended Related Work 
+
+Our work builds on and extends three main strands of research: spatial disaggregation, causal inference under aggregation, and causal abstraction. 
+
+Statistical Downscaling and Disaggregation. Statistical downscaling methods aim to infer high-resolution estimates from coarse data, using spatial interpolation, small area estimation [40], or learning-based techniques. These have been widely applied in climate and environmental sciences [17, 41, 42], including recent work on probabilistic downscaling using Gaussian processes [18, 43]. However, such methods typically model associational patterns and do not support interventional or counterfactual reasoning. To address this, some recent approaches integrate causal reasoning into downscaling pipelines, e.g., by identifying causally relevant predictors [19, 20]. Yet, these still rely on observable variables and assume access to relatively fine-grained information. In contrast, our approach estimates high-resolution causal effects using only aggregated outcome data and high-resolution covariates. The challenges of reasoning with aggregate data are well-documented. Classical results on the ecological fallacy show that aggregated statistics may obscure or even invert causal relationships [44, 21, 45]. Earlier work on aggregation and disaggregation in optimization similarly highlights the complexity introduced when latent heterogeneity is present but unobserved [22]. C LAM explicitly addresses these challenges by modeling the aggregation process and learning disentangled causal effects at the subregional level. 
+
+Causal Deabstraction. Structurally, our approach is inspired by recent work on causal abstraction, which studies mappings between causal models at different levels of granularity [9, 25, 13]. These works formalize when such mappings preserve counterfactual or interventional semantics, but do not address learning disaggregated effects from data. Finally, our work relates to spatiotemporal causal discovery [46], but differs by operating in a setting where temporal data is limited and only aggregate observations are available. 
+
+Graph Neural Networks. Conceptually, our architecture is related to message-passing graph neural networks [11]. In a GNN, pairwise messages are computed and aggregated within a single update step. Similarly, our model learns an update function fθ (·) that operates on ordered inputs, and optionally an aggregation function gϕ(·) that is permutation-invariant, akin to a Deep Sets model [10]. As in GNNs, we share the parameters of the structural function across nodes or regions. 
+
+Invariant Causal Mechanisms. Our work also relates to the principle of invariant causal mecha-nisms , which posits that the functional relationships between variables remain stable across different environments or interventions [14, 15]. This idea has been used for causal discovery [33] and domain generalisation [34], and is particularly relevant for spatial disaggregation where intervention effects may vary locally but share stable dependencies on contextual covariates. C LAM incorporates this principle by enforcing that the learned local causal mechanism fθ (·) is shared across all subregions while allowing spatial heterogeneity to emerge through contextual variables. 
+
+Hierarchical Bayesian Model. The design also parallels hierarchical Bayesian models [35, 36], where group-specific effects are drawn from a shared prior distribution and information is partially pooled across groups. In C LAM , the local mechanism fθ (·) plays the role of the shared prior, and contextual covariates capture structured variation across subregions, allowing data-sparse subregions to benefit from patterns learned in others. 18 Spatiotemporal Causality. Spatiotemporal causal inference has received growing attention as researchers seek to understand how interventions and their effects evolve across both space and time. A recent work presents a causal framework for studying the interplay between conflict and forest loss in Colombia, emphasizing the need to model spatial and temporal dependencies jointly [26]. Extending this perspective, methods proposed in [27] estimate heterogeneous treatment effects in settings where economic assistance moderates the impact of airstrikes on insurgent violence, while approaches introduced in [28] accommodate arbitrary spill-over and carryover effects across space and time. Network-based settings with temporal dynamics have also been explored. In [29] the authors study bipartite causal inference with interference in time series data, and in [32] methods are developed to analyse the causal effects of modified treatment policies under network interference. Recent methodological innovations include GST-UNet [30], a deep learning architecture for spatiotemporal causal inference under time-varying confounding, and consistency-guided aggregation for causal discovery in multivariate spatiotemporal data introduced in [31]. Together, these works highlight the diversity of approaches to spatiotemporal causality, spanning structural models, interference-aware estimation, and machine learning-driven inference. 19 Baseline: 
+
+Details of Exp. 1: Political Campaigning      
+
+> Performance LOCATE MAE
+> CLAM Ground Truth
+> Counterfactual
+> CLAM Ground Truth
+> Intervention:
+> ABC
+> CLAM Baseline
+> LOACATE MAE
+> Training Loss
+> Epoch Epoch
+
+Figure 5: Evaluation of the learned outcomes, causal effect estimates, counterfactual predictions, and training behavior. 
+
+## D Details of Main Experiments 
+
+D.1 Exp. 1: Political Campaigning Context. We consider a simple political campaigning setting in which a candidate either spends campaign resources in a region or does not. The treatment is binary at the regional level and is inherited by all subregions. The outcome is the candidate’s relative improvement, but it is observed only as a regional aggregate. The effect of campaigning depends on subregional context, here interpreted as standardized wealth. Thus, two regions can have similar aggregate context and similar aggregate outcomes while still containing different subregional causal effects. 
+
+Setup. We use N = 100 regions arranged on a 10 × 10 grid. Each region contains M = 16 
+
+subregions arranged on a 4 × 4 grid. The treatment matrix is T ∈ { 0, 1}N ×M . Exactly half of the regions are treated, and within a treated region all subregions have treatment value 1; within a control region all subregions have treatment value 0.The context matrix C ∈ RN ×M contains one continuous contextual value per subregion. We sample the entries from a standard Gaussian distribution and then subtract the mean within each region, so that each row of C has mean zero. This makes the regional average context uninformative by construction. We then randomly swap entries across the matrix to introduce additional variation while preserving the overall structure. The observed outcome is generated at the subregional level and then aggregated to the region level by averaging. The ground-truth outcome function is 
+
+f (t, c ) = 
+
+1, t = 0 ,
+
+interp( c), t = 1 ,
+
+where interp( c) is the piecewise linear interpolation through the anchor points 
+
+{(−2, 2) , (0 , 1) , (1 , 0) }.Thus, untreated subregions have outcome 1, while treated subregions have an outcome that depends nonlinearly on the local context c. The noisy subregional outcome is 
+
+yi,j = f (ti,j , c i,j ) + ϵi,j , ϵi,j ∼ N (0 , 0.12),
+
+and the observed regional outcome is 
+
+bYi = 1
+
+M
+
+> M
+
+X
+
+> j=1
+
+yi,j .
+
+The ground-truth local causal effect, which we use only for evaluation, is 
+
+Ei,j = f (ti,j , c i,j ) − f (0 , c i,j ).
+
+20 Ablation Study of Exp. 1 
+
+> Mean LOCATE MAE (over 5 seeds)
+> Variability Between Regions
+> Variability Within Regions
+
+Figure 6: We evaluate the effect of varying the variance of regional context means and, for each fixed context mean, the inter-regional variance. Results are averaged over 5 random seeds for each parameter combination, and uncertainty bounds represent the corresponding variability. 
+
+Training. We train a small neural network fθ (t, c ) with two inputs, treatment and context, and one scalar output. The model has two hidden layers with 32 hidden units each, ReLU activations, dropout with probability 0.05 , and is trained with AdamW using learning rate 10 −3 and weight decay 10 −3
+
+for 4000 epochs. Importantly, C LAM is trained only from the regional aggregate signal. For each region, we average the model’s subregional predictions and minimize 
+
+LCLAM = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+ 1
+
+M
+
+> M
+
+X
+
+> j=1
+
+fθ (ti,j , c i,j ) − bYi
+
+
+
+> 2
+
+.
+
+Baseline. We compare against a uniform disaggregation baseline. Since the true subregional outcomes are not observed, this baseline assigns the same regional outcome to every subregion, 
+
+eyi,j = bYi.
+
+It then trains the same neural network architecture using an element-wise loss, 
+
+Lbase = 1
+
+N M 
+
+> N
+
+X
+
+> i=1
+> M
+
+X
+
+> j=1
+
+(fθ (ti,j , c i,j ) − eyi,j )2 .
+
+This gives the baseline a dense subregional loss signal, but the signal is based on a uniformity assumption that removes the within-region heterogeneity needed to recover local causal effects. 
+
+Evaluation. We evaluate whether the learned model can recover the fine-grained causal structure from aggregate observations (Figure 5). We report the training loss and LOCATE MAE (cf. Eq. (4)) over training (Figure 5a). Confidence intervals (95%) are bootstrapped and based on 20 runs. As expected, both decrease for C LAM , while the baseline cannot learn the causal mechanism. We also report the full LOCATE matrix, comparing the ground truth with the one inferred by CLAM , in Figure 5b. The recovered causal effect is almost indistinguishable from the ground truth, while the baseline, as expected, cannot reconstruct the underlying disaggregation. Lastly, we construct a counterfactual treatment matrix (Figure 5c) by inverting the observed treatment assignment, T cf = 1 − T , and compare the ground-truth counterfactual outcome f (T cf , C ) with the neural-network estimate fθ (T cf , C ). This tests whether the learned mechanism supports coherent counterfactual prediction beyond the observed treatment assignment. 
+
+Ablation. To test when this recovery is possible, we repeat the experiment while varying two properties of the context matrix. The first is the standard deviation of the regional context means, denoted σreg . The second is the standard deviation of context values within each region, denoted 
+
+σsubreg . For each pair (σreg , σ subreg ), we run the experiment over multiple random seeds and average the final LOCATE MAE. This ablation shows that high variability within regions is associated with a smaller error. 21 A 
+
+> Details of Exp. 2: Unknown Intervention Location
+> Performance
+> Treatment Reconstruction MAE
+> Training Loss
+> Epoch
+> Parametric Function (high opacity)
+> Neural network (low opacity)
+> B
+> Estimated Treatment Locations (errors in purple)
+> Parametric Function Neural Network
+
+Figure 7: Performance of the training loss and MSE of the local-effect estimation, alongside ground-truth causal effects, estimated causal effects, and the corresponding estimation errors across subre-gions. 
+
+D.1.1 Ablation of Exp. 1: Political Campaigning 
+
+Our setting targets low-variability aggregate regimes, where regional outcomes are nearly constant and the inverse problem is underdetermined: many fine-grained causal explanations can yield indis-tinguishable regional observations. The key idea is that high-dimensional subregional covariates can restore information by exposing the shared causal mechanism fθ (·) to diverse contextual compo-sitions within each aggregate unit. Exp. 1 and the corresponding ablation support this mechanism: as subregional heterogeneity increases, recovery of the true causal effect improves, even when ag-gregate outcomes remain similarly uninformative. By contrast, varying regional-level heterogeneity has a weaker effect, indicating that the gains do not come primarily from more variable aggregate outcomes, but from richer within-region contextual structure. See Figure 6 for details. Thus, causal deabstraction becomes possible in otherwise weakly identified settings when subregional covariate variation, together with an invariant causal mechanism, provides enough compositional diversity to distinguish the underlying fine-grained causal function. 
+
+D.2 Exp. 2: Public School Funding vs Improvement in Outcomes Context. We examine how public spending on schools affects educational outcomes when the exact locations of the expenditures are unknown . Each administrative region contains multiple subregions, interpreted here as school districts, but only one district in a treated region receives a funding intervention. At the regional level, we only observe an aggregated treatment indicator and the aggregated outcome, not the specific district that received the intervention. The goal is to infer the high-resolution intervention locations from aggregated data. The subregional context consists of high-resolution demographic and economic data, represented here by a normally distributed wealth score . We hypothesize that the effect of school funding depends on this wealth score through a global shift and scale. 
+
+Setup. We assume N = 30 × 30 = 900 regions, each with M = 2 × 2 = 4 subregions. We simulate: • A high-resolution intervention matrix T ∈ RN ×M , where ti,j indicates whether subregion j
+
+of region i receives the funding intervention. • A regional intervention vector bT ∈ RN , where bTi = PMj=1 ti,j is the absolute intervention intensity in region i.• A high-resolution context matrix C ∈ RN ×M encoding the socioeconomic status of each subregion, where smaller ci,j values represent lower socioeconomic status and larger ci,j 
+
+values represent higher socioeconomic status. • A high-resolution noise matrix ϵ ∈ RN ×M with i.i.d. entries ϵi,j ∼ N (0 , σ 2), where 
+
+σ2 = 0 .005 .22 The intervention matrix T is generated by: 1. Initializing all entries to zero. 2. Randomly selecting 50% of the regions for treatment. 3. For each treated region i, choosing exactly one subregion j ∈ { 1, . . . , M } uniformly at random and assigning ti,j = 1 .The context matrix C is sampled i.i.d. from a standard normal distribution: 
+
+ci,j ∼ N (0 , 1) .
+
+The outcome variable is given by the ground-truth functional relationship 
+
+yi,j = fθ (ti,j , c i,j ) + ϵi,j = ( θshift − ci,j ) · θscale · ti,j + ϵi,j ,
+
+with ground-truth parameters 
+
+θshift = 4 .2, θscale = 1 .23 .
+
+The observed regional outcome is aggregated by summation: 
+
+bYi =
+
+> M
+
+X
+
+> j=1
+
+yi,j .
+
+As in Exp. 1, we assume no hidden confounding, no time-series effects, treatment assignment independent of context, and aggregation-based regional observations. 
+
+Training. We train a model to estimate both the latent subregional intervention assignments and the parameters of the causal effect function. The model has: • N × M = 900 × 4 latent treatment logits, one vector of length M for each region. • Two scalar parameters {θshift , θ scale } specifying the parametric form of fθ (·).The learned causal effect function is parametrized as 
+
+fθ (ti,j , c i,j ) = ( θshift − ci,j ) · θscale · ti,j .
+
+To ensure a positive scale parameter, θscale is represented through a softplus transformation. An auxiliary preprocessing function is applied to the latent treatment logits using the Gumbel-Softmax relaxation. This produces a soft row-wise assignment over the M subregions. The resulting assignment is processed so that untreated rows remain all-zero and treated rows have approximately one active subregion. During training, the Gumbel-Softmax temperature is exponentially annealed from 2.0 to 0.1.In the forward pass: 1. Sample a mini-batch of region indices. 2. Process the latent treatment logits using the Gumbel-Softmax relaxation to obtain an estimate of the high-resolution treatment matrix T for the mini-batch. 3. Compute predicted subregional outcomes: 
+
+μi,j = fθ
+
+ bti,j , c i,j 
+
+ .
+
+4. Aggregate to regional predictions by summation: 
+
+μi =
+
+> M
+
+X
+
+> j=1
+
+μi,j .
+
+5. Compare the regional prediction with the observed regional outcome bYi using the MSE loss. We optimize all parameters jointly using AdamW with learning rate 10 −4. Training is performed for 
+
+200 ,000 epochs with a fixed random seed. 23 Details of Exp. 3: Spatiotemporal Effects of Heat Waves on School Performance         
+
+> Non-Linear Mapping Linear Scaling
+> ABCD
+> GT Confounding Estimated Confounding Performance GT Confounding Estimated Confounding Performance
+
+Figure 8: Ground-truth vegetation index, the corresponding estimated latent effect-modifier fields, and joint plots of training loss and vegetation MSE. Results are shown for two settings: linear scaling (left) and MLP learning (right). 
+
+Neural Network. Additionally, we train a neural-network variant following the same treatment-assignment procedure. In this version, the causal effect function fθ (·) is implemented as a feed-forward neural network taking (ti,j , c i,j ) as input. The network has three hidden layers with hidden dimension 16 and tanh activations: 
+
+(ti,j , c i,j ) 7 → MLP θ (ti,j , c i,j ).
+
+To stabilize the local-effect interpretation, the model uses the centered form 
+
+fθ (ti,j , c i,j ) = MLP θ (ti,j , c i,j ) − MLP θ (0 , c i,j ),
+
+which enforces fθ (0 , c i,j ) ≈ 0. The latent treatment indicators are processed in the same way as in the parametric model, using Gumbel-Softmax with temperature annealing from 2.0 to 0.1.The neural-network model is also trained for 200 ,000 epochs using AdamW with learning rate 10 −4
+
+and mini-batches containing 20% of the regions. 
+
+Results. Figure 7a shows the evolution of the mini-batch training loss and the quality of the treatment-location reconstruction (measured as MAE). Both the neural network and the parametric function recover the locations reasonably well. We however find that this depends on the noise level and on proper temperature annealing. The final reconstructed locations are shown in Figure 7b, where incorrect predictions are shown in purple. 
+
+D.3 Exp. 3: Spatiotemporal Effects of Heat Waves on School Performance Context. In this experiment, we examine the impact of extreme heat events (“heat waves”) on educational outcomes across both space and time. We model a spatial grid of N = 100 regions, each containing M = 9 subregions, observed over W = 48 consecutive months. The intervention represents the occurrence of a heat wave in a given subregion and month. Heat waves have a detrimental effect on school performance, but the strength of this effect depends on the educational background of parents in the subregion and on an unobserved environmental factor, vegetation coverage, which mitigates the impact of heat. The observed context for each subregion is a categorical indicator of parents’ education level, taking one of three values ( low = 1, medium = 2, high = 3), which evolves slowly over time to reflect gradual demographic changes. The unobserved context is a fixed vegetation index between 0 and 1 for each subregion, representing the proportion of green cover and its protective effect against heat. The intervention process is binary at the subregional level, with most regions remaining unaffected in a given month, but some experiencing heat waves simultaneously in all their subregions, corresponding to large-scale weather patterns. The outcome, measured as a monthly change in school performance for each subregion, is driven by the interaction between the intervention, parents’ education level, and the vegetation coverage. Subregions with lower parental education are more strongly affected, while vegetation dampens the negative effect. The challenge in this experiment is to recover both the mapping from context, intervention, and unobserved effect modifier to outcomes, and the vegetation values themselves, given only aggregated regional-level outcomes over time. 24 Setup. We model N = 100 regions, each with M = 9 subregions, observed over W = 48 discrete time points (months). For each month w ∈ { 1, . . . , W }, we define: • A high-resolution binary treatment matrix T (w) ∈ { 0, 1}N ×M , where t(w) 
+
+> i,j
+
+= 1 indicates that subregion j of region i is experiencing a heat wave in month w. In our data generation, each row of T (w) is either all zeros (probability 0.7) or all ones (probability 0.3), corresponding to large-scale heat events affecting entire regions. • An observed context matrix C(w) ∈ { 1, 2, 3}N ×M encoding the categorical education level of parents in each subregion. At w = 1 , these values are sampled uniformly. For w > 1,
+
+C(w) is obtained from C(w−1) by flipping each entry to a random category with probability 
+
+0.05 , capturing slow demographic change. • An unobserved covariate context matrix U ∈ [0 , 1] N ×M containing fixed vegetation index values for each subregion, drawn uniformly from [0 , 1] and constant across all months. • A noise matrix ϵ(w) ∈ RN ×M with i.i.d. entries ϵ(w) 
+
+> i,j
+
+∼ N (0 , σ 2), with σ2 = 0 .02 .The subregional outcome is generated as: 
+
+y(w) 
+
+> i,j
+
+= fθ
+
+
+
+t(w) 
+
+> i,j
+
+, c (w) 
+
+> i,j
+
+, u i,j 
+
+
+
++ ϵ(w) 
+
+> i,j
+
+,
+
+where c(w) 
+
+> i,j
+
+is the parents’ education category, ui,j is the vegetation index, and: 
+
+fθ
+
+
+
+t(w) 
+
+> i,j
+
+, c (w) 
+
+> i,j
+
+, u i,j 
+
+
+
+=
+
+
+
+0 if t(w) 
+
+> i,j
+
+= 0 ,
+
+ 10 · 1[c(w) 
+
+> i,j
+
+= 1] + 5 · 1[c(w) 
+
+> i,j
+
+= 2] + 1[c(w) 
+
+> i,j
+
+= 3]  · (1 − ui,j ) if t(w) 
+
+> i,j
+
+= 1 .
+
+This function specifies that the subregional outcome depends on whether a heat wave occurs and, if so, how vulnerable the subregion is based on the education level of parents and the vegetation coverage. If t(w) 
+
+> i,j
+
+= 0 , the effect is zero. If t(w) 
+
+> i,j
+
+= 1 , the impact is determined by the categorical education level with coefficients (10 , 5, 1) corresponding to low, medium, and high parental education, respectively, and is scaled by (1 − ui,j ), which reduces the effect in proportion to the amount of vegetation present. The indicator 1[·] selects the appropriate coefficient for each subregion. The regional outcome at month w is obtained via mean aggregation. This setup induces a spatiotem-poral causal problem with heterogeneous treatment effects driven by both observed and unobserved context, where the latter must be recovered from aggregated outcomes across multiple time points. 
+
+Training. We train a model to jointly estimate: 1. The mapping fθ (·) from observed context, intervention, and vegetation index to subregional outcomes, 2. The static vegetation index values U ∈ [0 , 1] N ×M for all subregions. The function fθ (·) is implemented as a 4 layer multilayer perceptron (MLP) with hidden dimension 
+
+16 and a dropout rate of 0.1 after the second hidden layer. Its inputs for each subregion are: 
+
+z(w) 
+
+> i,j
+
+=  1[c(w) 
+
+> i,j
+
+= 1] , 1[c(w) 
+
+> i,j
+
+= 2] , 1[c(w) 
+
+> i,j
+
+= 3] , t (w) 
+
+> i,j
+
+, u i,j 
+
+,
+
+where ui,j is the vegetation index. The output is the predicted outcome y(w) 
+
+> i,j
+
+for that subregion and month. In the forward pass for a given month w:1. The model takes as input T (w), C(w), and U ,2. The MLP evaluates fθ (·) at each (i, j ) to produce predicted subregional outcomes y(w) 
+
+> i,j
+
+,25 3. These are aggregated to the regional level via mean aggregation. 4. The primary loss is the MSE between predicted and observed regional outcomes. Training proceeds over all months in random order at each epoch. The total parameter set consists of the MLP weights θ and the vegetation matrix U . We optimize using Adam with a learning rate of 
+
+0.001 for 10 ,000 epochs, with fixed random seeds for reproducibility. Loss curves for Lregion and the MSE of Lveg are recorded throughout training. 
+
+Results. 
+
+1. Figure 8a shows the loss curves and vegetation MSE under the linear scaling parameter-ization. Both training loss and MSE decrease rapidly, and the final error is very small, indicating near-perfect recovery of the unobserved covariate. 2. Figure 8b compares the ground-truth vegetation field to the estimated vegetation under linear scaling. The two maps are almost indistinguishable, confirming that the restricted functional form matches the data-generating process and allows highly accurate recovery. 3. Figures 8c and d present the same results for the non-linear MLP parameterization. While the model still recovers meaningful structure in the vegetation, the MSE remains orders of magnitude higher than in the linear case, and deviations from the ground truth are clearly visible in the estimated field. This is notable since the true vegetation values are not necessarily identifiable; the MLP could instead store a transformed version and map them back during the forward process. 4. Overall, these results demonstrate that the model can reconstruct regional outcomes while also uncovering hidden drivers of heterogeneity. The comparison between linear and non-linear parameterizations highlights the trade-off: structural restrictions yield more accurate recovery when they match the true mechanism, while flexible approximators such as MLPs still learn the vegetation but with reduced precision. 26 Observed Incidents (Week 51) CLAM Recovered Rate Granular Data based Rate 
+
+> 0.00 0.05 0.10 0.15 0.20 0.25 0.30 Predicted Rate / Intensity
+
+Figure 9: Comparison of learned spatial intensities for week 51. Both models are rendered on a shared color scale across the √N · M × √N · M grid, alongside the observed events for that week. 
+
+## E Real-World Case Study Details: Effect of Heat on Gun Violence 
+
+This section provides the full details of the real-world study summarized in Section 6.2. The notation follows Section 2: regions are indexed by i ∈ { 1, . . . , N }, subregions or cells by j ∈ { 1, . . . , M },and weeks by w ∈ { 1, . . . , W }. Temperature is used as a continuous, time-varying treatment-like exposure; urbanization is the HR static contextual covariate; and gun-incident counts are the observed LR outcomes. 
+
+Problem Setting. The target variable is observed at a coarse spatial resolution, while covariates are available at a finer resolution. The study area is discretized into a fine grid of √N · M × √N · M
+
+cells, grouped into √N × √N coarse regions. With N = 100 and M = 100 , this gives a 100 × 100 
+
+cell grid grouped into a 10 × 10 region grid. For each week w and region i, we observe a nonnegative count outcome 
+
+Y LR  
+
+> i,w
+
+∈ Z≥0, (7) representing the number of gun-incident events occurring in region i during week w.
+
+Data Representation and Covariates. Let ci,j,w denote the observed urbanization measurement for cell (i, j ) and week w. Since urbanization is treated as time-invariant in this study, we use its temporal mean, 
+
+ci,j = 1
+
+W
+
+> W
+
+X
+
+> w=1
+
+ci,j,w . (8) Temperature is modeled at the region level. Let tHR  
+
+> i,j,w
+
+denote the cell-level temperature for cell (i, j )
+
+and week w. We compute the region-average temperature exposure as 
+
+tLR  
+
+> i,w
+
+= 1
+
+M
+
+> M
+
+X
+
+> j=1
+
+tHR 
+
+> i,j,w
+
+, (9) and standardize it using the global mean and standard deviation across all region–week pairs: 
+
+eti,w = tLR  
+
+> i,w
+
+− μt
+
+σt + ε , (10) where ε > 0 is a small constant for numerical stability. Missing temperature values are imputed using the global median temperature, and missing outcome counts are set to zero. 
+
+Disaggregation Model. We model the latent HR intensity, or rate, λi,j,w > 0 as a function of the standardized regional temperature exposure and the HR urbanization covariate: 
+
+λi,j,w = fθ
+
+ eti,w , c i,j 
+
+ , (11) where fθ (·) is a feed-forward neural network with parameters θ. To enforce nonnegativity, the network output is passed through a softplus transformation. The model-implied LR expected count is obtained by summing the HR rates over all cells in region i:
+
+μi,w =
+
+> M
+
+X
+
+> j=1
+
+λi,j,w . (12) 27 Thus, μi,w denotes the predicted regional count intensity, while Y LR  
+
+> i,w
+
+denotes the observed regional count. This additive aggregation is consistent with the SCM in Section 3.1. 
+
+Training Objective. We assume a Poisson observation model at the region–week level, 
+
+Y LR  
+
+> i,w
+
+∼ Poisson( μi,w ) , (13) and train fθ by minimizing the negative Poisson log-likelihood, up to additive constants: 
+
+L(θ) = 1
+
+|W train | · N
+
+X
+
+> w∈W train
+> N
+
+X
+
+> i=1
+
+ μi,w − Y LR  
+
+> i,w
+
+log( μi,w + ε) , (14) where Wtrain is the set of training weeks and ε > 0 is a small constant for numerical stability. 
+
+Spatial Intensity Comparison. Figure 9 visualizes observed incidents for a representative week, week 51, alongside spatial intensity estimates learned under different supervision regimes. When trained only on region-level counts, C LAM produces spatially structured intensity maps that con-centrate mass around incident clusters but exhibit noticeably higher peak intensities and broader spatial support compared to the cell-supervised estimate. This overestimation reflects a fundamental ambiguity induced by aggregation: without access to fine-grained outcomes, the model must allocate regional mass across plausible subregional locations, leading to inflated local rates in areas consis-tent with the observed context and covariates. The response-surface comparison in the main paper, Figure 4, shows the same pattern in covariate space rather than physical space. 
+
+Learning. The training procedure optimizes the function parameters θ (or any other missing components of the SCM). The structural function fθ (·) can be represented by a neural network or any other parameterized function. Since the fine-grained outcomes yi,j are unobserved, training relies solely on their aggregated counterparts. We optimize with the goal that the inferred aggregated predictions ( μi) match the observed aggregate: 
+
+Lθ,ϕ = PNi=1 
+
+  bYi − μi
+
+2, where bYi denotes the observed aggregate of region i. If the noise terms are not i.i.d. and normally distributed, they can also be explicitly learned within the optimization loop. 28 Details of Exp. 4: Aggregation Function Estimation Mean Aggregation (β = 6) Max Aggregation (β = 0.1)     
+
+> GT Local Effect Performance Performance GT Local Effect Estimated Local Effect Estimated Local Effect
+> (τ=6) (τ=0.1)
+> Details of Exp. 4: Aggregation Function Estimation
+
+Figure 10: Results Overview. Top: Input of LR intervention locations (red), LR outcomes (blue), and HR context (green) for mean aggregation and max aggregation cases. Bottom: We observe the estimated local effects and the performance of our model over multiple epochs for both cases. 
+
+## F Additional Experiments 
+
+Exp. 4 considers driving bans with an unknown aggregation function between subregional and regional outcomes. Exp. 5 introduces treatment–context confounding, where the probability of subregional treatment depends on contextual variables, affecting both allocation and outcomes 
+
+F.1 Exp. 4: Unknown Aggregation Functions Context. We study the causal effect of driving bans on air quality under the assumption that the reported region-level air quality values are an unknown aggregation of finer-scale (subregional) measurements. Specifically, we model the aggregation as a learned combination of the subregional mean and maximum values, with the combination weights parameterized via a logit transform. A realistic example is a city-wide driving ban where air quality is officially reported as a single regional index (e.g., PM 2.5 concentration), while the underlying measurement network collects data from multiple monitoring stations. Depending on reporting policies, the published index might resemble an average across stations, a worst-case station reading, or something in between. The high-resolution context for each subregion is a single continuous variable: a vegetation index, capturing the amount of green coverage in the area. Vegetation can mitigate pollution and thus may modulate the effect of a driving ban. We hypothesize that the causal effect of driving bans varies with vegetation and that the unknown aggregation mechanism must be learned alongside the effect parameters to estimate subregional impacts correctly. 
+
+Setup. We assume N = 100 regions, each with M = 100 subregions. We are given: • A binary treatment vector T ∈ { 0, 1}N , where Ti = 1 indicates that a driving ban was implemented in region i (and thus all its subregions). • A high-resolution context matrix C ∈ [0 , 1] N ×M encoding the vegetation index of each subregion, where ci,j = 0 represents minimal vegetation cover and ci,j = 1 represents dense vegetation. • A high-resolution noise matrix ϵ ∈ RN ×M with i.i.d. entries ϵi,j ∼ N (0 , σ 2), where 
+
+σ2 = 0 .02 .The treatment vector T is generated using a Bernoulli distribution with probability 0.5, assigning each region to either the intervention or control group at random. The vegetation index values in C
+
+are drawn i.i.d. from Uniform(0 , 1) .The subregional outcome variable is given by the ground-truth functional relationship: 
+
+yi,j = fθ (ti,j , c i,j ) + ϵi,j ,
+
+29 where: • ti,j = Ti is the treatment status of subregion j in region i (inherited from the region), • ci,j is the vegetation index, • ϵi,j is Gaussian noise. The causal effect function is parameterized as: 
+
+fθ (ti,j , c i,j ) = 
+
+0.0 if ti,j = 0 ,θbase + θveg · ci,j if ti,j = 1 ,
+
+where θbase captures the baseline effect of a driving ban and θveg captures how this effect changes with vegetation cover. Unlike Exp. 1, the regional outcome xi is not a simple mean over subregions. Instead, we model the aggregation function as: 
+
+yi =
+
+> M
+
+X
+
+> j=1
+
+pi,j (τ ) · yi,j ,
+
+where: 
+
+pi,j (τ ) = exp( yi,j /τ )
+
+PMk=1 exp( yi,k /τ )
+
+is the softmax weight assigned to subregion j with temperature parameter τ > 0. When τ → ∞ ,
+
+pi,j approaches a uniform distribution (mean aggregation); when τ → 0, pi,j concentrates on the subregion with the highest outcome (max aggregation). 
+
+Training. We train a model to estimate: 1. The parameters θ = {θbase , θ veg } of the causal effect function fθ (·),2. The aggregation temperature parameter τ > 0 governing the softmax-based aggregation from subregional to regional outcomes. The learned function takes the form: 
+
+fθ (ti,j , c i,j ) = 
+
+0.0 if ti,j = 0 ,θbase + θveg · ci,j if ti,j = 1 .
+
+In the forward pass: 1. Compute predicted subregional outcomes: yi,j = fθ (ti,j , c i,j ) ,
+
+2. Compute subregion-level aggregation weights via the softmax: pi,j (τ ) = exp( yi,j /τ )    
+
+> PMk=1 exp( yi,k /τ )
+
+,
+
+3. Compute predicted regional outcomes as the expectation under pi,j (τ ): yi = PMj=1 pi,j (τ ) ·
+
+yi,j ,
+
+4. Compute the loss as the mean squared error with the observed Yi.All parameters {θbase , θ veg , τ } are optimized jointly using Adam with a learning rate of 0.001 for 
+
+1000 epochs. We initialize τ to a moderate value (e.g., τ = 1 .0) and enforce τ > 0 during training by optimizing its logarithm. 
+
+Results. 
+
+1. Visualizations of the aggregated causal effects show that mean aggregation preserves more variation across regions, whereas max aggregation suppresses smaller effects and produces sharper contrasts. 2. Although the subregional causal effect loss is never used directly for training, it decreases steadily over epochs, indicating that the model recovers fine scale effects from only re-gional supervision. Training loss is substantially higher under max aggregation, as weaker subregional signals are obscured. 30 Details of Exp. 5: Covariate Based Confounding of Treatment Subregion          
+
+> Low Confounding (τ= 1) High Confounding (τ= 0.1)
+> GT Treatment Locations Confounder Modelling Based Location Estimates Naive Estimation of Location GT Treatment Locations Confounder Modelling Based Location Estimates Naive Estimation of Location
+
+Figure 11: Results Overview. Top: Input of LR intervention locations (red), LR outcomes (blue), and HR context (green). Bottom: Ground truth treatment locations, estimation of treatment locations based on modeling of location covariate-based confounding, naïve estimation of treatment locations with all free parameters. 3. Comparing estimated and ground truth local effects confirms this bias: areas with small true effects tend to be overestimated when max aggregation dominates. 4. The aggregation function, parameterized by the temperature τ , is recovered with high accuracy. In the mean aggregation case, τ is estimated within 0.01 of the ground truth, while in the max aggregation case, the estimate is slightly underestimated ( 5.6), consistent with the plateauing behavior of the softmax function at low temperatures. 5. Overall, the experiment demonstrates that our approach can successfully recover both the aggregation mechanism (within its parametric form) and the underlying causal effects, despite only observing region-level outcomes. 
+
+F.2 Exp. 5: Covariate-Based Confounding of Treatment Subregion Context. In this experiment, we study how confounding between treatment allocation and contextual variables affects causal effect estimation. We take the example of school districts receiving additional public funding and the corresponding changes in educational outcomes. In reality, funding allocation is rarely random: wealthier or poorer districts may have systematically different chances of receiving funding due to political priorities, lobbying power, or policy constraints. This creates a dependency between the probability of treatment and district level context variables, violating the standard assumption of independent treatment assignment. We model this confounding explicitly by making the probability of treatment allocation a deterministic function of the contextual variable, passed through a logistic transform to obtain valid probabilities for each region. The treatment effect itself is also a function of the same contextual variable, representing heterogeneous impacts across different socioeconomic conditions. 
+
+Setup. We assume N = 100 regions, each with M = 100 subregions (school districts). We are given: • A high-resolution treatment matrix T ∈ { 0, 1}N ×M with exactly one treated subregion per region, i.e., PMj=1 ti,j = 1 for all i.• A context matrix C ∈ [0 , 1] N ×M encoding a socioeconomic/need index for each subregion, where a higher ci,j indicates greater need. • A noise matrix ϵ ∈ RN ×M with i.i.d. entries ϵi,j ∼ N (0 , σ 2) (default σ2 = 0 .02 ). 
+
+Confounded Treatment Allocation. For each region i, we form logits from the subregional context, 
+
+ℓi,j = α0 + α1 ci,j ,
+
+31 and convert them to a categorical distribution over subregions via a row-wise softmax, 
+
+pi,j = exp( ℓi,j )
+
+PMk=1 exp( ℓi,k ) .
+
+We then draw exactly one treated subregion j⋆ ∼ Categorical( pi, 1: M ) and set 
+
+ti,j = 1{j = j⋆},
+
+> M
+
+X
+
+> j=1
+
+ti,j = 1 .
+
+The parameters (α0, α 1) control the strength and direction of confounding between context and treatment assignment (default α0 = 0 , α1 > 0 so higher-need subregions are more likely to be treated). 
+
+Outcome Model With Context-Dependent Effects. Subregional outcomes follow the ground-truth functional relationship 
+
+yi,j = fθ (ti,j , c i,j ) + ϵi,j ,
+
+with the causal effect function 
+
+fθ (ti,j , c i,j ) = 
+
+(0 if ti,j = 0 ,θbase + θsoc ci,j if ti,j = 1 ,
+
+where θ = {θbase , θ soc } captures the baseline funding effect and its modulation by socioeconomic need. 
+
+Regional Aggregation. Region-level outcomes are the sum over subregions (as in Exp. 1). This construction induces confounding because (i) treatment allocation depends on ci,j through the softmax logits, and (ii) treatment effects also vary with ci,j via fθ (·).
+
+Training. We compare two training regimes for estimating the causal effect parameters θ =
+
+{θbase , θ soc } and the high resolution treatment assignments T ∈ RN ×M in the presence of treatment context confounding. 
+
+Regime 1: Naïve Training Under Independence Assumption. This setup directly applies the training procedure of Exp. 2 (Section D) to the confounded data, it: 1. Treats the treatment allocation as if independent of the context, 2. Learns T as free parameters, constrained to be one hot per row via a differentiable argmax with temperature, 3. Learns θ by minimizing the MSE between observed and predicted regional outcomes. This ignores the fact that the treatment assignment mechanism is context dependent. 
+
+Regime 2: Confounding Aware Training. Here, we explicitly model the context-dependent treatment allocation mechanism. For each region i, we predict logits 
+
+ℓi,j = β0 + β1 ci,j ,
+
+where (β0, β 1) are learned parameters, and convert them to a categorical distribution via a row-wise softmax with a learnable temperature τconf > 0:
+
+pi,j (τconf ) = exp( ℓi,j /τ conf )
+
+PMk=1 exp( ℓi,k /τ conf ) .
+
+We then use pi,j (τconf ) as the (differentiable) treatment assignment in the forward pass. In both regimes, predicted subregional outcomes are given by: 
+
+yi,j = fθ (ti,j , c i,j ) = 
+
+(0 if ti,j = 0 ,θbase + θsoc · ci,j if ti,j = 1 ,
+
+32 where in Regime 1, ti,j comes from the naïvely learned bT , and in Regime 2, ti,j = pi,j (τconf ) from the confounding model. Regional outcomes are summed and aggregated. and the training loss is the mean squared error, All parameters are optimized jointly using Adam with a learning rate of 0.001 for 1000 epochs. Regime 1 learns { bT , θ base , θ soc }, while Regime 2 learns {β0, β 1, τ conf , θ base , θ soc }.
+
+Results. 
+
+1. We compare two cases of confounding in subregional treatment allocation, holding region-level treatments and contextual factors fixed. The aggregated causal effects differ markedly depending on the level of confounding, showing that the treatment context dependency directly shapes the observed regional outcomes. 2. We visualize the ground truth intervention locations alongside the estimates obtained with and without explicitly modeling confounding. Under strong confounding, the confounding-aware approach recovers the true intervention locations with high fidelity, while the naïve method from Exp. 2 retrieves only a small fraction correctly. 3. In the low confounding setting, both methods perform similarly, and location probabilities are estimated with comparable accuracy. This confirms that adjusting for confounding does not reduce performance when confounding is weak. 4. For causal effect estimation, the final MSE of subregional effects under low confounding was 
+
+2.04 (naïve) versus 1.60 (confounding aware). Under high confounding, the respective errors were 0.74 versus 0.32 . These results show that accounting for confounding improves both intervention location recovery and the accuracy of estimated causal effects by conditioning on the correct contextual information. Overall, this experiment demonstrates that explicitly modeling treatment context confounding is essential as it enables accurate recovery of intervention locations and yields more reliable causal effect estimates, particularly when treatment assignment is strongly biased by contextual factors. 33

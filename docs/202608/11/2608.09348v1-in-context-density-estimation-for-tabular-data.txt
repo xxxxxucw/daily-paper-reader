@@ -1,0 +1,603 @@
+Title: In-Context Density Estimation for Tabular Data
+
+URL Source: https://arxiv.org/pdf/2608.09348v1
+
+Published Time: Tue, 11 Aug 2026 02:05:26 GMT
+
+Number of Pages: 20
+
+Markdown Content:
+## In-Context Density Estimation for Tabular Data 
+
+Patryk Marszałek 1,2∗, Jacek Tabor 1, Marek Śmieja 1
+
+> 1
+
+Faculty of Mathematics and Computer Science, Jagiellonian University, Kraków, Poland 
+
+> 2
+
+Doctoral School of Exact and Natural Sciences, Jagiellonian University, Kraków, Poland patryk.marszalek@doctoral.uj.edu.pl, jacek.tabor@uj.edu.pl, marek.smieja@uj.edu.pl 
+
+Abstract 
+
+Density estimation underlies many unsupervised tasks on tab-ular data such as anomaly detection, out-of-distribution de-tection, and data augmentation. Although all these problems reduce to questions about where probability mass lies, they are typically solved individually by fitting a separate model to each dataset, with its own hyperparameters and tuning bud-get. We introduce ICED , an in-context, energy-based den-sity estimator that removes this per-dataset cost. ICED is a transformer-based model pretrained once on a synthetic prior built specifically for density estimation under an objective that fits log-density where it is informative and preserves its order-ing elsewhere. In the inference, it reads a dataset as context and returns an unnormalized log-density for any query point in a single forward pass, with no fitting, sampling, or hyperparam-eter selection. A single frozen ICED model then drives four tasks usually handled by four specialized pipelines: density es-timation, out-of-distribution detection, unsupervised anomaly detection, and generative augmentation. Across all four, it is competitive with the strongest task-specific method, while be-ing the only approach that needs no retraining, no tuning, and no labels to move between them. The code is available at https://github.com/gmum/iced. 
+
+1 Introduction 
+
+Estimating probability density is one of the most fun-damental problems in machine learning. A model that accurately captures where probability mass lies can be used directly for unsupervised anomaly detection, out-of-distribution (OOD) detection, sample generation, and uncer-tainty estimation (Bishop 2006). In this sense density is a central unsupervised primitive, since many seemingly dis-tinct tasks are, at their core, the same question about where the data concentrate. Yet despite these shared probabilistic foundations, the corresponding problems are typically treated in isolation, each addressed by its own specialized method. And each such method must be fit anew on every dataset, tuned, and often re-engineered for the task at hand. This per-dataset, per-task optimization paradigm stands in sharp contrast to recent progress in foundation models. In nat-ural language processing and computer vision, task-specific optimization has increasingly given way to large models that acquire general inference capabilities during pretraining and 
+
+> ∗
+
+Corresponding author. Anomaly detection Density estimation OOD detection ICED Data augmentation   
+
+> Input data Output energy landscape Downstream tasks
+
+Figure 1: ICED turns density estimation into a single reusable model. Pretrained once, a frozen ICED serves den-sity estimation, out-of-distribution detection, unsupervised anomaly detection, and data augmentation, with no retrain-ing, tuning, or labels. adapt to new tasks purely through conditioning (Brown et al. 2020). A similar shift has recently reached tabular super-vised learning through Prior-Data Fitted Networks (PFNs), which learn a prediction algorithm over synthetic tasks and solve unseen classification or regression problems in a single forward pass, without retraining or hyperparameter optimiza-tion (Müller et al. 2022; Hollmann et al. 2023, 2025). This line of work suggests that learning the algorithm , rather than fitting a model from scratch for every dataset, is a powerful alternative for tabular machine learning. Surprisingly, density estimation has not undergone this transition. The established estimators, including kernel den-sity estimation (Scott 2015; Silverman 2018), Gaussian mix-tures, normalizing flows (Papamakarios et al. 2021; Dinh, Sohl-Dickstein, and Bengio 2017), and energy-based mod-els (LeCun et al. 2006), all remain firmly in the per-dataset regime, learning a fresh model for each new table. In prin-ciple, an in-context predictor such as TabPFN can already produce densities, by autoregressively factorizing the joint over features one dimension at a time (Hollmann et al. 2023). However, this procedure is slow, scales poorly with dimen-sion, and can be unreliable, since density is recovered only as a by-product of a model trained for supervised prediction. More recent PFN-based models tackle individual unsuper-vised problems, but do so discriminatively (Zhao et al. 2026; Marszałek et al. 2025; Marszałek, Kuśmierczyk, and Śmieja 2026): each amortizes a single task-specific output rather than the density that underlies them. As a result, practition-ers still maintain a separate pipeline for each unsupervised task, despite many of them resting on the same notion of probability density. arXiv:2608.09348v1 [cs.LG] 10 Aug 2026 In this work, we introduce ICED , an In-Context Energy-based Density estimator that removes this optimization loop entirely, see Figure 1. Instead of learning a density model for every dataset, ICED learns the density-estimation algo-rithm itself. Following the PFN paradigm, it is a transformer pretrained once on a carefully designed synthetic prior span-ning multimodal, heavy-tailed, nonlinear, and mixed-type tabular distributions, for which exact log-densities are avail-able by construction. At inference, the pretrained transformer receives an unseen dataset as context together with arbitrary query points and predicts their energies in a single forward pass (Figure 2), requiring neither gradient updates, sampling, nor hyperparameter tuning. Representing density through an energy (an unnormalized log-density) is central to this generality. Most downstream applications depend only on relative density rather than a normalized likelihood, so an energy discards the one quan-tity that is intractable to compute, the partition function, while retaining everything these tasks require (LeCun et al. 2006). A single energy landscape therefore supports many tasks at once. The same frozen ICED model ranks samples by density, flags anomalies and OOD examples through its low-energy regions, and generates new in-distribution sam-ples by following the energy gradient with Langevin dynam-ics (Welling and Teh 2011), all without task-specific retrain-ing or architectural change. Our contributions are summarized as follows: 
+
+• We introduce, to our knowledge, the first in-context foun-dation model for tabular density estimation, extending the PFN paradigm from supervised prediction to unsu-pervised probabilistic modeling. 
+
+• We design a synthetic pretraining prior and a training objective tailored to density estimation, combining exact synthetic log-densities, broad distributional diversity, and a hybrid regression-ranking loss that concentrates model capacity on the informative regions of the density land-scape. 
+
+• We demonstrate that a single frozen pretrained model is competitive with specialized methods across four tradi-tionally separate tasks (density estimation, OOD detec-tion, anomaly detection, and data augmentation) while requiring no retraining, no hyperparameter search, and no task-specific adaptation. 
+
+2 Related Work 
+
+Tabular foundation models and in-context learning. 
+
+Prior-fitted networks (PFNs) reframe Bayesian inference as supervised learning: a transformer is pretrained on datasets sampled from a chosen prior so that one forward pass ap-proximates the posterior predictive distribution (Müller et al. 2022). TabPFN brought this to tabular classification, pre-training on a structural-causal-model prior and solving small tasks in a single pass with no per-dataset training (Holl-mann et al. 2023); later work scaled it to larger tables and to regression (Hollmann et al. 2025; Grinsztajn et al. 2025), built fixed-dimensional row embeddings for very large ta-bles (Qu et al. 2025), and combined in-context retrieval with self-supervised pretraining on real tables (Ma et al. 2025). A newer line carries the PFN recipe into unsupervised problems, and is the closest precedent for our work. Tab-ClustPFN amortizes clustering, inferring cluster assignments and their number in one pass (Zhao et al. 2026); ZEUS pro-duces zero-shot embeddings on which off-the-shelf clusterers operate (Marszałek et al. 2025); TACTIC casts anomaly de-tection as in-context inference, returning calibrated outlier probabilities (Marszałek, Kuśmierczyk, and Śmieja 2026). These methods establish that prior-fitting generalizes well beyond classification. Crucially, however, each amortizes a single task-specific output, such as a partition, an embedding, or an anomaly score, rather than the density that underlies them. 
+
+Density estimation. Classical density estimators trade flexibility for per-dataset fitting. KDE places a kernel at each sample but is bandwidth-sensitive and degrades sharply in dimension (Silverman 2018; Scott 2015). Gaussian mixtures require choosing a component count, e.g. by BIC (Schwarz 1978). Deep likelihood models are more expressive: nor-malizing flows give exact likelihoods through invertible maps (Dinh, Sohl-Dickstein, and Bengio 2017; Papamakar-ios, Pavlakou, and Murray 2017; Kingma and Dhariwal 2018; Durkan et al. 2019; Papamakarios et al. 2021), autoregressive models factorize the joint into ordered conditionals (Germain et al. 2015; Van Den Oord, Kalchbrenner, and Kavukcuoglu 2016), and variational autoencoders optimize a likelihood lower bound (Kingma and Welling 2014). However, each of these models is trained anew per dataset, which requires separate optimization and parameter selection. Energy-based models (EBMs) learn an unnormalized en-ergy and sidestep the partition function (LeCun et al. 2006). Energies can be fit by score matching (Hyvärinen and Dayan 2005) and sampled by Langevin dynamics (Song and Er-mon 2019; Welling and Teh 2011). Closest to our setting, TabEBM constructs a distinct class-specific EBM for tabular data augmentation by turning a frozen in-context classifier into an energy through a surrogate binary task, and samples from it with SGLD (Margeloiu et al. 2024). ICED shares this energy-based, in-context, training-free lineage, but differs in what the energy represents. TabEBM builds an energy indi-rectly, from classifier logits on a surrogate task, and targets class-conditional generation. ICED instead predicts a density 
+
+log p(x) directly, from a single model that needs no surro-gate construction, which is what lets the same energies serve ranking, detection, and generation alike. 
+
+3 Method 
+
+We present ICED , an in-context energy-based density esti-mator for tabular data, pretrained once on a synthetic prior and applied to any dataset in a single forward pass. We first formalize in-context density estimation and the energy for-mulation we adopt (Section 3.1), then describe the two in-gredients that determine what the model learns: the synthetic prior it is trained on (Section 3.2) and the training objective (Section 3.3). We then specify the model architecture (Sec-tion 3.4) and describe how a single frozen model serves all downstream tasks at inference (Section 3.5). 3.1 In-context density estimation perspective 
+
+Let D = {xi}ni=1 ⊂ Rd be a tabular dataset drawn i.i.d. from an unknown distribution p, and let Q = {qj }mj=1 ⊂ Rd be a set of query points. Our goal is to estimate the (log-)density of p at each query. Conventional estimators address this by 
+
+fitting a model to D (selecting a bandwidth, a number of mixture components, or the weights of a neural network) and then evaluating it on Q, so that every dataset incurs a fresh fitting procedure. Following the prior-fitted network (PFN) paradigm (Müller et al. 2022; Hollmann et al. 2023), we instead learn a single model that performs density estimation in context. Rather than fitting parameters per dataset, we train one network fθ on a large collection of synthetic datasets sampled from a prior p(D) over data-generating processes. During pretraining, each instance provides a dataset D, query points Q, and their ground-truth log-densities; the network learns to predict these from D
+
+and Q alone. Formally, it is trained to approximate 
+
+fθ (q | D) ≈ Ep∼p(D)
+
+ log p(q) D , (1) so that, at inference, density estimation on a previously un-seen dataset reduces to a single forward pass: the parameters 
+
+θ are shared across all datasets, and the dependence on D en-ters only through in-context conditioning. No gradient steps and no hyperparameter selection are performed at test time, see Figure 2 for the illustration. ICED estimates an energy , i.e. an unnormalized log-density, rather than a normalized one. Concretely, its output approximates log p(q) only up to a dataset-dependent addi-tive constant cD that absorbs the log-partition function 1 (Le-Cun et al. 2006), 
+
+fθ (q | D) ≈ log p(q) + cD . (2) This choice is deliberate. The tasks that consume tabular densities, such as anomaly and OOD scoring, and gradient-based generation, are invariant to cD , depending only on relative density between points. Modeling energy therefore removes the one quantity that is intractable to compute while retaining everything the downstream tasks require: higher energy denotes higher density, so a query in a dense region of D receives a high value and an outlier a low one. 
+
+3.2 Synthetic prior 
+
+A prior-fitted network is only as good as the prior it is trained on. ICED is trained entirely on synthetic data, where each training instance is a triple (D, Q, {yj }j ) with ground-truth log-densities yj = log p(qj ) available by construction. We design the prior to span the distributional structures encoun-tered in real tabular data while keeping exact log-densities tractable. Each instance is generated by sampling a base mix-ture, optionally warping it through an invertible flow, option-ally appending discrete features, and perturbing a fraction of the points; we describe each in turn. 
+
+> 1Note that we define energy with the opposite sign to the usual EBM convention, so that higher energy corresponds to higher den-sity.
+
+Base mixtures. With equal probability we sample either a Gaussian mixture or a heavy-tailed mixture of K ∈ [2 , 20] 
+
+components. Gaussian components use random means and random positive-definite covariances Σk = AkA⊤ 
+
+> k
+
+, with ex-act log-densities from the closed-form mixture log-likelihood (computed stably via Cholesky factorization). Heavy-tailed mixtures draw each component from a Student-t (ν = 3 ), Laplace, or Cauchy base distribution under a random affine map x = Akz + bk; the change-of-variables rule gives the exact log-density 
+
+log p(x) = log p0
+
+ A−1 
+
+> k
+
+(x − bk) − log | det Ak|.
+
+Including heavy tails teaches the model that density can decay at very different rates, which is essential for robust anomaly scoring. 
+
+Nonlinear warping via flows. Real tabular distributions are rarely mixtures of simple unimodal components. To inject nonlinear geometry while preserving an exact likelihood, we optionally compose the base mixture with an invertible normalizing flow (Papamakarios et al. 2021), applying the change-of-variables formula to propagate log-densities. We draw from two flow families: the standard affine coupling flow (RealNVP) (Dinh, Sohl-Dickstein, and Bengio 2017) and a piecewise flow that we introduce in this work (see Appendix B for its detailed formulation). The flow warps both context and query points, yielding distributions with curved, multimodal support far richer than the base mixtures alone. 
+
+Discrete features. To reflect the mixed-type nature of tab-ular data, with probability pcat we append one to five inde-pendent categorical features. Each takes Cj ∈ { 2, . . . , 5}
+
+values with class probabilities drawn from a Dirichlet prior, contributing additively to the joint log-density. Categorical columns are one-hot encoded and interleaved with the con-tinuous columns in a random order, preventing the model from exploiting any fixed positional layout. 
+
+Perturbation for a robust landscape. A density estimator that has only ever seen exact samples can assign arbitrary energies just off the data manifold. To shape the learned landscape in these out-of-distribution regions, we perturb a random 10% of the coordinates of a fraction of the query points before they are scored, using one of Gaussian noise (with dimension-adaptive scale), Mixup with a context point, or CutMix feature swaps (see Appendix C for details). This populates the region around the manifold with partially-in-distribution queries and regularizes the energy surface where the downstream tasks operate. 
+
+Target normalization. Because we model energy up to an additive constant, only the shape of the log-density matters, not its scale. We therefore normalize the per-instance targets to a common range using their empirical 10 th and 90 th per-centiles as anchors, ˜yj = 2 ( yj − ˆq0.1)/(ˆ q0.9 − ˆq0.1)−1. This stabilises training across instances whose raw log-densities span wildly different magnitudes. 
+
+3.3 Training objective 
+
+Given an instance, the model predicts energies ˆyj = fθ (qj |
+
+D) and is trained against the normalized targets ˜yj . Two Figure 2: Overview of ICED. A transformer is pretrained once on a synthetic prior with exact log-densities (Gaussian and heavy-tailed mixtures, flow-warped distributions, mixed discrete/continuous features). At inference, a single frozen model reads a dataset as context D together with query points Q and returns an energy for each query in a single forward pass. The same energies then drive four tasks that are usually handled by separate, per-dataset pipelines. properties of density estimation shape our loss. First, we op-timize the accuracy of estimation in the high-density regions where the data actually lie. The precise depth of the tails is dominated by outliers, hard to fit, and rarely used, so we do not spend capacity on it. Second, several downstream tasks consume density only through the ordering it induces over points. We combine two terms accordingly, 
+
+L = Lreg + Lrank . (3) For queries whose target lies in the in-distribution range we use a squared error; for low-density queries we ask only that their predicted energy stay below the range, not that it match an exact value: 
+
+Lreg = 1
+
+|I| 
+
+X
+
+> j∈I
+
+(ˆ yj − ˜yj )2
+
+| {z }
+
+> fit where density is high
+
++ 1
+
+m
+
+X
+
+> j / ∈I
+
+ϕ(ˆ yj )
+
+| {z }
+
+> bound the OOD tail
+
+, (4) where m is the number of query points, I = {j : ˜ yj ∈
+
+[τlo , τ hi ]} are the in-range queries, and ϕ is a one-sided penalty that activates only when an out-of-range query is pre-dicted inside the range. This keeps model capacity focused on the informative, high-density region instead of chasing the precise depth of every outlier. To align the model directly with order-based use, we pe-nalise every pair whose predicted order disagrees with the ground truth, 
+
+Lrank = 1
+
+|P| 
+
+X
+
+> (j,k )∈P
+
+ℓ ˆyj − ˆyk
+
+, (5) where P = {(j, k ) : ˜ yj > ˜yk} is the set of query pairs ordered by their target density, and ℓ is a margin-based pair-wise loss; we use the logistic form ℓ(s) = log(1 + e−s) in all experiments. This term improves rank metrics (Kendall’s 
+
+τ , pairwise accuracy) even when absolute energies are im-perfect, which is precisely what anomaly and OOD scoring rely on. Both τlo , τ hi and the loss form are fixed once during pre-training; crucially, they are properties of training , not knobs exposed at inference. The model is optimized with AdamW under a cosine schedule, with gradient accumulation and clipping, on a stream of synthetic instances generated on the fly. During pretraining, the context length varies from 200 to 2000 samples, while the query length is fixed at 256 samples. Furthermore, the pretraining datasets contain a uni-formly distributed number of features, ranging from 2 to 50. 
+
+3.4 Model architecture 
+
+ICED instantiates fθ as a transformer that processes context and query points jointly as a set, in the spirit of TabPFN (Holl-mann et al. 2023) and its unsupervised successors (Marszałek et al. 2025). Each point is embedded into a token by the TabI-CLv2 feature extractor (Qu et al. 2026), which handles inputs of varying dimensionality. At the beginning of the pretraining process, the feature extractor is initialized with weights from a pretrained TabICLv2 model. It is then fine-tuned jointly with the rest of the model throughout pretraining. The con-text and query tokens are processed together by a stack of transformer encoder layers under an attention mask in which query tokens attend to the full context while context tokens attend only among themselves. This makes fθ (qj | D) afunction of the entire context set, keeps the context repre-sentation independent of the queries, and renders the model permutation-invariant in the data points. A small multilayer-perceptron head maps each query token to a scalar energy, so that all m estimates {fθ (qj | D)}mj=1 are produced in one forward pass. Full architectural specifications are deferred to Appendix A. 
+
+3.5 Inference: one model, many tasks 
+
+At test time the user supplies a context dataset D and queries 
+
+Q. Both are scaled using statistics from D, and the frozen model returns the energies {fθ (qj | D)} in a single forward pass. The same model and the same energies then serve every downstream task, differing only in how the energy is read: 1. Density estimation & ranking. The energies are used di-rectly as log-density proxies, ordering queries from most to least typical. 2. Anomaly / OOD detection. The negated energy is an out-lier score: points in low-density regions of D are flagged as anomalous or out-of-distribution. 3. Data augmentation. Treating fθ (· | D) as an energy sur-face, we draw new in-distribution samples by following its gradient with Stochastic Gradient Langevin Dynamics (SGLD) (Welling and Teh 2011), conditioning on a class-specific context as in TabEBM (Margeloiu et al. 2024). 
+
+4 Experiments 
+
+Our experiments demonstrate that one frozen, prior-fitted density model can stand in for the specialized pipelines normally built for each individual task. We first establish that ICED estimates density faithfully on held-out syn-thetic distributions (Section 4.1), a controlled check with known ground truth. We then take that same checkpoint, un-changed , and ask it to perform three downstream tasks it was never explicitly trained for: out-of-distribution detection (Section 4.2), unsupervised anomaly detection (Section 4.3), and data augmentation (Section 4.4). An ablation isolates the contribution of the prior and the loss (Section 4.5). 
+
+4.1 Density estimation on synthetic data 
+
+In this proof-of-concept experiment, we ask whether ICED, pretrained on the synthetic prior of Section 3, estimates 
+
+log p(x) correctly on held-out data drawn from the same prior but never seen during pretraining. We group test dis-tributions by their generative class, following the structure of the prior: Gaussian mixtures, heavy-tailed mixtures, and mixtures pushed through random invertible flows, with and without discrete coordinates. For each class we sample 50 datasets, supply each as context, and score a held-out set of queries whose ground-truth log-densities are known by construction. Because the downstream value of a density estimate lies in the ordering it induces over points, and because ICED mod-els an unnormalized energy, we evaluate rank agreement between predicted and ground-truth log-densities rather than absolute likelihood. We report Kendall’s τ and a pairwise ordering accuracy (C + 12 T )/ n
+
+> 2
+
+, where C and T are the numbers of concordant and tied query pairs, respectively 2.Pairwise accuracy is reported in Table 1; Kendall’s τ , which yields the same ranking of methods, is deferred to Ap-pendix D. Each reported value is averaged over the datasets sampled from the corresponding class.    
+
+> 2a pair is concordant when the predicted and reference log-density differences share the same sign KDE GMM-BIC MAF RealNVP VAE TabPFN TabICL TabEBM ICED 10 100 1,000
+> Time (seconds, log scale)
+> 10.4 167.3 453.6 432.8 314.3 849.0 598.5 16.6 15.6
+
+Figure 3: Density-estimation runtime by method (lower is better). ICED performs a single forward pass and is among the fastest methods, whereas the per-dataset deep estimators and the autoregressive in-context models (TabPFN, TabICL) are substantially slower. We compare against three families: (i) classical estimators: kernel density estimation (KDE) (Scott 2015) and Gaus-sian mixtures with BIC-selected components (GMM-BIC), (ii) deep density estimators: masked autoregressive flows (MAF) (Papamakarios, Pavlakou, and Murray 2017), Real-NVP (Dinh, Sohl-Dickstein, and Bengio 2017), and a varia-tional autoencoder (Kingma and Welling 2014), (iii) tabular foundation models: autoregressive TabPFN (Hollmann et al. 2023), TabICL (Qu et al. 2025), and TabEBM (Margeloiu et al. 2024). The classical and deep estimators are fit anew on each dataset, and most also require their own hyperpa-rameter search; the tabular foundation models are frozen like ICED but recover density only indirectly, autoregressively or through a surrogate task, rather than as a direct output. The pattern to look for in Table 1 is not a single winner but a robustness gap : ICED is the best or second-best estimator in every distribution class, while the baselines are each strong only where their assumptions hold. KDE and GMM-BIC, despite being fit directly to the test data, are competitive on the Gaussian classes and erode on heavy-tailed and flow-warped ones. The single-dataset flows and VAE track ICED loosely but never lead. Tabular foundation models are inferior to competitive methods. ICED, alone among the methods, is never fit to the test data and yet never far from the top. Because ICED estimates density in a single forward pass, it avoids the per-dataset fitting loop that the classical and deep baselines pay at test time. Figure 3 compares the time to pro-duce density estimates. ICED is among the fastest methods, second only to KDE and on par with TabEBM, while the per-dataset deep estimators are an order of magnitude slower and the autoregressive in-context models are slower still, since they recover density one feature dimension at a time. ICED is thus roughly 50 × faster than TabPFN while producing a joint density directly, which makes a single frozen model practical to apply across many datasets, not just accurate. 
+
+4.2 Out-of-distribution detection 
+
+The first transfer test asks whether ICED’s energies flag points that fall outside a reference distribution. Using the ADBench suite (Han et al. 2022), we give ICED a context Table 1: Density estimation on held-out synthetic data. We report pairwise ordering accuracy (higher is better; chance = 0 .5). ICED and the in-context baselines (TabPFN, TabICL, TabEBM) use a single frozen model across all classes, while the classical and deep estimators are fit per dataset. Bold is best, underline second best. 
+
+Evaluation datasets Methods Base class Cat. Aug. KDE GMM-BIC MAF RealNVP VAE TabPFN TabICL TabEBM ICED Gaussian mix. ✓ ✗ 0.7355 0.7730 0.7251 0.7339 0.7355 0.7486 0.7671 0.5885 0.7824 
+
+Heavy-tailed mix. ✓ ✗ 0.6838 0.7241 0.6794 0.6692 0.6500 0.7025 0.6416 0.6006 0.7462 
+
+Mix. with flows ✓ ✗ 0.6975 0.7092 0.6985 0.6974 0.6856 0.7153 0.7030 0.5575 0.7541 
+
+All datasets ✗ ✓ 0.6922 0.7379 0.6801 0.6867 0.6593 0.7066 0.6777 0.5769 0.7381 
+
+All datasets ✓ ✓ 0.6658 0.7095 0.6621 0.6467 0.6308 0.6782 0.6288 0.5826 0.7209 TabICL TACTIC-C ICED GMM KNN TACTIC-N MAF uTabPFN NVP LOF KDE TCCM IForest VAE PCA HBOS OCSVM DeepSVDD CBLOF COPOD ECOD DAGMM LODA SOD TabEBM COF 
+
+> 60 80
+> AUCROC
+> 89.2 88.7 88.3 87.9 87.1 85.0 84.6 84.6 83.5 83.0 82.3 82.2 80.1 79.5 77.9 77.6 76.6 75.6 74.5 74.4 74.3 70.7 70.2 53.7 52.9 50.0
+
+Figure 4: Out-of-distribution detection on ADBench. Mean AUROC over all datasets (higher is better). of in-distribution points only and a query set mixing in- and out-of-distribution points; the negated energy is the OOD score. We report AUROC averaged over ADBench datasets and five random seeds, and compare against every ADBench detector together with the density estimators of Section 4.1 fit on the in-distribution context. Figure 4 presents the mean AUROC. ICED obtains 88 .3,placing third among all 26 methods. It is within one point of the best, behind only TabICL ( 89 .2) and TACTIC-C ( 88 .7)and well ahead of TabPFN ( 84 .6) and TabEBM ( 52 .9). A clean reference set rewards methods that capture the global density, so several classical detectors are close behind, no-tably GMM ( 87 .9) and KNN ( 87 .1). 
+
+4.3 Unsupervised anomaly detection 
+
+Here the context is contaminated rather than clean: it con-tains both normal points and a small, unlabeled fraction of anomalies, as specified by ADBench (Han et al. 2022). As before, we report AUROC over all datasets and five random seeds, with the same datasets and baselines as in Section 4.2. Under contamination (Figure 5), ICED reaches 76 .7 mean AUROC, again third overall, behind TACTIC-N ( 78 .7) and MAF ( 77 .3). The comparison with the previous section shows that the methods that topped clean-context OOD de-tection collapse once the context is contaminated. GMM falls from 87 .9 to 65 .9, a 22 -point drop that matches the intuition that a single global mixture is dragged toward the very outliers it should flag; TabICL falls from 89 .2 to 73 .1,TACTIC-C from 88 .7 to 70 .7, and KNN from 87 .1 to 70 .0.The methods that lead here, TACTIC-N, MAF, RealNVP, and Isolation Forest, were only mid-pack on the clean task. ICED is the one method that stays in the top three across both settings. We attribute this consistency to two design choices TabICL TACTIC-C ICED GMM KNN TACTIC-N MAF uTabPFN NVP LOF KDE TCCM IForest VAE PCA HBOS OCSVM DeepSVDD CBLOF COPOD ECOD DAGMM LODA SOD TabEBM COF 
+
+> 60 80
+> AUCROC
+> 73.1 70.7 76.7 65.8 70.0  78.7 77.3 65.1  76.0 61.7 73.8 72.1 76.4 74.0 74.0 74.5 71.0 71.2 62.0 74.5 74.4 65.8 66.0 69.3 48.7 62.8
+
+Figure 5: Unsupervised anomaly detection on ADBench. Mean AUROC over all datasets (higher is better). Baseline SMOTE TVAE CTGAN NFLOW TabDDPM ARF TabEBM ICED 
+
+> 60 70
+> Accuracy
+> 71.0 70.7 63.6 64.3 62.4 65.3 65.9  73.0 72.8
+
+Figure 6: Aggregated downstream classification accuracy for classifiers trained on the original data and on data augmented by each method (higher is better). rather than to the in-context formulation alone. The prior, which spans heavy-tailed and perturbed distributions, ex-poses the model during pretraining to exactly the low-density and near-manifold structure that contamination introduces, and the ranking term in the loss makes the resulting energy ordering robust when absolute values are imperfect. The re-sult is a single density that scores well whether the context is clean or contaminated, rather than a method tuned for one regime. It is worth noting that TabEBM, the other energy-based tabular model, scores near chance on both detection tasks ( 52 .9 and 48 .7). 
+
+4.4 Data augmentation 
+
+The final task is generative rather than discriminative. Fol-lowing the TabEBM protocol (Margeloiu et al. 2024, Sec-tion 3.1), we treat each class as its own distribution, condition ICED on the within-class context, and synthesize new points by following the gradient of its energy with Stochastic Gra-dient Langevin Dynamics (SGLD) (Welling and Teh 2011). The augmented set trains multiple downstream classifiers (see Appendix G for details), whose accuracy we compare Table 2: Prior ablation. Pairwise ordering accuracy on held-out synthetic data (higher is better) when each ingredient of the prior is removed during pretraining. Rows are grouped by the evaluation distribution class, with ✓/✗ indicating whether the class includes categorical features (Cat.) and input perturbations (Aug.). Bold is best, underline second best.                                                  
+
+> Evaluation datasets Prior Base class Cat. Aug. w/o h-tail w/o Gauss w/o flow w/o cat w/o augm full prior Gaussian mix. ✓✗0.7894 0.7772 0.7858 0.7562 0.7869 0.7824 Heavy-tailed mix. ✓✗0.7315 0.7545 0.7537 0.7367 0.7589 0.7462 Mix. with flows ✓✗0.7510 0.7543 0.7462 0.7371 0.7609 0.7541 All datasets ✗✓0.7354 0.7378 0.7340 0.7415 0.7280 0.7381 All datasets ✓✓0.7188 0.7183 0.7168 0.7010 0.7088 0.7209
+
+against training on the original data alone ( baseline ) across training-set sizes. In downstream classification accuracy (Figure 6), ICED reports 72 .8, essentially matching the purpose-built TabEBM (73 .0) and improving over the vanilla baseline ( 71 .0), while reusing the very same frozen model that produced every other result in this paper. Both energy-based methods clearly outperform the dedicated generative augmenters, several of which fall below the vanilla baseline. 
+
+4.5 Ablation study 
+
+ICED’s behavior is determined by two design choices, what the prior contains and what the loss rewards. We ablate each on the synthetic density task of Section 4.1. First, we retrain ICED while removing one ingredient of the prior at a time and evaluate on the held-out synthetic classes (Table 2). Removing a component tends to help slightly on classes that do not exercise it and to hurt on the combined classes that do. On the hardest setting, evalu-ation data with both categorical features and perturbations, the full prior (all) is best (0.7209), and it is also strongest or second-strongest on the aggregate rows spanning all datasets. Next, we compare the full objective against two reduced variants (Table 3). The full loss is best on every evaluation class. Dropping the ranking term costs a consistent margin, confirming that aligning the model with the order density induces helps even a rank-based metric. Removing the re-gression term is more damaging still, leaving the weakest variant throughout, since the pairwise objective alone does not anchor the energy where the data concentrate. 
+
+5 Limitations 
+
+First, the accuracy of ICED’s density estimation depends on how well the synthetic prior reflects the target distribu-tion, and we give no formal coverage guarantee. However, our experiments show that ICED transfers well to the OOD, anomaly, and augmentation benchmarks, where the targets are real datasets outside any prior class. Second, ICED re-turns an unnormalized energy, which is sufficient for rank-ing, detection, and sampling but cannot serve as an absolute normalized probability without an extra normalization step. Third, a single forward pass attends over the whole con-text, so inference cost grows with context size; this can be mitigated by subsampling, and recent long-context architec-tures make larger contexts increasingly practical. Finally, our Table 3: Loss ablation. Pairwise ordering accuracy on held-out synthetic data (higher is better) when each term of the training objective is removed. Rows are grouped by evalua-tion distribution class, with ✓/✗ indicating whether the class includes categorical features (Cat.) and input perturbations (Aug.). Bold is best, underline second best.                                
+
+> Evaluation datasets Loss Base class Cat. Aug. w/o rank w/o MSE full loss Gaussian mix. ✓✗0.7716 0.7541 0.7824
+> Heavy-tailed mix. ✓✗0.7389 0.7301 0.7462
+> Mix. with flows ✓✗0.7449 0.7340 0.7541
+> All datasets ✗✓0.7299 0.7099 0.7381
+> All datasets ✓✓0.7107 0.6970 0.7209
+
+augmentation results use SGLD sampling from the learned energy, which reintroduces an iterative procedure at gener-ation time even though density estimation remains a single forward pass. 
+
+6 Conclusion 
+
+We introduced ICED, an in-context energy-based density es-timator for tabular data. Rather than fitting a new model to every dataset, ICED learns the density-estimation algorithm itself during a single pretraining phase on a synthetic prior with exact log-densities, and then estimates the energy of any query point on an unseen dataset in one forward pass, with no retraining, sampling, or hyperparameter tuning. By model-ing an unnormalized energy and training it with an objective that fits density where it is informative and preserves its or-dering elsewhere, a single frozen model supports the full family of tasks that density underlies. Across density esti-mation, out-of-distribution detection, unsupervised anomaly detection, and data augmentation, ICED is competitive with strong task-specific baselines while being the only method that moves between these tasks without retraining, tuning, or labels. We view ICED as a step toward treating density es-timation as a reusable, amortized primitive for tabular data, in the same way that prior-fitted networks have reshaped supervised tabular learning. 
+
+Acknowledgments 
+
+The research of P. Marszałek and M. Śmieja was sup-ported by the National Science Centre (Poland), grant no. 2023/50/E/ST6/00169. The research of J. Tabor was sup-ported by the National Science Centre (Poland), grant no. 2023/49/B/ST6/01137. Some experiments were performed on servers purchased with funds from the flagship project entitled “Artificial Intelligence Computing Center Core Fa-cility” from the DigiWorld Priority Research Area within the Excellence Initiative – Research University program at Jagiellonian University in Krakow. We gratefully ac-knowledge Polish high-performance computing infrastruc-ture PLGrid (HPC Center: ACK Cyfronet AGH) for pro-viding computer facilities and support within computational grant no. PLG/2025/018969. 
+
+References 
+
+Bishop, C. M. 2006. Pattern Recognition and Machine Learning (Information Science and Statistics) . Berlin, Hei-delberg: Springer-Verlag. ISBN 0387310738. Breunig, M. M.; Kriegel, H.-P.; Ng, R. T.; and Sander, J. 2000. LOF: identifying density-based local outliers. In Pro-ceedings of the 2000 ACM SIGMOD international confer-ence on Management of data , 93–104. Brown, T.; Mann, B.; Ryder, N.; Subbiah, M.; Kaplan, J. D.; Dhariwal, P.; Neelakantan, A.; Shyam, P.; Sastry, G.; Askell, A.; et al. 2020. Language models are few-shot learners. Ad-vances in neural information processing systems , 33: 1877– 1901. Dinh, L.; Sohl-Dickstein, J.; and Bengio, S. 2017. Density estimation using Real NVP. In International Conference on Learning Representations .Durkan, C.; Bekasov, A.; Murray, I.; and Papamakarios, G. 2019. Neural spline flows. Advances in neural information processing systems , 32. Germain, M.; Gregor, K.; Murray, I.; and Larochelle, H. 2015. Made: Masked autoencoder for distribution estimation. In International conference on machine learning , 881–889. PMLR. Goldstein, M.; and Dengel, A. 2012. Histogram-based outlier score (hbos): A fast unsupervised anomaly detection algo-rithm. KI-2012: poster and demo track , 1: 59–63. Grinsztajn, L.; Flöge, K.; Key, O.; Birkel, F.; Jund, P.; Roof, B.; Jäger, B.; Safaric, D.; Alessi, S.; Hayler, A.; et al. 2025. TabPFN-2.5: Advancing the state of the art in tabular foun-dation models. arXiv preprint arXiv:2511.08667 .Han, S.; Hu, X.; Huang, H.; Jiang, M.; and Zhao, Y. 2022. AdBench: Anomaly detection benchmark. Advances in neu-ral information processing systems , 35: 32142–32159. He, Z.; Xu, X.; and Deng, S. 2003. Discovering cluster-based local outliers. Pattern recognition letters , 24(9-10): 1641–1650. Hollmann, N.; Müller, S.; Eggensperger, K.; and Hutter, F. 2023. TabPFN: A Transformer That Solves Small Tabular Classification Problems in a Second. In The Eleventh Inter-national Conference on Learning Representations .Hollmann, N.; Müller, S.; Purucker, L.; Krishnakumar, A.; Körfer, M.; Hoo, S. B.; Schirrmeister, R. T.; and Hutter, F. 2025. Accurate predictions on small data with a tabular foundation model. Nature , 637(8045): 319–326. Hyvärinen, A.; and Dayan, P. 2005. Estimation of non-normalized statistical models by score matching. Journal of Machine Learning Research , 6(4). Kingma, D. P.; and Dhariwal, P. 2018. Glow: Generative flow with invertible 1x1 convolutions. Advances in neural information processing systems , 31. Kingma, D. P.; and Welling, M. 2014. Auto-Encoding Varia-tional Bayes. In International Conference on Learning Rep-resentations .Kriegel, H.-P.; Kröger, P.; Schubert, E.; and Zimek, A. 2009. Outlier detection in axis-parallel subspaces of high dimen-sional data. In Pacific-asia conference on knowledge discov-ery and data mining , 831–838. Springer. LeCun, Y.; Chopra, S.; Hadsell, R.; Ranzato, M.; Huang, F.; et al. 2006. A tutorial on energy-based learning. Predicting structured data , 1(0). Li, Z.; Huang, Q.; Zhu, Y.; Yang, L.; Amiri, M. M.; van Stein, N.; and van Leeuwen, M. 2025. Scalable, Explainable and Provably Robust Anomaly Detection with One-Step Flow Matching. arXiv preprint arXiv:2510.18328 .Li, Z.; Zhao, Y.; Botta, N.; Ionescu, C.; and Hu, X. 2020. Copod: copula-based outlier detection. In 2020 IEEE in-ternational conference on data mining (ICDM) , 1118–1123. IEEE. Li, Z.; Zhao, Y.; Hu, X.; Botta, N.; Ionescu, C.; and Chen, G. H. 2023. ECOD: Unsupervised Outlier Detection Us-ing Empirical Cumulative Distribution Functions. IEEE Transactions on Knowledge and Data Engineering , 35(12): 12181–12193. Liu, F. T.; Ting, K. M.; and Zhou, Z.-H. 2008. Isolation forest. In 2008 eighth ieee international conference on data mining , 413–422. IEEE. Ma, J.; Thomas, V.; Hosseinzadeh, R.; Labach, A.; Cresswell, J.; Golestan, K.; Yu, G.; Caterini, A. L.; and Volkovs, M. 2025. TabDPT: Scaling tabular foundation models on real data. Advances in Neural Information Processing Systems ,38: 172692–172722. Margeloiu, A.; Jiang, X.; Simidjievski, N.; and Jamnik, M. 2024. TabEBM: A tabular data augmentation method with distinct class-specific energy-based models. Advances in Neural Information Processing Systems , 37: 72094–72144. Marszałek, P.; Kuśmierczyk, T.; and Śmieja, M. 2026. TAC-TIC for navigating the unknown: Tabular anomaly detection via in-context inference. arXiv preprint arXiv:2603.14171 .Marszałek, P.; Kuśmierczyk, T.; Wydmański, W.; Tabor, J.; and Śmieja, M. 2025. Zeus: Zero-shot embeddings for un-supervised separation of tabular data. Advances in Neural Information Processing Systems , 38: 86464–86501. Müller, S.; Hollmann, N.; Arango, S. P.; Grabocka, J.; and Hutter, F. 2022. Transformers Can Do Bayesian Inference. In International Conference on Learning Representations .Papamakarios, G.; Nalisnick, E.; Rezende, D. J.; Mohamed, S.; and Lakshminarayanan, B. 2021. Normalizing flows for probabilistic modeling and inference. Journal of Machine Learning Research , 22(57): 1–64. Papamakarios, G.; Pavlakou, T.; and Murray, I. 2017. Masked autoregressive flow for density estimation. Advances in neu-ral information processing systems , 30. Pevn` y, T. 2016. Loda: Lightweight on-line detector of anomalies. Machine Learning , 102(2): 275–304. Qu, J.; HolzmÃžller, D.; Varoquaux, G.; and Morvan, M. L. 2026. TabICLv2: A better, faster, scalable, and open tabular foundation model. arXiv preprint arXiv:2602.11139 .Qu, J.; Holzmüller, D.; Varoquaux, G.; and Le Morvan, M. 2025. TabICL: A Tabular Foundation Model for In-Context Learning on Large Data. In International Conference on Machine Learning , 50817–50847. PMLR. Ramaswamy, S.; Rastogi, R.; and Shim, K. 2000. Efficient algorithms for mining outliers from large data sets. In Pro-ceedings of the 2000 ACM SIGMOD international confer-ence on Management of data , 427–438. Ruff, L.; Vandermeulen, R.; Goernitz, N.; Deecke, L.; Sid-diqui, S. A.; Binder, A.; Müller, E.; and Kloft, M. 2018. Deep one-class classification. In International conference on machine learning , 4393–4402. PMLR. Schölkopf, B.; Williamson, R. C.; Smola, A.; Shawe-Taylor, J.; and Platt, J. 1999. Support vector method for novelty de-tection. Advances in neural information processing systems ,12. Schwarz, G. 1978. Estimating the dimension of a model. The annals of statistics , 461–464. Scott, D. W. 2015. Multivariate Density Estimation: Theory, Practice, and Visualization . John Wiley & Sons. Shyu, M.-L.; Chen, S.-C.; Sarinnapakorn, K.; and Chang, L. 2003. A novel anomaly detection scheme based on principal component classifier. Proceedings of International Confer-ence on Data Mining .Silverman, B. W. 2018. Density estimation for statistics and data analysis . Routledge. Song, Y.; and Ermon, S. 2019. Generative modeling by estimating gradients of the data distribution. Advances in neural information processing systems , 32. Tang, J.; Chen, Z.; Fu, A. W.-C.; and Cheung, D. W. 2002. Enhancing effectiveness of outlier detections for low density patterns. In Pacific-Asia conference on knowledge discovery and data mining , 535–548. Springer. Van Den Oord, A.; Kalchbrenner, N.; and Kavukcuoglu, K. 2016. Pixel recurrent neural networks. In International conference on machine learning , 1747–1756. PMLR. Welling, M.; and Teh, Y. W. 2011. Bayesian learning via stochastic gradient Langevin dynamics. In Proceedings of the 28th international conference on machine learning (ICML-11) , 681–688. Zhao, T.; Wang, G.; Tan, Y. S.; and Zhang, Q. 2026. Tab-ClustPFN: A Prior-Fitted Network for Tabular Data Cluster-ing. arXiv preprint arXiv:2601.21656 .Zhao, Y.; Nasrullah, Z.; and Li, Z. 2019. Pyod: A python toolbox for scalable outlier detection. Journal of machine learning research , 20(96): 1–7. Zong, B.; Song, Q.; Min, M. R.; Cheng, W.; Lumezanu, C.; Cho, D.; and Chen, H. 2018. Deep autoencoding gaussian mixture model for unsupervised anomaly detection. In In-ternational conference on learning representations .
+
+A Architecture details 
+
+ICED is implemented as a transformer-based in-context learning model that operates on sets of tabular samples. Each input sample is first mapped into a token representation using the TabICLv2 feature extractor (Qu et al. 2026). The resulting token embeddings have a dimensionality of 512 . The feature extractor supports inputs with varying numbers of features and is initialized from a pretrained TabICLv2 checkpoint. During pretraining, these weights are fine-tuned jointly with the remaining model parameters. The resulting tokens are processed by a transformer en-coder consisting of 12 layers with hidden embedding di-mension dmodel = 512 . Each transformer layer uses multi-head self-attention with 4 attention heads and a feed-forward network with hidden dimension 1024 , using GELU as the activation function. Dropout is not applied ( p = 0 ). The model processes context and query samples jointly, using an attention mask that allows query tokens to attend to all con-text tokens, while restricting context tokens to attend only to other context tokens. This design preserves the independence of the context representation from the query set and ensures permutation invariance over input samples. The output of the transformer encoder is passed through a lightweight decoder implemented as a two-layer multilayer perceptron. The decoder first projects the token representa-tion from the transformer embedding dimension to a hidden dimension of 1024 using a linear layer followed by a GELU activation. A final linear projection maps the hidden repre-sentation to the output dimension, producing a scalar energy estimate for each query sample. We pretrain each model for 10 M iterations, sampling a new synthetic dataset from the predefined prior distribution at every iteration. We optimize the model using the Adam op-timizer with a learning rate of 3 × 10 −5. To stabilize training and enable efficient optimization, we use gradient accumu-lation over 25 steps. Before being passed to the model, we normalize all input features using min-max scaling. 
+
+B Random pointwise normalizing flows for synthetic data 
+
+To generate distributions with curved, multimodal support while retaining exact log-densities, we optionally compose the base mixture with a random normalizing flow. In addition to RealNVP, we use pointwise flows, which is composed of 
+
+L layers. A layer T applies an orthogonal mixing step fol-lowed by a pointwise nonlinearity, and for each flow instance the nonlinearity is drawn uniformly at random from three families, piecewise-linear, ELU-based, and softplus-based, each with probability 1/3. Because every transformation is invertible with a tractable Jacobian, the change-of-variables rule propagates the exact log-density from the base mixture to the warped distribution, giving the ground-truth targets used to pretrain ICED. Table 4: Evaluation of density estimation quality on unseen synthetic data. We measure the agreement between estimated and reference densities using Kendall’s τ .                                                                   
+
+> Evaluation datasets Methods Base class Cat. Aug. KDE GMM-BIC MAF RealNVP VAE TabPFN TabICL TabEBM ICED Gaussian mix. ✓✗0.4710 0.5459 0.4503 0.4677 0.4710 0.4973 0.5342 0.1781 0.5648
+> Heavy-tailed mix. ✓✗0.3740 0.4482 0.3587 0.3387 0.3000 0.4278 0.4411 0.2025 0.4925
+> Mix. with flows ✓✗0.3951 0.4184 0.3971 0.3949 0.3712 0.4379 0.4645 0.1156 0.5082
+> All datasets ✗✓0.3895 0.4757 0.3602 0.3735 0.3187 0.4218 0.4387 0.1549 0.4761
+> All datasets ✓✓0.3340 0.4191 0.3243 0.2935 0.2615 0.3772 0.4004 0.1663 0.4418
+
+Let z ∈ Rd be the input to a layer. The layer first ap-plies an orthogonal mixing map and then a coordinatewise nonlinearity. 
+
+Orthogonal mixing. For numerical stability and a trivial Jacobian, mixing uses an orthogonal matrix Q ∈ Rd×d with 
+
+Q⊤Q = I,
+
+z′ = Qz. (6) Since | det Q| = 1 , this step contributes nothing to the log-determinant, log | det Jlin | = 0 , so the entire Jacobian of a layer comes from the pointwise nonlinearity. 
+
+Piecewise-linear activity Each coordinate i is transformed around a random breakpoint ki with distinct positive slopes on either side, 
+
+fi(z′
+
+> i
+
+) = 
+
+ai (z′ 
+
+> i
+
+− ki) + ki, z′ 
+
+> i
+
+≤ ki,bi (z′ 
+
+> i
+
+− ki) + ki, z′ 
+
+> i
+
+> k i, (7) with ai, b i > 0. The map is piecewise linear and strictly increasing, and its log-determinant is 
+
+log | det Jf | =
+
+> d
+
+X
+
+> i=1
+
+log  ai I(z′ 
+
+> i
+
+≤ ki) + bi I(z′ 
+
+> i
+
+> k i). (8) The remaining two families replace the sharp knee of the piecewise-linear map with a smooth transition, which pro-duces densities without hard creases. 
+
+ELU-based. The exponential linear unit scales negative values nonlinearly while staying linear for positive ones, 
+
+fi(z′
+
+> i
+
+) = 
+
+αi (exp( z′ 
+
+> i
+
+− ki) − 1) + ki, z′ 
+
+> i
+
+≤ ki,βi (z′ 
+
+> i
+
+− ki) + ki, z′ 
+
+> i
+
+> k i, (9) with αi, β i > 0. On the lower branch the derivative is 
+
+αi exp( z′ 
+
+> i
+
+− ki) and on the upper branch it is βi, so 
+
+log | det Jf | =
+
+> d
+
+X
+
+> i=1
+
+log  αi exp( z′ 
+
+> i
+
+− ki) I(z′ 
+
+> i
+
+≤ ki) + βi I(z′ 
+
+> i
+
+> k i).
+
+(10) 
+
+Softplus-based. Softplus is a smooth approximation to ReLU, parameterized here to control the sharpness of the bend and the residual slope, 
+
+fi(z′
+
+> i
+
+) = si
+
+γi
+
+log  1 + exp( γi(z′ 
+
+> i
+
+− ki))  + mi z′
+
+> i
+
+, (11) where γi sets the steepness of the transition and si, m i are random slope coefficients (with si, m i > 0 to keep the map increasing). Its derivative is a shifted sigmoid, giving 
+
+∂f i
+
+∂z ′
+
+> i
+
+= si σ γi(z′ 
+
+> i
+
+− ki) + mi,
+
+log | det Jf | =
+
+> d
+
+X
+
+> i=1
+
+log 
+
+ si
+
+1 + exp( −γi(z′ 
+
+> i
+
+− ki)) + mi
+
+
+
+.
+
+(12) 
+
+Change of variables Stacking L layers and letting x ∼ px
+
+be a sample from the base Gaussian mixture, the log-density of the warped output y is obtained by accumulating the per-layer log-determinants, 
+
+log py (y) = log px(x) −
+
+> L
+
+X
+
+> l=1
+
+log | det Jl|. (13) Because each term on the right is available in closed form, every flow-warped training instance carries an exact ground-truth log-density, which is precisely what ICED’s regression target requires. 
+
+C Query augmentation details 
+
+During pretraining, we apply query-level augmentations to regularize the learned energy landscape in regions outside the data manifold. For each training episode, augmentation is applied with probability 0.5. If an augmentation is selected, a random mask is sampled over the query points, where each coordinate is independently selected with probability 
+
+0.1. Only the selected coordinates are modified, while the remaining features remain unchanged. We consider three types of query perturbations: Gaussian noise injection, Mixup, and CutMix. When the random aug-mentation mode is enabled, one of these transformations is sampled uniformly for each episode. For Gaussian noise augmentation, the selected query co-ordinates are perturbed with zero-mean Gaussian noise. The noise magnitude is adapted to the input dimensionality and is defined as σ(d) = 7 .76 · d−1.955 , where d denotes the number of input features. For Mixup augmentation, each query sample is interpo-lated with a randomly selected context sample. The interpo-lation coefficient is sampled as 
+
+λ ∼ N (0 .5, 0.1) ,and the resulting perturbation is computed as 
+
+∆x = λx context + (1 − λ)xquery − xquery .
+
+The perturbation is applied only to the coordinates selected by the augmentation mask. For CutMix augmentation, a subset of features is replaced with the corresponding features from randomly sampled con-text points. The fraction of replaced features is sampled uni-formly from [0 .1, 0.5] . Letting I denote the selected feature indices, the perturbed query is obtained by replacing xquery ,I
+
+with xcontext ,I .These augmentations generate partially perturbed queries located around the original data manifold. By exposing the model to such samples during pretraining, the learned en-ergy function is encouraged to form smoother and more meaningful landscapes in regions relevant for downstream out-of-distribution detection. 
+
+D Additional density-estimation results 
+
+As an additional evaluation metric to the pairwise accuracy reported in Section 4.1, we provide density estimation results using Kendall’s τ correlation coefficient. We evaluate the models under the same synthetic dataset setting as in the main experiments, measuring the rank agreement between the estimated and reference density values. Kendall’s τ is defined as: 
+
+τ = C − D 
+
+> 12
+
+n(n − 1) , (14) where C and D denote the number of concordant and dis-cordant pairs, respectively, among all possible pairs of n
+
+samples. Higher values of τ indicate better agreement be-tween the estimated density ordering and the ground-truth density ordering. The results are presented in Table 4. 
+
+E Extended anomaly detection results 
+
+This section presents the complete results on the ADBench benchmark for both out-of-distribution and unsupervised anomaly detection settings described in Sections 4.2 and 4.3 of the main paper. In addition to density-based models, we evaluate ICED against the 14 dominant algorithms from the AD-Bench (Han et al. 2022) benchmark, implemented using the PyOD (Zhao, Nasrullah, and Li 2019) library, including KNN (Ramaswamy, Rastogi, and Shim 2000), LOF (Bre-unig et al. 2000), IForest (Liu, Ting, and Zhou 2008), PCA (Shyu et al. 2003), HBOS (Goldstein and Dengel 2012), OCSVM (Schölkopf et al. 1999), CBLOF (He, Xu, and Deng 2003), DeepSVDD (Ruff et al. 2018), ECOD (Li et al. 2023), COPOD (Li et al. 2020), LODA (Pevn` y 2016), SOD (Kriegel et al. 2009), COF (Tang et al. 2002) and DAGMM (Zong et al. 2018). We further extend the comparison with two re-cent methods, namely TCCM (Li et al. 2025) and TACTIC-N (pretrained on clean context) and TACTIC-N (pretrained on noisy context) (Marszałek, Kuśmierczyk, and Śmieja 2026). For all baselines, we use the hyperparameter settings recom-mended by the respective authors to ensure fair comparison. The reported values are averaged over five random seeds. In addition to the results for individual datasets, Tables 5 and 6 include two aggregation rows: Mean AUROC and Median Rank. Table 5: Out-of-distribution detection AUROC scores on the ADBench benchmark.  Bold  and underlined values denote the best and second-best results, respectively. 
+
+> Idx  TabICL  TACTIC-C  ICED  GMM  KNN  TACTIC-N  MAF  TabPFN  NVP  LOF  KDE  TCCM  IForest  VAE  PCA  HBOS  OCSVM  DeepSVDD  CBLOF  COPOD  ECOD  DAGMM  LODA  SOD  TabEBM  COF 1 71.76  61.58  62.03  55.86  63.05  59.08  56.10  55.98  57.10  66.84  55.82  57.11  55.76  57.82  56.34  54.49  55.17  55.46  54.63  53.36  55.21  51.87  51.06  60.28  43.56  63.28 2 92.68  88.29  93.33  94.33  87.04  91.54  94.52  94.64  86.68  90.92  65.46  76.64  91.44  82.43  81.23  70.78  66.03  85.28  63.83  77.56  78.97  60.84  60.61  71.39  40.56  64.30 3 96.87  94.92  90.66  95.99  94.91  84.20  93.76  51.55  92.52  93.99  93.87  93.24  75.74  89.35  69.33  66.49  85.79  58.25  76.73  78.24  84.50  57.32  64.50  67.60  73.75  76.62 4 99.45  99.37  99.40  99.69  99.49  99.55  96.40  75.75  99.12  72.64  99.47  99.56  99.54  99.39  99.16  99.49  99.43  98.20  99.22  99.50  98.97  95.54  98.48  84.55  98.47  45.03 5 81.69  78.62  81.78  77.47  74.40  77.45  78.46  71.53  77.03  67.18  70.44  75.83  74.05  77.80  76.87  80.33  69.42  73.26  52.54  78.31  76.91  52.18  54.67  65.89  42.96  53.41 6 93.11  92.86  90.94  84.38  95.79  92.19  87.23  89.90  95.86  95.24  97.46  98.11  94.85  96.40  96.70  86.82  97.45  93.77  87.88  92.28  93.41  86.03  92.22  50.32  91.64  52.91 7 78.53  71.52  72.19  66.59  79.78  76.58  65.44  80.12  78.29  80.12  82.20  81.57  80.05  81.88  82.24  70.35  84.27  79.47  79.11  66.82  78.07  74.49  78.70  36.06  91.84  41.14 8 60.04  74.72  76.01  78.96  65.04  86.23  81.45  57.90  76.86  45.99  66.60  69.26  70.48  77.45  78.87  75.94  70.16  72.55  69.21  74.55  75.11  52.60  64.03  49.33  66.01  40.94 9 78.04  64.24  72.68  72.18  68.23  62.99  73.26  53.71  68.13  50.27  68.10  61.50  62.96  70.86  71.70  65.65  56.28  70.32  54.44  67.94  66.54  56.62  41.95  58.76  49.03  40.13 10  95.31  94.18  95.14  92.32  97.60  82.88  87.29  98.61  96.20  99.06  91.00  91.91  84.65  95.96  94.44  76.68  95.21  87.64  89.93  87.90  91.56  87.46  92.47  59.56  9.44  51.55 11  98.79  99.43  96.58  98.18  99.83  96.91  97.43  86.12  97.28  95.48  95.07  93.63  90.11  88.59  88.52  82.36  88.18  83.72  83.41  81.49  88.95  69.71  44.62  58.63  85.24  70.83 12  73.91  78.40  81.09  77.74  81.09  70.45  71.00  79.35  74.55  66.04  78.05  72.17  66.53  58.94  55.07  63.17  55.63  55.52  62.76  44.78  46.64  46.52  50.74  52.78  55.01  54.14 13  94.50  94.24  93.45  93.50  94.93  95.34  92.16  92.51  93.78  95.17  93.51  93.49  93.21  93.26  93.26  94.09  93.24  92.95  88.25  92.18  92.66  86.06  92.59  94.43  11.45  86.29 14  98.00  99.19  98.80  99.16  94.12  90.93  80.51  99.44  75.98  91.92  77.90  87.95  81.78  73.41  74.07  81.76  49.84  67.11  72.06  75.25  71.77  79.49  74.64  60.24  70.27  48.03 15  98.25  99.95  100.00  100.00  99.78  89.38  90.44  100.00  99.64  66.35  99.85  82.51  84.16  83.19  85.19  86.25  87.34  78.46  69.75  81.68  74.48  59.36  62.43  3.57  18.35  18.34 16  97.53  99.91  99.55  100.00  99.98  99.90  99.99  93.43  99.99  99.96  99.57  99.96  99.52  100.00  99.95  99.57  99.57  99.84  84.40  99.08  97.96  99.73  37.14  57.56  14.68  4.08 17  90.79  82.24  61.52  90.60  82.01  72.01  88.90  50.00  75.34  85.69  87.04  70.24  41.28  88.41  79.60  53.58  70.79  77.91  54.27  67.57  67.63  63.11  56.02  35.11  nan  45.06 18  98.17  99.70  99.41  99.82  97.54  96.70  97.09  99.43  97.96  92.63  96.98  98.07  90.97  90.75  89.56  77.46  92.41  85.07  88.92  79.81  72.66  75.32  87.12  51.58  98.68  66.06 19  63.86  86.25  72.93  72.65  77.72  82.84  63.74  78.45  52.52  76.47  58.27  58.67  62.91  50.58  41.55  69.71  38.87  43.70  65.77  43.21  37.54  49.62  42.34  45.42  28.12  51.15 20  92.49  92.09  86.58  95.43  91.12  84.60  86.01  91.12  80.99  89.35  73.72  87.14  63.82  54.16  53.73  59.09  51.84  50.38  67.95  55.74  57.49  53.80  54.14  76.44  37.44  80.84 21  98.13  100.00  100.00  100.00  100.00  99.88  99.64  99.19  99.99  97.77  100.00  100.00  99.69  99.93  99.94  99.77  100.00  99.01  80.80  99.46  99.50  91.02  41.54  37.90  79.84  31.00 22  86.71  87.83  86.11  86.78  85.56  78.74  86.40  87.46  82.63  80.95  76.98  77.38  77.71  71.58  70.14  73.53  71.70  67.86  74.33  68.43  64.06  73.89  72.73  66.32  23.91  59.88 23  84.01  91.69  86.23  87.00  88.72  85.13  85.36  85.38  88.00  85.65  89.48  88.68  88.15  87.71  90.23  85.93  90.09  85.44  74.75  90.68  90.83  84.75  88.24  78.50  29.89  68.07 24  - 95.45  91.03  78.97  93.55  87.45  92.20  64.06  93.07  95.49  93.76  85.71  86.29  90.62  90.50  67.15  88.89  81.18  60.23  77.42  74.50  68.25  83.79  62.36  29.44  57.77 25  98.72  100.00  100.00  99.98  100.00  100.00  100.00  99.16  100.00  100.00  100.00  100.00  95.61  100.00  100.00  100.00  100.00  98.61  65.20  94.24  95.40  95.96  99.87  54.46  97.92  51.91 26  - 96.55  87.19  96.91  99.70  84.51  80.17  95.43  89.71  99.75  99.71  88.59  77.48  60.80  58.86  87.78  65.30  54.81  59.48  69.40  61.49  70.98  65.95  44.44  13.50  57.40 27  92.22  93.39  96.89  94.21  95.25  93.46  93.94  94.11  95.97  96.09  90.83  93.37  92.40  92.63  93.14  80.85  91.93  92.63  85.12  87.66  91.37  87.93  88.38  56.00  15.85  62.04 28  98.85  99.92  99.29  99.39  99.91  98.32  98.69  99.50  96.26  99.23  99.25  98.68  97.45  90.24  94.39  93.93  96.56  87.21  85.97  90.51  92.85  66.54  93.32  52.22  64.89  51.39 29  87.72  84.60  85.92  68.88  79.63  79.13  78.72  88.66  78.16  75.05  78.15  75.27  77.55  74.77  76.19  74.79  74.83  74.63  75.78  69.72  63.49  67.28  71.13  36.69  73.75  38.83 30  80.67  87.44  87.96  84.10  87.56  88.94  81.32  86.98  79.39  84.85  81.52  81.72  79.27  72.71  66.30  86.45  65.54  67.64  84.64  63.27  58.31  66.18  68.59  46.94  12.22  50.95 31  98.65  97.08  99.85  99.31  99.90  99.45  99.67  99.78  99.92  99.70  99.73  99.88  99.28  99.53  97.84  98.13  98.16  97.39  90.09  97.42  96.46  72.57  98.35  74.58  1.54  56.38 32  98.01  99.90  99.95  99.97  99.86  90.20  99.95  99.19  99.74  99.77  98.63  99.87  99.64  99.95  99.58  99.00  98.55  99.50  97.88  99.47  99.22  98.54  90.78  41.27  4.32  56.89 33  97.56  91.62  96.55  94.73  98.72  92.74  93.86  98.88  92.56  77.55  74.47  61.42  89.45  74.31  53.52  78.35  76.94  62.51  82.72  47.60  48.91  89.93  74.94  42.33  29.18  41.64 34  91.53  90.49  92.66  93.85  95.42  95.95  93.15  80.22  91.50  90.95  91.93  92.69  93.67  91.06  93.88  92.09  91.80  90.58  86.64  91.21  93.63  87.11  71.91  88.69  78.58  88.60 35  79.53  72.17  75.25  76.68  70.16  66.99  77.45  64.93  69.47  73.99  65.28  81.04  75.21  80.08  71.52  65.80  65.73  70.85  74.90  61.33  57.36  59.41  66.48  21.25  63.25  16.87 36  62.83  48.51  52.05  50.94  48.99  48.62  47.87  48.59  49.00  50.47  70.79  51.14  47.33  47.34  47.10  47.38  46.57  51.55  54.09  49.19  47.05  51.04  47.08  43.85  47.08  37.63 37  98.48  98.62  98.55  99.00  96.02  95.65  93.12  99.42  92.69  92.94  91.78  89.83  93.17  90.51  92.69  92.44  90.84  93.93  85.60  92.89  86.87  88.33  90.47  37.38  97.25  41.01 38  98.35  94.90  99.08  98.12  98.14  96.06  98.60  98.11  98.33  98.28  93.87  97.54  98.94  98.27  98.12  98.68  94.11  98.50  86.52  93.79  97.74  84.45  91.86  88.14  51.89  52.63 39  98.59  83.82  77.30  64.26  64.38  71.06  49.45  98.26  46.83  63.37  38.91  54.58  46.64  43.28  46.69  38.31  40.35  42.72  47.54  24.27  41.62  48.27  34.07  17.53  62.66  21.32 40  98.73  99.86  97.51  99.69  98.28  95.35  92.47  99.91  93.09  97.26  74.30  94.29  77.57  63.92  58.16  71.02  62.78  58.53  77.70  50.30  59.54  62.77  72.76  75.26  30.10  78.90 41  77.21  73.41  86.58  78.88  77.77  87.05  63.41  75.92  62.08  77.27  77.30  62.81  72.72  70.89  65.91  70.42  56.82  58.94  72.06  73.82  60.97  56.15  62.39  56.32  47.32  61.40 42  98.95  99.90  100.00  100.00  99.22  99.43  97.46  74.32  98.72  84.10  99.54  99.55  99.38  98.96  99.16  99.06  99.52  98.21  99.64  99.21  99.19  86.67  97.66  84.01  99.24  34.82 43  99.44  99.99  99.77  99.75  99.77  96.09  99.53  99.77  99.34  99.90  99.87  99.65  98.98  99.70  99.46  99.10  99.79  99.09  86.72  99.39  96.73  91.23  98.95  78.35  100.00  34.34 44  87.23  83.16  89.18  89.36  51.87  61.32  93.54  91.98  46.77  53.36  35.02  31.74  46.91  31.89  39.35  34.48  34.98  34.81  46.24  33.96  38.32  42.71  31.24  47.26  42.70  43.96 45  98.80  100.00  99.94  99.54  99.60  98.52  98.65  99.91  99.57  98.32  98.17  99.09  91.60  95.88  93.73  95.82  95.39  82.03  96.81  85.79  73.03  74.83  92.93  2.92  100.00  45.34 46  98.23  98.66  96.79  99.59  75.40  67.01  58.21  99.69  59.58  61.18  57.99  53.84  57.39  55.50  53.41  60.83  53.72  52.35  54.74  53.67  50.98  55.05  53.27  7.94  44.34  20.92 47  50.63  48.53  45.67  45.48  45.77  47.98  44.50  48.73  45.64  48.55  39.19  55.67  41.74  44.47  44.47  41.41  42.36  43.63  51.82  37.64  45.58  41.10  49.86  39.92  64.65  34.81 Mean  89.19  88.71  88.33  87.88  87.08  85.04  84.65  84.62  83.49  83.04  82.27  82.18  80.11  79.51  77.91  77.59  76.60  75.60  74.53  74.45  74.30  70.65  70.19  53.67  52.87  50.02 Median-Rank  6.00  5.00  5.00  5.00  6.00  10.00  10.00  7.00  10.00  8.00  11.00  10.00  12.00  13.00  14.00  15.00  16.00  18.00  16.00  18.00  18.00  21.00  19.00  23.00  24.00  24.00 Table 6: Comparison of baselines on the unsupervised anomaly detection task using the ADBench benchmark.
+> Idx  TabICL  TACTIC-C  ICED  GMM  KNN  TACTIC-N  MAF  TabPFN  NVP  LOF  KDE  TCCM  IForest  VAE  PCA  HBOS  OCSVM  DeepSVDD  CBLOF  COPOD  ECOD  DAGMM  LODA  SOD  TabEBM  COF 1 69.27  61.46  61.29  56.17  62.55  59.86  55.99  53.69  57.01  66.95  55.49  57.37  55.93  56.84  56.05  54.04  54.90  55.21  51.96  53.20  55.48  51.28  50.64  62.07  48.33  64.11 2 86.11  70.42  88.16  88.09  71.72  76.20  88.95  88.49  71.94  70.19  57.43  92.68  81.99  61.39  64.94  59.88  58.04  68.27  52.55  76.95  78.53  55.42  46.86  77.92  33.64  67.30 3 87.83  88.97  71.81  96.37  77.53  81.02  92.85  50.35  90.75  82.96  91.98  91.17  72.75  85.62  80.90  71.57  84.63  76.92  54.95  79.52  84.95  56.42  72.44  66.89  42.75  73.06 4 93.62  64.75  96.92  93.57  97.37  95.00  94.97  95.48  97.46  41.00  99.55  99.56  98.33  99.31  96.43  98.67  91.81  90.33  77.34  99.55  99.21  93.42  98.53  93.55  52.76  38.67 5 79.31  74.64  79.64  75.24  72.02  76.14  73.74  60.91  74.03  58.96  67.00  72.15  70.85  72.37  72.56  78.32  65.87  69.11  48.49  77.77  76.08  50.37  51.09  69.58  54.59  57.61 6 64.11  68.38  75.56  65.58  75.61  87.94  79.47  57.39  90.13  66.45  95.08  67.28  92.71  93.22  95.27  86.53  93.32  88.74  77.50  92.43  93.47  79.19  88.25  70.31  84.84  64.67 7 52.21  49.97  50.13  47.02  55.95  63.87  48.63  41.43  63.69  59.75  75.67  78.37  68.71  70.89  75.73  60.17  78.52  73.60  61.14  66.99  78.81  64.74  73.48  51.57  90.22  53.25 8 58.28  71.89  71.87  78.49  60.33  85.36  80.19  59.40  73.95  40.76  60.65  67.03  69.88  74.43  78.22  75.03  68.67  71.00  65.04  74.75  75.52  51.66  61.92  48.54  38.64  42.00 9 78.95  63.93  69.70  70.14  66.14  64.56  70.59  52.73  65.60  48.04  65.64  60.37  60.29  68.86  68.20  64.04  54.56  67.45  49.88  68.46  67.03  53.52  42.45  61.64  67.80  41.55 10  82.19  56.35  88.05  89.11  87.07  98.09  75.41  85.88  92.42  85.94  86.31  94.56  87.10  96.08  93.63  77.15  91.84  86.32  65.13  88.17  91.51  83.03  88.08  75.09  12.04  79.80 11  85.71  70.04  89.74  87.75  81.86  74.01  84.03  73.91  78.08  57.07  75.18  47.23  78.40  73.41  81.86  76.40  72.37  79.11  66.40  81.33  89.01  59.74  45.57  62.93  71.57  71.01 12  58.95  64.90  65.78  67.00  73.84  58.48  53.75  65.91  67.09  60.20  70.28  63.41  57.70  50.93  47.16  54.24  50.28  48.45  53.64  45.04  46.73  46.24  45.25  68.39  46.87  62.66 13  99.48  95.61  92.17  91.72  95.92  96.15  93.17  91.15  95.45  97.23  94.70  93.15  94.04  99.52  94.13  94.01  94.55  94.00  77.20  92.87  93.29  81.42  93.96  96.40  2.02  97.63 14  64.30  73.99  82.33  82.87  82.34  83.52  76.25  65.06  76.56  67.84  75.49  68.64  79.44  72.84  68.88  78.68  40.20  63.33  64.40  72.93  68.41  73.32  74.86  79.21  79.11  75.93 15  37.69  72.22  77.01  40.59  51.09  78.40  74.57  38.27  70.26  39.62  70.47  75.23  70.20  72.54  75.83  78.95  66.17  70.42  55.39  81.78  75.43  49.16  63.12  66.88  23.64  37.86 16  99.11  99.17  99.23  7.25  5.16  99.54  99.36  41.58  82.06  29.28  99.50  72.61  99.97  99.26  99.60  99.45  99.50  99.66  99.20  99.07  97.97  99.53  10.07  77.82  1.81  87.66 17  73.22  65.76  56.16  74.58  68.97  68.36  68.43  50.00  68.97  65.30  65.88  67.76  66.79  57.00  60.59  67.49  67.72  59.56  53.17  66.39  66.45  63.62  54.36  60.98  nan  64.41 18  71.52  73.57  87.21  78.35  89.26  90.66  94.18  52.13  92.87  89.88  91.73  93.14  84.44  80.94  79.26  64.63  77.84  72.66  64.09  78.90  73.42  69.06  79.05  85.84  92.23  85.83 19  51.74  67.41  55.14  59.80  58.01  68.14  56.04  60.07  44.94  54.29  46.27  53.75  48.47  42.43  36.33  55.78  35.97  38.88  55.36  42.01  36.57  51.16  37.48  60.03  41.28  53.30 20  91.64  86.65  85.92  90.46  87.16  80.63  81.92  85.42  76.48  85.48  69.50  81.36  62.95  52.41  53.00  60.94  49.91  49.71  52.81  55.78  57.83  52.22  52.30  85.49  40.76  81.35 21  76.06  98.13  99.42  23.01  64.16  99.89  99.02  42.08  97.15  88.64  93.43  99.80  99.89  99.84  99.88  99.61  99.80  98.35  67.72  99.41  99.45  76.23  80.68  77.88  89.62  90.59 22  81.15  70.81  81.87  81.26  82.65  78.59  80.19  82.41  74.18  68.67  72.31  71.34  73.02  67.66  67.00  70.88  61.76  64.32  63.09  68.77  64.55  67.98  68.96  75.76  30.80  66.66 23  82.09  88.77  77.47  84.79  84.41  82.76  83.51  82.36  84.45  75.83  86.47  84.08  86.24  87.26  89.69  85.63  84.78  81.59  56.19  90.74  90.78  79.76  82.42  80.74  55.47  76.82 24  - 85.79  78.09  64.78  80.80  86.33  85.91  58.89  85.62  67.76  78.61  77.28  81.45  86.49  85.75  61.23  83.01  70.43  50.10  78.18  75.23  64.24  73.08  60.81  36.25  70.98 25  78.16  91.70  90.24  31.86  68.20  100.00  99.91  51.38  99.43  35.49  26.65  74.51  99.99  100.00  100.00  100.00  91.84  95.66  80.71  93.89  95.03  43.31  95.09  73.34  79.22  40.85 26  - 64.66  42.89  57.61  42.18  57.91  53.88  70.60  57.57  57.52  39.92  51.83  68.78  51.25  52.18  83.79  55.37  50.02  50.31  68.98  60.79  68.71  59.25  57.64  10.43  50.05 27  87.49  88.88  91.46  77.12  80.97  95.35  88.34  82.20  92.45  74.48  89.03  81.21  89.76  75.37  90.48  79.69  89.19  89.47  68.69  87.94  91.55  86.49  82.31  75.92  31.94  72.66 28  82.49  79.23  85.10  78.35  72.18  90.29  83.07  80.46  81.26  46.80  96.17  79.77  95.22  83.66  93.50  92.31  94.93  85.93  73.42  90.32  92.59  64.27  91.20  66.15  86.43  43.86 29  53.57  63.49  69.72  60.14  71.55  70.58  74.01  59.09  71.72  63.62  72.74  71.45  71.43  66.77  69.79  70.94  66.09  67.51  55.42  69.49  63.57  65.72  66.14  60.11  66.83  58.68 30  73.87  61.47  72.32  67.24  65.37  82.21  72.93  64.83  64.52  56.11  68.98  64.06  70.21  67.23  59.65  74.96  59.41  61.42  63.69  63.18  58.10  59.59  61.05  64.40  24.40  55.43 31  96.85  63.81  96.38  98.36  92.54  99.80  98.78  86.20  99.45  49.42  99.55  85.32  99.04  99.76  96.88  97.01  97.29  96.52  80.27  96.43  95.26  77.32  97.29  84.91  1.36  55.40 32  97.36  84.98  89.74  86.32  67.76  85.09  99.36  96.97  97.60  56.34  98.22  69.90  99.63  99.18  98.74  98.60  97.75  98.55  83.15  99.41  99.20  97.32  62.02  69.58  0.16  53.58 33  62.32  49.96  59.76  73.65  71.85  64.37  76.49  72.09  73.38  46.31  61.18  61.54  67.55  50.23  42.19  60.03  50.19  48.65  49.06  47.34  48.97  73.43  45.37  59.72  38.43  41.57 34  100.00  86.75  90.88  91.24  93.77  95.02  88.35  70.16  91.17  83.10  88.62  93.60  92.98  100.00  92.09  81.98  88.37  85.92  66.94  86.71  91.35  82.64  75.73  77.39  100.00  87.75 35  46.91  52.56  53.34  39.93  53.68  50.61  55.08  47.92  55.19  43.06  55.93  49.63  65.38  57.09  54.92  65.14  53.43  54.52  50.42  69.62  66.35  52.32  42.50  52.74  51.55  40.95 36  65.56  50.99  53.00  53.36  51.51  51.28  51.01  48.58  53.08  52.94  61.09  53.23  51.74  54.56  50.69  50.71  50.19  49.23  49.20  52.39  50.71  50.95  49.66  54.23  55.47  51.29 37  55.95  67.86  79.17  67.14  68.44  80.61  85.62  79.35  85.15  53.22  89.73  70.58  90.15  88.00  90.21  90.38  82.98  91.32  52.46  92.55  86.82  84.06  86.43  75.50  47.64  58.65 38  98.50  85.43  98.22  95.63  95.94  95.89  97.21  94.78  95.77  87.95  88.14  93.69  98.40  97.02  96.64  96.30  88.34  97.15  61.64  94.46  98.11  80.66  79.09  91.61  14.91  91.57 39  53.72  35.85  34.58  36.41  38.64  43.40  33.83  41.09  39.09  50.07  35.59  51.02  37.60  42.44  43.76  30.69  38.19  39.70  47.28  24.35  42.16  44.55  32.13  43.39  40.75  49.30 40  84.90  86.30  92.72  93.04  97.28  99.47  86.74  90.43  89.21  93.45  69.18  91.71  73.36  52.34  58.93  69.10  58.49  59.06  67.96  49.87  59.42  55.78  69.07  88.11  36.67  93.77 41  65.16  69.05  80.43  70.24  74.27  83.49  61.26  67.42  60.27  72.83  76.32  65.51  70.85  68.03  65.74  69.75  57.53  58.75  53.05  74.87  62.56  53.22  63.52  68.60  49.06  73.77 42  72.08  91.45  97.09  26.51  84.93  98.58  96.21  21.36  95.25  53.87  99.38  99.38  99.08  98.68  98.67  98.56  99.30  98.17  90.82  99.15  99.13  91.15  97.87  94.65  93.86  52.25 43  81.03  85.60  91.28  9.00  93.26  99.77  98.25  72.88  93.80  86.06  98.64  83.61  99.15  99.41  99.13  99.45  98.93  98.52  88.08  99.48  97.43  83.49  98.69  93.37  71.18  95.70 44  68.10  40.84  75.97  71.73  46.69  51.40  78.13  66.60  45.89  48.82  32.70  30.91  42.49  29.97  36.15  33.40  32.83  32.67  52.51  33.36  37.26  42.43  30.45  52.02  42.93  49.00 45  55.94  46.22  83.19  22.58  42.71  81.07  71.92  66.88  64.19  36.07  86.01  41.14  78.19  86.48  81.62  89.88  70.04  61.75  43.89  87.09  74.13  72.52  86.09  41.00  54.60  41.13 46  44.82  50.30  54.01  48.86  46.70  46.34  50.33  50.83  50.06  41.60  50.69  49.38  49.23  48.40  47.94  54.78  47.86  47.34  51.21  52.34  48.39  52.35  50.39  53.45  47.46  46.61 47  40.24  41.13  41.38  42.79  38.83  41.89  40.54  43.87  43.10  44.55  38.02  48.36  38.37  41.22  39.03  39.13  40.99  40.91  50.08  36.89  44.00  38.08  46.61  42.83  59.32  43.89 Mean  73.10  70.68  76.67  65.81  70.02  78.68  77.28  65.13  75.95  61.74  73.77  72.14  76.39  74.01  74.04  74.47  70.97  71.19  61.98  74.49  74.44  65.81  66.02  69.30  48.73  62.82 Median-Rank  13.00  15.00  11.00  12.00  13.00  8.00  10.00  17.00  11.00  19.00  11.00  13.00  9.00  9.00  9.00  10.00  16.00  16.00  20.00  11.00  10.00  19.00  17.00  16.00  23.00  19.00
+
+F Extended augmentation results 
+
+The following section provides additional analysis of the data augmentation experiments introduced in Section 4.4 of the main paper under the TabEBM protocol. We report results obtained across ten random seeds to account for variability introduced during training and evaluation. The effectiveness of each augmentation strategy is evaluated using four down-stream classifiers: K-Nearest Neighbors (KNN) (Table 7), Logistic Regression (LR) (Table 8), Multi-Layer Perceptron (MLP) (Table 9), and Random Forest (RF) (Table 10). Per-formance is measured in terms of balanced accuracy. All classifiers use their scikit-learn implementations with de-fault configurations. Finally, Table 11 reports the average performance across all evaluated classifiers. Table 7: Balanced accuracy results of the K-Nearest Neighbors (KNN) classifier under different data augmentation strategies. 
+
+dataset n_real Baseline SMOTE TVAE CTGAN NFLOW TabDDPM ARF TabEBM ICED biodeg 20 69.35 71.14 60.91 62.33 63.24 67.92 64.01 69.12 69.06 biodeg 50 74.68 74.13 70.39 69.58 72.97 74.66 70.22 72.00 72.06 biodeg 100 78.85 78.92 74.13 77.40 78.82 78.83 76.53 77.11 77.15 biodeg 200 80.83 79.08 78.68 80.45 80.46 80.83 79.67 78.02 77.63 biodeg 500 82.71 81.56 82.45 82.68 82.62 82.71 82.18 80.77 81.87 collins 100 14.82 14.86 14.08 14.49 14.70 14.72 14.09 15.91 16.06 
+
+collins 200 17.89 17.56 17.16 17.72 17.79 17.87 17.82 17.28 17.27 energy 50 17.61 20.67 18.19 16.85 17.69 16.30 18.03 29.16 28.46 energy 100 24.76 28.07 24.93 24.87 25.38 23.31 25.49 36.92 35.62 energy 200 33.25 35.76 33.56 33.27 33.48 31.84 34.02 43.11 41.02 fourier 20 33.30 34.93 23.92 31.40 29.98 33.30 34.02 46.16 45.74 fourier 50 50.80 50.11 37.78 50.56 47.58 50.80 49.06 57.54 57.46 fourier 100 60.50 68.32 49.74 60.46 57.50 60.50 59.02 64.60 64.60 fourier 200 68.00 71.54 60.76 68.16 66.92 68.00 66.72 70.20 69.30 fourier 500 74.96 75.62 73.72 74.96 74.88 74.96 74.34 74.24 73.94 protein 20 30.92 33.05 26.23 30.91 29.41 30.92 29.89 42.00 41.98 protein 50 43.36 47.13 40.46 43.24 43.06 43.36 42.52 58.75 58.54 protein 100 55.36 74.68 52.90 55.30 55.44 55.36 55.31 73.55 73.36 protein 200 72.36 84.20 71.12 72.36 72.36 72.36 72.82 84.63 83.11 protein 500 92.29 95.07 92.32 92.35 92.35 92.29 92.39 94.85 95.08 
+
+steel 20 64.24 75.69 60.09 59.68 61.05 63.69 59.40 74.51 74.12 steel 50 79.73 85.53 65.07 69.67 71.41 79.76 69.56 85.23 85.26 steel 100 86.99 90.13 72.34 79.83 82.13 86.99 77.04 89.29 88.69 steel 200 91.92 93.21 79.80 88.76 89.93 91.92 86.46 92.62 92.71 steel 500 96.15 96.51 94.64 95.23 95.99 96.15 94.73 96.42 96.49 stock 20 77.72 84.15 76.85 73.90 77.95 78.81 79.53 84.20 83.57 stock 50 83.71 89.14 84.68 83.14 84.71 83.88 86.44 89.52 89.65 
+
+stock 100 90.22 93.00 90.03 89.84 90.39 90.22 89.68 92.93 92.82 stock 200 92.44 93.52 92.50 92.53 92.44 92.44 92.38 93.73 93.70 texture 50 68.37 71.02 66.90 68.09 68.49 68.53 67.09 78.61 79.45 
+
+texture 100 78.50 86.45 78.11 78.48 78.50 78.25 78.23 84.92 84.88 texture 200 87.31 90.73 87.23 87.31 87.31 86.94 87.27 89.99 90.01 texture 500 92.76 93.21 92.70 92.76 92.76 92.76 92.82 93.68 93.40 Mean - 65.66 69.05 61.95 64.20 64.54 65.49 64.21 70.65 70.43 Median-Rank - 4.50 2.00 9.00 7.00 6.00 5.00 7.00 2.00 2.00 Table 8: Balanced accuracy results of the Logistic Regression (LR) classifier for different augmentation methods. 
+
+dataset n_real Baseline SMOTE TVAE CTGAN NFLOW TabDDPM ARF TabEBM ICED biodeg 20 71.54 70.78 60.90 59.63 52.48 55.37 68.08 69.90 70.05 biodeg 50 77.37 76.62 70.26 62.47 57.86 58.44 72.13 76.07 75.74 biodeg 100 80.36 80.66 76.27 72.38 64.26 68.16 76.59 79.86 80.36 biodeg 200 82.13 82.10 78.75 75.46 70.20 76.09 79.03 81.68 81.76 biodeg 500 83.65 83.74 81.20 80.23 78.84 78.70 81.93 83.97 83.42 collins 100 15.82 14.43 14.94 14.34 13.51 11.43 15.51 15.67 15.58 collins 200 19.56 18.29 19.04 18.49 17.76 16.41 18.46 19.21 18.66 energy 50 22.20 19.71 20.00 18.09 13.96 14.38 20.77 26.21 24.57 energy 100 26.04 25.06 25.10 24.43 22.84 15.23 24.88 31.99 30.93 energy 200 32.15 31.03 32.38 31.32 29.71 19.48 31.51 37.08 35.73 fourier 20 50.78 34.17 23.10 20.42 22.48 24.18 48.64 50.18 50.20 fourier 50 63.10 44.96 34.42 35.52 30.90 34.46 54.44 62.64 62.36 fourier 100 69.82 69.10 46.90 45.56 42.32 42.44 55.26 69.48 68.98 fourier 200 74.12 73.18 58.54 56.72 55.94 52.00 60.82 73.52 73.38 fourier 500 75.62 75.02 69.96 68.12 68.70 66.52 70.58 74.92 74.80 protein 20 47.22 36.24 32.88 25.55 18.93 34.20 46.37 47.86 47.88 
+
+protein 50 70.78 53.20 50.11 39.12 32.43 48.51 59.16 71.67 71.39 protein 100 83.86 83.70 63.47 56.55 49.58 58.28 62.48 84.17 84.09 protein 200 93.77 93.36 79.71 72.62 70.10 72.03 78.03 94.17 93.45 protein 500 98.30 98.17 90.80 88.55 87.00 79.61 90.08 98.28 98.32 
+
+steel 20 77.59 79.28 59.56 60.28 51.91 58.33 58.28 80.35 80.22 steel 50 94.89 95.51 62.94 63.71 53.93 67.75 67.30 97.18 97.10 steel 100 99.10 99.08 69.72 66.84 57.31 85.61 69.06 99.28 99.42 
+
+steel 200 99.80 99.80 71.74 79.01 64.15 94.87 82.24 99.81 99.84 
+
+steel 500 99.84 99.84 92.24 96.19 88.10 97.98 97.99 99.82 99.87 
+
+stock 20 78.01 79.78 75.66 66.04 75.64 59.76 70.77 79.92 80.07 
+
+stock 50 81.12 81.92 76.02 65.91 72.97 57.93 76.35 82.48 81.46 stock 100 81.75 83.50 78.11 75.01 75.15 62.86 77.94 82.98 82.12 stock 200 82.67 84.11 77.64 77.84 75.36 69.91 78.88 83.38 82.23 texture 50 89.94 60.57 60.61 56.37 36.12 39.00 50.64 90.79 90.49 texture 100 93.99 93.59 76.00 73.86 60.10 62.41 68.39 94.39 94.25 texture 200 96.74 96.62 86.49 86.82 76.34 83.52 87.16 96.98 96.68 texture 500 98.02 98.10 90.43 93.31 91.17 90.52 94.91 98.16 98.04 Mean - 73.08 70.16 60.78 58.39 53.88 56.25 63.47 73.76 73.44 Median-Rank - 3.00 4.00 6.00 7.00 9.00 8.00 5.00 2.00 2.50 Table 9: Evaluation of data augmentation strategies using a Multi-Layer Perceptron (MLP) classifier. Results are reported in terms of balanced accuracy averaged over ten independent runs. 
+
+dataset n_real Baseline SMOTE TVAE CTGAN NFLOW TabDDPM ARF TabEBM ICED biodeg 20 72.22 72.21 64.00 64.30 60.90 57.98 66.50 71.76 71.85 biodeg 50 76.48 75.67 71.81 70.36 72.31 71.60 73.07 75.99 76.22 biodeg 100 80.63 80.23 76.30 77.87 77.73 78.41 76.92 79.74 80.01 biodeg 200 82.48 82.15 80.09 80.98 81.17 82.70 79.50 82.15 82.24 biodeg 500 84.25 84.28 83.16 83.67 83.74 84.57 82.58 84.86 84.85 collins 100 16.54 15.76 15.33 15.81 14.63 14.75 15.95 16.69 17.16 
+
+collins 200 19.48 19.33 18.90 19.62 19.05 19.25 19.19 19.63 19.65 
+
+energy 50 27.50 25.90 24.78 24.54 25.08 26.68 24.79 28.16 27.28 energy 100 37.40 37.33 36.66 36.71 37.21 38.42 35.93 39.04 37.33 energy 200 49.03 48.70 47.42 48.75 48.11 51.15 46.99 49.49 48.97 fourier 20 44.76 34.09 23.04 26.24 26.22 28.46 44.36 45.20 45.08 fourier 50 57.58 47.99 37.78 43.08 37.36 47.70 52.36 58.92 58.72 fourier 100 65.80 65.80 48.74 53.68 49.48 60.18 61.36 66.66 66.52 fourier 200 71.68 72.38 59.70 64.78 60.56 69.82 67.28 72.72 73.04 
+
+fourier 500 77.32 77.00 70.80 72.58 71.62 76.50 72.48 77.38 77.14 protein 20 44.40 38.91 34.28 35.45 32.17 37.98 43.48 44.62 44.38 protein 50 67.12 59.74 50.66 55.05 54.63 61.80 60.89 67.86 67.30 protein 100 81.00 81.16 65.05 73.30 72.80 77.85 72.28 81.44 81.67 
+
+protein 200 93.27 92.90 83.70 88.99 88.61 91.80 87.08 93.70 93.25 protein 500 99.08 98.87 96.66 97.78 97.89 98.75 97.69 99.10 99.22 
+
+steel 20 73.94 75.18 59.76 65.29 59.50 63.93 59.66 74.78 74.85 steel 50 87.23 87.29 69.90 75.04 71.90 82.51 66.18 89.41 89.35 steel 100 95.70 96.04 74.70 82.68 81.47 95.21 73.15 96.73 96.90 
+
+steel 200 98.79 99.00 82.10 91.35 88.89 98.32 83.74 99.04 99.24 
+
+steel 500 99.54 99.56 94.41 97.95 97.19 99.25 93.60 99.59 99.56 stock 20 83.70 82.60 76.88 72.31 76.50 79.90 78.27 84.17 84.17 
+
+stock 50 90.20 89.40 86.75 85.43 86.25 87.14 86.28 89.97 89.98 stock 100 93.64 93.29 91.88 91.96 90.84 92.04 91.02 93.65 93.73 
+
+stock 200 94.19 94.42 92.88 93.29 93.61 92.74 92.64 94.26 94.14 texture 50 88.27 82.26 75.17 81.61 81.64 84.90 76.39 88.43 87.69 texture 100 93.21 92.63 86.47 90.12 89.27 92.17 85.86 93.47 92.87 texture 200 96.27 96.01 93.55 94.97 94.79 95.59 91.95 96.43 96.09 texture 500 98.18 97.88 97.40 97.22 97.30 97.42 96.62 98.04 97.94 Mean - 73.97 72.60 65.78 68.27 67.29 70.83 68.36 74.34 74.19 Median-Rank - 3.00 4.00 8.00 6.00 7.00 5.00 8.00 2.00 2.00 Table 10: Performance comparison of augmentation approaches using a Random Forest (RF) classifier. The reported balanced accuracy values are averaged over ten random seeds. 
+
+dataset n_real Baseline SMOTE TVAE CTGAN NFLOW TabDDPM ARF TabEBM ICED biodeg 20 70.15 70.76 62.51 62.10 59.71 61.70 65.02 71.03 71.17 
+
+biodeg 50 72.12 72.92 69.80 66.05 65.02 69.87 69.09 73.61 73.86 
+
+biodeg 100 76.23 77.61 73.81 74.01 72.46 74.96 74.34 77.94 78.09 
+
+biodeg 200 79.55 79.95 78.20 77.27 78.52 79.41 78.53 80.52 80.25 biodeg 500 82.50 82.51 81.85 82.18 82.25 82.18 82.62 82.62 82.79 
+
+collins 100 14.69 14.72 14.93 14.54 13.53 14.15 14.90 15.48 15.48 
+
+collins 200 17.21 17.50 16.82 17.36 17.59 17.63 17.51 17.64 17.95 
+
+energy 50 39.41 37.26 37.89 37.92 37.96 32.30 38.21 38.59 37.94 energy 100 50.32 50.05 50.80 50.36 49.67 47.42 50.52 51.24 50.34 energy 200 59.56 59.57 59.74 60.04 59.76 57.06 59.74 60.28 60.35 
+
+fourier 20 46.54 35.47 26.00 23.68 20.76 29.00 44.06 51.76 53.02 
+
+fourier 50 65.98 54.78 46.54 47.60 33.76 59.14 58.66 69.50 68.26 fourier 100 72.80 73.92 61.52 63.68 52.00 72.96 67.42 74.70 74.20 fourier 200 76.38 77.04 71.42 73.64 68.66 76.30 73.74 77.08 77.70 
+
+fourier 500 79.94 79.68 77.78 78.82 77.58 79.72 78.30 79.64 79.82 protein 20 43.76 37.64 33.11 31.78 26.58 36.42 41.72 47.06 46.77 protein 50 62.23 56.71 54.86 54.08 44.19 58.13 54.51 65.93 65.24 protein 100 75.52 77.57 69.40 72.45 65.46 73.51 67.55 78.07 77.83 protein 200 87.39 88.34 84.88 86.98 84.65 85.62 84.26 89.63 88.77 protein 500 97.30 97.37 96.62 96.89 96.86 96.65 96.39 97.26 97.49 
+
+steel 20 59.41 65.19 56.77 54.77 53.96 55.46 56.03 62.68 62.41 steel 50 65.00 74.75 58.85 56.48 54.05 61.44 58.31 73.68 73.28 steel 100 73.19 82.84 62.45 63.01 57.73 69.91 63.37 84.87 86.31 
+
+steel 200 85.58 88.23 69.85 72.43 64.57 81.75 70.27 92.08 93.63 
+
+steel 500 96.68 97.00 88.37 90.38 86.40 95.43 89.37 98.82 98.57 stock 20 82.95 81.18 79.14 74.89 80.82 81.56 80.80 85.11 84.40 stock 50 89.61 90.33 88.46 85.64 87.68 87.51 87.78 90.02 89.60 stock 100 93.45 93.09 93.07 92.26 91.25 92.54 91.84 93.16 93.10 stock 200 94.37 94.45 94.18 93.96 94.07 94.18 93.75 94.21 94.45 
+
+texture 50 75.44 72.37 64.66 74.08 73.11 73.50 67.02 77.04 77.19 
+
+texture 100 82.42 82.90 75.04 82.60 81.62 81.28 77.24 83.68 84.09 
+
+texture 200 88.01 88.82 86.80 88.39 88.65 87.92 88.14 89.76 90.33 
+
+texture 500 93.19 93.06 92.40 93.13 92.98 93.43 93.16 93.84 93.38 Mean - 71.18 71.08 66.02 66.47 64.06 68.49 67.70 73.29 73.27 Median-Rank - 4.00 3.00 8.00 7.00 9.00 5.00 6.00 2.00 2.00 Table 11: Average balanced accuracy across four downstream classifiers (KNN, LR, MLP, and RF) for different data augmentation techniques. The table summarizes the overall effectiveness of each augmentation strategy across classifiers and datasets. 
+
+dataset n_real Baseline SMOTE TVAE CTGAN NFLOW TabDDPM ARF TabEBM ICED biodeg 20 70.82 71.22 62.08 62.09 59.08 60.74 65.90 70.45 70.53 biodeg 50 75.16 74.83 70.56 67.11 67.04 68.64 71.13 74.42 74.47 biodeg 100 79.02 79.35 75.13 75.41 73.31 75.09 76.10 78.66 78.90 biodeg 200 81.25 80.82 78.93 78.54 77.59 79.76 79.18 80.59 80.47 biodeg 500 83.28 83.02 82.16 82.19 81.86 82.04 82.33 83.06 83.23 collins 100 15.47 14.94 14.82 14.79 14.09 13.76 15.11 15.94 16.07 
+
+collins 200 18.54 18.17 17.98 18.30 18.05 17.79 18.24 18.44 18.38 energy 50 26.68 25.89 25.22 24.35 23.67 22.42 25.45 30.53 29.57 energy 100 34.63 35.13 34.37 34.09 33.77 31.09 34.20 39.80 38.55 energy 200 43.50 43.76 43.28 43.35 42.76 39.88 43.06 47.49 46.52 fourier 20 43.84 34.66 24.02 25.44 24.86 28.74 42.77 48.32 48.51 
+
+fourier 50 59.36 49.46 39.13 44.19 37.40 48.02 53.63 62.15 61.70 fourier 100 67.23 69.28 51.72 55.84 50.32 59.02 60.76 68.86 68.58 fourier 200 72.54 73.54 62.60 65.82 63.02 66.53 67.14 73.38 73.35 fourier 500 76.96 76.83 73.06 73.62 73.19 74.42 73.92 76.54 76.42 protein 20 41.57 36.46 31.63 30.92 26.77 34.88 40.36 45.38 45.25 protein 50 60.87 54.19 49.02 47.87 43.58 52.95 54.27 66.05 65.62 protein 100 73.93 79.27 62.71 64.40 60.82 66.25 64.40 79.31 79.24 protein 200 86.70 89.70 79.85 80.24 78.93 80.45 80.55 90.53 89.65 protein 500 96.74 97.37 94.10 93.89 93.52 91.82 94.14 97.37 97.53 
+
+steel 20 68.79 73.83 59.04 60.00 56.61 60.35 58.34 73.08 72.90 steel 50 81.71 85.77 64.19 66.22 62.83 72.87 65.34 86.38 86.24 steel 100 88.74 92.02 69.80 73.09 69.66 84.43 70.66 92.54 92.83 
+
+steel 200 94.03 95.06 75.87 82.89 76.88 91.72 80.68 95.89 96.36 
+
+steel 500 98.05 98.23 92.41 94.94 91.92 97.20 93.92 98.67 98.62 stock 20 80.60 81.93 77.13 71.79 77.73 75.01 77.34 83.35 83.05 stock 50 86.16 87.70 83.98 80.03 82.90 79.11 84.21 88.00 87.67 stock 100 89.76 90.72 88.27 87.26 86.91 84.41 87.62 90.68 90.44 stock 200 90.92 91.62 89.30 89.40 88.87 87.32 89.41 91.39 91.13 texture 50 80.51 71.56 66.83 70.04 64.84 66.48 65.29 83.72 83.70 texture 100 87.03 88.89 78.90 81.26 77.37 78.53 77.43 89.12 89.02 texture 200 92.08 93.05 88.52 89.37 86.78 88.49 88.63 93.29 93.28 texture 500 95.54 95.56 93.23 94.11 93.55 93.53 94.38 95.93 95.69 Mean - 70.97 70.72 63.63 64.33 62.44 65.26 65.94 73.01 72.83 Median-Rank - 4.00 3.00 7.00 7.00 9.00 7.00 5.00 2.00 2.00 
+
+Table 12: Kendall’s τ results for the prior ablation study on held-out synthetic datasets. 
+
+Evaluation datasets Prior Base class Cat. Aug. w/o h-tail w/o Gauss w/o flow w/o cat w/o augm full prior Gaussian mix. ✓ ✗ 0.5787 0.5544 0.5717 0.5124 0.5739 0.5648 Heavy-tailed mix. ✓ ✗ 0.4631 0.5097 0.5077 0.4742 0.5185 0.4925 Mix. with flows ✓ ✗ 0.5020 0.5087 0.4973 0.4742 0.5218 0.5082 All datasets ✗ ✓ 0.4708 0.4756 0.4700 0.4830 0.4710 0.4761 All datasets ✓ ✓ 0.4397 0.4386 0.4356 0.4019 0.4327 0.4418 
+
+Table 13: Influence of individual loss components on density estimation performance measured by Kendall’s τ . The full objective combines the ranking and MSE losses, while the remaining variants remove one of these terms. 
+
+Evaluation datasets Loss Base class Cat. Aug. w/o rank w/o MSE full loss Gaussian mix. ✓ ✗ 0.5531 0.5083 0.5648 
+
+Heavy-tailed mix. ✓ ✗ 0.4878 0.4605 0.4925 
+
+Mix. with flows ✓ ✗ 0.4998 0.4680 0.5082 
+
+All datasets ✗ ✓ 0.4697 0.4199 0.4761 
+
+All datasets ✓ ✓ 0.4314 0.3940 0.4418 G Additional results for ablation studies 
+
+Similar to Appendix D, this section reports additional Kendall’s τ results for the ablation experiments. We eval-uate the impact of different prior choices (Table 12) and loss function variants (Table 13) using the same experimental setting as in the main paper. 
+
+H Computational Infrastructure 
+
+All experiments were conducted on a GPU workstation equipped with an NVIDIA DGX A100 system with an NVIDIA A100 GPU (80 GB VRAM) and an AMD Ryzen Threadripper PRO 5975WX CPU with 256 GB RAM. The experiments were run under a Linux operating system. The implementations were developed in Python using the Py-Torch deep learning framework together with standard sci-entific computing and machine learning libraries, including NumPy, SciPy, pandas, and scikit-learn. The specific library versions and software dependencies are provided in the code repository available in the code appendix.
