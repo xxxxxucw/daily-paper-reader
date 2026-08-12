@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-08-11</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-12</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 19 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 12 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>10</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>3</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-08-11 06:03:36 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-08-12 06:39:18 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,7 +62,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日共读19篇论文，其中9篇精读、10篇速读。最值得关注的是局部保形预测用于个体因果效应估计，以及网络实验的极小极大设计理论。建议优先精读这两篇高分论文，其他速读可快速浏览摘要。</p>
+<p>今日精读9篇、速读3篇，共处理12篇论文，聚焦因果推断与稳健统计方法。最值得关注两篇9分高评：面板数据偏差稳健因果推断，及观察性研究中聚类逆概率加权策略。建议普通读者优先理解这两项因果推断新方法，它们对实证研究设计极具参考价值。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -74,9 +74,9 @@
     <strong class="dpr-home-dashboard-count">9 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Local conformal prediction for individual causal effects">Local conformal prediction for individual causal effects</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Design-Based Minimax Theory for Network Experiments">A Design-Based Minimax Theory for Network Experiments</span></li><li><span class="dpr-home-dashboard-paper-title" title="PATH: Next-Interval Prediction via Autoregressive Tree Hierarchy on Tabular Data">PATH: Next-Interval Prediction via Autoregressive Tree Hierarchy on Tabular Data</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Bias-robust causal inference for panel data">Bias-robust causal inference for panel data</span></li><li><span class="dpr-home-dashboard-paper-title" title="Clustering Informed Inverse Probability Weighting Strategies for Causal Effect Estimation in Observational Studies">Clustering Informed Inverse Probability Weighting Strategies for Causal Effect Estimation in Observational Studies</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Prediction to Incrementality: Causal Optimization for Large-Scale Targeting and Recommendation">From Prediction to Incrementality: Causal Optimization for Large-Scale Targeting and Recommendation</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">two-sided <strong>3</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">two-sided <strong>4</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>3</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -84,12 +84,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">10 篇</strong>
+    <strong class="dpr-home-dashboard-count">3 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="LAB-Tab: LLM-Augmented Bayesian Network Adaptation for Few-Shot Tabular Generation">LAB-Tab: LLM-Augmented Bayesian Network Adaptation for Few-Shot Tabular Generation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Micro-randomized Trials with Categorical Treatments and Binary Proximal Outcome: Causal Effect Estimation and Sample Size Calculation">Micro-randomized Trials with Categorical Treatments and Binary Proximal Outcome: Causal Effect Estimation and Sample Size Calculation</span></li><li><span class="dpr-home-dashboard-paper-title" title="FUSE: Feature-Wise Unified Specialization with Cross-Column Exchange for Mixed-Type Tabular Flow Matching">FUSE: Feature-Wise Unified Specialization with Cross-Column Exchange for Mixed-Type Tabular Flow Matching</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Unlocking the Power of Medical Tabular Data via Semantic-Aware Multimodal Pre-training">Unlocking the Power of Medical Tabular Data via Semantic-Aware Multimodal Pre-training</span></li><li><span class="dpr-home-dashboard-paper-title" title="Hierarchical Empirical-Bayes Naive Bayes: Minimax Smoothing and Calibration with AODE Extension">Hierarchical Empirical-Bayes Naive Bayes: Minimax Smoothing and Calibration with AODE Extension</span></li><li><span class="dpr-home-dashboard-paper-title" title="ReliableNet: A Chance-Constrained Approach to Trustworthy Classification in Deep Learning">ReliableNet: A Chance-Constrained Approach to Trustworthy Classification in Deep Learning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>4</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>3</strong></span><span class="dpr-home-dashboard-tag">two-sided <strong>3</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
 </section>
 </div>
 
