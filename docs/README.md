@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-08-12</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-13</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 12 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 7 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>3</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>3</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>4</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-08-12 06:39:18 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-08-13 06:48:27 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,7 +62,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精读9篇、速读3篇，共处理12篇论文，聚焦因果推断与稳健统计方法。最值得关注两篇9分高评：面板数据偏差稳健因果推断，及观察性研究中聚类逆概率加权策略。建议普通读者优先理解这两项因果推断新方法，它们对实证研究设计极具参考价值。</p>
+<p>今日精选7篇论文，重点精读选择性问答风险校准与表格图生成两篇高分解读。最值得关注的是大模型选择性问答的不确定性校准方法（9.0分），以及表格自动生成图表的AutoGrable框架（8.0分）。建议普通读者优先吸收问答校准思路，并尝试用AutoGrable简化表格可视化流程。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -71,12 +71,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">9 篇</strong>
+    <strong class="dpr-home-dashboard-count">3 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Bias-robust causal inference for panel data">Bias-robust causal inference for panel data</span></li><li><span class="dpr-home-dashboard-paper-title" title="Clustering Informed Inverse Probability Weighting Strategies for Causal Effect Estimation in Observational Studies">Clustering Informed Inverse Probability Weighting Strategies for Causal Effect Estimation in Observational Studies</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Prediction to Incrementality: Causal Optimization for Large-Scale Targeting and Recommendation">From Prediction to Incrementality: Causal Optimization for Large-Scale Targeting and Recommendation</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Asymptotic Risk Calibration for Selective Question Answering">Asymptotic Risk Calibration for Selective Question Answering</span></li><li><span class="dpr-home-dashboard-paper-title" title="AutoGrable: What Is a Good Graph for a Table?">AutoGrable: What Is a Good Graph for a Table?</span></li><li><span class="dpr-home-dashboard-paper-title" title="FunnelCausalNet: Funnel-aware Joint Conversion-Revenue Uplift for Multi-tier Coupon Allocation">FunnelCausalNet: Funnel-aware Joint Conversion-Revenue Uplift for Multi-tier Coupon Allocation</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">two-sided <strong>4</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>3</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span><span class="dpr-home-dashboard-tag">two-sided <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -84,12 +84,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">3 篇</strong>
+    <strong class="dpr-home-dashboard-count">4 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Unlocking the Power of Medical Tabular Data via Semantic-Aware Multimodal Pre-training">Unlocking the Power of Medical Tabular Data via Semantic-Aware Multimodal Pre-training</span></li><li><span class="dpr-home-dashboard-paper-title" title="Hierarchical Empirical-Bayes Naive Bayes: Minimax Smoothing and Calibration with AODE Extension">Hierarchical Empirical-Bayes Naive Bayes: Minimax Smoothing and Calibration with AODE Extension</span></li><li><span class="dpr-home-dashboard-paper-title" title="ReliableNet: A Chance-Constrained Approach to Trustworthy Classification in Deep Learning">ReliableNet: A Chance-Constrained Approach to Trustworthy Classification in Deep Learning</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="SurroPilot: An LLM-Assisted Platform for Heterogeneous Surrogate Endpoint Evaluation in Clinical Trials">SurroPilot: An LLM-Assisted Platform for Heterogeneous Surrogate Endpoint Evaluation in Clinical Trials</span></li><li><span class="dpr-home-dashboard-paper-title" title="CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing">CausalRepair: Bridging the Causality Gap in Large Language Model-Based Automated Program Repair via Dual-Slicing</span></li><li><span class="dpr-home-dashboard-paper-title" title="CausalSplat: Towards Comprehensive Hierarchical Reasoning in 3D Gaussian Splatting">CausalSplat: Towards Comprehensive Hierarchical Reasoning in 3D Gaussian Splatting</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span><span class="dpr-home-dashboard-tag">two-sided <strong>1</strong></span></div>
 </section>
 </div>
 
