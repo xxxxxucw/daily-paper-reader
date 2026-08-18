@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-08-17</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-18</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 11 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 0 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>7</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>4</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>0</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>0</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-08-17 06:02:25 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-08-18 06:32:02 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,9 +62,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精读7篇、速读4篇，重点聚焦表格基础模型与时空因果发现。</p>
-<p>最值得关注：表格基础模型用于S-PLUS类星体测光红移概率估计，以及几何感知的大规模时空系统因果发现，均获9.0高分。</p>
-<p>建议优先精读这两篇，后续可延伸关注能量重构互补的表格异常检测和气象驱动的垃圾填埋场排放因果预警。</p>
+<p>今日无新推荐，系统未产出可展示论文。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -73,12 +71,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">7 篇</strong>
+    <strong class="dpr-home-dashboard-count">0 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Tabular foundation models for the estimation of probabilistic quasar photometric redshifts in S-PLUS">Tabular foundation models for the estimation of probabilistic quasar photometric redshifts in S-PLUS</span></li><li><span class="dpr-home-dashboard-paper-title" title="Geometry-aware neural causal discovery for large-scale spatiotemporal systems">Geometry-aware neural causal discovery for large-scale spatiotemporal systems</span></li><li><span class="dpr-home-dashboard-paper-title" title="Training Fair Tabular Foundation Models">Training Fair Tabular Foundation Models</span></li></ul>
+<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>4</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
+
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -86,12 +84,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">4 篇</strong>
+    <strong class="dpr-home-dashboard-count">0 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Revisiting Energy-based Tabular Anomaly Detection: Energy and Reconstruction are Complementary">Revisiting Energy-based Tabular Anomaly Detection: Energy and Reconstruction are Complementary</span></li><li><span class="dpr-home-dashboard-paper-title" title="Meteorology-driven Causal Nowcasting of Fugitive Landfill Emissions Enables Proactive Public Health Response">Meteorology-driven Causal Nowcasting of Fugitive Landfill Emissions Enables Proactive Public Health Response</span></li><li><span class="dpr-home-dashboard-paper-title" title="Error-Aware Reverse Auction Mechanism for Large Language Model Routing">Error-Aware Reverse Auction Mechanism for Large Language Model Routing</span></li></ul>
+<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">two-sided <strong>2</strong></span></div>
+
 </section>
 </div>
 
