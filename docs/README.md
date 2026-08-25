@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-08-24</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-16 ~ 2026-08-25</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 0 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 29 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>0</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>0</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>16</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>13</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-08-24 05:47:40 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-08-25 02:22:20 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,7 +62,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日无新推荐，系统未产出可展示论文。</p>
+<p>今日共处理29篇论文，精读16篇、速读13篇，重点聚焦共形预测与可信机器学习方向。最值得关注的是《Generalized Hierarchical Conformal Prediction》和《Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection》，均获9.0分高分，分别涉及分层共形预测框架与欺诈检测中的时序图原型约束。建议优先精读这两篇，把握共形预测在结构化和动态数据上的最新进展。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -71,12 +71,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">0 篇</strong>
+    <strong class="dpr-home-dashboard-count">16 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Generalized Hierarchical Conformal Prediction">Generalized Hierarchical Conformal Prediction</span></li><li><span class="dpr-home-dashboard-paper-title" title="Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection">Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection</span></li><li><span class="dpr-home-dashboard-paper-title" title="Localized TabICLv2: Scaling Tabular In-Context Learning through k-NN">Localized TabICLv2: Scaling Tabular In-Context Learning through k-NN</span></li></ul>
   </div>
-
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>6</strong></span><span class="dpr-home-dashboard-tag">cp <strong>5</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>5</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -84,12 +84,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">0 篇</strong>
+    <strong class="dpr-home-dashboard-count">13 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Learning Auditable Classifier Models: Source-Disjoint Tree Ensembles">Learning Auditable Classifier Models: Source-Disjoint Tree Ensembles</span></li><li><span class="dpr-home-dashboard-paper-title" title="Advancing Open and Reproducible Relational Learning: RelArena-$α$, TabPFN-Rel and RPI">Advancing Open and Reproducible Relational Learning: RelArena-$α$, TabPFN-Rel and RPI</span></li><li><span class="dpr-home-dashboard-paper-title" title="Mixed-effects Outcome-Adaptive Lasso for Propensity Score Estimation under Partial Interference">Mixed-effects Outcome-Adaptive Lasso for Propensity Score Estimation under Partial Interference</span></li></ul>
   </div>
-
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>8</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>4</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
 </section>
 </div>
 

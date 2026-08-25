@@ -1,0 +1,701 @@
+Title: Learning Auditable Classifier Models: Source-Disjoint Tree Ensembles
+
+URL Source: https://arxiv.org/pdf/2608.15725v1
+
+Published Time: Tue, 18 Aug 2026 01:09:57 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+Learning Auditable Classifier Models: Source-Disjoint Tree Ensembles 
+
+Srikumar Krishnamoorthy Information Systems Area, Indian Institute of Management Ahmedabad, India 
+
+Abstract 
+
+Predictive models in clinical and regulated settings must be accurate and fully auditable. Tree ensembles deliver strong accuracy on tabular data, but their sequential boosting couples structure discovery with coefficient estimation, making compact per-prediction auditing difficult. Interpretable alternatives impose structural constraints that limit expressiveness: generalized additive models typically restrict interactions to pairwise terms and post-hoc rule extractors produce overlapping rules that hinder compact interpretation. We introduce Residual Pattern Tree Ensemble (RPTE), a three-stage learning approach, that is built on three key principles: bounded feature budget, source disjointness, and separate coefficient estimation. Stage 1 builds a supervised symbolic feature vocabulary. Stage 2 grows shallow trees under a source-disjointness constraint, where each raw variable is allocated to at most one tree, and retains only the dis-covered tree structures. Stage 3 solves a single ℓ1-regularized logistic regression over leaf-region indicators, yielding jointly optimal sparse coefficients. This learning approach ensures that ev-ery prediction decomposes into an algebraic sum of named, non-overlapping rule contributions, enabling full auditability by design. Empirical evaluation on twelve clinical-domain binary classi-fication benchmarks using repeated stratified 5-fold cross-validation shows that RPTE performs competitively against tuned opaque ensembles and interpretable baselines. RPTE reduces model inspection units by 9 × to 87 × relative to XGBoost and maintains lower audit complexity than EBM on all 12 datasets. RuleFit requires comparable or fewer inspection units on three datasets where its rule count is small, but without source-disjointness guarantees. The source code is available at this https URL. 
+
+Keywords: Interpretable machine learning, auditable tabular classification, tree ensembles, sparse logistic regression, clinical decision support. 
+
+# 1 Introduction 
+
+In regulated domains such as healthcare, finance, and insurance, model outputs inform decisions that directly affect individual outcomes. Predictive models in these settings must satisfy two com-peting requirements: strong classification accuracy and sufficient transparency for regulatory review. Regulatory frameworks increasingly mandate that these outputs be traceable to verifiable decision logic (Rudin, 2019; Rudin et al., 2022). A growing body of work formalizes what interpretability means in practice (Murdoch et al., 2019; Barredo Arrieta et al., 2020): a model is interpretable when its predictions can be verified, audited, and explained without relying on secondary approxi-mation tools. This creates a practical challenge: the most accurate tabular classifiers are often the least auditable. Gradient-boosted tree ensembles (Friedman, 2001) are the dominant paradigm for tabular clas-sification. Implementations such as XGBoost (Chen and Guestrin, 2016) and LightGBM (Ke et al., 2017) achieve strong accuracy on clinical and scientific benchmarks. Recent large-scale compar-isons confirm that tree-based methods remain competitive with or superior to deep learning on tabular tasks (Grinsztajn et al., 2022; Shwartz-Ziv and Armon, 2022; Fern´ andez-Delgado et al., 1arXiv:2608.15725v1 [cs.LG] 16 Aug 2026 2014). These models construct hundreds of shallow decision trees in sequence, each fitted to the residual error of its predecessors. The sequential construction that produces strong accuracy also creates an obstacle for deployment in regulated settings. No individual prediction can be traced to a single, readable set of decision rules. Consider a gradient-boosted model with 200 trees of depth 4. A single prediction aggregates the outputs of all 200 trees, with the same variable potentially appearing repeatedly under different split thresholds across trees. A clinical reviewer verifying why a patient was flagged as high-risk must reconstruct the relevant decision paths across many trees. In a cardiac risk model, for example, the variable “oldpeak” (exercise-induced ST depression) might appear in 30 separate trees at 15 different thresholds, each interacting with different co-variables. The model’s overall decision logic may span thousands of split conditions and does not yield a self-contained rule for that prediction. Post-hoc explanation methods can summarize this behavior but do not expose the model’s decision logic in rule form. SHAP (Lundberg and Lee, 2017) assigns feature contributions using Shapley values, defined through changes in expected model output relative to a chosen background distri-bution. LIME (Ribeiro et al., 2016) fits a simple surrogate model to approximate the predictor’s behavior in a neighborhood of the instance being explained. Even when computed faithfully, these methods provide feature attribution or local approximation rather than a direct representation of the ensemble’s underlying decision structure. In high-stakes settings, this distinction motivates the use of models whose decision rules can themselves be inspected, verified, and held accountable (Rudin, 2019; Freitas, 2014). We argue that one important source of opacity in boosted tree ensembles is their stagewise construction. At each boosting round, a new tree structure is constructed and numerical leaf values are estimated conditional on the ensemble fitted thus far. Once a tree is added, its structure and leaf values are fixed rather than jointly re-estimated. This leads to two key problems. First, the resulting leaf coefficients are not jointly optimal conditional on the collection of structures ultimately discovered. Second, decision logic becomes fragmented across the ensemble: the same variable may appear repeatedly, at different thresholds and in interaction with different variables, across many trees. Existing interpretable methods address parts of this problem but leave important gaps. General-ized additive models such as Explainable Boosting Machines (EBMs; Lou et al., 2013; InterpretML, Nori et al., 2019) impose structural transparency by representing the prediction as a sum of univari-ate effects and selected pairwise interactions. 1 This architectural restriction means that interactions involving more than two variables cannot be discovered automatically. In a breast cancer diagnosis model, for example, the joint effect of nuclear size, boundary irregularity, and texture variation, a three-way interaction supported by clinical cytopathology, lies outside the model’s representational capacity. Additionally, EBMs produce per-feature shape functions with many bins, leading to high audit complexity on feature-rich datasets. On the WDBC dataset (30 features), EBM generates over 12,000 model inspection units, in our experiments (Section 6.3). Rule-based classifiers take a different approach. RuleFit (Friedman and Popescu, 2008) extracts path-based rules from an ensemble and estimates a sparse linear combination using ℓ1-regularized regression (Tibshirani, 1996), separating rule generation from coefficient estimation. However, can-didate rules are generated through greedy univariate tree splits, and interactions whose constituent variables provide little marginal gain at early splits may be missed. Sparsification operates over rules rather than their constituent variables, so the same variable can appear across multiple se-lected rules. When 10 to 20 rules fire simultaneously per prediction, with shared variables and 
+
+> 1The InterpretML implementation supports higher-order interactions when the user explicitly specifies them as tuples of feature indices. Automatic detection is limited to pairs.
+
+2potentially conflicting coefficient signs, the resulting model hinders compact interpretation. Or-dered rule lists such as CORELS (Angelino et al., 2018) and Bayesian rule lists (Letham et al., 2015) avoid this simultaneous-activation problem, but their interpretability depends on list length, and the operational meaning of each rule depends on all preceding rules having failed. Sparse scoring systems (Ustun and Rudin, 2016) achieve strong interpretability but are limited to linear decision boundaries. In this study, our primary motivation is to address the two identified problems through the Residual Pattern Tree Ensemble (RPTE), a three-stage learning approach built around three key principles: (a) bounded vocabulary of symbolic features subject to a user-defined budget, (b) source-disjointness constraint on the discovered tree structures, and (c) separation of structure discovery from coefficient estimation. In the first stage , a supervised pattern miner constructs an interpretable symbolic feature vocabulary. In the second stage , shallow trees are grown sequentially against the current boosting residuals, subject to a constraint that reserves each raw variable for at most one accepted tree. Each tree is assigned temporary leaf values for residual updates, but these values are discarded once its structure is accepted. In the third stage , terminal-leaf membership indicators from all accepted trees, together with eligible direct terms, form a common design matrix. Asingle ℓ1-regularized logistic regression estimates their coefficients jointly. This final refitting allows structures discovered early in the boosting process to receive small or zero coefficients once all discovered structures are considered jointly. The source-disjointness constraint further prevents distinct trees from encoding competing threshold structures over the same raw variables, thereby limiting the proliferation of overlapping rules that can arise in unconstrained ensembles. In order to assess the strengths of the proposed approach, we investigate the following key research questions: (RQ1) Does separating structure discovery from coefficient estimation while enforcing source dis-jointness preserve competitive predictive accuracy relative to tuned opaque ensembles and interpretable baselines? (RQ2) What quantifiable reduction in audit complexity does the proposed approach achieve while maintaining this predictive accuracy, and does this reduction hold consistently across datasets with different characteristics? To address these research questions, our study makes the following contributions: (1) We formalize RPTE as a three-stage learning approach and identify its three defining archi-tectural principles: bounded feature budget, source disjointness, and separation of structure discovery from coefficient estimation. Together, these distinguish RPTE from standard boost-ing, interpretable baselines, and post-hoc rule extraction methods. (2) We characterize five structural properties of RPTE and establish corresponding complexity bounds, providing a formal foundation for its auditability. (3) We report an empirical evaluation on twelve clinical-domain binary classification datasets against three ensemble methods and two interpretable baselines. The evaluation includes pattern-level interpretability analysis, cross-fold and same-fold Rashomon analysis, eight ab-lation experiments, and a robustness study of strict source disjointness. The remainder of this paper is organized as follows. Section 2 reviews related work. Section 3 introduces notation and audit-load metrics. Section 4 presents the three stage learning approach. Section 5 establishes theoretical properties and complexity bounds. Section 6 reports predictive performance, audit-load reduction, and ablation results. Section 7 presents the interpretability analysis, Rashomon findings, practical implications, and limitations. Section 8 concludes with directions for future research. 32 Related Work 
+
+This section reviews four lines of research that bear on the problem of simultaneously achieving predictive accuracy and auditability in tabular classification. 
+
+Gradient-boosted ensembles. Gradient boosting (Friedman, 2001; Friedman et al., 2000) con-structs an additive model by sequentially fitting shallow trees to pseudo-residuals. L2-boosting theory (B¨ uhlmann and Yu, 2003) establishes convergence for functional gradient descent. XGBoost (Chen and Guestrin, 2016) adds second-order gradient information and regularization. LightGBM (Ke et al., 2017) introduces gradient-based one-side sampling. Random Forests (Breiman, 2001) aggregate many independently randomized deep trees using bagging and random feature selection. These tree-ensemble methods share a structure-estimation coupling issue: each tree’s leaf predic-tions are estimated locally and remain fixed thereafter. The proposed approach decouples these stages - discarding leaf predictions after structure discovery and re-estimating all leaf values jointly in a single convex program. 
+
+Additive interpretable models. Generalized additive models restrict each term to one variable. Explainable Boosting Machines (EBMs; Lou et al., 2013; InterpretML, Nori et al., 2019) extend this to pairwise interactions via boosted CART. Automatic interaction detection is limited to pairs; higher-order terms require explicit user specification. Neural additive models (Agarwal et al., 2021) replace shape functions with small networks. These methods are transparent by construction but structurally limited. The proposed approach discovers interactions of arbitrary order through a pairwise-composition search (Section 4), while the source-disjointness constraint ensures auditabil-ity. 
+
+Rule-based interpretable classifiers. RuleFit (Friedman and Popescu, 2008) extracts conjunctive rules from a Random Forest and applies lasso regression to leaf-path indicators. The differences from the proposed approach are threefold. First, RuleFit’s rules inherit the marginal-screening limitation of CART splits, while the pairwise-composition search in Stage 2 discovers higher-order interactions at polynomial cost. Second, RuleFit imposes no source-disjointness constraint, so the same variable can appear in multiple rules. Third, RuleFit’s lasso operates on indicators weighted by locally estimated leaf values, while the proposed approach operates on structural indicators with reassigned coefficients. FIGS (Tan et al., 2025) grows a small set of trees simultaneously but permits variable reuse across trees, sacrificing exact source-level decomposability. SIRUS (B´ enard et al., 2021) stabilizes rule extraction by frequency thresholding but inherits the variable overlap of the underlying forest. Although each individual rule in these methods is readable, the fitted collections often hinders compact interpretation. Multiple rules can fire on the same observation with conflicting coefficient signs. The number of simultaneously active rules per prediction can reach 20 or more. Appendix A presents an empirical analysis of these patterns. 
+
+Ordered rule lists and sparse scoring systems. A separate family represents predictions as or-dered rule lists. CORELS (Angelino et al., 2018) uses branch-and-bound search to find a globally optimal rule list. SamRuLe (Pellegrina and Vandin, 2024) addresses computational cost by learn-ing from a statistically selected sample. QCBA (Kliegr and Izquierdo, 2023) post-processes rule classifiers to recover information lost during discretization. Bayesian rule lists (Letham et al., 2015) generate decision lists via a pre-mined set of rules. Sparse scoring systems (Ustun and Rudin, 2016) restrict coefficients to small integers for point-of-care use. While ordered rule lists avoid the simultaneous-activation problem, their interpretability depends on list length, antecedent complex-ity, and ordering dependence. The proposed approach takes a different path: rather than imposing rule ordering, it eliminates variable overlap through source disjointness. The idea of constructing a structural basis and then fitting a sparse model over it has precedents beyond RuleFit. Sparse additive models (Hastie et al., 2009) estimate components jointly under 4an ℓ1 penalty. Dembczy´ nski et al. (2008) propose maximum likelihood rule ensembles. Cohen and Singer (1999) extract rules from decision lists via sequential covering. Optimal classification trees (Bertsimas and Dunn, 2017) and fast Rashomon sets (Molero-R´ ıo et al., 2026) enumerate good mod-els from the Rashomon set of near-optimal classifiers (Semenova et al., 2022; Xin et al., 2022). The proposed approach differs in two respects: the structural basis is built by residual-guided sequential search with a source-disjointness constraint, and leaf values are discarded entirely so that Stage 3 operates on structural indicators. The supervised pattern-mining component (Stage 1) relates to itemset mining (Agrawal and Srikant, 1994) and its supervised extensions (Krishnamoorthy, 2024), but the three-stage approach is not tied to any specific Stage 1 implementation. Table 1. Comparison of structural properties across tabular classification methods.                                  
+
+> Property RPTE RuleFit EBM FIGS SIRUS CORELS XGBoost Source disjointness Enforced No No No No No No Exact source decomposition Yes No Term wise No No N/A No Separate structure/ weight fit Yes Yes No Optional refit Fixed average N/A No Discovered interactions
+> max depth
+> Tree size Pairwise ∗max depth max depth
+> Pre-mined max depth
+> Bounded audit load Hard L1/soft Interaction cap Hard split cap Hard rule cap
+> λ-implied Indirect Native contribution unit Leaf/ direct term Rule/ linear term Term score Leaf Rule output First matching rule Leaf
+> ∗EBM automatically selects pairwise interactions; higher-order interactions may be specified explicitly.
+
+Table 1 distinguishes structural properties that affect how a fitted model can be inspected and audited. Source disjointness denotes an explicit construction constraint preventing an underlying source from being reused across independently fitted structural components. Exact source decom-position is stronger than algebraic additivity: contributions must correspond to non-redundant, source-owned components. Hence a model may expose exact native contributions without satisfying exact source decomposition; for example, overlapping RuleFit rules or FIGS trees may contribute in opposing directions to nearly the same observations (see Appendix A). Separate structure/weight fit distinguishes methods that discover a representation before estimating its final coefficients from methods that learn structure and prediction values jointly; fixed aggregation and optional post-structure refitting are indicated separately. Bounded audit load characterizes whether and how the number of auditable structural units is controlled, distinguishing direct hard limits from sparsity penalties, regularization-implied bounds, or indirect complexity controls. Finally, native contribu-tion unit reports the model component at which a prediction can be inspected directly; it does not imply unique raw-feature attribution. Viewed collectively, these structural differences expose three gaps in prior work. First, no existing method combines source disjointness with separated estimation to guarantee an exact, source-disjoint per-prediction decomposition. Second, existing interpretable model families do not jointly provide automatic discovery of higher-order interactions at polynomial cost while avoiding a fixed low-order interaction cap. Third, although individual methods can achieve low audit load or strong predictive performance, none provides formal bounds that tie audit load directly to user-specified structural budgets while retaining competitive predictive accuracy. 53 Preliminaries and Notations 
+
+Let X ∈ Rn×p0 denote the raw input matrix with n observations and p0 variables, and let y ∈ { 0, 1}n
+
+denote the binary labels. Let R0 = {1, . . . , p 0} denote the set of raw variable indices. The logistic function is σ(z) = 1 /(1 + e−z ), and the binomial deviance loss used throughout is: 
+
+L(F ) = 2
+
+n
+
+> n
+
+X
+
+> i=1
+
+−yi log σ(Fi) − (1 − yi) log(1 − σ(Fi)) , (1) where Fi is the log-odds prediction for observation i.
+
+3.1 Feature vocabulary 
+
+A feature vocabulary H is constructed from the raw variables through up to three sources: (i) Raw features: the original p0 columns of X.(ii) Mined patterns: up to K binary indicator columns, each encoding a conjunctive condition over at most two raw variables. Any supervised pattern mining procedure (e.g., utility-based mining, frequent pattern mining) may serve as the constructor. (iii) Augmented pairs (optional): up to K continuous columns computed as pairwise arithmetic transforms of raw variables (e.g., |xa − xb|, xa · xb). The user-specified feature budget K bounds the mined pattern and augmented pair counts inde-pendently. The total vocabulary size is 
+
+V = |H| ≤ p0 + 2 K. (2) 
+
+Definition 1 (Source ownership) . Each column j ∈ H carries a source set ω(j) ⊆ R 0 with |ω(j)| ≤ 
+
+2, identifying the raw variables from which it is derived. A raw feature k has ω(k) = {k}; a mined pattern or augmented pair derived from variables a and b has ω(j) = {a, b }. Two columns are 
+
+source-disjoint when ω(j) ∩ ω(j′) = ∅.
+
+When cross-validation is used, vocabulary construction is performed inside each training fold to prevent label leakage. 
+
+3.2 Structural parameters 
+
+Three parameters govern model construction: the maximum number of boosting rounds T , the maximum number of leaves per tree Lmax , and the maximum tree depth Dmax . After fitting, 
+
+M ≤ T trees are accepted; source disjointness (Section 4) further tightens this to M ≤ min( T, p 0), since each accepted tree claims at least one raw variable. The set D ⊆ H consists of vocabulary columns not used by any accepted tree. 
+
+3.3 Audit-load metrics 
+
+To quantify the audit complexity that any classification model produces, we define three levels of measurement that apply uniformly across all model architectures. 
+
+Definition 2 (Audit load) .
+
+(i) Model units (MU): non-zero coefficients in the final model. 
+
+6Table 2. Summary of notation. Symbol Description 
+
+n, p 0 Number of observations and raw variables 
+
+K User-specified feature budget 
+
+H Feature vocabulary, V = |H| ≤ p0 + 2 Kω(j) Source set of column j, ω(j) ⊆ R 0, |ω(j)| ≤ 2
+
+T Maximum boosting rounds 
+
+Lmax Maximum leaves of tree 
+
+Dmax Maximum depth of tree 
+
+M Number of accepted trees, M ≤ min( T, p 0)
+
+D Set of unused vocabulary columns (direct terms) 
+
+q Design matrix width, q ≤ M · Lmax + |D|
+
+ρ Ridge parameter for Newton leaf values 
+
+η0 Initial learning rate for backtracking 
+
+λ1 ℓ1 regularization parameter 
+
+(ii) Model inspection units (MIU): total split conditions across all active leaf paths plus active direct terms, i.e., the number of conditions a reviewer must read to audit the complete model. (iii) Instance inspection units (IIU): mean conditions consulted per prediction over test in-stances, i.e., the per-prediction audit cost. 
+
+MIU is the primary model-level metric. These metrics are computed for all methods using the same counting procedure. We note that MIU and IIU measure auditor workload (conditions to verify), but they do not capture cognitive difficulty of individual conditions or domain familiarity. Table 2 summarizes the notation used throughout. 
+
+# 4 Methodology 
+
+This section presents the three-stage learning approach and its concrete realization, RPTE (Residual Pattern Tree Ensemble). 
+
+4.1 Architecture overview 
+
+Standard gradient boosting merges three distinct questions: what primitives should the learner use, how should those primitives be composed into tree structures, and how much predictive weight should each structure receive. The proposed three-stage approach separates these questions explic-itly. 
+
+Stage 1 Vocabulary Stage 2 Structure Discovery Stage 3 Global Estimation  
+
+> Supervised mining provenance-annotated columns Source-disjoint trees leaf values discarded
+> ℓ1logistic regression jointly optimal coefficients
+
+Stage 1 answers: what primitives may the learner use? A supervised procedure constructs the feature vocabulary H with V ≤ p0 + 2 K columns, as described in Section 3.1. Each column 7carries a provenance record ω(j) ⊆ R 0. The subsequent stages are agnostic to the choice of mining algorithm. 
+
+Stage 2 answers: how should the primitives be composed? Shallow trees grow sequentially against pseudo-residuals of the binomial deviance (1). At each round m, the pseudo-residuals and Newton weights are 
+
+ri = yi − σ(Fi), wi = σ(Fi) 1 − σ(Fi). (3) A tree hm is grown using only columns whose raw sources remain unclaimed. Each leaf ℓ receives a Newton step 
+
+vℓ =
+
+P 
+
+> i∈ℓ
+
+ri
+
+P 
+
+> i∈ℓ
+
+wi + ρ , (4) where ρ > 0 is a ridge parameter. A backtracking line search finds ηm ≤ η0 satisfying L(Fm−1 +
+
+ηmhm) < L(Fm−1), starting from an initial rate η0 and halving up to Bls times. On acceptance, the raw sources S 
+
+> j∈used( hm)
+
+ω(j) are removed from the eligible pool. The temporary leaf values are then discarded; only the tree structure (the partition into leaf regions) is retained. 
+
+Stage 3 answers: how much predictive weight should each structure receive? Leaf-membership indicators from all M accepted trees, together with any unused vocabulary columns D, form a design matrix Z ∈ { 0, 1, R}n×q, where q ≤ M · Lmax + |D|. A single ℓ1-penalized logistic regression assigns jointly optimal coefficients: (β∗, γ ∗) = arg min 
+
+> β,γ
+
+L(β, γ ; Z, y ) + λ1(∥β∥1 + ∥γ∥1), (5) where β collects the leaf-region coefficients and γ collects the direct-term coefficients. The ℓ1
+
+penalty (Tibshirani, 1996) drives a fraction of coefficients to zero, further sparsifying the model. The resulting prediction for any input x decomposes as 
+
+F (x) = β0 +
+
+> M
+
+X
+
+> t=1
+
+βt,ℓ t(x)
+
+| {z }
+
+> tree contributions
+
++ X
+
+> j∈D
+
+γj ϕj (x)
+
+| {z }
+
+> direct terms
+
+, (6) where ℓt(x) is the unique leaf of tree t reached by x and ϕj (x) is the value of vocabulary column j
+
+for input x.
+
+4.2 Design principles 
+
+The approach is grounded in three design principles that together constrain model construction and ensure that the resulting model is auditable without post-hoc attribution tools. 
+
+Bounded feature budget (P1). The vocabulary size V ≤ p0 + 2 K is bounded by the user-specified budget K (Equation 2). Combined with the tree parameter bounds ( T rounds, Lmax 
+
+leaves, Dmax depth), the maximum audit load can be computed before training begins (Theorem 1). Unlike opaque ensembles, where model complexity is an emergent property of the training process, the audit cost here is deterministic. 
+
+Source disjointness (P2). Each raw variable is owned by at most one tree. Once a tree uses a column whose provenance includes variable k, no subsequent tree may use any column derived from k. This forces the model to allocate each raw variable to one coherent structural role and limits the ensemble to at most p0 trees. A direct consequence is exact decomposability: every prediction is an algebraic sum of terms with non-overlapping raw-variable sources, as expressed in 8Equation (6). A reviewer can verify any prediction by reading each active leaf path and summing the corresponding coefficients. 
+
+Separated coefficient estimation (P3). Structure discovery (Stage 2) and coefficient esti-mation (Stage 3) are fully separated. Stage 2 uses Newton boosting with temporary leaf values (4) to discover tree structures. After each tree is accepted, the temporary leaf values are discarded. Stage 3 then assigns each leaf region a coefficient that is jointly optimal over all discovered struc-tures and unused vocabulary columns. This ensures that locally estimated coefficients from early boosting rounds, when residuals differ substantially from the final residuals, do not persist into the final model. 
+
+Algorithm 1 Residual Pattern Tree Ensemble (RPTE) 
+
+Require: Raw data X ∈ Rn×p0 , labels y, feature budget K, structural bounds (T =10 , L max =12 , D max =8), hyperparameters ( η0=0 .3, λ 1)
+
+Ensure: Tree structures and final coefficients ( β∗, γ ∗) 
+
+> 1:
+
+Stage 1: (H, ω ) ← ConstructVocabulary (X, y, K ) {Supervised pattern mining } 
+
+> 2:
+
+F ← log(¯ y/ (1 − ¯y)) · 1; avail ← R 0; trees ← ∅ ; m ← 1; success ← true  
+
+> 3:
+
+Stage 2: Constrained sequential structure discovery  
+
+> 4:
+
+while m ≤ T and success do  
+
+> 5:
+
+success ← false  
+
+> 6:
+
+ri ← yi−σ(Fi); wi ← σ(Fi)(1 −σ(Fi)); zi ← I(ri > 0); ηm ← η0; E ← { j ∈ H : ω(j) ⊆ avail } 
+
+> 7:
+
+if E̸ = ∅ and z is nonconstant then  
+
+> 8:
+
+Fit a tree hm using the columns in E, with targets z and subject to Lmax and Dmax  
+
+> 9:
+
+if hm has a valid split then  
+
+> 10:
+
+Compute Newton leaf values via (4)  
+
+> 11:
+
+Repeatedly halve ηm until F + ηmhm decreases binomial deviance (at most Bls =6 trials)  
+
+> 12:
+
+if a decreasing step was found then  
+
+> 13:
+
+F ← F + ηmhm; avail ← avail \ [
+
+> j∈used( hm)
+
+ω(j) 
+
+> 14:
+
+Retain the structure of hm for the final representation  
+
+> 15:
+
+trees ← trees ∪ { hm}; m ← m + 1; success ← true  
+
+> 16:
+
+end if  
+
+> 17:
+
+end if  
+
+> 18:
+
+end if  
+
+> 19:
+
+end while  
+
+> 20:
+
+Stage 3: Global coefficient estimation  
+
+> 21:
+
+D ← { j ∈ H : j / ∈ [
+
+> h∈trees
+
+used( h)} 
+
+> 22:
+
+Build Z from leaf indicators of trees and columns in D 
+
+> 23:
+
+Solve (5) via ℓ1-regularized logistic regression for ( β∗, γ ∗) 
+
+> 24:
+
+return tree structures, β∗, γ∗
+
+4.3 Algorithm pseudo-code 
+
+Algorithm 1 summarizes the complete RPTE learning process in three stages. Lines 1–2 construct the supervised vocabulary H, retain its raw-source mapping ω, and initialize the additive score and available-source set. Lines 3–19 perform sequential structure discovery. At each round, RPTE computes logistic residuals and Newton weights, forms residual-sign targets, and fits a depth- and 9leaf-constrained tree using only columns whose raw sources remain available. Newton leaf values are used provisionally to determine, through backtracking, whether the candidate tree decreases binomial deviance. An accepted tree updates the additive score, and every raw source used by that tree is removed from the pool available to subsequent trees. If no eligible split or deviance-reducing step is found, the success condition remains false and tree construction terminates. Finally, Lines 20–24 form a representation from the retained tree-leaf indicators and unused direct features, and jointly estimate their final coefficients using ℓ1-regularized logistic regression. Thus, the stage-wise Newton values guide structure discovery but are not carried into the final coefficient model. 
+
+# 5 Theoretical Analysis 
+
+This section establishes structural properties of RPTE and derives complexity bounds. 
+
+Proposition 1 (Monotone descent) . The training deviance is strictly decreasing across Stage 2 rounds: L(Fm) < L(Fm−1) for every accepted round m.Proof. Each Stage 2 update takes the form Fm = Fm−1 + ηmhm. The tree hm is accepted only when the backtracking line search identifies ηm > 0 satisfying L(Fm−1 + ηmhm) < L(Fm−1). If no such ηm exists, the tree is rejected and Stage 2 terminates. 
+
+Proposition 2 (Finite termination) . Algorithm 1 accepts at most min( T, p 0) rounds. Proof. Every accepted round uses at least one column j with ω(j)̸ = ∅. The raw sources of j are removed from avail. Since |avail | starts at p0 and decreases by at least one per accepted round, at most p0 rounds can be accepted. The budget T provides a second bound. 
+
+Proposition 3 (Source disjointness) . Let Ω( ht) := S 
+
+> j∈used( ht)
+
+ω(j) denote the raw-variable sources used by an accepted tree ht. Then any two distinct accepted trees are source-disjoint: 
+
+Ω( ht) ∩ Ω( ht′ ) = ∅, t̸ = t′.
+
+Proof. We proceed by induction over construction rounds. At the start of round m, maintain the invariant avail = R0 \ [ 
+
+> s<m hsaccepted
+
+Ω( hs),
+
+where R0 is the initial set of available raw-variable sources. The invariant holds trivially at m = 1. During round m, every column j eligible for use by the candidate tree satisfies ω(j) ⊆ avail. Hence, if hm is accepted, Ω( hm) ⊆ avail ,
+
+which is disjoint from the sources claimed by all previously accepted trees. The sources in Ω( hm) are then removed from avail before the next round. Rejected trees do not modify avail. The invariant is therefore preserved, proving pairwise source disjointness of all accepted trees. 
+
+Proposition 4 (Exact source-separated prediction decomposition) . For every input x, Equation (6) 
+
+is an algebraic identity. If M trees are accepted and D denotes the retained direct terms, each prediction contains at most M + |D| active contributions: exactly one leaf contribution from each accepted tree and at most one contribution from each direct term. 
+
+10 The tree contributions are mutually source-disjoint, and no direct term uses a raw-variable source claimed by an accepted tree. Consequently, the default model gives an exact source-separated decomposition between accepted trees and the direct-term channel. Under the strict direct-term ownership variant, distinct retained direct terms are additionally required to have disjoint raw-variable ownership. In that case, the decomposition is fully source-disjoint: no raw-variable source appears in more than one active contribution. Proof. The leaves of each accepted tree partition its input space, so for every input x exactly one leaf indicator is active in each tree. Summing these M leaf contributions together with the retained direct terms yields Equation (6); hence at most M + |D| terms contribute to any prediction. By Proposition 3, the raw-variable sources associated with distinct accepted trees are disjoint. By construction, direct terms are restricted to sources not claimed by any accepted tree. Thus the tree contributions are mutually source-disjoint and are source-separated from the direct-term channel. In the default construction, distinct direct terms may still share a raw source. The strict direct-term ownership variant forbids such reuse. Under this additional restriction, the source sets of every pair of distinct contributing components are disjoint, establishing full term-level source disjointness. 
+
+Proposition 5 (Per-round search complexity) . For fixed Lmax and Dmax , the cost of growing one tree in Algorithm 1 is O(V · n), where V = |H| is the vocabulary size and n is the number of observations. Proof. At each leaf expansion, the greedy search evaluates at most |E| ≤ V candidate columns. Evaluating one column requires a scan of the observations reaching that leaf and computation of information gain, costing O(nℓ). Hence an expansion of leaf ℓ costs O(V n ℓ). Across all expansions at any fixed depth, the corresponding leaves contain disjoint subsets of the observations, so their total size is at most n. Since the tree has at most Dmax depth levels, the total search cost is therefore O(Dmax V n ). With Dmax fixed, this simplifies to O(V n ). 
+
+Theorem 1 (Model complexity bound) . Let M ≤ min( T, p 0) be the number of accepted trees and 
+
+Lmax the maximum number of leaves per tree. Then: (a) The number of leaf-region indicators in the design matrix Z is at most M · Lmax .(b) The total model inspection units satisfy MIU ≤ M · Lmax · Dmax + |D|.(c) After ℓ1 sparsification, there exists an optimal solution with at most rank( Z) ≤ min( n, q )
+
+active terms, where q = M · Lmax + |D|.Proof. (a) Each of M trees has at most Lmax leaves. (b) Each leaf path has at most Dmax conditions. Summing over all leaves of all trees gives M · Lmax · Dmax conditions from trees, plus |D| direct terms. (c) Among the ℓ1-regularized logistic regression optima, there exists a solution whose active columns are linearly independent. Consequently, its number of active terms is at most rank( Z) ≤
+
+min( n, q ). 
+
+Remark 1 (Audit-load comparison with opaque ensembles) . The theoretical MIU bound of RPTE is M · Lmax · Dmax + |D|, which is polynomial in user-specified parameters. For a gradient-boosted ensemble with Tx trees, each with at most Lx leaves and depth dx, the corresponding bound is 
+
+Tx · Lx · dx. Both expressions are structurally similar, but RPTE’s source disjointness constrains 
+
+M to at most min( T, p 0), while opaque ensembles place no comparable bound on Tx. In practice, 
+
+Tx is often hundreds or thousands of trees, producing MIU values orders of magnitude larger. The empirical comparison in Section 6 quantifies this gap on all twelve benchmarks. 
+
+11 Theorem 2 (Stage 3 optimality) . The Stage 3 objective (5) is strictly convex in (β, γ ) when Z has full column rank. The coordinate descent solver converges to the unique global minimum. Proof. Let θ = ( β, γ ) denote the full Stage 3 coefficient vector, so that the fitted logits can be written as F = Zθ . The logistic loss is convex, with Hessian 
+
+∇2
+
+> θ
+
+L(θ) = Z⊤W Z, W = diag  σ(Fi) 1 − σ(Fi) .
+
+For finite Fi, each diagonal entry satisfies Wii > 0. Therefore, if Z has full column rank, then for every nonzero vector v,
+
+v⊤Z⊤W Zv = ( Zv )⊤W (Zv ) > 0,
+
+so Z⊤W Z is positive definite and the logistic loss is strictly convex in θ.Adding the convex ℓ1 penalty preserves strict convexity. Hence the Stage 3 objective has a unique global minimizer, and coordinate descent converges to this minimizer (Tseng, 2001). When 
+
+Z does not have full column rank, coefficient minimizers need not be unique, but all yield the same predicted probabilities. 
+
+# 6 Experimental Evaluation 
+
+6.1 Experimental design 
+
+We evaluate RPTE on twelve binary classification datasets from PMLB (Romano et al., 2022) and OpenML, spanning sample sizes from n = 87 to n = 11 ,500 and feature dimensionalities from p = 3 to p = 178 (Table 3). Datasets were selected to cover three dimensions of difficulty: varying sample sizes (from n< 100 to n> 10 ,000), varying feature counts (3 to 178), and varying imbalance levels (balanced to 4:1 ratio). Table 3. Dataset summary with class balance. Balance shows the minority class proportion; ratio shows the majority-to-minority class ratio.                                                                               
+
+> Dataset Short npBalance Ratio Domain lupus lupus 87 30.40 1.5:1 SLE diagnosis postop. patient data postop. 88 80.27 2.7:1 Discharge planning appendicitis append. 106 70.20 4.0:1 Appendicitis diagnosis corral corral 160 60.44 1.3:1 Structured interaction hepatitis hepatitis 155 19 0.21 3.8:1 Hepatitis survival prnn crabs crabs 200 70.50 1.0:1 Morphological class. biomed biomed 209 80.36 1.8:1 Biomedical screening heart c heart-c 303 13 0.46 1.2:1 Cardiac diagnosis haberman haberman 306 30.26 2.8:1 Breast cancer survival saheart saheart 462 90.35 1.9:1 Heart disease (SA) WDBC WDBC 569 30 0.37 1.7:1 Breast cancer diagnosis EEG-Seizure EEG seizure 11,500 178 0.20 4.0:1 Seizure detection
+
+All experiments use stratified 5-fold cross-validation with 3 repeats, yielding 15 splits per dataset. Inner hyperparameter selection uses stratified 3-fold CV on the training fold. We compare RPTE against five baselines: XGBoost, LightGBM, Random Forest (RF), EBM, and RuleFit. All six models use a uniform grid of 8 hyperparameter configurations each. 2 For specific configuration  
+
+> 2Source code: https://github.com/srikumar2050/hugiml-core .
+
+12 details, refer to Appendix B. The primary metrics are ROC AUC, balanced accuracy, Brier score, and MIU/IIU, all computed as means over 15 splits. 
+
+6.2 Predictive performance 
+
+Table 4 reports mean ROC AUC over 15 splits. Bold marks the highest AUC per row. Across all twelve datasets, RPTE achieves a mean AUC of 0.830. The opaque baselines achieve mean AUCs of 0.838 (XGBoost), 0.836 (LightGBM), and 0.837 (RF). EBM leads among inter-pretable methods at 0.853, followed by RuleFit at 0.831 and RPTE at 0.830. On corral, a dataset requiring interaction recovery, RPTE achieves perfect AUC. On EEG-Seizure ( n = 11 ,500, p = 178), RPTE achieves a ROC AUC of 0 .990, only 0 .006 below LightGBM. Panel-level Wilcoxon signed-rank tests (Table 5) assess whether the AUC differences are statis-tically significant across the 12 dataset means. After Holm correction across the five prespecified RPTE-versus-baseline comparisons, RPTE performs significantly below XGBoost ( pHolm = 0 .005) and EBM ( pHolm = 0 .039). Differences between RPTE and LightGBM, RF, and RuleFit are not significant ( pHolm = 0 .442, 0 .467, and 0 .700, respectively). These results position RPTE as compet-itive with several baselines: the median AUC gap to RuleFit is 0.001, and the gap to LightGBM is 0.004. Table 4. Predictive performance: ROC AUC, mean over 15 outer splits. The final row is the unweighted mean of the 12 dataset-level means. Bold marks the highest AUC within each row. 
+
+Dataset RPTE XGBoost LightGBM RF EBM RuleFit lupus 0.768 0.772 0.775 0.754 0.806 0.730 postop. 0.432 0.440 0.426 0.333 0.407 0.443 
+
+append. 0.797 0.806 0.797 0.818 0.847 0.774 corral 1.000 1.000 1.000 0.998 1.000 1.000 
+
+crabs 0.974 0.976 0.977 0.967 0.983 0.997 
+
+hepatitis 0.790 0.793 0.782 0.868 0.848 0.793 biomed 0.927 0.945 0.947 0.961 0.980 0.953 haberman 0.669 0.687 0.699 0.708 0.697 0.667 heart-c 0.903 0.906 0.904 0.911 0.915 0.898 saheart 0.728 0.748 0.734 0.750 0.767 0.743 WDBC 0.987 0.993 0.993 0.990 0.996 0.991 EEG seizure 0.990 0.995 0.996 0.993 0.991 0.987 Mean 0.830 0.838 0.836 0.837 0.853 0.831 
+
+Table 5. Panel-level Wilcoxon signed-rank tests on ROC AUC across 12 dataset means. Holm correction is applied across the five prespecified RPTE-versus-baseline comparisons. 
+
+Comparison W p pHolm Med. ∆AUC Record RPTE vs XGBoost 0 0.001 0.005 ∗ −0.006 0-1-11 RPTE vs LightGBM 16 0.148 0.442 −0.004 3-1-8 RPTE vs RF 23 0.233 0.467 −0.006 4-0-8 RPTE vs EBM 5 0.010 0.039 ∗ −0.020 1-1-10 RPTE vs RuleFit 28 0.700 0.700 −0.001 5-1-6   
+
+> ∗Significant at α= 0 .05 after Holm correction. Record = wins–ties–losses for RPTE.
+
+13 6.3 Audit-load performance 
+
+Table 6 reports MIU and compression ratios. Relative to opaque ensembles, RPTE achieves lower MIU on all 12 datasets, with XGBoost-to-RPTE ratios ranging from 9 × (saheart) to 87 × (corral). Relative to EBM, RPTE maintains lower MIU on all 12 datasets, with ratios ranging from 2 × on postop. to 328 × on EEG-Seizure. EBM’s audit load grows substantially on feature-rich datasets because each feature generates a shape function with many bins: on EEG-Seizure (178 features), EBM produces 145,155 MIU. Relative to RuleFit, RPTE achieves lower MIU on 9 of 12 datasets. RuleFit achieves the lowest MIU on heart-c (64 vs. 75), saheart (62 vs. 91), and EEG-Seizure (152 vs. 442), where its compact rule sets produce fewer conditions. However, RuleFit does not enforce source disjointness, so its rules can share variables and fire simultaneously with conflicting signs (Appendix A). Table 6. Audit-load metrics: MIU, mean over 15 splits. Bold marks the lowest MIU per row. Parentheses report the MIU ratio baseline/RPTE; values above one favor RPTE.                                                                                        
+
+> Dataset RPTE XGBoost LightGBM RF EBM RuleFit lupus 10 760 (80 ×)744 (78 ×)2,807 (294 ×)159 (17 ×)59 (6 ×)postop. 16 211 (13 ×)73 (5 ×)4,587 (294 ×)33 (2 ×)98 (6 ×)append. 20 660 (34 ×)992 (51 ×)1,607 (82 ×)657 (34 ×)75 (4 ×)corral 18 1,600 (87 ×)3,074 (167 ×)3,455 (188 ×)32 (2 ×)51 (3 ×)crabs 39 1,894 (49 ×)4,544 (118 ×)7,557 (196 ×)1,033 (27 ×)55 (1.44 ×)hepatitis 40 600 (15 ×)497 (13 ×)3,761 (95 ×)368 (9 ×)80 (2 ×)biomed 35 1,624 (46 ×)3,530 (101 ×)7,206 (206 ×)1,110 (32 ×)106 (3 ×)haberman 36 775 (22 ×)831 (23 ×)6,718 (188 ×)165 (5 ×)71 (2 ×)heart-c 75 1,247 (17 ×)1,193 (16 ×)6,692 (90 ×)370 (5 ×)64 (0.86 ×)saheart 91 820 (9 ×)1,297 (14 ×)4,462 (49 ×)1,492 (16 ×)62 (0.69 ×)WDBC 46 1,478 (32 ×)4,071 (88 ×)5,101 (110 ×)12,593 (272 ×)63 (1.36 ×)EEG seizure 442 9,608 (22 ×)18,080 (41 ×)51,150 (116 ×)145,155 (328 ×)152 (0.34 ×)Mean 72 1,773 3,244 8,759 13,597 78
+
+Table 7 presents the accuracy–auditability tradeoff for each method using both means and medi-ans. RPTE combines high predictive accuracy with the lowest model-level audit load: its MIU is 72 (median 37), compared with 78 (68) for RuleFit, which lacks RPTE’s source-disjointness guarantee. EBM achieves higher AUC and comparable prediction-level IIU, but its complete model-level MIU is approximately 189 × higher by the mean and 14 × higher by the median. The opaque ensembles improve mean AUC by only 0.5–0.8 percentage points over RPTE while requiring approximately 25 ×–121 × greater mean MIU and 9 ×–11 × greater mean IIU. Table 7. Accuracy–auditability tradeoff across 12 datasets. Entries are mean (median) of the dataset-level results over 15 splits.                         
+
+> Metric RPTE XGBoost LightGBM RF EBM RuleFit AUC 0.830 (.850) 0.838 (.856) 0.836 (.851) 0.837 (.889) 0.853 (.881) 0.831 (.845) MIU 72 (37) 1,773 (1,034) 3,244 (1,245) 8,759 (4,844) 13,597 (514) 78 (68) IIU 30.0 (14.4) 279.2 (216.9) 317.5 (180.3) 341.7 (321.5) 28.7 (14.5) 78.1 (67.5)
+
+14 6.4 Impact of strict source ownership 
+
+The default RPTE enforces source disjointness at the tree-ensemble level. Direct terms may share raw sources with trees or with each other. To quantify the effect of extending source ownership to direct terms, we evaluate a strict source-disjoint RPTE variant. After tree construction, direct terms are admitted greedily only when their raw sources are not already owned by a tree or an earlier admitted direct term. Table 8 reports the results across all 12 datasets (15 folds each, 180 folds total). The strict constraint reduces mean AUC by 1.8 percentage points. Active direct terms drop from 2,171 (default) to 243 (strict) across 180 folds, an 89% reduction. Table 8. Strict source-disjointness analysis over 15 outer splits. Default RPTE is compared with the independently nested-CV-retuned strict variant.                                                                                        
+
+> Dataset AUC AUC ∆AUC MIU MIU ∆MIU default strict default strict lupus 0.768 0.750 −0.018 10 11 +1 postop. 0.432 0.454 +0 .022 16 13 −3append. 0.797 0.751 −0.046 20 16 −4corral 1.000 1.000 0.000 18 10 −8crabs 0.974 0.927 −0.047 39 40 +1 hepatitis 0.790 0.788 −0.002 40 34 −5biomed 0.927 0.913 −0.014 35 29 −6haberman 0.669 0.645 −0.024 36 31 −5heart-c 0.903 0.872 −0.031 75 54 −20 saheart 0.728 0.681 −0.047 91 70 −21 WDBC 0.987 0.981 −0.006 46 46 0EEG seizure 0.990 0.989 −0.001 442 375 −68 Mean 0.830 0.813 −.018 72 61 −11
+
+Panel-level Wilcoxon signed-rank tests on the 12 paired dataset means confirm that the AUC reduction under the strict constraint is statistically significant (AUC: W = 6, p = 0 .014, Holm-corrected p = 0 .024; balanced accuracy: W = 4, p = 0 .007, Holm-corrected p = 0 .021; Brier score: W = 8, p = 0 .012, Holm-corrected p = 0 .024). The additional term level strict constraint is therefore best suited to deployment scenarios where complete variable ownership (or reduced audit complexity) is desired and a modest accuracy cost is acceptable. 
+
+6.5 Ablation experiments 
+
+To isolate the contribution of each architectural choice, we conduct a systematic eight-scenario abla-tion using the complete 3 ×5 repeated outer-CV protocol (12 datasets, 15 splits each, with identical folds and seeds). Five configurations evaluate RPTE under different vocabulary and reconstruc-tion choices. Three additional configurations replace RPTE with fixed-hyperparameter XGBoost while retaining the vocabulary produced by the corresponding RPTE configuration, thereby com-paring downstream learners on matched representations. Table 9 reports the descriptive results, while Table 10 reports the nine prespecified panel-level comparisons. Per-dataset results appear in Appendix C. Three principal findings emerge from the RPTE configurations. First, Stage 1 vocabulary construction makes an important contribution to predictive accuracy: replacing the 15 Table 9. Ablation analysis across eight configurations and 12 datasets: mean ROC AUC, ∆AUC relative to full RPTE, and audit-load metrics. 
+
+Configuration AUC ∆AUC MIU IIU 
+
+RPTE estimator 
+
+Full RPTE (HUG + augmented pairs) 0.830 – 72 30.0 HUG, no augmentation 0.819 −0.011 62 18.8 Frequent top-K vocabulary 0.825 −0.005 131 25.7 Original features only 0.805 −0.025 127 15.8 No leaf reassignment 0.809 −0.022 120 12.6 
+
+Fixed XGBoost on constructed vocabulary 
+
+HUG vocabulary + XGBoost 0.832 +0.001 1,540 264.3 HUG, no augmentation + XGBoost 0.828 −0.002 1,661 273.3 Frequent vocabulary + XGBoost 0.827 −0.003 1,595 267.5 
+
+> AUC differences are calculated from the unrounded dataset-panel means.
+
+Table 10. Panel-level Wilcoxon signed-rank tests for the nine prespecified AUC contrasts. Holm correction is applied across all nine tests. Record denotes wins–ties–losses for the first-named configuration. 
+
+Comparison W p pHolm Record Full RPTE vs original only 8 0.0122 0.0977 11–0–1 Full RPTE vs no reassignment 5 0.0098 0.0879 10–1–1 Full RPTE vs HUG no augmentation 23 0.2334 0.9336 8–0–4 HUG no augmentation vs frequent RPTE 33 0.6772 1.000 7–0–5 Frequent RPTE vs frequent XGBoost 15 0.1230 0.6152 2–1–9 HUG no-augmentation RPTE vs corresponding XGBoost 16 0.0771 0.4629 2–0–10 Full RPTE vs HUG-vocabulary XGBoost 11 0.0537 0.3760 1–1–10 HUG-vocabulary XGBoost vs HUG no-augmentation XG-Boost 29 0.7646 1.000 4–1–7 HUG no-augmentation XGBoost vs frequent XGBoost 27 0.6377 1.000 6–1–5 
+
+supervised vocabulary with original features reduces mean AUC by 2.5 percentage points, with full RPTE outperforming the original-only variant on 11 of 12 datasets. This difference is nominally significant but does not cross the 5% threshold after Holm correction across the nine contrasts (pHolm = .0977). Second, the HUG no-augmentation vocabulary produces a substantially more compact representation than the independently constructed frequent vocabulary. No significant AUC difference is detected between these configurations (0.819 vs. 0.825; pHolm = 1 .0), whereas HUG reduces mean MIU from 131 to 62, a 2 .1× reduction that remains significant after correction (pHolm = .005). Third, leaf reassignment and the Stage 3 global refit improve mean AUC by 2.2 per-centage points relative to retaining the Stage 2 leaf values, with full RPTE winning on 10 datasets, tying on one, and losing on one. The XGBoost configurations show that the constructed vocabu-laries can also transfer predictive information to an opaque learner. Their mean AUCs range from 0.827 to 0.832 and do not differ significantly from their prespecified RPTE counterparts after cor-rection. However, they require approximately 21–23 × the mean MIU and about 9 × the mean IIU of full RPTE. These results indicate that vocabulary construction alone does not explain RPTE’s 16 low audit load. The observed compactness is consistent with the combined effect of source-disjoint tree construction and Stage 3 global coefficient estimation. 
+
+6.6 Representation refinement and transfer 
+
+The ablation demonstrates that HUG and frequent vocabularies achieve comparable AUC when paired with the same RPTE estimator. We investigate whether this performance parity arises because the two vocabularies produce similar data-level representations, or because the RPTE absorbs vocabulary differences during tree construction. 
+
+Representation refinement. We measure linear centered kernel alignment (CKA; Kornblith et al., 2019) between the HUG and frequent vocabularies at two stages. Stage-1 CKA compares only the binary mined-pattern matrices (excluding shared originals, augmented pairs, and labels). Pre-LR CKA compares the full design matrices supplied to Stage 3 logistic regression, including terminal-leaf indicators and eligible direct terms. On the 11 datasets where both vocabularies produce binary patterns, mean Stage-1 CKA is 0 .554. After RPTE tree construction, mean pre-LR CKA rises to 0 .694, an increase of +0 .140 observed on all 11 eligible datasets. Fig. 1 shows the per-dataset values. The RPTE therefore absorbs a substantial portion of the initial vocabulary variation during structure discovery, bringing the two representations closer together before the final estimation step. The remaining CKA gap indicates that the representations are not identical; the HUG vocabulary retains a structurally distinct encoding that produces the same predictive performance at lower audit cost. 
+
+Vocabulary transfer to XGBoost. To assess whether the benefits of the HUG vocabulary extend beyond the RPTE estimator, we compare fixed-hyperparameter XGBoost trained on original fea-tures with the same XGBoost trained on the full HUG vocabulary (Table 9, bottom panel; Fig. 2). The two configurations achieve comparable observed AUC (0 .832 vs. 0 .824, pHolm = 1 .0), while HUG-vocabulary XGBoost reduces MIU on 11 of 12 datasets and IIU on 9 of 12. 
+
+Fig. 1. Linear CKA between HUG and frequent representations at Stage 1 (mined-pattern matrices) and immediately before logistic-regression fitting (full RPTE design matrices). A panel-level Wilcoxon test for MIU yields p = .003 ( pHolm = .068); the corresponding IIU test yields p = .009 ( pHolm = .158). Thus, the vocabulary primarily provides directional evidence of improved representational simplicity rather than a statistically confirmed improvement in predictive 17 Fig. 2. Impact of HUG vocabulary transfer on XGBoost. accuracy. The lower MIU and IIU are consistent with simpler fitted XGBoost structures when pre-composed patterns capture relevant interactions. 
+
+6.7 Execution time performance 
+
+Table 11 reports mean wall-clock execution times across all 12 datasets. RPTE tuning time is comparable to XGBoost and RF and substantially faster than EBM and RuleFit. EBM tuning averages 382 seconds due to iterative boosting over per-feature shape functions. RuleFit tuning averages 112 seconds. Table 11. Execution time: mean (SD) of the 12 dataset-level mean times, in seconds.                        
+
+> RPTE XGBoost LightGBM RF EBM RuleFit Tuning 26.2 (62.4) 16.0 (29.2) 11.7 (36.8) 9.7 (17.3) 382.1 (688.4) 112.2 (111.5) Fit 1.987 (5.431) 0.783 (1.510) 0.464 (1.452) 0.727 (1.786) 24.551 (52.971) 6.009 (9.672) Predict 0.019 (0.041) 0.003 (0.003) 0.005 (0.013) 0.012 (0.009) 0.004 (0.012) 0.090 (0.049)
+
+# 7 Discussion, Implications, and Limitations 
+
+7.1 Predictive accuracy under structural constraints (RQ1) 
+
+RPTE achieves a mean AUC of 0 .830, 0 .8 percentage points below the best opaque baseline, XG-Boost (0 .838). EBM leads with 0 .853, while RuleFit has a similar panel mean of 0 .831. Panel-level Wilcoxon tests across the five pre-specified RPTE-versus-baseline comparisons (Table 5) show that RPTE performs significantly below XGBoost and EBM after Holm correction ( pHolm = .005 and .039, respectively). Its differences from LightGBM, RF, and RuleFit are not significant (pHolm = .442, .467, and .700). RPTE nevertheless achieves perfect AUC on corral. On EEG-Seizure ( n = 11 ,500, p = 178), it achieves 0 .990, only 0 .006, or 0 .6 AUC percentage points, below 18 LightGBM. Overall, RPTE trades some predictive capacity for a substantially smaller, source-disjoint representation. It delivers competitive performance with markedly lower model-level audit complexity. 
+
+7.2 Audit-load reduction (RQ2) 
+
+The reduction in audit complexity is substantial against opaque ensembles and EBM. The XGBoost-to-RPTE MIU ratio ranges from 9 × to 87 × across datasets. RPTE maintains lower MIU than EBM on all 12 datasets. EBM’s audit load grows with the number of features: on WDBC (30 features), EBM MIU reaches 12,593; on EEG-Seizure (178 features), it reaches 145,155, exceeding even RF (51,150). This occurs because EBM represents each feature with a shape function containing many bins, and pairwise interactions add further terms. The comparison with RuleFit is more nuanced. RuleFit achieves comparable aggregate MIU (mean 78 vs. 72) and lower MIU on three datasets (heart-c, saheart, EEG-Seizure). The key difference is structural rather than quantitative: RuleFit does not enforce source disjointness, so its rules can share variables, leading to the overlapping effects documented in Appendix A. A RuleFit model with MIU = 64 may activate 20 rules per prediction with shared variables and conflicting coefficient signs, whereas an RPTE model with MIU = 75 produces non-overlapping contributions that can be read independently. We note that MIU and IIU measure condition counts rather than cognitive difficulty. Auditing a model with MIU = 75 is qualitatively different from reviewing one with MIU = 1,247: the former can be read entirely, while the latter requires automated tooling. 
+
+7.3 Interpretability analysis: Discovered patterns and domain alignment 
+
+A central premise of this work is that RPTE discovers meaningful structure. We assess this by examining rules involving more than two raw variables that are selected across 15 outer folds in three datasets. Table 12 summarizes the top recurring pattern signatures. Each dataset’s pattern signatures are organized by raw-variable sets: a signature such as {cp, oldpeak, thal } means a rule whose split conditions involve exactly those three variables. The ”Folds” column counts the number of folds in which that specific variable combination appears as a prediction-active rule. The ”Domain concepts” column identifies the clinical concept families that the selected variables span. Table 12. Top recurring RPTE pattern signatures and domain alignment. Folds = number of folds (out of 15) in which the exact variable combination is prediction-active.                     
+
+> Dataset Pattern signature Folds Domain concepts matched Heart-c
+> {cp, oldpeak, thal }4/15 Ischaemia + anatomical evidence
+> {ca, cp, oldpeak, sex, slope }3/15 Ischaemia + anatomical + sex
+> {ca, cp, oldpeak, thal, thalach, trestbps }2/15 Ischaemia + anatomical + baseline WDBC
+> {mean concavity, worst area }3/15 Nuclear size + boundary
+> {worst concave pts, worst perim., worst texture }3/15 Nuclear size + boundary
+> {mean concave pts, worst perim. }3/15 Nuclear size + boundary SA Heart
+> {Age, Famhist, Ldl, Tobacco, Typea }10/15 Lipid/tobacco + age/family
+> {Age, Famhist, Ldl, Tobacco }8/15 Lipid/tobacco + age/family
+> {Age, Famhist, Ldl }5/15 Lipid + age/family
+
+19 Heart-c: cardiac risk pathways. Across all 15 folds, every RPTE model selects rules involving features from at least two of three clinically recognized cardiac pathways: exercise/ischaemia re-sponse (oldpeak, thal, exang, slope, thalach), anatomical/symptom evidence (cp, ca, thal), and baseline risk (age, trestbps, chol, fbs). At the concept level, all three pathway families are repre-sented in all 15 folds. At the signature level, the most frequent exact variable combination is {cp, oldpeak, thal }, appearing in 4 of 15 folds. Different folds produce rules that span the same clinical concepts but use different variable subsets. Active-tree stability of 0.74 and prediction Spearman of 0.93 indicate that the overall tree architecture and risk ranking are highly consistent across folds, even as the specific variable combinations vary. 
+
+WDBC: breast cancer morphology. All 15 folds produce rules involving features from two diag-nostic dimensions: nuclear size (radius, perimeter, area) and nuclear boundary irregularity (con-cavity, concave points, compactness). Both concepts recur at the concept level in all 15 folds. Individual signature frequencies are lower (3/15) because correlated size features (worst radius, worst perimeter, worst area) are interchangeable representations, and the Stage 1 redundancy fil-ter retains different representatives in different folds. 
+
+SA Heart: coronary risk factors. RPTE discovers a dominant signature {Age, Famhist, Ldl, Tobacco, Typea } in 10 of 15 folds, unifying two established coronary risk dimensions: lipid/tobacco exposure and age/family-history risk. Active-tree stability of 0.72 and prediction Spearman of 0.82 indicate a consistent decision architecture. 
+
+7.4 Alternate explanations through Rashomon analysis 
+
+An important question for auditable models is whether the discovered structure is the only near-optimal explanation. We investigate this through two complementary analyses. 
+
+Cross-fold alternate explanations. Two rules from different folds are coverage-equivalent if they identify the same observations (Jaccard ≥ 0.75) with the same coefficient sign, even when built from different features. Representative pairs are drawn from the 15 outer splits of the 3 × 5repeated-CV protocol; split identifiers run from 0 to 14 across repetitions. On WDBC, 733 direct and 172 complement pairs are found; on heart-c, 32 pairs. Table 13 shows representative examples, with the features that differ between Rule A and Rule B highlighted in bold .On WDBC, the first pair identifies nearly the same subgroup (coverage Jaccard = 0 .987) despite providing substantially different explanations: both rules retain worst perimeter and worst concave points, but one uses radius error whereas the other uses area error and a worst-compactness–mean-area product. The second pair replaces worst radius with worst perimeter while retaining the other conditions and achieves a coverage Jaccard of 0 .984, illustrating how correlated tumor-size measures can support alternative explanations of nearly the same subgroup. On heart-c, different arithmetic and threshold conditions similarly provide alternative explanations that identify nearly the same patients and have the same coefficient direction. 
+
+Same-fold alternate explanations. To examine whether RPTE can produce different expla-nations under a fixed data partition, we refit the model after removing one raw feature at a time. Candidates are screened using three-fold out-of-fold predictions within the outer-training fold, and at most five alternatives per dataset are evaluated on the common held-out fold. All ten selected alternatives preserved held-out discrimination, with an AUC loss of at most 0 .01. Three of five heart-c alternatives also met the joint prediction-agreement criteria, whereas the WDBC alterna-tives preserved AUC but showed greater changes in risk ranking and top-risk membership. Table 14 compares prediction-active leaf rules from the reference and alternative models. 20 Table 13. Cross-fold alternate explanation pairs. Each row shows two rules from different folds that identify nearly the same patient subgroup (coverage Jaccard ≥ 0.90) using different features. Features unique to each rule are in bold .Dataset Folds Rule A Rule B Cov. J WDBC 0 vs 9 worst perim ≤ 106.0 AND worst concave pts ≤ 0.135 AND 
+
+radius err ≤ 0.596  
+
+> 3 features, coeff = −2.52
+
+worst perim ≤ 106.0 AND 
+
+worst compact × mean area ≤
+
+201.0 AND area err ≤ 46.9 AND worst concave pts ≤ 0.135  
+
+> 5 features, coeff = −1.64
+
+.987 5 vs 14 worst radius ≤ 16.8 AND worst concave pts ≤ 0.136 AND area err ≤ 38.6 AND smooth err >
+
+0.003  
+
+> 4 features, coeff = −2.84
+
+worst perim ≤ 111.5 AND worst concave pts ≤ 0.136 AND area err ≤ 38.6 AND smooth err >
+
+0.003  
+
+> 4 features, coeff = −2.43
+
+.984 Heart-c 1 vs 4 |cp − thal | > 2.5 AND oldpeak > 0.65  
+
+> 3 features, coeff = −1.57
+
+cp=[0,1), oldpeak=[0.8, 6.2) AND 
+
+trestbps × thal > 290  
+
+> 4 features, coeff = −1.42
+
+.918 9 vs 11 cp − oldpeak > −0.45 AND ca ≤ 0.5 AND chol × thal ≤ 628.5 
+
+> 5 features, coeff = +1 .20
+
+cp − oldpeak > −0.45 AND ca ≤ 0.5 AND trestbps × thal ≤ 317.5 AND chol ≤ 323 
+
+> 6 features, coeff = +1 .74
+
+.902 The same-fold comparisons reveal both feature substitution and structural persistence. On WDBC, radius error and area error produce coverage-equivalent explanations when combined with the same perimeter and concavity conditions ( J = 1 .000). When worst perimeter is removed, RPTE reconstructs the explanation using worst radius and related morphology features while retaining high subgroup agreement ( J = .857). On heart-c, a thal threshold is replaced by a trestbps–thal product with closely aligned coverage and coefficient magnitude ( J = .944); the second pair achieves exact coverage equivalence through an alternative ca condition ( J = 1 .000). Unlike the cross-fold analysis, these comparisons hold the training and test partitions fixed. The observed alternatives therefore arise from fitting RPTE with different feature sets rather than from changes in sampled patients. This demonstrates that RPTE can expose multiple, directly comparable explanations for nearly the same patient groups while preserving effect direction and predictive behavior. 
+
+7.5 Practical implications and limitations 
+
+The results have practical implications for predictive modeling in regulated settings. On heart-c, RPTE has an MIU of approximately 75, making comprehensive human review more tractable. By comparison, XGBoost has an MIU of 1,247 on heart-c, while EBM reaches 145,155 on EEG-Seizure, making automated model-level inspection increasingly necessary. Other interpretable methods, including RuleFit, SIRUS, FIGS, and EBM, provide algebraically additive predictions. However, additivity alone does not ensure distinct explanatory components: rules or tree contributions may overlap, form nested conditions, or reuse the same variables across multiple terms. RPTE instead organizes predictions around source-disjoint trees, with each observation activating one leaf per tree. A prediction can therefore be traced exactly to a compact set of named leaf rules and direct 21 Table 14. Same-fold alternate explanations. Reference and alternative models are trained on the same outer-training fold using different raw feature sets. Differing conditions are shown in bold .Dataset Removed feature Reference rule Alternative rule Cov. J
+
+WDBC 
+
+worst symmetry worst perimeter ≤ 105 .95 AND worst concave points ≤ 0.13505 AND 
+
+radius error ≤ 0.59555  
+
+> coefficient = −2.52
+
+worst perimeter ≤ 105 .95 AND worst concave points ≤ 0.13505 AND 
+
+area error ≤ 44 .13  
+
+> coefficient = −2.45
+
+1.000 
+
+worst perimeter worst perimeter ≤ 105 .95 AND worst concave points ≤ 0.13505 AND 
+
+radius error ≤ 0.59555  
+
+> coefficient = −2.52
+
+worst radius ≤ 16 .805 AND worst concave points ≤ 0.13505 AND 
+
+area error ≤ 48 .7 AND 
+
+smoothness error > 0.003294 AND 
+
+worst texture ≤ 33 .27  
+
+> coefficient = −2.77
+
+.857 Heart-c fbs cp − oldpeak ≤ − 0.7 AND thal 
+
+> 2.5 
+
+> coefficient = −1.90
+
+cp − oldpeak ≤ − 0.7 AND trestbps 
+
+× thal > 315  
+
+> coefficient = −1.93
+
+.944 
+
+exang cp − oldpeak ≤ − 0.7 AND thal ≤ 2.5AND NOT(ca = [1 , 4) , cp = [0 , 1) )
+
+AND trestbps − thalach ≤ − 8.5
+
+> coefficient = +0 .17
+
+cp − oldpeak ≤ − 0.7 AND thal ≤ 2.5AND ca = [0 , 1) AND trestbps −
+
+thalach ≤ − 8.5
+
+> coefficient = +0 .46
+
+1.000 terms. The ablation results (Section 6.5) provide guidance for deployment. Stage 1 vocabulary con-struction contributes the largest accuracy gain and should not be omitted. The HUG-based vocab-ulary produces substantially more compact models than the independently constructed frequent vocabulary at comparable AUC, making it the preferred Stage 1 strategy when audit load matters. Source disjointness imposes a modest accuracy cost for a substantial reduction in audit load, a tradeoff favorable in most regulated settings. The representation analysis (Section 6.6) confirms that the HUG vocabulary transfers structural benefits even to opaque learners: when supplied to a fixed-hyperparameter XGBoost, HUG reduces MIU on 11 of 12 datasets at comparable AUC. This indicates that the vocabulary captures genuine structural regularities rather than artifacts of the RPTE estimator. The strict source-disjointness analysis (Section 6.4) further shows that complete variable ownership can be enforced at a mean cost of 1.8 AUC points, with an 89% reduction in active direct terms. The proposed approach has several limitations that should be considered when interpreting the results. First, the statistical comparison is based on 12 dataset-level observations. After Holm correction across the five prespecified RPTE-versus-baseline tests, RPTE performs significantly below XGBoost and EBM ( pHolm = .005 and .039), while its differences from LightGBM, RF, and RuleFit are not significant. Second, the same-fold Rashomon analysis examines a systematically generated, bounded set of alternatives rather than the complete Rashomon set, whose exhaustive enumeration would be combinatorially prohibitive. Third, MIU and IIU quantify structural audit load rather than human cognitive effort. Hence, user studies with domain experts are needed to establish how these reductions affect review time and decision quality. Finally, extensions to multi-class classification, survival analysis, and regression are natural next steps. 22 8 Conclusion and Future Research 
+
+This paper introduced a three-stage learning approach that separates structure discovery from co-efficient estimation in tabular classification. Coefficient reassignment and source-disjoint tree con-struction yield models that retain competitive predictive performance while substantially reducing audit complexity. The proposed approach achieves a mean ROC AUC of 0.830 across twelve bench-marks, within 0.8 percentage points of the best opaque baseline, while reducing model inspection units by 9 × to 87 × relative to XGBoost and maintaining lower MIU than EBM on all 12 datasets. RuleFit achieves comparable or lower MIU on three datasets but without the source-disjointness guarantees. Five structural properties are formally established, providing the theoretical basis for audit-load guarantees. An eight-scenario ablation confirms that the supervised HUG vocabulary is the primary driver of both predictive accuracy and representational economy: it outperforms the original-features-only variant by 2.5 AUC points and produces 2 .1× lower MIU than an in-dependently constructed frequent vocabulary at comparable AUC. The learned vocabulary also transfers to XGBoost, reducing MIU on 11 of 12 datasets at matched AUC, demonstrating that the vocabulary captures genuine structural regularities. The approach complements existing methods. Gradient-boosted ensembles remain the method of choice when maximum accuracy is the sole objective. EBMs provide an effective alternative when pairwise interactions suffice and per-feature shape functions are preferred. The three-stage approach targets scenarios where higher-order interactions matter and full per-prediction auditabil-ity is required. Several research directions follow from the modular design of RPTE. First, alternative Stage 1 vocabularies and structured Stage 3 penalties, including elastic net (Zou and Hastie, 2005) and group lasso, could clarify how representation and coefficient regularization interact. Second, scal-able search procedures could characterize larger regions of the Rashomon set without requiring combinatorially infeasible exhaustive enumeration. Third, external, multi-site, and temporal val-idation would establish whether the discovered structures remain stable and transferable across populations. Finally, extensions that incorporate domain-specific constraints or prior knowledge could further improve the relevance and actionability of the resulting explanations. 
+
+# References 
+
+Agarwal, R., Melnick, L., Frosst, N., Zhang, X., Lengerich, B., Caruana, R., and Hinton, G. E. (2021). Neural additive models: Interpretable machine learning with neural nets. In Advances in Neural Information Processing Systems , volume 34, pages 4699–4711. Agrawal, R. and Srikant, R. (1994). Fast algorithms for mining association rules in large databases. In Proceedings of the 20th International Conference on Very Large Data Bases , pages 487–499. Angelino, E., Larus-Stone, N., Alabi, D., Seltzer, M., and Rudin, C. (2018). Learning certifiably optimal rule lists for categorical data. Journal of Machine Learning Research , 18(234):1–78. Barredo Arrieta, A., D´ ıaz-Rodr´ ıguez, N., Del Ser, J., Bennetot, A., Tabik, S., Barbado, A., Garcia, S., Gil-Lopez, S., Molina, D., Benjamins, R., Chatila, R., and Herrera, F. (2020). Explainable ar-tificial intelligence (XAI): Concepts, taxonomies, opportunities and challenges toward responsible AI. Information Fusion , 58:82–115. B´ enard, C., Biau, G., Da Veiga, S., and Scornet, E. (2021). SIRUS: Stable and Interpretable RUle Set for classification. Electronic Journal of Statistics , 15(1):427–505. 23 Bertsimas, D. and Dunn, J. (2017). Optimal classification trees. Machine Learning , 106(7):1039– 1082. Breiman, L. (2001). Random forests. Machine Learning , 45(1):5–32. B¨ uhlmann, P. and Yu, B. (2003). Boosting with the L2 loss: Regression and classification. Journal of the American Statistical Association , 98(462):324–339. Chen, T. and Guestrin, C. (2016). XGBoost: A scalable tree boosting system. In Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining , pages 785–794. Cohen, W. W. and Singer, Y. (1999). A simple, fast, and effective rule learner. In Proceedings of the Sixteenth National Conference on Artificial Intelligence , pages 335–342. Dembczy´ nski, K., Kotlowski, W., and Slowi´ nski, R. (2008). Maximum likelihood rule ensembles. In Proceedings of the 25th International Conference on Machine Learning , pages 224–231. Fern´ andez-Delgado, M., Cernadas, E., Barro, S., and Amorim, D. (2014). Do we need hundreds of classifiers to solve real world classification problems? Journal of Machine Learning Research ,15(90):3133–3181. Freitas, A. A. (2014). Comprehensible classification models: A position paper. ACM SIGKDD Explorations Newsletter , 15(1):1–10. Friedman, J. H. (2001). Greedy function approximation: A gradient boosting machine. The Annals of Statistics , 29(5):1189–1232. Friedman, J. H., Hastie, T., and Tibshirani, R. (2000). Additive logistic regression: A statistical view of boosting. The Annals of Statistics , 28(2):337–407. Friedman, J. H. and Popescu, B. E. (2008). Predictive learning via rule ensembles. The Annals of Applied Statistics , 2(3):916–954. Grinsztajn, L., Oyallon, E., and Varoquaux, G. (2022). Why do tree-based models still outperform deep learning on typical tabular data? In Advances in Neural Information Processing Systems ,volume 35, pages 507–520. Hastie, T., Tibshirani, R., and Friedman, J. (2009). The Elements of Statistical Learning: Data Mining, Inference, and Prediction . Springer, New York, 2 edition. Ke, G., Meng, Q., Finley, T., Wang, T., Chen, W., Ma, W., Ye, Q., and Liu, T.-Y. (2017). LightGBM: A highly efficient gradient boosting decision tree. In Advances in Neural Information Processing Systems , volume 30, pages 3146–3154. Kliegr, T. and Izquierdo, E. (2023). QCBA: Improving rule classifiers learned from quantitative data by recovering information lost by discretisation. Applied Intelligence , 53(18):20797–20827. Kornblith, S., Norouzi, M., Lee, H., and Hinton, G. (2019). Similarity of neural network repre-sentations revisited. In Proceedings of the 36th International Conference on Machine Learning ,volume 97 of PMLR , pages 3519–3529. Krishnamoorthy, S. (2024). Interpretable classifier models for decision support using high utility gain patterns. IEEE Access , 12:126088–126107. 24 Letham, B., Rudin, C., McCormick, T. H., and Madigan, D. (2015). Interpretable classifiers using rules and Bayesian analysis: Building a better stroke prediction model. The Annals of Applied Statistics , 9(3):1350–1371. Lou, Y., Caruana, R., Gehrke, J., and Hooker, G. (2013). Accurate intelligible models with pairwise interactions. In Proceedings of the 19th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining , pages 623–631. Lundberg, S. M. and Lee, S.-I. (2017). A unified approach to interpreting model predictions. In 
+
+Advances in Neural Information Processing Systems , volume 30, pages 4765–4774. Molero-R´ ıo, C., Li, B., Wang, T., and Rudin, C. (2026). Fast Rashomon sets of sparse rule sets. 
+
+Machine Learning , 115(7):165. Murdoch, W. J., Singh, C., Kumbier, K., Abbasi-Asl, R., and Yu, B. (2019). Definitions, methods, and applications in interpretable machine learning. Proceedings of the National Academy of Sciences , 116(44):22071–22080. Nori, H., Jenkins, S., Koch, P., and Caruana, R. (2019). InterpretML: A unified framework for machine learning interpretability. arXiv preprint arXiv:1909.09223 .Pellegrina, L. and Vandin, F. (2024). Scalable rule lists learning with sampling. In Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining , pages 2352–2363. Association for Computing Machinery. Ribeiro, M. T., Singh, S., and Guestrin, C. (2016). “Why should I trust you?”: Explaining the predictions of any classifier. In Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining , pages 1135–1144. Romano, J. D., Le, T. T., La Cava, W., Gregg, J. T., Goldberg, D. J., Chakraborty, P., Ray, N. L., Himmelstein, D., Fu, W., and Moore, J. H. (2022). PMLB v1.0: An open-source dataset collection for benchmarking machine learning methods. Bioinformatics , 38(3):878–880. Rudin, C. (2019). Stop explaining black box machine learning models for high stakes decisions and use interpretable models instead. Nature Machine Intelligence , 1(5):206–215. Rudin, C., Chen, C., Chen, Z., Huang, H., Semenova, L., and Zhong, C. (2022). Interpretable machine learning: Fundamental principles and 10 grand challenges. Statistics Surveys , 16:1–85. Semenova, L., Rudin, C., and Parr, R. (2022). On the existence of simpler machine learning models. In Proceedings of the 2022 ACM Conference on Fairness, Accountability, and Transparency , pages 1827–1858. Shwartz-Ziv, R. and Armon, A. (2022). Tabular data: Deep learning is not all you need. Information Fusion , 81:84–90. Tan, Y. S., Singh, C., Nasseri, K., Agarwal, A., Duncan, J., Ronen, O., Epland, M., Kornblith, A., and Yu, B. (2025). Fast interpretable greedy-tree sums. Proceedings of the National Academy of Sciences , 122(7):e2310151122. Tibshirani, R. (1996). Regression shrinkage and selection via the lasso. Journal of the Royal Statistical Society: Series B (Methodological) , 58(1):267–288. 25 Tseng, P. (2001). Convergence of a block coordinate descent method for nondifferentiable mini-mization. Journal of Optimization Theory and Applications , 109(3):475–494. Ustun, B. and Rudin, C. (2016). Supersparse linear integer models for optimized medical scoring systems. Machine Learning , 102(3):349–391. Xin, R., Zhong, C., Chen, Z., Takagi, T., Seltzer, M., and Rudin, C. (2022). Exploring the whole Rashomon set of sparse decision trees. In Advances in Neural Information Processing Systems ,volume 35, pages 14071–14084. Zou, H. and Hastie, T. (2005). Regularization and variable selection via the elastic net. Journal of the Royal Statistical Society: Series B (Statistical Methodology) , 67(2):301–320. 
+
+# A Interpretability Analysis of Additive Rule Methods 
+
+Individual rules in RuleFit, FIGS, and SIRUS are human-readable. However, the fitted rule collec-tions can impose a substantial cognitive burden when a reviewer attempts to reconstruct any single prediction. This appendix examines three recurring patterns that widen the gap between rule-level readability and model-level interpretability. These are not mathematical errors. The concern is operational: how much mental work is required to trace a prediction. We refit all three methods on five datasets using the first outer fold (seed 42, stratified 5-fold CV). RuleFit uses the nested-CV best parameters; SIRUS uses 10 rules at depth 2; FIGS uses 
+
+max rules = 100. For each fitted model, we extract all active rules and compute pairwise training-set coverage overlaps. Table 15 summarizes the results. (1) Conflicting overlapping effects. When rules on the same features fire simultaneously with opposite signs, no single rule can be read as the model’s conclusion about those features. (2) Nested threshold families. When multiple rules use the same variables at different thresh-olds and one rule’s coverage is a subset of another’s, their contributions accumulate with no single clear boundary. (3) Activation multiplicity. The number of rules firing simultaneously per observation deter-mines the cognitive load of tracing any prediction. 26 Table 15. Interpretability issues observed in fitted additive rule models (outer fold 0, seed 42). For SIRUS, contrast denotes the true-branch output minus the false-branch output. 
+
+RuleFit 
+
+Conflicting over-lap 
+
+prnn crabs : index ≤ 23 .5, FL ≤ 17 .3, BD ≤ 11 .45 (coef. = −1.23, train = 38) and index ≤ 26 .0, FL ≤ 17 .75 , BD ≤ 11 .3 (coef. = +0 .17, train = 38). The rules overlap on 36 training and 10 held-out observations (train/test Jaccard = .90 /. 91), so both opposing contributions apply to nearly the same subgroup. Nested thresh-olds 
+
+prnn crabs : seven {FL , index } rules form 10 nested pairs. Example: index ≤   
+
+> 23 .5,FL ≤17 .1
+
+(−0.87) within index ≤ 24 .5, FL ≤ 18 .05 (−0.11); train/test Jac-card = .949 /. 833. Activation multi-plicity Mean active rules per held-out observation: 6.7–19 .2; maximum = 35 (prnn crabs ). 
+
+FIGS 
+
+Conflicting over-lap Hepatitis: BILIRUBIN ≤ 13 .5, ALBUMIN ≤ 28 .5 (Tree 1, +0 .192, n = 87) and     
+
+> BILIRUBIN ≤16 .5,ALBUMIN ≤28 .5
+
+(Tree 3, −0.022, n = 91); train/test Jaccard = .956 /. 958. Nested thresh-olds Hepatitis: ASCITES > 0.5, BILIRUBIN > 18 , 29 < SGOT ≤ 82 .5 contains 0.5 <         
+
+> ASCITES ≤1.5,BILIRUBIN >18 ,37 .5<SGOT ≤81 .5
+
+; 10 shared training obser-vations, Jaccard = .909. Activation multi-plicity One leaf is active per tree; hence active leaves per prediction equal the number of trees, ranging from 1 to 18 across the five fitted models. 
+
+SIRUS 
+
+Conflicting over-lap Postoperative: BP-STBL < 1 (contrast = −.091, train/test = 15 /6) within   
+
+> BP-STBL <2
+
+(contrast = + .048, train/test = 53 /13); train/test Jaccard = 
+
+.283 /. 462. Nested thresh-olds Appendicitis: At7 < . 1986 (contrast = + .499, train/test = 17 /4) within At7 <.2778 (contrast = + .412, train/test = 25 /8); train/test Jaccard = .680 /. 500. Activation multi-plicity All 10 rule components contribute through true/false outputs; mean true-branch memberships = 2 .27–3 .83, maximum = 6–9. 
+
+Note. Shared variables do not necessarily imply redundant or conflicting explanations; thresh-old, direct, and interaction effects may remain meaningfully distinct. The examples above concern repeated subgroup descriptions with overlapping or nested thresholds. RPTE sepa-rates source variables across trees and activates exactly one leaf within each tree. The strict variant additionally constrains retained direct terms. 
+
+# B Hyperparameter Configuration 
+
+All models are tuned using inner three-fold stratified cross-validation within each outer-training fold. For every model, the Cartesian product of three binary choices produces eight candidate configurations. The candidate with the highest mean inner-fold ROC AUC is refitted on the complete outer-training fold. 27 Table 16. Hyperparameter search spaces. Each model has eight candidate configurations evaluated by inner three-fold stratified cross-validation. 
+
+Method Tuned parameters Fixed settings RPTE L ∈ { 1, 2}, topK ∈ { 50 , 100 },G ∈ { 0.01 , 0.001 },Sequential RPTE estimator Package defaults XGBoost max depth ∈ { 2, 4}; learning rate ∈ { 0.03 , 0.1};min child weight ∈ { 1, 5}
+
+reg lambda = 1; n estimators = 200; early stopping after 20 rounds LightGBM learning rate ∈ { 0.03 , 0.1}; num leaves ∈ { 15 , 31 };min child samples ∈ { 10 , 30 }
+
+reg lambda = 1; n estimators = 200 Random Forest n estimators ∈ { 50 , 100 }; max depth ∈ { 4, 8};min samples leaf ∈ { 1, 5}
+
+max features = √p
+
+EBM max rounds ∈ { 200 , 500 }; interactions ∈ { 0, 10 };learning rate ∈ { 0.015 , 0.05 }
+
+Package defaults RuleFit n estimators ∈ { 50 , 100 }; max rules ∈ { 30 , 60 };tree size ∈ { 3, 4}
+
+Package defaults 
+
+# C Detailed Ablation Results 
+
+Table 17 reports per-dataset AUC and MIU for the five RPTE configurations. All entries are means over the 15 outer splits of the 3 × 5 repeated-CV protocol. The HUG-no-augmentation configuration achieves the lowest MIU on 11 of 12 datasets. Full RPTE achieves the highest AUC on seven datasets, including its tie with frequent RPTE and no reassignment on corral. The frequent vocabulary has higher MIU than both HUG configurations on 11 datasets. Overall, the HUG-based representations are substantially more compact while retaining comparable predictive performance. Table 17. Per-dataset ablation results: mean ROC AUC and MIU over 15 outer splits. Bold denotes the highest AUC and lowest MIU within each dataset, determined from unrounded values.                                                                                                                                                 
+
+> Full RPTE HUG no aug. Frequent Original only No reassign. Dataset AUC MIU AUC MIU AUC MIU AUC MIU AUC MIU lupus 0.768 10 0.758 80.755 39 0.767 36 0.754 39 postop. 0.432 16 0.479 60.475 35 0.467 35 0.388 39 append. 0.797 20 0.780 16 0.780 60 0.760 61 0.756 53 corral 1.000 18 0.883 24 1.000 13 0.883 43 1.000 13
+> crabs 0.974 39 0.934 31 0.909 86 0.904 85 0.928 55 hepatitis 0.790 40 0.822 37 0.802 92 0.777 110 0.808 116 biomed 0.927 35 0.928 29 0.922 106 0.915 101 0.924 87 haberman 0.669 36 0.669 25 0.682 59 0.660 50 0.634 50 heart-c 0.903 75 0.897 63 0.902 112 0.874 97 0.871 89 saheart 0.728 91 0.708 73 0.703 118 0.684 101 0.669 99 WDBC 0.987 46 0.984 43 0.988 189 0.983 184 0.984 232 EEG seizure 0.990 442 0.987 384 0.987 661 0.986 619 0.988 567 Mean 0.830 72 0.819 62 0.825 131 0.805 127 0.809 120
+
+28

@@ -1,0 +1,966 @@
+Title: Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection
+
+URL Source: https://arxiv.org/pdf/2608.15768v1
+
+Published Time: Tue, 18 Aug 2026 01:12:33 GMT
+
+Number of Pages: 12
+
+Markdown Content:
+# Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection 
+
+# Xudong Chen 
+
+Emory University Atlanta, USA xudongchen550@gmail.com 
+
+# Shengbo Gong 
+
+Emory University Atlanta, USA shengbo.gong@emory.edu 
+
+# Lu Cheng 
+
+University of Illinois at Chicago Chicago, IL, USA lucheng@uic.edu 
+
+# Wei Jin 
+
+Emory University Atlanta, USA wei.jin@emory.edu 
+
+## Abstract 
+
+Conformal prediction (CP) provides distribution-free coverage guar-antees and has emerged as a principled tool for uncertainty quantifi-cation. In edge-level fraud detection on temporal interaction graphs, where false positives and false negatives both carry substantial cost, such coverage guarantees are particularly appealing for risk-aware decision making. However, directly applying existing graph confor-mal predictors yields inefficient prediction sets due to two recurring properties of fraud data. Fraudulent interactions are often embed-ded in benign-dominated neighborhoods that dilute calibration sig-nals, while extreme class imbalance leaves scarce labeled-fraud sup-port in the calibration split and leads to overly conservative class-conditional thresholds. To address these issues, we propose Pro-toCP, a conformal prediction framework for edge-level fraud detec-tion on temporal graphs. ProtoCP improves calibration efficiency by focusing calibration on fraud-relevant subgraph context and producing more stable nonconformity scores under class imbalance and temporal drift. Specifically, it leverages learned prototypes to suppress benign-dominated noise in the calibration context and in-troduces a neighborhood-relative scoring mechanism with temporal score diffusion for stable class-conditional calibration. Experiments on four fraud benchmarks (YelpChi, S-FFSD, FTFD, and BankSim) show that ProtoCP achieves the target coverage with consistently smaller prediction sets than state-of-the-art baselines. Our codes are available at https://github.com/Picard1701ent/ProtoCP.git 
+
+## CCS Concepts 
+
+• Information systems → Data mining ; • Computing method-ologies → Machine learning ; Artificial intelligence .
+
+## Keywords 
+
+Conformal prediction, fraud detection, temporal graphs, graph neu-ral networks 
+
+ACM Reference Format: 
+
+Xudong Chen, Shengbo Gong, Lu Cheng, and Wei Jin. 2026. Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection. In 
+
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> KDD ’26, Jeju Island, Republic of Korea
+> © 2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2259-2/2026/08 https://doi.org/10.1145/3770855.3818061
+
+Proceedings of the 32nd ACM SIGKDD Conference on Knowledge Discovery and Data Mining V.2 (KDD ’26), August 09–13, 2026, Jeju Island, Republic of Korea. 
+
+ACM, New York, NY, USA, 12 pages. https://doi.org/10.1145/3770855.3818061 
+
+## 1 Introduction 
+
+Fraud detection is critical in real-world platforms and services, including telecommunications, online review systems, and finan-cial networks [1, 2]. Many of these applications naturally involve graph-structured data, where entities and their interactions form complex relational patterns. As a result, Graph Neural Networks (GNNs) [21, 23, 42] have been widely adopted for fraud detection tasks due to their strong ability to model relational dependen-cies [7, 8, 26]. In temporal edge-level fraud detection on interaction or transaction graphs, the goal is to label each future interaction as fraudulent or benign using only historical edges. Despite their demonstrated gains in detection accuracy, existing GNN-based fraud detection methods largely overlook the equally important challenge of uncertainty quantification. Without reliable uncer-tainty estimates, model predictions may become overconfident, obscuring the distinction between well-supported decisions and ambiguous cases that warrant human review, which can lead to severe economic and societal consequences [39]. Hence, models should offer coverage guarantees with efficient prediction sets (i.e., small sets) to enable reliable decisions and targeted human review beyond accuracy. Conformal prediction (CP) [5, 34, 50] provides uncertainty es-timates with formal reliability guarantees, generating prediction sets with finite-sample, distribution-free coverage. Concretely, it defines a nonconformity score measuring how poorly each example conforms to the model’s prediction, and uses an empirical quantile of these scores on a held-out calibration set as the threshold. This guarantee holds under exchangeability between calibration and test examples. Recent work has extended CP to graph learning in both static and temporal settings [19, 35, 40], demonstrating that valid coverage can be maintained under graph dependence. How-ever, when applied to fraud detection, existing graph conformal predictors tend to produce overly large prediction sets even if va-lidity holds. This degradation is mainly driven by two challenges of graph-based fraud detection: 
+
+Challenge 1: Fraud hides inside benign structure and dis-torts neighborhood-based calibration. Fraud graphs often ex-hibit deceptive neighborhoods , where the local context of a labeled arXiv:2608.15768v1 [cs.LG] 16 Aug 2026 KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Xudong Chen, Shengbo Gong, Lu Cheng, and Wei Jin Deceptive  Local Context  in Fraud Graphs  Limited Labeled-fraud Calibration Support  
+
+> Overconfident Error
+> Fraud Interactions
+> Benign Interactions
+> Context for Calibration
+> Informative Context for
+> Calibration
+> Deceptive Context for
+> Calibration
+> Quantile of Calibration Set w/o Overconfidence Error
+> Quantile of Calibration Set
+> Quantile of Test Set
+> (a) (b)
+
+Figure 1: Two graph-specific challenges for conformal predic-tion in fraud detection. (a) Fraudulent edges are structurally camouflaged within benign neighborhoods, which distorts neighborhood-based calibration and increases uncertainty. (b) With few fraud-labeled calibration edges, extreme non-conformity scores from overconfident errors can dispropor-tionately raise the fraud–class calibration quantile, especially under calibration–test distribution shift. 
+
+fraudulent interaction is dominated by heterogeneous and fre-quently benign interactions (Figure 1(a)). This dilutes fraud-relevant evidence in the neighborhood, and neighborhood-based calibration tends to become overly conservative, biasing conformal procedures toward larger prediction sets while still satisfying marginal cover-age. For instance, in financial fraud, collusive transfers may appear only on a small subset of edges along multi-hop chains, while most surrounding interactions involve legitimate accounts [14–16, 36]. Existing methods [19, 40] often overlook this fact and implicitly assume that locally similar edges exhibit similar nonconformity-score distributions, allowing them to share calibration information. Therefore, treating local neighborhoods as uniformly informative calibration context can inflate prediction sets and hurt efficiency in fraud graphs. 
+
+Challenge 2: Extreme rarity and temporal drift destabilize learning and calibration. Real-world fraud datasets are often extremely imbalanced, with fraudulent cases forming only a small fraction of all interactions [11]. This rarity directly destabilizes class-conditional CP: the fraud-class threshold must be estimated from only a handful of positive calibration samples, producing a high-variance quantile estimate. The issue is further exacerbated by overconfident misclassifications on fraud samples, which yield large nonconformity scores that act as outliers. As shown in Fig. 1(b), when the fraud calibration sample size is small, a few extreme scores can disproportionately influence the empirical quantile, pushing up the fraud-class threshold and resulting in overly conservative pre-diction sets. Temporal drift further amplifies this effect, as evolving fraud patterns render test edges more difficult than calibration data, increasing the frequency of overconfident errors and magnifying the influence of extreme scores. This limitation motivates the de-sign of stable nonconformity scores that remain robust to a small number of extreme errors, so that the fraud calibration quantile can remain less sensitive to extreme scores while maintaining efficient prediction sets at the target coverage level. To address the above limitations, we propose ProtoCP, a fraud-aware CP framework for uncertainty quantification on fraud graphs. The key idea is to construct a fraud-informative calibration context for conformal scoring under coordination and camouflage, and design more stable nonconformity scores under scarce labeled-fraud calibration support. Specifically, ProtoCP addresses Challenge 1 by constructing a fraud-informative calibration context via prototype-guided subgraph extraction, and tackles Challenge 2 by stabilizing conformal calibration with prototype-conditioned nonconformity scoring under scarce labeled fraud. To be concrete, we learn class-specific prototype banks in the backbone embedding space and use an embedding-driven mask to extract a temporal subgraph that suppresses benign-dominated neighbors. In this subgraph, we augment the base nonconformity score with neighborhood-relative discrepancy features that capture prediction-level inconsistency and structural/motif deviations (e.g., degree statistics and local motif counts). Finally, to improve conformal quantile estimation under spatiotemporal dependence in fraud graphs, we apply a lightweight history-only diffusion before Mondrian calibration. To sum up, our contribution can be summarized as: 
+
+• We are the first to systematically study conformal prediction for fraud detection on temporal interaction graphs, addressing challenges of benign-dominated neighborhoods and extreme rarity with temporal drifts, while explicitly targeting prediction-set efficiency without sacrificing coverage. 
+
+• We propose ProtoCP, a novel prototype-based conformal pre-diction approach that (i) learns class-specific prototypes to ex-tract prototype-consistent temporal subgraphs that form fraud-informative calibration context, and (ii) constructs a prototype-relative nonconformity score with a lightweight history-only diffusion step before class-conditional calibration to stabilize the fraud-class quantile under scarce positives and temporal drift. 
+
+• Experiments on multiple fraud benchmarks show that ProtoCP achieves target coverage while consistently producing tighter prediction sets than strong conformal baselines; ablations and diagnostics further verify the individual roles of prototype-con-ditioned context, relative scoring, and diffusion in improving the validity-efficiency tradeoff. 
+
+## 2 Related Work 
+
+Foundation of Conformal Prediction. Conformal prediction (CP) [5, 34, 38] provides distribution-free coverage guarantees by re-turning prediction sets containing the true label with a user-chosen probability, under the assumption of exchangeability between cali-bration and test examples. Full CP [38] requires refitting the model for every candidate label, which is prohibitive for deep networks, while split CP [24] avoids this by using a held-out calibration set for nonconformity scoring. Common score functions include TPS [33], APS [31], and RAPS [4], differing in how they accumulate prob-ability mass. When class-conditional coverage is desired, Class-conditional CP [13] calibrates within each class separately, which is particularly relevant under class imbalance. The validity of split CP hinges on exchangeability. Weighted CP [37] restores approximate validity under covariate shift via density-ratio reweighting, and Barber et al. [6] generalize to arbitrary non-exchangeable settings by bounding the coverage gap in total variation distance. ACI [17] further extends CP to time-series by dynamically adjusting the miscoverage rate to maintain long-run coverage under distribution shifts. However, these methods target i.i.d. or sequential data and do Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+not address the topological dependencies and temporal correlations in graph-structured fraud detection. 
+
+Conformal Prediction on Graphs. Graph-structured data chal-lenge exchangeability, since nodes and edges are coupled through topology. Huang et al. [19] show that exchangeability holds in the transductive setting under permutation-equivariant GNNs, while Zargarbashi [47] recover coverage inductively by recalculating scores upon each new arrival. To improve set efficiency, SNAPS [35] pools scores among structurally similar nodes, DAPS [46] diffuses scores over the graph, Clarkson [9] uses path-length-weighted neighborhoods as calibration context, and RR-GNN [48] combines graph-structured class-conditional CP with residual-adaptive scores. Temporal graphs further introduce distribution drift that violates exchangeability even in transductive settings. Davis et al. [12] recover valid coverage on dynamic graphs via tensor unfolding, and NCPNet [40] extends diffusion-based calibration to temporal graphs with jointly optimized weighted quantiles. Despite these ad-vances, existing graph CP methods assume a reliable neighborhood-based calibration context and sufficient labeled support per class. In fraud detection graphs, both assumptions are violated: neigh-borhoods are deceptive and benign-dominant, diluting calibration signals, while labeled fraud examples are extremely scarce, destabiliz-ing class-conditional thresholds. 
+
+Graph-based Fraud Detection. Graph-based fraud detection methods exploit relational structures to detect camouflage, collu-sion, heterophily, and abnormal interaction patterns. Representative methods improve fraud detection through relation-aware aggre-gation and label-balanced sampling [14, 27], spectral modeling for heterophily [41], self-explainable mask learning [25], cohort augmentation for camouflaged frauds [44], and label-aware mes-sage passing [20]. These methods demonstrate the importance of graph structure for fraud detection, but they primarily optimize point-prediction accuracy and do not provide conformal predic-tion sets with coverage control. In contrast, our work focuses on uncertainty quantification for edge-level fraud detection on tempo-ral interaction graphs, aiming to improve prediction-set efficiency while maintaining target coverage. Another related line studies graph learning with imbalanced classes, sparse labels, or distri-bution shifts [10, 18, 22, 28], but it does not address class-wise conformal calibration under rare positives and temporal drift. 
+
+## 3 Preliminary 
+
+Conformal prediction (CP) transforms any predictive model into one that outputs prediction sets with finite-sample coverage guar-antees. We consider binary labels 𝑌 ∈ { 0, 1}, features 𝑋 ∈ X , and adopt the split CP framework. Let Scal = {( 𝑋 cal  
+
+> 𝑖
+
+, 𝑌 cal  
+
+> 𝑖
+
+)} 𝑛 𝑖 =1 be the calibration set and Stest = {( 𝑋 test  
+
+> 𝑗
+
+, 𝑌 test  
+
+> 𝑗
+
+)} 𝑚 𝑗 =1 be the test set, with class-conditional sizes 
+
+𝑛 𝑦 :=
+
+> 𝑛
+
+∑︁ 
+
+> 𝑖 =1
+
+1{𝑌 cal  
+
+> 𝑖
+
+= 𝑦 }, 𝑚 𝑦 :=
+
+> 𝑚
+
+∑︁ 
+
+> 𝑗 =1
+
+1{𝑌 test  
+
+> 𝑗
+
+= 𝑦 }. (1) Split CP defines a nonconformity score function 𝑠 : X × { 0, 1} → 
+
+R that measures how poorly an example fits a candidate label, with higher values indicating greater disagreement. After training the model on a separate training set, we compute calibration scores 
+
+𝑆 cal  
+
+> 𝑖
+
+= 𝑠 (𝑋 cal  
+
+> 𝑖
+
+, 𝑌 cal  
+
+> 𝑖
+
+) for each calibration example, and set the thresh-old ˆ 𝑞 as the ⌈( 𝑛 + 1)( 1 − 𝛼 )⌉ -th smallest value among {𝑆 cal  
+
+> 𝑖
+
+}𝑛 𝑖 =1. The prediction set for a new test example 𝑋 test  
+
+> 𝑗
+
+then includes every label whose score falls below this threshold: 
+
+C( 𝑋 test  
+
+> 𝑗
+
+) := 𝑦 ∈ { 0, 1} : 𝑠 (𝑋 test  
+
+> 𝑗
+
+, 𝑦 ) ≤ ˆ𝑞 . (2) Under exchangeability between calibration and test data, this guar-antees marginal coverage Pr  𝑌 test  
+
+> 𝑗
+
+∈ C( 𝑋 test  
+
+> 𝑗
+
+) ≥ 1 − 𝛼 .
+
+## 4 Method 
+
+In this work, we propose ProtoCP, a conformal prediction frame-work for fraud detection on temporal transaction graphs. The key idea is to perform calibration on prototype-conditioned sub-graphs, where learned prototypes retain fraud-relevant neighbors and suppress benign noise; within these subgraphs, we construct neighborhood-relative nonconformity scores and further stabilize calibration via diffusion over the temporal graph. Accordingly, Pro-toCP consists of three components: (i) Prototype-based Fraud Subgraph Extraction , (ii) Prototype-conditioned Relative Non-conformity Scoring , and (iii) Temporal Graph Calibration .Figure 2 illustrates the overall pipeline. 
+
+## 4.1 Prototype-based Fraud Subgraph Extraction 
+
+Fraud detection tasks often exhibit intricate group-level behavioral patterns, where fraudulent entities collaborate within highly struc-tured relational networks (e.g., shared devices, accounts, or mer-chants). Existing calibration methods for conformal prediction typi-cally treat samples independently and don’t consider such relational heterogeneity. To address this issue, we introduce a prototype-based fraud subgraph extraction for the calibration stage. For each en-tity/transaction, we learn several prototypes to summarize common fraud-related group patterns and use them to extract representative local subgraphs for calibration. By calibrating on subgraphs that are structurally aligned with these prototypes, we reduce heterogene-ity in calibration residuals and obtain more reliable uncertainty estimates under relational fraud patterns. 
+
+Prototype Initialization. Given a temporal graph backbone F𝜃 
+
+(e.g., TGN [32]), we encode each interaction edge 𝑒 𝑖 = (𝑢 𝑖 , 𝑣 𝑖 , 𝑡 𝑖 ) into a time-dependent representation. Specifically, let E≤𝑡 𝑖 = {( 𝑢 ℓ , 𝑣 ℓ , 𝑡 ℓ , 𝑠 ℓ ) :
+
+𝑡 ℓ ≤ 𝑡 𝑖 } denote the interaction history up to 𝑡 𝑖 . The backbone en-coder produces time-conditioned node embeddings for the end-points of 𝑒 𝑖 as 
+
+h𝑢 𝑖 (𝑡 𝑖 ), h𝑣 𝑖 (𝑡 𝑖 ) = F𝜃 
+
+ E≤𝑡 𝑖 , 𝑢 𝑖 , 𝑣 𝑖 , 𝑡 𝑖 
+
+ . (3) We then form an edge embedding 
+
+x𝑖 = 𝜓  h𝑢 𝑖 (𝑡 𝑖 ), h𝑣 𝑖 (𝑡 𝑖 ), 𝑠 𝑖 
+
+ , (4) where 𝑠 𝑖 denotes the edge/transaction attributes of 𝑒 𝑖 , and 𝜓 (·) 
+
+is a fusion function (e.g., concatenation), and obtain the edge-classification probability by a prediction head: ˆp(𝑒 𝑖 ) = softmax (MLP cls (x𝑖 )) , ˆ𝑝 (𝑦 | 𝑒 𝑖 ) = ˆp(𝑒 𝑖 )𝑦 , (5) where MLP cls is the edge classifier and ˆ 𝑝 (𝑦 | 𝑒 𝑖 ) is the predicted probability for class 𝑦 .To characterize heterogeneous behavioral patterns across classes, we initialize a set of learnable prototypes comprising 𝑀 fraud proto-types Pfraud = {p𝑓 𝑖 }𝑀 𝑖 =1 and 𝑁 normal prototypes Pnorm = {p𝑛 𝑗 }𝑁 𝑗 =1.KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Xudong Chen, Shengbo Gong, Lu Cheng, and Wei Jin …
+
+> Node/Edge Features
+> Temporal Interactions
+> Temporal GNN
+> Calibration Set
+
+…
+
+> Edge
+> Embeddings
+
+…
+
+> Edge
+> Logits
+
+Data Preparation 
+
+W
+
+Prototype -based Fraud 
+
+Subgraph Extraction   
+
+> 𝑡 1≥ 𝑡 𝑖 , 𝑖 ∈ 2, 3, 4, … 11
+> Initial Subgraph
+> Linear
+
+⊙ Dot Product  ⊕ Sum 
+
+> 𝑡 1
+> 𝑡 2
+> 𝑡 3
+> 𝑡 4
+> 𝑡 5𝑡 6
+> 𝑡 7
+> 𝑡 9
+> 𝑡 10
+> 𝑡 11
+
+W ⊕
+
+> …
+
+…
+
+> ⊙
+> ⊙
+> ⊙
+> Prototype -based Subgraph Embeddings Calculation
+> Prototype Scores
+> Subgraph
+> Embedding
+> Concat
+> Subgraph Embeddings
+> Fraud Prototypes
+> Benign Prototypes
+> Distance Computation fraud benign
+> Contrast
+> Prototype -based Contrast Learning
+
+W
+
+Prototype -conditioned Relative 
+
+Nonconformity Scoring 
+
+> Prototype Subgraph
+> 𝑒 1
+> 𝑒 2
+> 𝑒 3
+> 𝑒 4
+> 𝑒 5
+
+W
+
+> Relative Structural Difference Encoding
+> Structural Scoring 𝑒 1
+> …
+> +
+> 𝑒 3
+> 𝑒 2
+> Neighbor
+> Edges
+
+…     
+
+> Structural Scores 𝑔 1
+> …
+> Structural Matrix 𝐺
+> 𝑒 1𝑒 2𝑒 3𝑒 4
+> For Each
+> Edges
+> Stack
+> Relative Diff
+> Calculation
+> Linear
+> Structural
+> Matrix  𝐺
+> Relative Difference
+> Vectors Prototype Scores
+> Relative
+> Nonconformity
+> Scores
+> 𝑒 1
+> 𝑒 2
+> 𝑒 3
+> 𝑒 4
+> Relative Nonconformity Scores Calculation
+> Center
+> Edges
+> Prediction Probs
+> ：Frozen Parameters
+> Extracted Subgraphs
+
+W
+
+Temporal Graph 
+
+Calibration  
+
+> × λ
+
+⊕
+
+> Raw
+> Nonconformity
+> Scores
+> Nonconformity Scores
+> Prototype Scores
+> Mondrian
+> Thresholding tg
+> ia
+> Temporal
+> Graph
+> Score
+> Diffusion
+
+Figure 2: Overall pipeline of Prototype-based Temporal Graph Conformal Prediction 
+
+Each prototype acts as an anchor in the edge-embedding space, summarizing a recurring interaction pattern for its class. These prototypes are subsequently refined together with the subgraph-level calibration objective, enabling pattern-aware calibration under diverse relational contexts. 
+
+Embedding-driven Subgraph Extraction. For each labeled edge event 𝑒 𝑖 = (𝑢 𝑖 , 𝑣 𝑖 , 𝑡 𝑖 ), we precompute its 𝑘 -hop temporal neigh-borhood under a history-cutoff constraint: the subgraph is con-structed only from interactions with timestamps 𝑡 ≤ 𝑡 𝑖 (i.e., up to and including the current time) in case of information leakage from future interactions. For each 𝑒 𝑖 , we compute an importance weight for each neigh-boring edge 𝑒 𝑗 ∈ N 𝑖 by scoring the pair (𝑒 𝑖 , 𝑒 𝑗 ) and normalizing over the neighborhood. Specifically, we form 
+
+z𝑖 𝑗 = concat (x𝑖 , x𝑗 ), 𝛼 𝑖 𝑗 = exp  MLP 𝛼 (z𝑖 𝑗 )Í𝑒 𝑘 ∈ N 𝑖 exp (MLP 𝛼 (z𝑖𝑘 )) , (6) so that Í𝑒 𝑗 ∈ N 𝑖 𝛼 𝑖 𝑗 = 1. We then obtain the subgraph representation centered at 𝑒 𝑖 via attention pooling: 
+
+s𝑖 =∑︁  
+
+> 𝑒 𝑗 ∈ N 𝑖
+
+𝛼 𝑖 𝑗 x𝑗 . (7) 
+
+Prototype Optimization. To obtain semantically meaningful prototypes for prototype-aware conformal calibration, we regular-ize the prototype space with a margin-based objective. Let dist (· , ·) 
+
+denote the cosine distance. For each subgraph embedding s𝑖 , we compute the nearest-prototype distances 
+
+𝑑 𝑓 𝑖 = min 
+
+> p∈ P fraud
+
+dist (s𝑖 , p), 𝑑 𝑛 𝑖 = min 
+
+> p∈ P norm
+
+dist (s𝑖 , p). (8) We then define a margin-based prototype loss: 
+
+ℓ𝑖 = 𝑦 𝑖 
+
+
+
+𝑑 𝑓 𝑖 +[ 𝛾 −𝑑 𝑛 𝑖 ]+
+
+
+
++( 1−𝑦 𝑖 )
+
+
+
+𝑑 𝑛 𝑖 +[ 𝛾 −𝑑 𝑓 𝑖 ]+
+
+
+
+, Lproto = 1
+
+|B| ∑︁ 𝑖 ∈ B 
+
+ℓ𝑖 .
+
+(9) where 𝑦 𝑖 ∈ { 0, 1} is the label (1 for fraud), 𝛾 is the margin, and 
+
+[𝑥 ]+ = max (0, 𝑥 ). We optimize this prototype loss jointly with the conformal-prediction-related objectives during training. 
+
+## 4.2 Prototype-conditioned Relative Nonconformity Scoring 
+
+In fraud detection, structural anomalies (e.g., abnormal fan-in/out, bursty interactions, rings, or triangular motifs) are often revealed by comparing a target interaction against its local neighborhood context, consistent with prior findings on local-structure-aware graph learning [49]. Meanwhile, under severe class imbalance, back-bone models are prone to produce heavy-tailed probabilities/logits distributions for fraud class. As a result, conventional noncon-formity scores based solely on absolute prediction scores (log-its/probabilities) can be unreliable: they may underestimate un-certainty for minority (fraud) cases, hurting coverage, or become overly conservative, reducing calibration efficiency. By computing relative nonconformity within prototype-conditioned subgraphs, we highlight locally abnormal interactions that are not evident from an isolated edge, making neighborhood-relative deviations a more reliable resource for nonconformity than absolute confidence alone under severe class imbalance. 
+
+Relative Nonconformity Encoding. Given a prototype-condi tioned subgraph G𝑖 centered at edge 𝑒 𝑖 , we obtain an importance weight 𝛼 𝑖 𝑗 for each neighboring edge 𝑒 𝑗 ∈ N 𝑖 . We then construct Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+a relative-difference feature vector by quantifying how the center edge deviates from its weighted neighborhood. Specifically, we en-code three types of signals—prediction-level discrepancies, degree-based structural statistics, and motif-based counts (e.g., two-hop paths and triangles) under the same neighbor-importance weight-ing. For any edge-level quantity 𝑔 (𝑒 ) (vector or scalar), we define its weighted neighborhood mean and weighted center-neighbor absolute difference as: 
+
+𝜇 𝑖 (𝑔 ) =∑︁  
+
+> 𝑒 𝑗 ∈ N 𝑖
+
+𝛼 𝑖 𝑗 𝑔 (𝑒 𝑗 ), 𝛿 𝑖 (𝑔 ) =∑︁  
+
+> 𝑒 𝑗 ∈ N 𝑖
+
+𝛼 𝑖 𝑗 𝑔 (𝑒 𝑖 ) − 𝑔 (𝑒 𝑗 ) . (10) Let p(𝑒 ) ∈ R𝐶 denote the backbone-predicted class probabilities for edge 𝑒 (i.e., p(𝑒 ) = ˆp(𝑒 ) in Eq. 5). We capture prediction-level inconsistency by comparing the center prediction with its weighted neighborhood, including the neighborhood mean, the center-to-neighborhood deviation, and their weighted absolute differences. For structural cues, we define an edge-level degree statistic vector 
+
+d(𝑒 ) that summarizes degree-related properties of 𝑒 , such as the degree sum, degree difference, and degree product of its incident nodes. We further define motif-level features m(𝑒 ) using log-scaled counts of local motifs, including two-hop paths and triangles. All signals are aggregated under the same neighbor-importance weights and concatenated to form the relative difference vector r𝑖 .
+
+r𝑖 = concat 
+
+
+
+𝜇 𝑖 (p), 𝛿 𝑖 (p), p(𝑒 𝑖 )− 𝜇 𝑖 (p), 𝜇 𝑖 (d), 𝛿 𝑖 (d), 𝜇 𝑖 (m), 𝛿 𝑖 (m)
+
+
+
+.
+
+(11) 
+
+Relative-aware Nonconformity Score Construction. Given the relative difference encoding r𝑖 for edge 𝑒 𝑖 , we define the base nonconformity for assigning a candidate label 𝑦 ∈ { 0, 1} to 𝑒 𝑖 as 
+
+𝑎 (𝑒 𝑖 , 𝑦 ) = 1 − ˆ𝑝 (𝑦 | 𝑒 𝑖 ), (12) where ˆ 𝑝 (𝑦 | 𝑒 𝑖 ) is the backbone-predicted probability for class 𝑦 .We then incorporate neighborhood-relative discrepancies via ˜𝑎 (𝑒 𝑖 , 𝑦 ) = 𝑎 (𝑒 𝑖 , 𝑦 ) + 𝜆 𝑔 (r𝑖 ), (13) where 𝜆 is a learnable scalar controlling the contribution of the relative component. 
+
+## 4.3 Temporal Graph Calibration 
+
+Conformal calibration proceeds by estimating class-wise thresh-olds on a calibration split and then constructing prediction sets by thresholding nonconformity scores. However, in temporal transac-tion graphs, edge events are coupled through shared entities and evolve over time, leading to strong spatiotemporal dependencies. Di-rectly calibrating on per-edge scores may thus be sensitive to local relational heterogeneity. To mitigate this issue, we adopt a diffusion-style temporal graph calibration step that smooths nonconformity over leakage-free temporal neighborhoods, while keeping the sub-sequent conformal quantile estimation unchanged. 
+
+Temporal Graph Neighborhood Score Diffusion. Given the intermediate nonconformity score ˜ 𝑎 𝑖 for edge 𝑒 𝑖 (Eq. 13) and its tem-poral neighborhood N𝑖 constructed under the history-cutoff con-straint ( 𝑡 ≤ 𝑡 𝑖 ), We perform one-step diffusion within the prototype-conditioned subgraph G𝑖 by smoothing ˜ 𝑎 over the neighborhood 
+
+N𝑖 using the prototype weights 𝛼 𝑖 𝑗 :
+
+𝑎 tg  
+
+> 𝑖
+
+= 𝛽 ˜𝑎 𝑖 + ( 1 − 𝛽 )∑︁  
+
+> 𝑒 𝑗 ∈ N 𝑖
+
+𝛼 𝑖 𝑗 ˜𝑎 𝑗 . (14) We set 𝛽 = 0.5 by default. This diffusion step yields a temporal-graph-aware nonconformity score 𝑎 tg  
+
+> 𝑖
+
+that incorporates both the center edge and its (weighted) historical context, and is computed without accessing future interactions. 
+
+Class-conditional conformal thresholds. To address severe class imbalance, we use class-conditional (Mondrian) conformal calibration. Let Dcal denote the calibration set and 𝑎 tg (𝑒 𝑖 , 𝑦 ) the temporal-graph-aware nonconformity score for assigning label 𝑦 
+
+to 𝑒 𝑖 . For each class 𝑦 ∈ { 0, 1}, let D (𝑦 ) 
+
+> cal
+
+= {( 𝑒 𝑖 , 𝑦 𝑖 ) ∈ D cal : 𝑦 𝑖 = 𝑦 }
+
+and 𝑛 𝑦 = |D (𝑦 ) 
+
+> cal
+
+|. We compute the class-conditional threshold 𝑞 𝑦 
+
+as an order statistic of the true-class scores: 
+
+𝑞 𝑦 = 𝑎 tg   
+
+> 𝑦, (𝑘 𝑦 )
+
+, 𝑘 𝑦 = (𝑛 𝑦 + 1)( 1 − 𝛼 ) , (15) where 𝑎 tg   
+
+> 𝑦, (𝑘 𝑦 )
+
+denotes the 𝑘 𝑦 -th smallest value in the multiset 
+
+{ 𝑎 tg (𝑒 𝑖 , 𝑦 𝑖 ) : (𝑒 𝑖 , 𝑦 𝑖 ) ∈ D (𝑦 ) 
+
+> cal
+
+}. Given {𝑞 𝑦 }, we construct the predic-tion set for a test edge 𝑒 by including all labels whose nonconformity does not exceed the corresponding threshold: 
+
+Γ(𝑒 ) = { 𝑦 ∈ { 0, 1} : 𝑎 tg (𝑒, 𝑦 ) ≤ 𝑞 𝑦 }. (16) 
+
+Joint optimization. We jointly optimize the prototype module and the conformal objectives on the calibration split. For efficiency, we approximate the inclusion indicator with a sigmoid relaxation: ˜I𝑖,𝑦 = 𝜎 
+
+ 𝑞 𝑦 − 𝑎 tg (𝑒 𝑖 , 𝑦 )
+
+𝜏 
+
+
+
+, (17) which approaches I(𝑎 tg (𝑒 𝑖 , 𝑦 ) ≤ 𝑞 𝑦 ) as 𝜏 → 0. To discourage empir-ical miscoverage, we penalize threshold violations on the true-label nonconformity via a hinge surrogate: 
+
+Lcov = 1
+
+|D cal |∑︁ (𝑒 𝑖 ,𝑦 𝑖 ) ∈ D cal 
+
+ 𝑎 tg (𝑒 𝑖 , 𝑦 𝑖 ) − 𝑞 𝑦 𝑖 
+
+𝜏 
+
+
+
+> +
+
+, (18) where [𝑥 ]+ = max (0, 𝑥 ). During backpropagation, we treat the empirical class-wise thresholds {𝑞 𝑦 } as constants. Using ˜ I𝑖,𝑦 , we define the surrogate efficiency loss as 
+
+Leff = 1
+
+|D cal |∑︁ 𝑒 𝑖 ∈ D cal ∑︁ 𝑦 ∈ { 0,1}
+
+˜I𝑖,𝑦 , (19) where Leff is a smooth proxy of the expected prediction-set size. The overall training objective is 
+
+L = 𝜆 cov Lcov + 𝜆 eff Leff + 𝜆 proto Lproto , (20) where Lproto is the margin-based prototype loss defined in Sec. 4.1. 
+
+## 5 Theoretical Analysis 
+
+To explain the efficiency gains of ProtoCP, we analyze the empiri-cal class-wise miscoverage gap. While standard split/Mondrian con-formal coverage relies on exchangeability, temporal fraud graphs may involve relational dependence and temporal shift. We therefore decompose how calibration–test score-distribution shift contributes to the empirical gap, showing that prototype conditioning and tem-poral diffusion are designed to reduce this shift rather than establish a new finite-sample guarantee under arbitrary drift. KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Xudong Chen, Shengbo Gong, Lu Cheng, and Wei Jin 
+
+In our framework, each edge is additionally assigned to a proto-type index 𝐾 ∈ { 1, . . . , 𝐾 0 } via the learned prototype bank (detailed in Section 4.1). Intuitively, prototypes partition the edges into behav-iorally coherent groups, so that calibration and test edges within the same prototype share more similar score distributions. Within class 
+
+𝑦 , the empirical prototype weights and mode-conditional CDFs are 
+
+b𝜋 cal  
+
+> 𝑦
+
+(𝑘 ) = bPr (𝐾 = 𝑘 | 𝑌 = 𝑦, cal ),
+
+b𝜋 test  
+
+> 𝑦
+
+(𝑘 ) = bPr (𝐾 = 𝑘 | 𝑌 = 𝑦, test ), (21) 
+
+b𝐹 cal  
+
+> 𝑦,𝑘
+
+(𝑡 ) = bPr (𝑆 cal ≤ 𝑡 | 𝑌 = 𝑦, 𝐾 = 𝑘, cal ),
+
+b𝐹 test  
+
+> 𝑦,𝑘
+
+(𝑡 ) = bPr (𝑆 test ≤ 𝑡 | 𝑌 = 𝑦, 𝐾 = 𝑘, test ). (22) Under severe class imbalance, a single global threshold can be dominated by the majority class. Class-conditional CP addresses this by computing a separate threshold for each class using only the true-class calibration scores: ˆ𝑞 𝑦 := Quant 1−𝛼 
+
+
+
+{𝑆 cal  
+
+> 𝑦,𝑖
+
+}𝑛 𝑦 
+
+> 𝑖 =1
+
+
+
+. (23) The empirical miscoverage on the test set and its deviation from the target level 𝛼 are then 
+
+dmis 𝑦 := 1
+
+𝑚 𝑦 𝑚 𝑦 ∑︁ 
+
+> 𝑗 =1
+
+1{𝑆 test  
+
+> 𝑦,𝑗
+
+> ˆ𝑞 𝑦 }, bΔ𝑦 := dmis 𝑦 − 𝛼 . (24) To analyze when bΔ𝑦 becomes large, we decompose the miscoverage gap. Since dmis 𝑦 = 1 − b𝐹 test  
+
+> 𝑦
+
+( ˆ𝑞 𝑦 ), we have 
+
+dmis 𝑦 − 𝛼 =
+
+
+
+(1 − 𝛼 ) − b𝐹 cal  
+
+> 𝑦
+
+( ˆ𝑞 𝑦 )
+
+| {z }
+
+> quantile discretization error
+
++
+
+b𝐹 cal  
+
+> 𝑦
+
+( ˆ𝑞 𝑦 ) − b𝐹 test  
+
+> 𝑦
+
+( ˆ𝑞 𝑦 )
+
+| {z }
+
+> cal-test CDF shift
+
+, (25) where the first term reflects finite-sample discretization and is typi-cally small, while the second term captures the distributional shift between calibration and test scores. We denote the latter as the empirical shift: 
+
+b𝛿 𝑦 := b𝐹 cal  
+
+> 𝑦
+
+( ˆ𝑞 𝑦 ) − b𝐹 test  
+
+> 𝑦
+
+( ˆ𝑞 𝑦 ) . (26) Reducing |b𝛿 𝑦 | is the central goal of our method, as a smaller shift leads to tighter prediction sets at the target coverage. Prototype conditioning can further reduce |b𝛿 𝑦 |. Since the class-conditional CDF decomposes as a mixture over prototypes, 
+
+b𝐹 cal  
+
+> 𝑦
+
+(𝑡 ) =
+
+> 𝐾 0
+
+∑︁ 
+
+> 𝑘 =1
+
+b𝜋 cal  
+
+> 𝑦
+
+(𝑘 ) b𝐹 cal  
+
+> 𝑦,𝑘
+
+(𝑡 ),
+
+b𝐹 test  
+
+> 𝑦
+
+(𝑡 ) =
+
+> 𝐾 0
+
+∑︁ 
+
+> 𝑘 =1
+
+b𝜋 test  
+
+> 𝑦
+
+(𝑘 ) b𝐹 test  
+
+> 𝑦,𝑘
+
+(𝑡 ),
+
+(27) we obtain the following bound at the learned threshold ˆ 𝑞 𝑦 :
+
+b𝛿 𝑦 ≤
+
+> 𝐾 0
+
+∑︁ 
+
+> 𝑘 =1
+
+b𝜋 test  
+
+> 𝑦
+
+(𝑘 ) b𝐹 cal  
+
+> 𝑦,𝑘
+
+( ˆ𝑞 𝑦 ) − b𝐹 test  
+
+> 𝑦,𝑘
+
+( ˆ𝑞 𝑦 )
+
+| {z }
+
+> within-prototype CDF discrepancy
+
++
+
+> 𝐾 0
+
+∑︁ 
+
+> 𝑘 =1
+
+b𝜋 cal  
+
+> 𝑦
+
+(𝑘 ) − b𝜋 test  
+
+> 𝑦
+
+(𝑘 )
+
+| {z }
+
+> prototype-frequency mismatch
+
+.
+
+(28) Prototype conditioning reduces |b𝛿 𝑦 | through two mechanisms: (i) grouping behaviorally similar edges yields more homogeneous within-prototype score distributions, shrinking the first term; and (ii) learning stable prototypes that capture recurring patterns re-duces the frequency mismatch in the second term. After prototype conditioning, diffusion further stabilizes 𝑠 final against local spa-tiotemporal noise by smoothing each edge’s score over its temporal neighborhood, empirically reducing |b𝛿 𝑦 | in Eq. (26). 
+
+## 6 Experiment 6.1 Experimental Setup 
+
+Datasets. We evaluate ProtoCP on four datasets: the YelpChi dataset [30], the small version of the Financial Fraud Semi-supervised Dataset (S-FFSD) [43], the Financial Transaction Fraud Detection dataset (FTFD) 1, and the BankSim dataset [29]. Detailed dataset introduction is listed in Appendix C 
+
+Experimental Setup. For the main experiments, we use TGN [32] as the temporal graph backbone, pre-train it on the training set, and then freeze its parameters for calibration and conformal evalu-ation following the standard split-conformal protocol. To examine backbone transferability, we additionally evaluate ProtoCP with TGAT [45] on representative datasets. We use temporal splits to pre-vent future information leakage, with the calibration set taken from the time window before the test period. Backbone performance and TGAT results are reported in Appendix A. For baselines that do not natively support edge-level classification, we use a unified minimal adaptation by concatenating the two incident-node representations as the edge representation. For TGN-based models, edge represen-tations and prediction scores are obtained from the interaction encoder conditioned on event history. Unless otherwise specified, edge neighbors are edges sharing a common node. Further setup details are provided in Appendix E. 
+
+Evaluation Metric. We evaluate all methods using coverage , the fraction of test edges whose true label is included in the prediction set, and efficiency , the average prediction set size (lower is better). Formal definitions are provided in Appendix D. 
+
+## 6.2 Experiment Results 
+
+Conformal Prediction Performance. We compare ProtoCP with traditional conformal prediction methods (TPS [33], APS [31], and RAPS [4]), graph-based conformal prediction methods (DAPS [46] and CF-GNN [19]), and non-exchangeability-based approaches (NCPNet [40], NEX [6], and NAPS [9]). As shown in Table 1, ProtoCP consistently achieves the target coverage of 0.97–0.99 across all datasets, and yields the smallest prediction set sizes on S-FFSD, FTFD, and BankSim, with competi-tive efficiency on YelpChi. Traditional conformal methods often fail to reach the desired coverage because they ignore spatiotemporal dependencies among samples. Stronger baselines such as CF-GNN and NCPNet achieve valid coverage on most datasets, but produce larger prediction sets. For example, on S-FFSD, NCPNet and CF-GNN reach set sizes of 1.30 and 1.29, while ProtoCP achieves 1.16. On FTFD and BankSim, NCPNet produces set sizes of 1.15 and  
+
+> 1https://www.kaggle.com/datasets/aryan208/financial-transactions-dataset-for-fraud-detection Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea
+
+Table 1: Comparison of methods across four fraud detection datasets in terms of Coverage and Efficiency (set size). ✓ indicates that the coverage meets the target, while × indicates the opposite.              
+
+> Category Method YelpChi S-FFSD FTFD BankSim Coverage Efficiency( ↓)Coverage Efficiency( ↓)Coverage Efficiency( ↓)Coverage Efficiency( ↓)Traditional TPS 0.89 ±0.00
+
+× 1.52 ±0.02 0.94 ±0.02 × 1.44 ±0.04 0.78 ±0.01 × 1.51 ±0.01 0.88 ±0.01 × 1.57 ±0.01 APS 0.91 ±0.01 × 1.52 ±0.07 0.96 ±0.02 ✓ 1.53 ±0.08 0.92 ±0.03 × 1.48 ±0.09 0.92 ±0.02 × 1.67 ±0.10 RAPS 0.94 ±0.03 × 1.48 ±0.08 0.96 ±0.02 ✓ 1.65 ±0.09 0.93 ±0.03 × 1.32 ±0.06 0.95 ±0.02 ✓ 1.37 ±0.07 Graph-based DAPS 0.93 ±0.01 × 1.44 ±0.08 0.94 ±0.02 × 1.60 ±0.07 0.89 ±0.03 × 1.38 ±0.09 0.90 ±0.02 × 1.34 ±0.08 CF-GNN 0.93 ±0.03 × 1.40 ±0.08 0.94 ±0.03 × 1.29 ±0.05 0.97 ±0.03 ✓ 1.17 ±0.08 0.96 ±0.03 ✓ 1.13 ±0.06 Non-exchangeable NCPNet 0.99 ±0.02 ✓ 1.36 ±0.06 0.96 ±0.01 ✓ 1.30 ±0.04 0.99 ±0.02 ✓ 1.15 ±0.05 0.99 ±0.02 ✓ 1.14 ±0.04 NEX 0.95 ±0.01 ✓ 1.56 ±0.08 0.91 ±0.03 × 1.47 ±0.08 0.96 ±0.03 ✓ 1.21 ±0.06 0.96 ±0.02 ✓ 1.23 ±0.03 NAPS 0.95 ±0.02 ✓ 1.62 ±0.08 0.95 ±0.04 ✓ 1.56 ±0.05 1.00 ±0.01 ✓ 1.16 ±0.04 0.98 ±0.03 ✓ 1.27 ±0.05 Ours Ours 0.99 ±0.02 ✓ 1.39 ±0.06 0.97 ±0.02 ✓ 1.16 ±0.03 0.98 ±0.02 ✓ 1.07 ±0.04 0.98 ±0.01 ✓ 1.04 ±0.03  
+
+> Ours w/o Prot 0.97 ±0.03
+
+✓ 1.48 ±0.07 0.96 ±0.02 ✓ 1.27 ±0.05 0.96 ±0.02 ✓ 1.24 ±0.05 0.97 ±0.02 ✓ 1.19 ±0.05 Ours w/o Diff 0.95 ±0.03 ✓ 1.53 ±0.08 0.95 ±0.03 ✓ 1.19 ±0.05 0.95 ±0.03 ✓ 1.18 ±0.06 0.96 ±0.02 ✓ 1.12 ±0.05 1.14, compared with 1.07 and 1.04 by ProtoCP. This suggests that existing graph conformal predictors can become overly conserva-tive under deceptive neighborhoods, which inflate nonconformity scores and calibrated thresholds. To validate coverage and effectiveness on both fraud and benign classes, we further report class-wise coverage and efficiency in Table 2. From the class-wise perspective, most baselines under-cover the fraud class while over-covering the benign class. For instance, CF-GNN and NCPNet only reach fraud-class coverage of 0.82–0.90 and 0.89–0.93 across the four datasets, all below the 0.95 target, while their benign-class coverage consistently meets or exceeds it. This pattern reflects the limitation of a single global calibration threshold under severe imbalance, where the majority class domi-nates calibration. In contrast, ProtoCP attains target coverage for both classes, achieving 0.95–0.98 on fraud and 0.97–0.99 on benign edges. This indicates that prototype-conditioned subgraph calibra-tion and relative-difference scoring mitigate noisy or uninformative neighborhoods and provide more reliable uncertainty control under extreme imbalance. 
+
+Effect of Label-Conditioned Calibration. Standard confor-mal baselines typically employ a global calibration threshold. In highly imbalanced fraud detection, global calibration can preserve marginal coverage yet exhibit uneven class-wise coverage, espe-cially on the fraud class. We therefore also report label-conditioned variants for score-based baselines when applicable, which calibrate class-specific quantile thresholds using label-stratified calibration scores. As shown in Table 3, applying label-conditioned calibration con-sistently improves the fraud-class coverage compared with global calibration, alleviating the under-coverage issue under severe class imbalance. For example, TPS improves its fraud-class coverage from 0.90 to 0.95, and NCPNet from 0.93 to 0.95 after applying label-conditioned calibration. This indicates that a single global threshold can be dominated by the majority class, whereas class-wise thresh-olds better align the calibrated uncertainty with minority-class risk. However, this gain often comes with a trade-off: while label-conditioned calibration improves fraud-class coverage, it leads to more conservative prediction sets, resulting in inflated set sizes. Specifically, TPS +LC increases the fraud-class set size from 1.75 to 1.95, and CF-GNN +LC from 1.47 to 1.62. In contrast, ProtoCP achieves strong fraud-class coverage of 0.96 with a set size of only 1.26, substantially lower than the best label-conditioned baseline NCPNet +LC at 1.53, demonstrating improved efficiency under the same validity requirement. 
+
+Ablation. As shown at the bottom of Table 1, we ablate two key components in ProtoCP, i.e., the prototype-based subgraph extraction module (w/o Prot) and the relative-differential capture module (w/o Diff), to quantify their impact on conformal validity and efficiency. Removing the prototype module consistently enlarges predic-tion sets while maintaining target-level coverage, suggesting that prototype-conditioned calibration mainly reduces the conserva-tiveness of conformal thresholds. Compared with ProtoCP, w/o Prot increases the average set size by +0.09 (YelpChi), +0.11 (S-FFSD), +0.17 (FTFD), and +0.15 (BankSim), consistent with our motivation that prototypes filter out benign, calibration-irrelevant neighbors and yield more homogeneous calibration residuals, lead-ing to tighter sets. Ablating the differential-capture module yields a smaller but consistent efficiency drop, increasing the set size by +0.14/+0.03/+0.11/+0.08 on YelpChi/S-FFSD/FTFD/BankSim. This indicates that neighborhood-relative discrepancies provide com-plementary signals beyond absolute backbone confidence, making nonconformity scores more informative and the prediction set size tighter. 
+
+Parameter Sensitivity Analysis. To analyze the effect of the number of prototypes, we conduct a sensitivity study on the S-FFSD dataset, with results reported in Figure 3. Increasing the number of prototypes first improves both coverage and efficiency, e.g. effi-ciency improves from 1.19 to 1.16 as normal prototypes increase from 5 to 10, but over-partitioning the embedding space yields noisy prototype assignments that destabilize calibration and en-large prediction sets. The best-performing setting uses 15 fraud prototypes and 10 normal prototypes, reflecting the greater behav-ioral heterogeneity of fraudulent interactions. For the miscoverage level 𝛼 , coverage degrades gracefully as 𝛼 increases from 0.05 to 0.1 while efficiency improves from 1.16 to 1.07, but at 𝛼 = 0.2 coverage drops to 0.82. For the neighborhood hop 𝑘 , a 3-hop neighborhood achieves the best coverage of 0.97 with best efficiency of 1.16; larger KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Xudong Chen, Shengbo Gong, Lu Cheng, and Wei Jin 
+
+Table 2: Comparison of methods across four fraud detection datasets in terms of positive/negative coverage and set size. 
+
+## ✓denotes that the coverage reaches the target, while ×denotes the opposite. 
+
+Category Method YelpChi S-FFSD FTFD BankSim Fraud Benign Fraud Benign Fraud Benign Fraud Benign Cov. Eff.( ↓) Cov. Eff.( ↓) Cov. Eff.( ↓) Cov. Eff.( ↓) Cov. Eff.( ↓) Cov. Eff.( ↓) Cov. Eff.( ↓) Cov. Eff.( ↓)Traditional TPS 0.71 × 1.68 0.92 × 1.50 0.90 × 1.75 0.96 ✓ 1.21 0.73 × 1.69 0.78 × 1.51 0.80 × 1.79 0.88 × 1.57 APS 0.78 × 1.77 0.93 × 1.48 0.92 × 1.79 0.98 ✓ 1.33 0.90 × 1.89 0.92 × 1.48 0.83 × 1.80 0.92 × 1.67 RAPS 0.85 × 1.83 0.95 ✓ 1.43 0.92 × 1.91 0.99 ✓ 1.44 0.85 × 1.71 0.93 × 1.32 0.86 × 1.84 0.95 ✓ 1.36 Graph-based DAPS 0.89 × 1.73 0.94 × 1.40 0.92 × 1.76 0.96 ✓ 1.47 0.81 × 1.79 0.90 × 1.38 0.89 × 1.74 0.90 × 1.34 CF-GNN 0.82 × 1.65 0.95 ✓ 1.36 0.89 × 1.47 0.98 ✓ 1.15 0.87 × 1.59 0.98 ✓ 1.16 0.90 × 1.35 0.96 ✓ 1.13 Non-exchangeable NCPNet 0.89 × 1.58 1.00 ✓ 1.32 0.93 × 1.49 0.98 ✓ 1.16 0.90 × 1.42 0.99 ✓ 1.15 0.89 × 1.32 0.99 ✓ 1.14 NEX 0.73 × 1.68 0.98 ✓ 1.54 0.85 × 1.66 0.96 ✓ 1.32 0.80 × 1.57 0.96 ✓ 1.21 0.83 × 1.56 0.96 ✓ 1.23 NAPS 0.81 × 1.74 0.97 ✓ 1.60 0.90 × 1.83 0.99 ✓ 1.35 0.91 × 1.61 1.00 ✓ 1.16 0.89 × 1.42 0.98 ✓ 1.27 Ours Ours 0.98 ✓ 1.52 0.99 ✓ 1.37 0.96 ✓ 1.26 0.97 ✓ 1.09 0.95 ✓ 1.36 0.98 ✓ 1.07 0.98 ✓ 1.10 0.98 ✓ 1.04 5 10 15 20 0.90 0.92 0.94 0.96 0.98 1.00 Num. Normal Prototypes Coverage 1.16 1.18 1.20 1.22 Efficiency 5 10 15 20 0.90 0.92 0.94 0.96 0.98 1.00 Num. Fraud Prototypes Coverage 1.16 1.20 1.24 1.28 1.32 Efficiency 0.05 0.1 0.15 0.2 0.80 0.85 0.90 0.95 1.00 Coverage Efficiency Target Coverage(0.95) Alpha Coverage 1.00 1.04 1.08 1.12 1.16 Efficiency 1 2 3 40.90 0.92 0.94 0.96 0.98 1.00 Khop Coverage 1.16 1.20 1.24 1.28 1.32 Efficiency 0.25 0.2 0.15 0.1 0.90 0.92 0.94 0.96 0.98 1.00 1.1 1.2 1.3 1.4 1.5 1.6 0.95 Efficiency Data Size Coverage 
+
+Figure 3: Visualization of sensitivity analysis under different hyperparameters and data size Table 3: Effect of label-conditioned calibration on S-FFSD. +LC calibrates class-specific thresholds using label-conditioned calibration scores. 
+
+Method Calib. Fraud Benign Coverage Efficiency( ↓) Coverage Efficiency( ↓)TPS Global 0.90 × 1.75 0.96 ✓ 1.21 TPS +LC 0.95 ✓ 1.95 0.95 ✓ 1.34 APS Global 0.92 × 1.79 0.98 ✓ 1.33 APS +LC 0.94 × 1.88 0.97 ✓ 1.59 CF-GNN Global 0.89 × 1.47 0.98 ✓ 1.15 CF-GNN +LC 0.94 × 1.62 0.97 ✓ 1.20 NCPNet Global 0.93 × 1.49 0.98 ✓ 1.16 NCPNet +LC 0.95 ✓ 1.53 0.98 ✓ 1.13 Ours Global 0.96 ✓ 1.26 0.97 ✓ 1.09 hops introduce distant, less relevant edges that inflate set sizes to 1.27 at 𝑘 = 4 without improving coverage. We also investigate the impact of calibration set size: as the calibration ratio decreases, coverage gradually drops and set sizes increase, where coverage inflates to 0.98 and efficiency degrades to 1.53, as limited calibration data undermine the prototype-based mechanism and the model degenerates toward standard temporal graph diffusion. 
+
+## 6.3 Case Study and Visualization. 
+
+To understand why prototype-based conformal calibration yields tighter prediction sets in fraud detection, we provide two comple-mentary diagnostics on the S-FFSD dataset: (i) temporal neighbor-hood subgraphs showing how 𝛼 𝑖 𝑗 emphasizes calibration-relevant context (Figure 4); and (ii) temporal-window analysis using KS dis-tances between calibration and test NCS distributions (Figure 5) together with fraud-class coverage and efficiency (Table 4). As shown in Figure 4, 𝛼 𝑖 𝑗 assigns higher importance to neighbors Edge ID  𝚫𝐓  Amount  Score 
+
+𝑒 1 0 200.00$  --
+
+𝑒 2 38  347.39$  0.031 
+
+𝑒 3 20  8.10$  0.104 
+
+𝑒 4 25  2.73$  0.075 
+
+𝑒 5 170  37.53$  0.000 
+
+𝑒 6 45  123.10$  0.001 
+
+𝑒 7 236  8.00$  0.295 
+
+𝑒 8 43  7.36$  0.963 
+
+Edge ID  𝚫𝐓  Amount  Score 
+
+𝑒 1 0 7.00$  --
+
+𝑒 2 1 9.00$  0.832 
+
+𝑒 3 9 4.00$  0.041 
+
+𝑒 4 7 7.00$  0.715 
+
+𝑒 5 2 9.36$  0.102 
+
+𝑒 6 8 2.00$  0.051 
+
+𝑒 7 22  5.00$  0.438 
+
+Neighbor Transaction  Target Transaction  Fraud Edges  Benign Edges 
+
+(a) 
+
+(b) 
+
+𝑒 1
+
+𝑒 2 𝑒 7
+
+𝑒 3 𝑒 4
+
+𝑒 5
+
+𝑒 6
+
+𝑒 1
+
+𝑒 2
+
+𝑒 3
+
+𝑒 4
+
+𝑒 5
+
+𝑒 6
+
+𝑒 7
+
+𝑒 8
+
+Figure 4: Visualization of temporal neighborhood subgraphs for a fraud (a) and a benign (b) target edge. Tables report Δ𝑇 ,amount, and the neighbor-importance weight 𝛼 𝑖 𝑗 (shown as 
+
+Score ). 
+
+that provide a calibration-relevant context. For the fraud case (Fig-ure 4(a)), fraud-related neighbors generally receive larger 𝛼 𝑖 𝑗 than benign ones, and even a structurally more distant 2-hop fraud neigh-bor ( Δ𝑇 = 22) can be up-weighted, reflecting prototype alignment beyond mere proximity. For the benign case (Figure 4(b)), 𝛼 𝑖 𝑗 con-centrates on high-score benign neighbors while down-weighting fraud-related distractors; meanwhile, a temporally distant benign neighbor ( Δ𝑇 = 236) is assigned a smaller 𝛼 𝑖 𝑗 than closer benign Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 1 2 3 40.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 KS Distance Time Window Prototype-based NCS Standard NCS (a) (b) 1 2 3 40.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 KS Distance Time Window 
+
+Figure 5: Visualization of KS distance of Nonconformity Score(NCS) distributions over temporal windows on S-FFSD. (a) Benign class. (b) Fraud class. Table 4: Fraud-class coverage and efficiency across temporal test windows on S-FFSD. Lower efficiency indicates smaller prediction sets. 
+
+Window NCPNet ProtoCP Coverage Efficiency Coverage Efficiency 1 0.98 1.42 0.97 1.22 2 0.98 1.45 0.97 1.24 3 0.95 1.57 0.96 1.27 4 0.92 1.66 0.95 1.29 
+
+neighbors despite its high score, suggesting that temporal proximity still modulates the weight among same-class edges. To validate that prototype-based nonconformity scores mitigate the coverage gap under temporal drift, we split the test set into four temporal windows and compare each window with the calibra-tion set using the KS distance of class-wise NCS distributions. As shown in Figure 5, the KS distance of the standard NCS increases monotonically over time, especially for the fraud class, while the prototype-based NCS remains consistently smaller and grows more slowly. This indicates that prototype-conditioned scoring reduces calibration–test score-distribution shift across time. Table 4 further shows that this reduced shift leads to more sta-ble class-conditional calibration under temporal drift. For NCPNet, fraud-class coverage drops from 0.98 to 0.92 across temporal win-dows, while fraud-class efficiency degrades from 1.42 to 1.66. In contrast, ProtoCP maintains fraud-class coverage from 0.97 to 0.95, with efficiency increasing only from 1.22 to 1.29. These results provide direct evidence that ProtoCP improves temporal robust-ness by stabilizing the fraud-class nonconformity distribution and maintaining tighter prediction sets over time. 
+
+Computational Cost. We further analyze the computational cost introduced by ProtoCP beyond the frozen temporal GNN back-bone. Let 𝑀 be the number of edges in the current split/window, 
+
+𝑉 the number of nodes, Δ the maximum historical degree, 𝑈 the number of unique edges in a calibration batch, 𝑃 the number of center-neighbor edge pairs, 𝐶 the number of classes, 𝐾 the number of prototypes, and 𝑑 the embedding dimension. The one-time pre-processing stage constructs history-only temporal neighborhoods and precomputes structural/motif features, requiring 𝑂 (𝑀 Δ) time and 𝑂 (𝑀 + 𝑉 ) space. During calibration, motif aggregation uses precomputed two-hop and triangle features with 𝑂 (𝑈 + 𝑃 ) cost, prototype matching costs 𝑂 (𝑈 𝐾𝑑 ), and relative structural encoding costs 𝑂 (𝑃𝐶 +𝑈 + 𝑃 ) per batch. Since 𝐾 is small by default (15 fraud and 10 benign prototypes), the main overhead comes from temporal neighborhood construction and pairwise relative encoding. Table 5 reports runtime and memory on S-FFSD. ProtoCP is more expensive than CF-GNN and NCPNet because of prototype-conditioned subgraph extraction and relative structural encoding, but the overhead remains moderate: preprocessing takes 79 .43 sec-onds with 1 .88 GiB peak memory, while calibration takes 0 .947 seconds per epoch with 2 .18 GiB peak GPU memory. 
+
+Table 5: Runtime and memory comparison on S-FFSD. N/A indicates that the baseline does not require the corresponding preprocessing stage. 
+
+Method Pre. Time Pre. Mem. Cal. Mem. Cal. Time (s) (GiB) (GiB) (s/epoch) CF-GNN N/A N/A 0.85 0.315 NCPNet N/A N/A 0.33 0.641 ProtoCP 79.43 1.88 2.18 0.947 
+
+## 7 Conclusion 
+
+We study conformal prediction for fraud detection on temporal interaction graphs, where benign-dominated neighborhoods and extreme class imbalance degrade calibration efficiency. We pro-pose ProtoCP, a prototype-based conformal prediction framework that constructs fraud-informative calibration subgraphs via learned prototypes and stabilizes calibration with neighborhood-relative nonconformity scores and temporal diffusion. Experiments on four fraud datasets show that ProtoCP achieves the target coverage with consistently tighter prediction sets than conformal baselines, with particularly improved class-wise validity on the fraud class. 
+
+## Acknowledgments 
+
+The authors thank the anonymous reviewers for their constructive feedback and helpful suggestions. 
+
+## References             
+
+> [1] Aisha Abdallah, Mohd Aizaini Maarof, and Anazida Zainal. 2016. Fraud detection system: A survey. Journal of Network and Computer Applications 68 (2016), 90–113. [2] Abdulalem Ali, Shukor Abd Razak, Siti Hajar Othman, Taiseer Abdalla Elfadil Eisa, Arafat Al-Dhaqm, Maged Nasser, Tusneem Elhassan, Hashim Elshafie, and Abdu Saif. 2022. Financial fraud detection based on machine learning: a systematic literature review. Applied Sciences 12, 19 (2022), 9637. [3] Erik Altman, Jovan Blanuša, Luc Von Niederhäusern, Béni Egressy, Andreea Anghel, and Kubilay Atasu. 2023. Realistic synthetic financial transactions for anti-money laundering models. Advances in Neural Information Processing Systems
+> 36 (2023), 29851–29874. [4] Anastasios Angelopoulos, Stephen Bates, Jitendra Malik, and Michael I Jordan. 2020. Uncertainty sets for image classifiers using conformal prediction. arXiv preprint arXiv:2009.14193 (2020). [5] Anastasios N Angelopoulos, Stephen Bates, et al. 2023. Conformal prediction: A gentle introduction. Foundations and trends® in machine learning 16, 4 (2023), 494–591. [6] Rina Foygel Barber, Emmanuel J Candes, Aaditya Ramdas, and Ryan J Tibshirani. 2023. Conformal prediction beyond exchangeability. The Annals of Statistics 51, 2 (2023), 816–845. [7] Jing Chen, Quanzhen Chen, Feng Jiang, Xuyao Guo, Kaiyue Sha, and Yuxuan Wang. 2024. SCN_GNN: A GNN-based fraud detection algorithm combining strong node and graph topology information. Expert Systems with Applications
+> 237 (2024), 121643.
+
+KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Xudong Chen, Shengbo Gong, Lu Cheng, and Wei Jin 
+
+[8] Dawei Cheng, Yao Zou, Sheng Xiang, and Changjun Jiang. 2025. Graph neural networks for financial fraud detection: a review. Frontiers of Computer Science 19, 9 (2025), 199609. [9] Jase Clarkson. 2023. Distribution free prediction sets for node classification. In 
+
+International conference on machine learning . PMLR, 6268–6278. [10] Enyan Dai, Wei Jin, Hui Liu, and Suhang Wang. 2022. Towards robust graph neural networks for noisy graphs with sparse labels. In Proceedings of the fifteenth ACM international conference on web search and data mining . 181–191. [11] Andrea Dal Pozzolo, Giacomo Boracchi, Olivier Caelen, Cesare Alippi, and Gian-luca Bontempi. 2017. Credit card fraud detection: a realistic modeling and a novel learning strategy. IEEE transactions on neural networks and learning systems 29, 8 (2017), 3784–3797. [12] Ed Davis, Ian Gallagher, Daniel John Lawson, and Patrick Rubin-Delanchy. 2024. Valid conformal prediction for dynamic gnns. arXiv preprint arXiv:2405.19230 
+
+(2024). [13] Tiffany Ding, Anastasios Angelopoulos, Stephen Bates, Michael Jordan, and Ryan J Tibshirani. 2023. Class-conditional conformal prediction with many classes. Advances in neural information processing systems 36 (2023), 64555– 64576. [14] Yingtong Dou, Zhiwei Liu, Li Sun, Yutong Deng, Hao Peng, and Philip S Yu. 2020. Enhancing graph neural network-based fraud detectors against camouflaged fraudsters. In Proceedings of the 29th ACM international conference on information & knowledge management . 315–324. [15] Alessandra Fenizia and Raffaele Saggio. 2024. Organized crime and economic growth: Evidence from municipalities infiltrated by the mafia. American Economic Review 114, 7 (2024), 2171–2200. [16] Peter Gerbrands, Brigitte Unger, Michael Getzner, and Joras Ferwerda. 2022. The effect of anti-money laundering policies: an empirical network analysis. EPJ Data Science 11, 1 (2022), 15. [17] Isaac Gibbs and Emmanuel Candes. 2021. Adaptive conformal inference under distribution shift. Advances in Neural Information Processing Systems 34 (2021), 1660–1672. [18] Kai Guo, Hongzhi Wen, Wei Jin, Yaming Guo, Jiliang Tang, and Yi Chang. 2024. In-vestigating out-of-distribution generalization of GNNs: An architecture perspec-tive. In Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining . 932–943. [19] Kexin Huang, Ying Jin, Emmanuel Candes, and Jure Leskovec. 2023. Uncertainty quantification over graph with conformalized graph neural networks. Advances in Neural Information Processing Systems 36 (2023), 26699–26721. [20] Woochang Hyun, Insoo Lee, and Bongwon Suh. 2024. LEX-GNN: Label-exploring graph neural network for accurate fraud detection. In Proceedings of the 33rd ACM International Conference on Information and Knowledge Management . 3802–3806. [21] Wei Jin, Tyler Derr, Yiqi Wang, Yao Ma, Zitao Liu, and Jiliang Tang. 2021. Node similarity preserving graph convolutional networks. In Proceedings of the 14th ACM international conference on web search and data mining . 148–156. [22] Xin Juan, Fengfeng Zhou, Wentao Wang, Wei Jin, Jiliang Tang, and Xin Wang. 2023. INS-GNN: Improving graph imbalance learning with self-supervision. 
+
+Information Sciences 637 (2023), 118935. [23] Thomas N. Kipf and Max Welling. 2017. Semi-Supervised Classification with Graph Convolutional Networks. In ICLR .[24] Jing Lei, Max G’Sell, Alessandro Rinaldo, Ryan J Tibshirani, and Larry Wasserman. 2018. Distribution-free predictive inference for regression. J. Amer. Statist. Assoc. 
+
+113, 523 (2018), 1094–1111. [25] Kaidi Li, Tianmeng Yang, Min Zhou, Jiahao Meng, Shendi Wang, Yihui Wu, Boshuai Tan, Hu Song, Lujia Pan, Fan Yu, et al. 2024. Sefraud: Graph-based self-explainable fraud detection via interpretative mask learning. In Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining .5329–5338. [26] Junhong Lin, Xiaojie Guo, Yada Zhu, Samuel Mitchell, Erik Altman, and Julian Shun. 2024. FraudGT: a simple, effective, and efficient graph transformer for financial fraud detection. In Proceedings of the 5th ACM International Conference on AI in Finance . 292–300. [27] Yang Liu, Xiang Ao, Zidi Qin, Jianfeng Chi, Jinghua Feng, Hao Yang, and Qing He. 2021. Pick and choose: a GNN-based imbalanced learning approach for fraud detection. In Proceedings of the web conference 2021 . 3168–3177. [28] Yixin Liu, Ming Jin, Shirui Pan, Chuan Zhou, Yu Zheng, Feng Xia, and Philip S Yu. 2022. Graph self-supervised learning: A survey. IEEE transactions on knowledge and data engineering 35, 6 (2022), 5879–5900. [29] Edgar Alonso Lopez-Rojas and Stefan Axelsson. 2014. Banksim: A bank payments simulator for fraud detection research. In 26th European Modeling and Simulation Symposium, EMSS , Vol. 2014. [30] Shebuti Rayana and Leman Akoglu. 2015. Collective opinion spam detection: Bridging review networks and metadata. In Proceedings of the 21th acm sigkdd international conference on knowledge discovery and data mining . 985–994. [31] Yaniv Romano, Matteo Sesia, and Emmanuel Candes. 2020. Classification with valid and adaptive coverage. Advances in neural information processing systems 
+
+33 (2020), 3581–3591. [32] Emanuele Rossi, Ben Chamberlain, Fabrizio Frasca, Davide Eynard, Federico Monti, and Michael Bronstein. 2020. Temporal graph networks for deep learning on dynamic graphs. arXiv preprint arXiv:2006.10637 (2020). [33] Mauricio Sadinle, Jing Lei, and Larry Wasserman. 2019. Least ambiguous set-valued classifiers with bounded error levels. J. Amer. Statist. Assoc. 114, 525 (2019), 223–234. [34] Glenn Shafer and Vladimir Vovk. 2008. A tutorial on conformal prediction. 
+
+Journal of Machine Learning Research 9, 3 (2008). [35] Jianqing Song, Jianguo Huang, Wenyu Jiang, Baoming Zhang, Shuangjie Li, and Chongjun Wang. 2024. Similarity-navigated conformal prediction for graph neural networks. Advances in Neural Information Processing Systems 37 (2024), 48541–48567. [36] Michele Starnini, Charalampos E Tsourakakis, Maryam Zamanipour, André Panisson, Walter Allasia, Marco Fornasiero, Laura Li Puma, Valeria Ricci, Silvia Ronchiadin, Angela Ugrinoska, et al. 2021. Smurf-based anti-money laundering in time-evolving transaction networks. In Joint European Conference on Machine Learning and Knowledge Discovery in Databases . Springer, 171–186. [37] Ryan J Tibshirani, Rina Foygel Barber, Emmanuel Candes, and Aaditya Ramdas. 2019. Conformal prediction under covariate shift. Advances in neural information processing systems 32 (2019). [38] Vladimir Vovk, Alexander Gammerman, and Glenn Shafer. 2005. Algorithmic learning in a random world . Springer. [39] Chao Wang, Chuanhao Nie, and Yunbo Liu. 2025. Evaluating supervised learning models for fraud detection: A comparative study of classical and deep architec-tures on imbalanced transaction data. arXiv preprint arXiv:2505.22521 (2025). [40] Tuo Wang, Jian Kang, Yujun Yan, Adithya Kulkarni, and Dawei Zhou. 2025. Non-exchangeable Conformal Prediction for Temporal Graph Neural Networks. In 
+
+Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2 . 3031–3042. [41] Bin Wu, Xinyu Yao, Boyan Zhang, Kuo-Ming Chao, and Yinsheng Li. 2023. Split-gnn: Spectral graph neural network for fraud detection against heterophily. In 
+
+Proceedings of the 32nd ACM international conference on information and knowl-edge management . 2737–2746. [42] Zonghan Wu, Shirui Pan, Fengwen Chen, Guodong Long, Chengqi Zhang, and Philip S Yu. 2019. A comprehensive survey on graph neural networks. ArXiv preprint (2019). [43] Sheng Xiang, Mingzhi Zhu, Dawei Cheng, Enxia Li, Ruihui Zhao, Yi Ouyang, Ling Chen, and Yefeng Zheng. 2023. Semi-supervised credit card fraud detection via attribute-driven graph representation. In Proceedings of the AAAI conference on artificial intelligence , Vol. 37. 14557–14565. [44] Fei Xiao, Shaofeng Cai, Gang Chen, HV Jagadish, Beng Chin Ooi, and Meihui Zhang. 2024. Vecaug: Unveiling camouflaged frauds with cohort augmentation for enhanced detection. In Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining . 6025–6036. [45] Da Xu, Chuanwei Ruan, Evren Korpeoglu, Sushant Kumar, and Kannan Achan. 2020. Inductive representation learning on temporal graphs. arXiv preprint arXiv:2002.07962 (2020). [46] Soroush H Zargarbashi, Simone Antonelli, and Aleksandar Bojchevski. 2023. Conformal prediction sets for graph neural networks. In International Conference on Machine Learning . PMLR, 12292–12318. [47] Soroush H Zargarbashi and Aleksandar Bojchevski. 2024. Conformal inductive graph neural networks. arXiv preprint arXiv:2407.09173 (2024). [48] Zheng Zhang, Jie Bao, Zhixin Zhou, Nicolo Colombo, Lixin Cheng, and Rui Luo. 2025. Residual reweighted conformal prediction for graph neural networks. arXiv preprint arXiv:2506.07854 (2025). [49] Lingxiao Zhao, Wei Jin, Leman Akoglu, and Neil Shah. 2022. From Stars to Subgraphs: Uplifting Any GNN with Local Structure Awareness. In International Conference on Learning Representations . https://openreview.net/forum?id=Mspk_ WYKoEH [50] Xiaofan Zhou, Baiting Chen, Yu Gui, and Lu Cheng. 2025. Conformal prediction: A data perspective. Comput. Surveys (2025). 
+
+## A Backbone and Dataset Robustness 
+
+Backbone performance on main datasets. To ensure that the backbone model (TGN) provides a reliable foundation for our frame-work, we report accuracy and F1 score across the four main datasets in Table 6. 
+
+Backbone transfer with TGAT. To examine whether ProtoCP is tied to a specific temporal encoder, we additionally evaluate Pro-toCP with TGAT [45] as an alternative backbone on S-FFSD and YelpChi. The same temporal split and class-conditional calibration protocol are used as in the main experiments. Table 7 reports the Temporal Graph Prototype-conditioned Conformal Prediction for Fraud Detection KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+Table 6: Performance of the backbone model (TGN) across four fraud detection datasets in terms of Accuracy and F1 Score.                    
+
+> Metric YelpChi S-FFSD FTFD BankSim Accuracy F1 Accuracy F1 Accuracy F1 Accuracy F1 TGN 79.75 65.57 89.43 77.82 98.15 90.32 96.74 84.48
+
+TGAT backbone performance, and Table 8 reports fraud-class cover-age and efficiency against NCPNet. The results show that ProtoCP remains effective with TGAT, achieving higher fraud-class coverage and smaller prediction sets than NCPNet on both datasets. 
+
+Table 7: Performance of the TGAT backbone on S-FFSD and YelpChi.       
+
+> Dataset Accuracy F1 Score S-FFSD 89.64 78.02 YelpChi 81.43 66.32
+
+Table 8: Fraud-class coverage and efficiency with TGAT back-bone. Lower efficiency indicates smaller prediction sets. 
+
+Method S-FFSD YelpChi Coverage Efficiency Coverage Efficiency NCPNet 0.95 1.47 0.95 1.42 ProtoCP 0.96 1.31 0.96 1.35 
+
+Supplementary AML benchmark. To further assess ProtoCP on a transaction-style AML benchmark, we include the AML Laun-dering Dataset (HI-SMALL) [3] as a supplementary dataset. HI-SMALL is better aligned with our temporal edge-level transaction setting than some commonly used alternatives. For example, Ellip-tic is organized into discrete time steps rather than a continuous interaction stream, while DGraphFin uses node-level labels rather than edge-level transaction labels. Table 9 reports the backbone performance, and Table 10 reports class-wise conformal results on HI-SMALL. 
+
+Table 9: Backbone performance on HI-SMALL.     
+
+> Dataset Accuracy F1 Score HI-SMALL 99.81 75.78
+
+## B Additional Component Ablation 
+
+One-step temporal diffusion ablation. The main ablation in Table 1 evaluates the effect of removing the prototype module and the relative-difference scoring module. To further isolate the con-tribution of temporal score diffusion, we remove only the one-step history-only diffusion step while keeping prototype-conditioned 
+
+Table 10: Class-wise coverage and efficiency on HI-SMALL. Lower efficiency indicates smaller prediction sets. 
+
+Method Fraud Cov. Fraud Eff. Benign Cov. Benign Eff. TPS 0.93 1.92 0.95 1.13 APS 0.95 1.96 0.95 1.23 RAPS 0.92 1.94 0.96 1.19 DAPS 0.93 1.56 0.95 1.09 CF-GNN 0.94 1.73 0.96 1.09 NCPNet 0.95 1.52 0.98 1.07 NEX 0.92 1.75 0.97 1.10 NAPS 0.95 1.71 0.96 1.08 ProtoCP 0.96 1.46 0.97 1.07 
+
+scoring unchanged. As shown in Table 11, removing this step re-duces fraud-class coverage and increases fraud-class prediction set size on both S-FFSD and YelpChi, indicating that the diffusion step provides complementary stabilization for class-conditional calibration under temporal dependence. 
+
+Table 11: Ablation of the one-step temporal diffusion com-ponent. Lower efficiency indicates smaller prediction sets.              
+
+> Variant S-FFSD YelpChi Fraud Cov. Fraud Eff. Fraud Cov. Fraud Eff. w/o one-step diffusion 0.93 1.35 0.95 1.61 ProtoCP 0.96 1.26 0.98 1.52
+
+## C Dataset Introduction 
+
+We provide detailed descriptions of the four fraud detection datasets used in our experiments. Summary statistics are shown in Table 12. 
+
+Table 12: Summary statistics of the four fraud detection datasets.                             
+
+> Statistic YelpChi S-FFSD FTFD BankSim # Samples 67,395 77,881 5,000,000 594,643 # Fraud (Positive) 8,916 5,256 179,553 7,200 # Benign (Negative) 58,479 24,387 4,820,447 587,443 # Unknown –48,238 ––Fraud Ratio (%) 13.23% 17.73% 3.59% 1.21% Domain Review Payment Transaction Transaction
+
+YelpChi [30] is a review dataset collected from Yelp.com for restaurants and hotels in the Chicago area, containing both recom-mended (benign) and filtered (spam/suspicious) reviews along with their associated users and businesses, and is widely used for review spam detection experiments. S-FFSD [43] is a simulated, small-scale version of the Financial Fraud Semi-Supervised Dataset, consisting of transaction records with partially observed fraud labels and widely used for financial fraud detection. KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Xudong Chen, Shengbo Gong, Lu Cheng, and Wei Jin 
+
+FTFD 2 dataset contains 5 million synthetically generated finan-cial transactions designed to simulate real-world behavior for fraud detection research and machine learning applications. BankSim [29] is a synthetic bank payment transaction dataset generated by an agent-based simulator calibrated on aggregated statistics from a real Spanish bank, and it provides large-scale card payment records over a multi-month period with injected fraud behaviors and signatures, making it suitable for benchmarking and developing fraud detection methods without exposing any sensitive personal or proprietary transaction data. 
+
+## D Evaluation Metric 
+
+To evaluate ProtoCP, we use two quality scores: coverage and 
+
+efficiency (average set size) to report our performance. Given a test set Dtest and prediction set Γ(𝑒 𝑖 ) for each test edge 𝑒 𝑖 , we compute: Coverage = 1
+
+|D test |∑︁ (𝑒 𝑖 ,𝑦 𝑖 ) ∈ D test 
+
+I[𝑦 𝑖 ∈ Γ(𝑒 𝑖 )] , (29) Efficiency = 1
+
+|D test |∑︁ (𝑒 𝑖 ,𝑦 𝑖 ) ∈ D test 
+
+|Γ(𝑒 𝑖 )| . (30) When Γ(𝑒 𝑖 ) = ∅, we keep the coverage computation unchanged, but penalize efficiency by setting |Γ(𝑒 𝑖 )| = |Y| (i.e., counting it as the full label set). 
+
+## E Detailed Experiment Setup 
+
+Data Splitting. For all datasets, we adopt a temporal split to respect the temporal ordering of interactions. Specifically, the earliest 55% of edges are used for backbone training, the next 25% for calibration, and the final 20% for testing. No future information is accessible during any stage. 
+
+Backbone Training. We use TGN [32] as the shared backbone across all methods. The backbone is trained with a binary cross-entropy loss using the Adam optimizer with a learning rate of 
+
+{1e-3 , 1e-4 } selected via validation. Training runs for up to 200 epochs with early stopping based on validation F1 (patience = 10). After training, backbone parameters are frozen for all subsequent calibration and evaluation stages. 
+
+ProtoCP Configuration. For the prototype module, we ini-tialize 𝑀 fraud prototypes and 𝑁 normal prototypes in the edge-embedding space, with default values 𝑀 = 15 and 𝑁 = 10 selected based on the sensitivity analysis in Section 6. The margin 𝛾 in the prototype loss is set to 1.0. The subgraph extraction uses a 3-hop temporal neighborhood with the history-cutoff constraint. The dif-fusion coefficient 𝛽 is set to 0.5 by default. The target miscoverage level is 𝛼 = 0.05 unless otherwise specified. To stabilize prototype learning, we adopt a staged loss weighting strategy. During the first 50 training epochs, we optimize the model using only the prototype loss. After epoch 50, we incorporate the coverage and efficiency losses with weights 𝜆 cov = 1.0 and 𝜆 eff = 0.5, while the weight of the prototype loss 𝜆 proto is gradually decayed from its initial value (0.1) over the remaining epochs. 
+
+Computational Environment. All experiments are conducted on a single NVIDIA V100 GPU (32GB) with PyTorch 2.6. Each 
+
+> 2https://www.kaggle.com/datasets/aryan208/financial-transactions-dataset-for-fraud-detection
+
+experiment is repeated 5 times with different random seeds, and we report the mean and standard deviation.
