@@ -1,0 +1,1981 @@
+Title: Let Time Tell: Identification and Gaussian Process Estimation for Interrupted Time Series
+
+URL Source: https://arxiv.org/pdf/2608.20610v1
+
+Published Time: Mon, 24 Aug 2026 00:16:37 GMT
+
+Number of Pages: 64
+
+Markdown Content:
+# Let Time Tell: Identification and Gaussian Process Estimation for Interrupted Time Series ∗
+
+# Soonhong Cho †
+
+# August 24, 2026 
+
+Abstract 
+
+We study causal inference in interrupted time series designs where a treatment af-fects every unit simultaneously, so that the contemporaneous controls used by difference-in-differences and synthetic control are unavailable and the counterfactual must be ex-trapolated from a unit’s own pre-treatment history. We establish identification within the potential outcomes framework and estimate the counterfactual by Gaussian process regression. Rather than committing to a single best-fitting trend, the estimator retains the functions consistent with the pre-treatment series and widens its intervals where extrapolation magnifies their divergence. Connecting it to reproducing kernel Hilbert space theory, we derive a bias decomposition that isolates the component extrapolation inflates and a worst-case bound on that component, justifying the Gaussian process estimator’s posterior variance as extrapolation-aware uncertainty quantification. In closed form, the band equals the worst-case divergence the model class permits among functions consistent with the pre-treatment data. The method is illustrated with cal-ibrated simulations and an analysis of handgun purchases after the Supreme Court’s 
+
+Heller decision, a universal treatment whose practical effect concentrates in a single jurisdiction. An R package, gpss , implements the approach. 
+
+Keywords : causal inference, extrapolation, Gaussian process regression, interrupted time series, machine learning, reproducing kernel Hilbert space 
+
+> ∗
+
+The author thanks Jeffrey Lewis and Chad Hazlett for their invaluable advice and support throughout this project. The author is also grateful to Kosuke Imai, Ian Lundberg, Andrew Bertoli, Chris Felton, Ryan Baxter-King for helpful comments and discussions relevant to this project, and Jack Kappelman for both discussion and sharing National Instant Criminal Background Check System (NICS) data. This research benefited from feedback in presentations at the PolMeth 2024. This research was supported in part by a UCLA Dissertation Year Fellowship. The content is solely the responsibility of the author. 
+
+> †
+
+Department of Political Science, University of California, Los Angeles. Email: soonhongcho@ucla.edu, URL: https://soonhong-cho.github.io/ arXiv:2608.20610v1 [stat.ME] 20 Aug 2026 1 Introduction 
+
+A recurring challenge for causal inference is to estimate the effect of an event that reaches an entire population at once. Supreme Court decisions transform legal landscapes nationwide overnight, with Citizens United reshaping campaign finance and Heller altering the national interpretation of individual gun rights. Wars engulf entire societies and federal policies bind every jurisdiction simultaneously. The COVID-19 pandemic is the starkest case of all, a global shock that altered behaviour and institutions everywhere. Such events are universal treatments , single interventions that reach every unit simultaneously, and they pose a distinct challenge for causal inference. With no units left untreated, comparing treated to control units within the same post-treatment period is infeasible, and the practical effect is often concentrated: the precedent in Heller binds every state, yet the ruling reaches only the handgun ban in Washington, D.C., so its immediate consequences fall on a single jurisdiction. Standard identification strategies rely on comparisons that are unavailable here. Difference-in-differences (DiD) requires untreated comparison units (Card and Krueger, 1994), often with variation in treatment timing (Callaway and Sant’Anna, 2021; Sun and Abraham, 2021), and the synthetic control (SC) method requires a donor pool that remains untreated (Abadie et al., 2010; Abadie and Gardeazabal, 2003). Researchers must instead turn to temporal variation within treated units, asking not how treated units differ from controls but how outcomes deviate from what would have occurred absent treatment. One natural strategy for this setting is the interrupted time series (ITS) design (Box and Tiao, 1975; Campbell and Stanley, 1963). Pre-treatment patterns encode structural relationships, such as economic, institutional, and behavioural regularities, that would persist absent the intervention; an ITS learns these patterns and projects them forward to form the counterfactual trajectory, whose contrast with the realised outcomes measures the effect. Identification rests on a stability condition, that the conditional expectation of the untreated outcome given covariates remains the same function before and after the treatment onset. The condition can fail under concurrent shocks or structural breaks, but it states a clear requirement, that no force other than the intervention alters how the trajectory would otherwise have evolved. Existing ITS approaches carry two limitations. First, they impose restrictive functional forms. Segmented regression, the workhorse of ITS analysis, fits piecewise linear or polynomial models whose coefficients recover the level/slope change attributed to treatment (Bernal et al., 2017), risking substantial bias when the true process exhibits nonlinearities beyond the support of the observed data. Second, and more importantly, they are not designed to quantify extrapolation uncertainty . Many functions in a given class can fit the pre-treatment record equally well yet diverge at a post-treatment target; the worst-case divergence is a property of the class itself and grows with temporal distance. Standard methods commit to a single specification and condition the interval on that choice, so the interval does not widen as the counterfactual extends beyond the data. 
+
+1We propose Gaussian process (GP) regression for the counterfactual estimation, a nonpara-metric method that carries uncertainty over the whole function rather than fixing a single fit (Rasmussen et al., 2006). The kernel sets the available function space, and conditioning on the pre-treatment series concentrates it on the compatible functions. For the kernels of Section 3, the predictive variance interval widens with extrapolation distance, so the reported uncertainty reflects how far the counterfactual reaches beyond the training data (Cho et al., 2026). This article’s central contribution is an ITS estimator with extrapolation-aware uncertainty quantification. The GP posterior mean estimates the counterfactual, and a reproducing kernel Hilbert space (RKHS) reading of the posterior variance justifies it as the measure of uncertainty about that estimate. A bias decomposition separates the estimation error into identification, ap-proximation, learning, and noise components and names the assumption or condition that controls each. A worst-case bound then shows that the posterior variance controls the learning error over functions within a fixed complexity budget, and the bound is not loose: a least favourable coun-terfactual attains it, no estimator using the same data improves on it, and the band carries the extrapolation uncertainty of the model class itself, in closed form. Two further contributions support the central one. We establish identification of the ITS estimand within the potential outcomes framework (Neyman, 1923; Rubin, 1974), resting on a conditional-mean stability condition weaker than conditional independence, and we propose placebo checks and supplementary diagnostics that probe the assumptions. The rest of the paper proceeds as follows. Section 2 formalises identification, Section 3 devel-ops the estimator and placebo checks, Section 4 establishes the bias decomposition and worst-case bounds through RKHS theory. Section 5 examines finite-sample properties of the proposed esti-mator in calibrated simulations, Section 6 applies the method to handgun purchases after Heller 
+
+with further examples in Supplementary Material D, and Sections 7–8 situate the estimator among existing approaches and conclude. 
+
+# 2 Identification in Interrupted Time Series Design 
+
+To gain some intuition that informs our approach, suppose we observe a sequence of untreated outcomes before an event of interest followed by treated outcomes. Without contemporaneous controls, a researcher predicts what would have happened absent treatment by learning from pre-treatment history. If pre-treatment outcomes follow a steady trend with a stable cycle, that pattern should continue absent treatment, and post-treatment deviations from the projection are attributed to the causal effect (Figure 1). This section formalises the strategy, showing that stability in the outcome–observable relationship substitutes for controls and stating the conditions under which pre-treatment patterns identify counterfactual outcomes. 
+
+22 4 6 8 10 12 14 16 18 20 02468 
+
+> Treatment Event
+> Pre-treatment Post-treatment
+> Estimated trend Counterfactual prediction Observed (pre) Observed (post) Treatment effect
+
+t (Time) 
+
+> Y
+
+Figure 1. Illustration of Interrupted Time Series Design. Note: A flexible trend (solid grey) fitted to pre-treatment outcomes (black dots) is extrapolated as the counterfactual (dashed red), with 95% prediction intervals (shaded) widening with distance from the data. Treatment effects (black arrows) are the gaps between observed outcomes (black triangles) and the counterfactual; the vertical dashed line marks treatment onset. 
+
+Alt text: Schematic time series plot with a fitted pre-treatment trend extended past the intervention as a dashed counterfactual, its shaded interval widening with distance, and arrows marking gaps to observed points. 
+
+Setup. Consider a balanced panel of N units observed over T periods. For each unit i and time 
+
+t, let Yit denote the scalar observed outcome, Dit ∈ { 0, 1} treatment status, and Xit a vector of observed covariates that includes time t itself alongside any additional characteristics. Unobserved time-varying attributes that may affect outcomes are collected in Uit . Under the potential outcomes framework (Neyman, 1923; Rubin, 1974), let Yit (1) and Yit (0) denote the potential outcomes under treatment and control, respectively. Treatment begins simultaneously for all units at time t0 and persists thereafter: Dit = 1(t ≥ t0). We link observed to potential outcomes through the standard consistency assumption: 
+
+Yit = Dit Yit (1) + (1 − Dit ) Yit (0) . (1) For consistency to deliver untreated outcomes before t0, treatment must not act in advance of its 
+
+3onset ( no anticipation ): 
+
+Yit (1) = Yit (0) and Xit (1) = Xit (0) , t < t 0. (2) Equation (2) pairs two conditions. No anticipation proper is the outcome equality Yit (1) = Yit (0) for 
+
+t < t 0, which with consistency gives Yit = Yit (0) before t0. Because treatment is simultaneous and universal, spillovers from treated to untreated units cannot arise by design; the causal quantities below are total effects inclusive of any interactions among treated units (Cerqua et al., 2023). The counterfactual Yit (0) encodes the continuation of the pre-treatment regime, so expectations held at a stable level are absorbed into the conditional mean the method learns; what the equality rules out is anticipatory drift, the pattern the placebo checks of Section 3.3 are built to detect, and Supplementary Material D.3 assesses it in each application. At post-treatment periods the covariate equality Xit ∗ (1) = Xit ∗ (0) is additionally required; it holds by construction when Xit 
+
+consists of time and calendar indicators (e.g., quarter, month, etc.). We partition at t0: Yi, pre = ( Yi1, . . . , Y i,t 0−1)⊤ and Xi, pre = ( Xi1, . . . , Xi,t 0−1)⊤ are the pre-treatment outcomes and covariates, and Yit ∗ , Xit ∗ denote the observed outcome and covariates at a post-treatment period t∗ ≥ t0. In the estimation procedure of Section 3, ( Xi, pre , Y i, pre ) are training data and Xit ∗ the test inputs at which counterfactual predictions are formed. 
+
+Structural Model. For each unit i at time t, the untreated potential outcome is governed by 
+
+Yit (0) = hi(Xit , Uit ) + εit , E[εit | Xit , Uit ] = 0 , (3) where Xit is the observed covariate vector, Uit collects unobservables, and εit is idiosyncratic noise with variance σ2. Any unobserved factor that moves the conditional mean of Yit (0) belongs to Uit ;
+
+εit is the remainder, mean-zero given both arguments, so it contributes variance but does not bias the counterfactual. Measurement error in the outcome that is mean-zero given ( Xit , Uit ) joins εit ;a systematic shift is a change in Uit (see Supplementary Material D.3). The structural function 
+
+hi : X × U → R governs how observables and unobservables jointly determine the systematic component of outcomes. The function is unit-specific: two units at the same ( Xit , Uit ) may have different outcomes, reflecting heterogeneity in how units respond to observable and unobservable conditions. Any causal influence of pre-treatment history operates through Xit if observed or Uit if un-observed; past outcomes do not enter hi as arguments. Conditioning directly on lagged outcomes (Brodersen et al., 2015; Cerqua et al., 2023) requires recursive substitution of predicted values when forecasting several steps ahead, compounding error at each horizon, whereas the estimator of Section 3 carries temporal dependence through a covariance kernel that assigns high covariance to nearby periods. 
+
+4Target Function. The function gi : X → R represents the best prediction of Yit (0) achievable from observables: 
+
+gi(Xit ) := E[Yit (0) | Xit ] = 
+
+Z
+
+hi(Xit , u) dP (Uit = u | Xit ), (4) where the integral averages hi over the conditional distribution of Uit given Xit , not the marginal; the distinction matters because unobservables and observables can be correlated. Defined purely through conditional expectations, gi is the object a well-specified regression of Yit (0) on Xit would recover. The identification strategy maps ( Yi, pre , Xi, pre , Xit ∗ ) 7 → gi(Xit ∗ ), recovering gi from the pre-treatment history and evaluating it at the post-treatment input; we write gi(Xit ∗ ) throughout, suppressing its dependence on the pre-treatment data. 
+
+Key Identification Assumption. The structural function hi depends on unobservables Uit ,making direct estimation infeasible. Identification requires that within each unit’s data-generating process (DGP), Xit determine the conditional mean of Yit (0) without knowledge of Uit . The unit-specific function gi is then recovered from unit i’s own pre-treatment data. 
+
+Assumption 1 (Mean Sufficiency) . For all units i and all periods t:
+
+E[Yit (0) | Xit , Uit ] = E[Yit (0) | Xit ].
+
+Adding and subtracting gi in the structural model (3) writes the untreated outcome as an observable mean, an unobservable deviation, and noise, 
+
+Yit (0) = gi(Xit )
+
+| {z }
+
+> observable mean
+
++ hi(Xit , Uit ) − gi(Xit )| {z }
+
+> unobservable deviation
+
++ εit 
+
+|{z} 
+
+> noise
+
+. (5) By construction of gi, the deviation has mean zero given Xit . Mean Sufficiency strengthens this to hi(Xit , Uit ) = gi(Xit ) almost surely, so once Xit is known the particular value of Uit does not shift the expected outcome. The gap hi − gi is the identification error that Section 4 isolates as Term I. The assumption is not determinism, since outcomes still deviate from their conditional expectations through εit ; it restricts only the functional role of Uit , which conditional on Xit must not carry additional information about the mean of Yit (0), while Uit and Xit may be arbitrarily dependent. The unit level is deliberate: each counterfactual is learned from that unit’s own series, so every estimand rests on this condition, and a weaker requirement that biases merely average to zero would identify only ¯ τt∗ .This is a conditional-mean restriction, not a distributional one. It constrains only the first moment of Yit (0) given ( Xit , Uit ) and is weaker than the conditional-independence form of selection-on-observables (Hazlett and Xu, 2018). Mean Sufficiency is the temporal counterpart of that cross-sectional condition: where selection-on-observables identifies a counterfactual by comparing units 
+
+5that share covariates, the ITS requires the within-unit relationship gi to be stable across time. Section 7 situates the design relative to DiD and SC. Under Assumption 1, the pre-treatment observations simplify to 
+
+Yit = gi(Xit ) + εit , E[εit | Xit ] = 0 , t < t 0, (6) with the same idiosyncratic εit as in (3). No part of Uit is folded into the error, so gi is the conditional expectation function (CEF) of a regression of Yit on Xit . When Xit carries calendar time and period indicators, the covariate path is fixed by the design and the randomness in Yit (0) is due to the noise term εit alone, the convention under which the bias in Section 4 is computed and the intervals are read. 
+
+Estimands. We define the causal estimands, beginning at the unit-period level. The unit- and period-specific treatment effect is δit ∗ = Yit ∗ (1) − Yit ∗ (0) , the difference between the two potential outcomes for the same unit-period. The post-treatment period furnishes only Yit ∗ (1); no design recovers a unit’s realised untreated outcome at a treated period without untenable assumption, so 
+
+δit ∗ is not identified. We therefore target its conditional-mean counterpart, 
+
+τit ∗ = Yit ∗ (1) − gi(Xit ∗ ), (7) where gi(Xit ∗ ) = E[Yit ∗ (0) | Xit ∗ ]. The estimand replaces the unrecoverable realisation with its conditional mean given observables, the quantity that standard methods in ITS actually estimate. Aggregate estimands average or accumulate the unit-period effects, ¯τt∗ = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+τit ∗ , ¯τi = 1
+
+T − t0 + 1  
+
+> T−t0
+
+X
+
+> s=0
+
+τi,t 0+s, τi, cum =
+
+> T
+
+X
+
+> t∗=t0
+
+τit ∗ , (8) the average effect at period t∗ across units, the average effect for unit i over the post-treatment window, and its cumulative total. Identification of every estimand turns on recovering gi from pre-treatment data and on its stability across t0, which Assumption 1 secures. 
+
+Theorem 1 (Identification of Treatment Effects) . Under consistency (1) , no anticipation (2) , and Assumption 1, the treatment effect at t∗ ≥ t0 is identified as 
+
+τit ∗ = Yit ∗ − gi(Xit ∗ ),
+
+where gi coincides with the CEF of the observed pre-treatment data, gi(x) = E[Yit | Xit = x] for 
+
+t < t 0.
+
+A proof is given in Supplementary Material A. Theorem 1 shows that the counterfactual half of the estimand is controlled by two features of the design: consistency and no anticipation deliver 
+
+6untreated outcomes before t0, and Mean Sufficiency makes the relationship those outcomes trace a fixed function of Xit that persists past t0. The substitution of Yit ∗ for Yit ∗ (1) uses consistency alone, so the content of the theorem is the second clause, that the unobservable half of the estimand is pinned down by the observed pre-treatment distribution. That distribution recovers gi on the support of Xi, pre ; because Xit ∗ carries calendar time, evaluating gi there reaches beyond the support, and the reach is disciplined by the smoothness the kernel encodes in place of a parametric form. What that discipline leaves unresolved is a property of the model class itself. 
+
+Definition 1 (Extrapolation uncertainty) . For the ball FB = {f ∈ H k : ∥f ∥Hk ≤ B} in the RKHS induced by the kernel (Section 3.2) and a post-treatment input Xit ∗ , the extrapolation uncertainty of FB at Xit ∗ is 
+
+ωB (Xit ∗ ) = sup  |f (Xit ∗ ) − f ′(Xit ∗ )| : f, f ′ ∈ F B , f (Xit ) = f ′(Xit ) for all t < t 0 , (9) 
+
+the largest disagreement at Xit ∗ between members of the class that agree at every pre-treatment input. 
+
+The definition adapts Shen and Meinshausen (2025, Definition 1) to the fixed design of the ITS: agreement at the observed inputs replaces agreement on a covariate support, the disagreement is read at a given post-treatment input rather than over a neighbourhood of that support, and the class is a norm ball rather than a shape-restricted one. The ball is what keeps ωB finite, since 
+
+Hk contains functions vanishing at every pre-treatment input and any multiple of one may be added to f without leaving the space. Targeting the full conditional distribution rather than the conditional mean does not lower it either, because the structural model (3) places the noise after the nonlinearity, and for that class distributional and functional extrapolability coincide (Shen and Meinshausen, 2025, Theorem 1(ii)). Section 4 computes ωB (Xit ∗ ) in closed form. The primary threat to Assumption 1 is inherent to the ITS design rather than to a particular estimator. A component of Uit ∗ may take values after t0 that it never took before, so a factor that sat constant throughout the pre-treatment window, and was therefore absorbed into the learned relationship, begins to shift E[Yit ∗ (0) | Xit ∗ ], as with the post-election anxiety about gun restrictions in our Heller application (Section 6). The bias decomposition of Section 4 expresses this threat through Term I. Such breaks become more likely as the horizon lengthens, so shorter post-treatment windows are more credible; domain knowledge about concurrent events is essential, and the placebo checks (Section 3.3) diagnose the estimation procedure in the pre-treatment period where the true effect is zero. 
+
+73 Proposed Methodology: Gaussian Process Estima-tion for ITS 
+
+Building on the identification result of Theorem 1, this section introduces a general estimation strategy and proposes a GP estimator (Rasmussen et al., 2006). 
+
+# 3.1 A General Estimation Procedure 
+
+Theorem 1 reduces causal identification to a function learning problem: estimate gi(·) from pre-treatment data and evaluate it at each post-treatment input. An ideal estimator would recover the target at the test input, 
+
+E[ˆ gi(Xit ∗ ) | Xi, pre , Xit ∗ ] = gi(Xit ∗ ), (10) with the expectation over the pre-treatment noise. We do not assume (10). The GP posterior mean is a regularised estimator that shrinks toward the prior away from the data, so (10) holds only in the limit under extrapolation. We therefore bound the learning error directly through the GP posterior variance (Section 4). The estimation procedure runs in four steps. (a) For each unit i, estimate gi from the pre-treatment data ( Xi, pre , Y i, pre ) to obtain ˆ gi. (b) For each post-treatment period t∗ ≥ t0, predict the counterfactual outcome ˆYit ∗ (0) = ˆ gi(Xit ∗ ). (c) Estimate the treatment effect ˆ τit ∗ = Yit ∗ − ˆgi(Xit ∗ ). (d) Aggregate to the summary estimands of Section 3.4 as needed. The procedure imposes no apriori restriction on the temporal pattern of treatment effects, such as the step, pulse, or gradual transfer functions of the standard ITS toolkit (McDowall et al., 2019; Schaffer et al., 2021); the shape of τit ∗ over t∗ emerges from the data. Any learner for gi slots into step (a) without disturbing the causal interpretation established in Theorem 1. 
+
+# 3.2 Gaussian Process Estimation 
+
+Standard ITS approaches assume parametric forms that risk misspecification bias and undercover-age under unmodelled nonlinearities. We estimate gi by GP regression, which suits the ITS setting on three counts. It carries temporal dependence through the kernel rather than a fixed functional form, its predictive uncertainty grows with extrapolation distance, and the kernel encodes domain knowledge while regularising against overfitting, a combination standard for time series prediction (e.g., Gibson et al., 2012). We model the untreated potential outcome for unit i at time t as 
+
+Yit (0) = fi(Xit ) + εit , fi ∼ GP (0 , k ), εit ∼ N (0 , σ 2), (11) where fi is a unit-specific latent function and k is a positive-definite covariance function encoding assumptions about the smoothness and structure of the underlying process; the matrix Kpre , with 
+
+8elements Ktt ′ = k(Xit , Xit ′ ), collects its evaluations at the pre-treatment inputs. Normality of εit 
+
+enters only the posterior computation and the marginal likelihood used for hyperparameter tuning; neither Theorem 1 nor the bias decomposition of Proposition 1 relies on it. The target function is 
+
+gi(Xit ) = E[Yit (0) | Xit ]; under Assumption 1 it is recoverable from pre-treatment data, and the GP posterior mean ˆ gi is our estimator of gi.
+
+Posterior Prediction and Inference. Given pre-treatment data ( Xi, pre , Y i, pre ) and post-treatment covariate values Xi, post , the posterior predictive distribution over counterfactual out-comes is (Rasmussen et al., 2006): 
+
+Yi, post (0) | Yi, pre , Xi, pre , Xi, post ∼ N (μpost , Σpost ),
+
+μpost = Kpost,pre (Kpre + σ2I)−1Yi, pre , (12) 
+
+Σpost = Kpost + σ2I − Kpost,pre (Kpre + σ2I)−1Kpre,post , (13) where Kpost,pre has ( t∗, t )-entry k(Xit ∗ , Xit ) and Kpost has ( t∗, t ∗∗ )-entry k(Xit ∗ , Xit ∗∗ ). Writing 
+
+kt∗ for the row of Kpost,pre at t∗, the corresponding entry of μpost is the GP posterior mean ˆgi(Xit ∗ ) = k⊤ 
+
+> t∗
+
+(Kpre + σ2I)−1Yi, pre , and the diagonal entry of Σpost is the posterior predictive variance. Section 4 establishes that the GP posterior variance controls the learning error pointwise. 
+
+Kernel Specification. The kernel k(Xt, Xt′ ) = cov( f (Xt), f (Xt′ )) sets the covariance between function values at any two inputs, so that inputs closer in the covariate space receive higher co-variance. Each kernel induces a RKHS Hk of functions representable as weighted combinations of kernel evaluations, and the norm ∥f ∥Hk measures the complexity of f relative to the kernel, with functions built from directions the kernel treats as smooth carrying a small norm and rougher functions a large one. Section 4 puts this norm to work as the budget that disciplines extrapolation. As a starting point we take the Gaussian kernel, 
+
+kGaussian (X, X′) = exp 
+
+
+
+− ∥X − X′∥2
+
+b
+
+
+
+, (14) which is universal, so gi is taken as smooth but otherwise unrestricted in shape (Micchelli et al., 2006). In our setting it encodes the assumption that temporally proximate observations with similar covariate values have similar function values. 
+
+Combining Kernels. The Gaussian kernel is stationary, so predictions far from the pre-treatment data revert to the prior mean with uncertainty bounded by the marginal prior variance, a ceiling that suits local extrapolation but not longer horizons. Sums of valid covariance functions are valid covariance functions (Rasmussen et al., 2006), so components can be assembled to suit an 
+
+9application (Duvenaud et al., 2013); our working form is 
+
+kcombined (X, X′) = kGaussian (X, X′) + kperiodic (X, X′) + klinear (X, X′). (15) The periodic kernel kperiodic (X, X′) = exp  −2 sin 2(π|X − X′|/p ) / (b/ 2)  captures seasonal patterns with period p, assigning maximum covariance to time points separated by integer multiples of p
+
+(MacKay et al., 1998). The linear kernel klinear (X, X′) = X⊤X′ models trends that extend beyond the observed data, so predictive uncertainty grows with distance from the pre-treatment support; we use the homogeneous form, which keeps all components at the same degree and stays conserva-tive when the post-treatment window is much shorter than the pre-treatment period. Scaling the outcome to unit variance fixes the signal variance at one and the relative weight of the three com-ponents, a reparameterisation that preserves the function space (Cho et al., 2026). The Gaussian term dominates at short temporal distances and the linear term at long ones, hence the trend com-ponent matters most where extrapolation uncertainty is greatest. Where a particular composition is hard to defend, researchers can report how conclusions move across specifications. 
+
+Hyperparameter Selection. We center and scale each continuous covariate and the outcome to zero mean and unit variance within every unit, and one-hot encode categorical covariates such as the month and day-of-week indicators of our applications, so that the kernel reads all coordinates on a common scale; Supplementary Material F gives all the details. Including period indicators in 
+
+Xit lets the kernel learn period-specific baselines without additional parametric mean functions to be estimated. The length-scale b controls how rapidly covariance decays with temporal distance, with larger b concentrating the prior on smooth, low-frequency functions and smaller b admitting more rapid fluctuations. We select it by the variance-maximisation rule of Hartman et al. (2025), ˆb = argmax 
+
+> b
+
+V(Kij ) for i̸ = j, where Kij are the off-diagonal entries of Kpre . The objective locates the length-scale at which the pairwise covariances are most spread out, avoiding values that drive every entry toward near zero or one. Marginal likelihood (all hyperparameters combined) and cross-validation optimize against outcome data and risk overfitting under extrapolation, whereas this rule reads only the covariate structure, keeping the design and analysis stages separate (Chattopadhyay and Zubizarreta, 2023). Supplementary Material F re-estimates all effects across a broad range of 
+
+b and reports that the findings are robust. The period p is set from the data’s natural cycle, for instance p = 12 for monthly data, or from the periodogram of the detrended series when unknown. 
+
+Noise Variance and Regularisation. With the length-scale hyperparameter fixed at ˆb, we estimate σ2 by maximising the marginal likelihood, ˆ σ2 = argmax 
+
+> σ2
+
+log p(Yi, pre | Xi, pre , b, σ 2). This parameter is both the irreducible noise and a regulariser, since the posterior mean solves ˆgi = argmin  
+
+> f∈H k
+
+X
+
+> t<t 0
+
+ Yit − f (Xit )2 + σ2∥f ∥2 
+
+> Hk
+
+, (16) 
+
+10 so σ2 penalises the RKHS norm and pulls the estimate toward the directions the kernel represents cheaply (i.e., smooth). Fitting σ2 by marginal likelihood does not reintroduce the overfitting that the covariate-only rule for b avoids, since σ2 is a single scalar fitted with b already fixed. 
+
+# 3.3 Placebo Checks 
+
+Our identification strategy requires that gi, learned from pre-treatment data, remain valid for counterfactual prediction after t0. Pre-treatment periods, where no treatment was applied, serve as held-out targets for checking this plausibility (Eggers et al., 2023). The exercise parallels the pre-trends check in difference-in-differences, run temporally and within-unit. The procedure pretends that treatment began before its actual onset (cf. Liu et al., 2024). Take the last M pre-treatment periods {t0 − M, . . . , t 0 − 1} as a placebo post-treatment window, for instance matching the length of the actual one, and define relative time m = −(M − 1) , . . . , −1, 0, with m = 0 the period immediately before onset. For each m we fit the GP on all periods before 
+
+t0 + m and form the placebo estimate ˆτ placebo  
+
+> i,m
+
+= Yi, t 0+m − ˆg(t0+m) 
+
+> i
+
+(Xi, t 0+m), m = −(M − 1) , . . . , −1, 0, (17) where ˆ g(t0+m) 
+
+> i
+
+is the GP posterior mean trained on {1, . . . , t 0 + m − 1}. No treatment is applied at a placebo target, so under an adequate kernel the estimate should fall near zero with intervals that cover it. Equation (17) reproduces the one-step-ahead extrapolation the estimator performs at the first post-treatment period, the shortest and least demanding horizon, so a clean result is a necessary bar rather than a guarantee for longer horizons. The placebo serves two roles. First, it is a calibration check on the learning step, since systematic placebo error implicates the kernel rather than treatment. Second, it is a one-sided check on Assumption 1, and the asymmetry is logical. No pre-treatment statistic can confirm that Xit is a sufficient conditioning set, so the placebo can only falsify. A confounder inside the training window is absorbed into ˆ gi and leaves placebo error near zero even when the same disturbance, persisting past t0, violates Mean Sufficiency. A clean placebo therefore reports the absence of detected instability, not confirmation of the assumptions. Where feasible we might pair temporal placebos with placebo outcomes (see Felton, 2023); Supplementary Material E reports the comparison for each application. 
+
+# 3.4 Aggregation for Panel Data 
+
+With N units over common periods, we fit a separate GP to each unit’s pre-treatment series and predict unit-specific counterfactuals ˆ gi(Xit ∗ ). Fitting unit by unit accommodates arbitrary heterogeneity in temporal trajectories, at the cost of not borrowing strength across units. The unit-specific effect estimate is ˆ τit ∗ = Yit ∗ − ˆgi(Xit ∗ ), with prediction intervals from each unit’s GP posterior predictive variance. Summary estimands aggregate the unit- and period-specific effects 
+
+11 ˆτit ∗ over units at a fixed period, or over the post-treatment periods of a fixed unit as a mean or a cumulative total: ˆ¯τt∗ = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+ˆτit ∗ , ˆ¯τi = 1
+
+T − t0 + 1  
+
+> T−t0
+
+X
+
+> s=0
+
+ˆτi,t 0+s, ˆτi, cum =
+
+> T
+
+X
+
+> t∗=t0
+
+ˆτit ∗ . (18) Because each unit’s GP is fitted independently, the posterior predictive distributions are indepen-dent across units conditional on the data, and prediction intervals for the aggregate estimands follow from the Gaussian posterior. The independence is a modelling choice rather than a feature of the data, holding when common structure is pre-treatment and absorbed into each ˆ gi; common shocks or spatial spillovers enter each unit’s own temporal pattern rather than a cross-unit covari-ance (cf. Ben-Michael et al., 2023). At the unit level this is conservative, regularising each series on its own and paying for it in wider intervals; the conservativeness does not carry over to aggregates under positive cross-unit dependence. 
+
+# 4 Theoretical Properties of Gaussian Process Estima-tor 
+
+Several sources of error may cause the GP posterior mean ˆ g(Xt∗ ) to deviate from the true Yt∗ (0). This section decomposes the estimation error into four interpretable components, derives a bias result isolating the role of each, and connects the GP posterior variance to a worst-case bound on the learning error through RKHS theory. 
+
+# 4.1 Setup and the Four Functions 
+
+We suppress the unit subscript i throughout; all objects are unit-specific and the analysis applies unit by unit. The structural model (3) defines hi(Xt, Ut), which depends on both observables and unobservables, and the CEF g(Xt∗ ) = E[Yt∗ (0) | Xt∗ ] integrates out Ut so that only observables remain. When estimation is carried out in an RKHS Hk, two more arise. Fix a complexity budget 
+
+B > 0, the RKHS norm we are willing to grant the counterfactual. The best approximation within budget 
+
+g∗ = argmin  
+
+> f∈F B
+
+∥f − g∥L2(PX) (19) is the closest function to g in FB , and g∗ = g when g ∈ F B . The L2(PX ) criterion makes the minimizer unique and aligns with the spectral machinery of Section 4.3; in the leading case g sits inside the ball and the criterion does no work. The norm bound makes g∗ well defined, since a universal kernel drives the infimum to zero along functions of diverging norm; Supplementary Material B measures this budget on the series of our application. The GP estimator ˆg(Xt∗ ) = 
+
+k⊤ 
+
+> t∗
+
+(Kpre +σ2I)−1Ypre , where kt∗ = ( k(Xt∗ , X1), . . . , k (Xt∗ , Xt0−1)) ⊤, is the GP posterior mean. By 
+
+12 the representer theorem (Kimeldorf and Wahba, 1970), this lies in the finite-dimensional empirical subspace Spre = span {k(·, Xt) : t = 1 , . . . , t 0 − 1} ⊂ H k. Table 1 summarises these four functions. 
+
+Table 1. Functions in the bias decomposition for counterfactual prediction. Function Definition Governed by 
+
+h(Xt, Ut) Structural function Observables + unobservables 
+
+g(Xt) CEF: E[Yt(0) | Xt] Observables only 
+
+g∗(Xt) Best Hk approximation of g Kernel choice ˆg(Xt) GP estimator in Spre Kernel + training data 
+
+# 4.2 Bias Decomposition 
+
+The accuracy of ˆ τt∗ depends on how well ˆ g(Xt∗ ) approximates the untreated potential outcome 
+
+Yt∗ (0). Substituting Yt∗ (0) = h(Xt∗ , Ut∗ )+ εt∗ and inserting g and g∗ decomposes the counterfactual prediction error as ˆτt∗ − δt∗ = Yt∗ (0) − ˆg(Xt∗ ) (20) = [ h(Xt∗ , Ut∗ ) − g(Xt∗ )] 
+
+| {z }
+
+> I: identification
+
++ [ g(Xt∗ ) − g∗(Xt∗ )] 
+
+| {z }
+
+> II: approximation
+
++ [ g∗(Xt∗ ) − ˆg(Xt∗ )] 
+
+| {z }
+
+> III: learning
+
++ εt∗
+
+|{z} 
+
+> IV: noise
+
+. (21) The four right-hand terms trace prediction error through successive layers, from the unobservable structural function h, through the identifiable target g, to the best RKHS approximation g∗, and finally to the finite-sample estimator ˆ g. The decomposition targets Yt∗ (0) − ˆg(Xt∗ ), which equals ˆτt∗ − δt∗ ; the error for the primary estimand, ˆ τt∗ − τt∗ = g(Xt∗ ) − ˆg(Xt∗ ), involves only Terms II and III, since Yt∗ (1) cancels. 
+
+Term I: Identification error. The discrepancy between h(Xt∗ , Ut∗ ) and g(Xt∗ ) measures how much not observing Ut∗ biases the prediction. By definition of g as a conditional expectation, 
+
+E[Term I | Xt∗ ] = 0; under Assumption 1, h = g almost surely and Term I vanishes. 
+
+Term II: Approximation error. The gap between the true CEF g and the best approxima-tion within the budget. It is zero when ∥g∥Hk ≤ B and persists otherwise, however much training data accumulates. A universal kernel is dense in the continuous functions on a compact domain (Micchelli et al., 2006), so it approximates g to any tolerance, but the norm of the approximants grows as the tolerance shrinks (Supplementary Material B.3.1). The combined kernel keeps the budget small for such targets, carrying a trend in its linear component at a horizon-independent cost rather than at a cost that grows with the length of the series. 
+
+Term III: Learning error. The gap between the best approximation g∗ and the estimate ˆg recoverable from the finite training sample. Even when Term II vanishes, so that g∗ = g, the representer theorem confines ˆ g to the empirical subspace Spre , so the part of g∗ outside that span 
+
+13 is unreachable from the observed inputs, and inside the span the ridge term σ2 penalises ∥ˆg∥Hk
+
+and deliberately biases the fit toward smoother functions. Proposition 2 splits this error into a deterministic part and mean-zero noise propagation and controls each through a summand of the GP posterior variance. 
+
+Term IV: Noise. The irreducible error εt∗ , with E[εt∗ | Xt∗ , Ut∗ ] = 0 by the structural model (3), contributing σ2 to the variance but nothing to the bias. Taking the conditional expectation of the four-term decomposition pins down which terms survive in the bias. 
+
+Proposition 1 (Conditional Bias) . Under the structural model (3) , Assumption 1, and E[εt∗ |
+
+Xpre , Xt∗ ] = 0 , the conditional bias of ˆτt∗ for δt∗ satisfies 
+
+E[ˆ τt∗ − δt∗ | Xpre , Xt∗ ] = g(Xt∗ ) − g∗(Xt∗ )
+
+| {z }
+
+> approximation bias
+
++ E[g∗(Xt∗ ) − ˆg(Xt∗ ) | Xpre , Xt∗ ]
+
+| {z }
+
+> learning bias
+
+. (22) The conditional bias is controlled by two gaps: how far g sits from FB and how much of g∗ the training inputs cannot reach. The approximation bias is deterministic given Xt∗ . The learning bias vanishes when ˆ g is unbiased for g∗, the ideal benchmark (10) with g∗ = g, and is in general nonzero; Proposition 2 bounds its worst case. Terms I and IV drop out for different reasons. Term I has mean zero given Xt∗ by the definition of g, but serial dependence can let Xpre carry information about Ut∗ ; Assumption 1 closes this gap by setting h = g almost surely. Term IV drops out under the weaker requirement that εt∗ be mean-independent of Xpre given Xt∗ ; the noise contributes no bias but persists in the pointwise error, adding σ2 to the posterior predictive variance. 
+
+# 4.3 RKHS Interpretation of GP Posterior Variance 
+
+The GP posterior mean coincides with the kernel ridge regression estimator in Hk (Kimeldorf and Wahba, 1970), so as a point predictor it has a frequentist counterpart. Kernel ridge regression returns a point estimate; the GP additionally returns a posterior variance, whose two summands control the deterministic and stochastic parts of the learning error (Term III) (Rasmussen et al., 2006, Ch. 6); Kanagawa et al. (2025) give a recent treatment of the GP–RKHS connection. 
+
+Proposition 2 (GP posterior variance controls the learning error) . Suppose g lies in the unit ball 
+
+F1, so that g∗ = g, and suppose outcomes are observed with noise, Yt = g∗(Xt) + εt, where εt
+
+are mean-zero with variance σ2 > 0. The GP posterior mean is the weighting estimator ˆg(Xt∗ ) = 
+
+P 
+
+> t
+
+wtYt with weights w = ( Kpre + σ2I)−1kt∗ , and its posterior variance is 
+
+Vt∗ = k(Xt∗ , Xt∗ ) − k⊤ 
+
+> t∗
+
+(Kpre + σ2I)−1kt∗ .
+
+Let k⊥ 
+
+> t∗
+
+= k(·, Xt∗ ) − P 
+
+> t
+
+wt k(·, Xt) be the residual of the test feature after its ridge reconstruction from the training features Spre = span {k(·, Xt)}, coinciding with the orthogonal-projection residual 
+
+14 onto Spre as σ2 → 0. Then the learning error decomposes as 
+
+g∗(Xt∗ ) − ˆg(Xt∗ ) = 
+
+
+
+g∗(Xt∗ ) − P 
+
+> t
+
+wt g∗(Xt)
+
+| {z }
+
+> deterministic error
+
+− P 
+
+> t
+
+wt εt
+
+| {z }
+
+> noise propagation
+
+,
+
+and its two sources are controlled by the two summands of the GP posterior variance: 
+
+g∗(Xt∗ ) − X
+
+> t
+
+wtg∗(Xt) ≤ ∥ k⊥ 
+
+> t∗
+
+∥Hk , Var  X 
+
+> t
+
+wtεt
+
+ = σ2∥w∥2, ∥k⊥ 
+
+> t∗
+
+∥2 
+
+> Hk
+
++ σ2∥w∥2 = Vt∗
+
+| {z }
+
+> GP posterior variance
+
+.
+
+Therefore Vt∗ bounds the worst case of the deterministic error through its first summand and carries the exact variance of the propagated noise in its second. 
+
+A proof is given in Supplementary Material B. Restricting to F1 costs no generality, since over FB
+
+the worst-case bound scales to B ∥k⊥ 
+
+> t∗
+
+∥Hk and the noise term is unchanged; the learning bias of Proposition 1 is then bounded by ∥g∗∥Hk ∥k⊥ 
+
+> t∗
+
+∥Hk , a product of what the target costs and what the design cannot see. The geometric factor ∥k⊥ 
+
+> t∗
+
+∥Hk is the part of the test feature the training inputs cannot reconstruct, and it grows as Xt∗ leaves the pre-treatment support. Under a stationary kernel it never exceeds pk(Xt∗ , Xt∗ ), a constant, so the band flattens at long horizons and any further growth in the error must come through the budget. The Gaussian RKHS contains no non-trivial linear function, and tracks a trend only through elements whose norm grows at least linearly with the window’s length (Supplementary Material B.3.1), so the band flattens where the budget inflates. The combined kernel mitigates this: by the Aronszajn identity (Aronszajn, 1950), any decomposition g = glin + gper + gGaussian yields 
+
+g∗(Xt∗ ) − P 
+
+> t
+
+wt g∗(Xt) ≤
+
+q
+
+∥glin ∥2 
+
+> Hlin
+
++ ∥gper ∥2 
+
+> Hper
+
++ ∥gGaussian ∥2 
+
+> HGaussian
+
+∥k⊥ 
+
+> t∗
+
+∥Hk , (23) charging each structure where it is cheapest, with ∥glin ∥Hlin = ∥β∥ depending only on the slope and not the horizon. A counterfactual needing B > 1 leaves the reported interval short by that factor on the deterministic part. Two design choices hold B near one: the unit-variance standardisation of Section 3.2 fixes the scale, and the Aronszajn split charges trend and seasonality where their cost is horizon-independent. On the Heller series a unit-variance trend needs B = 0 .96 under the combined kernel and B = 3 .52 under a Gaussian-only kernel. This finite-sample bound, not an in-support L2 convergence rate, is the operative guarantee off support, because the fill distance at 
+
+Xt∗ is fixed by the study design and does not shrink with the pre-treatment length (Supplementary Material B.3.4). Let Tk be the kernel integral operator—a smoothing map that replaces a function’s value with a kernel-weighted average of its values—with eigenvalues μ1 ≥ μ2 ≥ · · · > 0 indexing the spectral directions of Hk. Applying T rk damps the small-eigenvalue directions, so the source condition of order r ≥ 0, g∗ = T rk v with ∥v∥Hk ≤ 1, asks that g∗ be built from directions the kernel represents cheaply, more strictly for larger r (Supplementary Material B.3.3). The deterministic learning error 
+
+15 then obeys 
+
+g∗(Xt∗ ) − P 
+
+> t
+
+wt g∗(Xt) ≤ T rk k⊥  
+
+> t∗Hk
+
+≤ μr 
+
+> 1
+
+∥k⊥ 
+
+> t∗
+
+∥Hk , (24) with r = 0 recovering Proposition 2. The middle quantity is the exact worst case over targets of order r, and the right-hand side trades sharpness for an explicit constant. Alignment therefore tightens the extrapolation bound itself, not only the in-support rate for which the source condition is usually invoked (Supplementary Material B.3.3). These bounds carry a frequentist meaning that does not treat g as a draw from the prior. The realised unit, its covariates, and the target g are held fixed, and the only randomness is the idiosyncratic noise within the observed series. The worst case is an adversarial choice of the counterfactual, attained by the trajectory that spends its entire budget on the direction the training periods cannot see, g∗ ∝ k⊥ 
+
+> t∗
+
+.The GP posterior mean is also minimax-optimal at the extrapolation points: no estimator built from the same pre-treatment data has a smaller worst-case error over the unit ball, and the reported band does not merely bound the minimax risk but equals it (Supplementary Material B). With noiseless training the geometry is the whole story (Corollary B.1), |g∗(Xt∗ ) − ˆg(Xt∗ )| ≤ ∥ k⊥ 
+
+> t∗
+
+∥Hk =
+
+√Vt∗ ; with σ2 > 0 the second summand adds the variance σ2∥w∥2 of the propagated noise. The same geometry also caps how far any two admissible counterfactuals can disagree at t∗, and the pair ±B k ⊥ 
+
+> t∗
+
+/∥k⊥ 
+
+> t∗
+
+∥Hk attains the cap, so it measures the extrapolation uncertainty of the class itself in the sense of Definition 1, ωB (Xt∗ ) = 2 B ∥k⊥ 
+
+> t∗
+
+∥Hk (Supplementary Material B.4). The band’s half-width at t∗ is ωB (Xt∗ )/2, so drawn across horizons it traces the extrapolation profile of the model class. This interval’s breadth is the point of the method. The GP keeps the rival continuations the kernel admits and lets their spread set the post-treatment uncertainty. Read backwards, a researcher who claims an effect should argue that the counterfactual trajectory belongs to a class narrow enough for the interval to exclude zero, and the class that sustains the claim is visible in the reported band. Enriching the set of admissible continuations can only widen the interval, so the conclusion rests on the excluded trajectories as much as on the included ones. 
+
+# 5 Calibrated Simulation Studies 
+
+Setup. To construct a realistic simulation design, we base the DGPs on the monthly series of our empirical illustration (Section 6), a seasonal outcome observed over a short pre-treatment window above a smooth trend. Our interest is deliberately narrow. Point forecasts are easy to compare across methods, but the main benefit of our proposed method is to deliver an interval whose width tracks what the pre-treatment record pins down. We ask whether each method’s nominal 95% interval covers the counterfactual at its stated rate, and how coverage changes with the pre-treatment length. We generate monthly outcomes yt = g(t) + εt for t = 1 , . . . , n pre + 12, with εt ∼ N (0 , σ 2), 
+
+16 treatment beginning at t0 = npre + 1, a fixed twelve-month post-treatment horizon, and a constant effect τ added over that horizon. A small random Gaussian bump displaces each trend from a clean closed form. We consider three regimes for g that share the monthly seasonality and short record of the appli-cation but place the target at increasing distance from the estimator (see Supplementary Material C for more details). The first, Smooth , is a draw from a kernel-based DGP, so the approximation error (Term II of Section 4) is negligible; the estimator still tunes its own hyperparameters, so the target is not exactly in its span. The second, Nonlinear trend , places a milder seasonal term on a concave, decelerating trend that mimics a bounded growth path. The third, Saturating trend , sets a strong annual cycle above a levelling trend where seasonality dominates and the trend flattens at both ends. We fit the GP as in the application of Section 6 and compare it with three benchmarks: (i) a segmented regression carrying a linear pre-trend and an annual harmonic, (ii) C-ARIMA (Menchetti et al., 2023), and (iii) CausalImpact , a Bayesian structural time-series model (Brodersen et al., 2015). For each regime we let npre run from 12 to 120 months in steps of twelve, draw 500 replications at each length, and calculate the absolute bias, the root-mean-squared error (RMSE) and the coverage rate across the post-treatment window. 
+
+Results. Figure 2 reports the three metrics, and the coverage panels carry the main message the theory leads us to expect. The GP stays at or above its nominal rate even at the shortest pre-treatment, a widening that the worst-case reading of Section 4 justifies. The benchmarks differ in how their intervals respond to extrapolation. A segmented regression’s interval reflects the residual variance around its fitted value and does not widen as the forecast leaves that form, so its coverage sits well below nominal. C-ARIMA is close to calibrated once it is given the seasonal period, though it under-covers when the pre-treatment window is short. The coverage of CausalImpact moves sharply with the pre-treatment length as its state components are re-estimated at each sample size, dropping below nominal at intermediate length before recovering. Point estimation improves with the pre-treatment record for every method, and the methods separate less on bias and RMSE than on coverage, with the GP competitive throughout. 
+
+# 6 Empirical Application 
+
+Did the Supreme Court’s decision in District of Columbia v. Heller (2008) affect legal handgun purchases? On June 26, 2008, the Court ruled that the Second Amendment protects an individual right to keep and bear arms for self-defence. The ruling is a universal treatment, binding every jurisdiction at once, but its practical reach was narrow: it struck down only D.C.’s comprehensive handgun ban, in effect since the late 1970s, so D.C. went from a near-total ban to legal purchasing overnight while residents elsewhere could already purchase handguns. Effects outside D.C. would 
+
+17 Smooth Nonlinear trend Saturating trend Absolute bias  RMSE  Coverage 25 50 75 100 125 25 50 75 100 125 25 50 75 100 125 0.0 0.5 1.0 1.5 2.0 0.5 1.0 1.5 2.0 2.5 0.2 0.4 0.6 0.8 1.0 Pre-treatment length npre GP Segmented (linear) C-ARIMA CausalImpact Figure 2. Absolute bias, RMSE and 95% coverage against the pre-treatment length npre ,over a fixed twelve-month horizon and 500 replications, for three scenarios (columns). Bias is that of the average post-treatment effect; RMSE and coverage are computed at each post-treatment period and then averaged. The GP (black) is compared with a segmented regression, C-ARIMA and CausalImpact . Shaded bands are Monte-Carlo 95% intervals. The GP stays at or above its nominal rate in every scenario. 
+
+Alt text: Grid of line plots comparing four estimation methods across three simulation regimes, with rows for absolute bias, root mean squared error, and coverage plotted against the pre-treatment length. 
+
+materialise only through later litigation, as in McDonald v. Chicago (2010), or regulatory adap-tation. Standard panel methods do not apply, since there are no untreated controls and D.C.’s pre-treatment trajectory is unlike that of jurisdictions with active handgun markets. The question is not treated versus control but where and when a universal treatment has practical bite, and fitting GP-ITS independently to every jurisdiction should recover a large immediate effect in D.C. and null estimates elsewhere if its counterfactuals are well calibrated. The data are a monthly panel with seasonal structure and a short post-treatment window, 
+
+18 placing weight on the periodic and linear components of the Gaussian+Periodic+Linear kernel. Supplementary Material D applies the same estimator to two further settings on daily series with different temporal structure, All-Women Police Stations in India (Jassal, 2020) and the Russian invasion of Ukraine (Damann et al., 2024). We measure handgun purchases using monthly background check rates per 100,000 popula-tion from the FBI’s National Instant Criminal Background Check System (NICS), a reliable proxy for new purchases (Steidley and Kosla, 2018). The raw monthly series appears in Supplementary Material E. The panel covers all U.S. states and D.C. except Hawaii, whose record is incomplete, giving N = 50 jurisdictions. The post-treatment window covers only July–October 2008, ending before the November presidential election, since Obama’s victory might have introduced political anxiety about future gun restrictions, a distinct treatment that would confound attribution to 
+
+Heller . Anticipation is an obvious threat to event-based designs, which it can contaminate even when the specific outcome remains uncertain (Bertoli et al., 2026), but D.C.’s near-total ban struc-turally precluded preemptive legal handgun purchases, which keeps no anticipation plausible here. Supplementary Material D.3 discusses each assumption in detail. 
+
+Model. We employ the composite Gaussian+Periodic+Linear kernel to capture the temporal structure of the series, with the Gaussian component carrying local temporal dependence, the periodic component annual seasonality at p = 12, and the linear component the long-run trend. Month indicators enter as covariates so that the kernel learns month-specific baseline levels. 
+
+Illustrative Cases: D.C. and Washington State. We begin with two jurisdictions that bracket the range of expected effects: D.C., whose handgun ban was directly struck down, and Washington state, a representative case with no immediate policy change (Figure 3). For D.C., the treatment effect is immediate and substantial, remaining significant throughout the four-month post-treatment period, while the placebo checks (blue) cluster near zero. Washington state, by contrast, exhibits effects indistinguishable from zero, with the GP capturing its pre-treatment seasonality and increasing trend, propagating the associated uncertainty into the post-treatment period. 
+
+Localised Heller Effect and Nationwide Null. Figure 4 presents unit-specific effects across all 50 jurisdictions. The left panel displays cumulative treatment effects for the four-month post-treatment period, standardised within each unit so that the panel ranks jurisdictions relative to their own pre-treatment variability. D.C. (red) is a distinct outlier with a large positive cumulative effect, and the remaining units cluster around zero, the pattern the substantive account predicts. Because the near-total ban holds D.C.’s pre-treatment series near zero, its suppressed variance inflates the standardised scale, so we report the magnitude on the count and per-capita scales instead. The cumulative four-month effect for D.C. is 15 .1 additional checks per 100,000 population, with a 95% interval of [13 .0, 17 .3], roughly 90 additional background checks. 
+
+19 02468Jan 2004 Jan 2006 Jan 2008 Months Handgun Background Checks Observed Y Counterfactual Y 2008-07-01 
+
+A  
+
+> -2.5 0.0 2.5 5.0 7.5 10.0 -3 03Months Since Heller Decision Effect of Heller Decision
+
+BDistrict of Columbia 
+
+> 60 90 120 Jan 2004 Jan 2006 Jan 2008 Months Handgun Background Checks
+
+C  
+
+> -25 025 50 75 -3 03Months Since Heller Decision Effect of Heller Decision
+
+DWashington State Figure 3. Model Fit and Dynamic Treatment Plot for D.C. and Washington State. Note: 
+
+The top row shows results for D.C., the bottom row for Washington state. Left panels show observed outcomes (black dots), the fitted GP (grey bands), and the predicted counterfactual (red bands); right panels the month-specific effects for the four post-treatment months (grey) and four placebo months (blue). Vertical dashed lines mark the Heller decision. 
+
+Alt text: Model fit and treatment effect plots for two jurisdictions in the Heller application, showing fitted values and monthly effect estimates with placebo periods. 
+
+The right panel traces the national average effect ˆ ¯τt∗ over time, and the cumulative version confirms the same flat path, matching the absence of a practical policy change outside D.C. That an independent GP per jurisdiction isolates the D.C. effect while leaving the rest null is what well-calibrated unit-specific counterfactuals would produce. The same pattern speaks to the anticipation concern. Had the D.C. estimates reflected anticipatory purchasing ahead of the November election rather than the ruling, similar anticipation should appear elsewhere, since gun owners in other jurisdictions had equal reason to read the electoral signal. No nationwide effect appears during 
+
+20 MO VA NC ID NE WA IL MT IN MN CT UT SC PA OR NY KY WI ND SD AZ LA OH MA OK WY AR FL TN TX MI AL KS NM WV IA MD ME CA MS VT CO NH GA DE AK RI NJ NV DC 0 10 20 30 40 (Standardized) Cumulative Effect Cumulative Effect (Standardized) A   
+
+> -50 050 100 150 -4 -2 02
+
+Months Since Heller Decision National Average Effect BFigure 4. Heterogeneous and Nationwide Effects of the Heller Decision on Handgun Pur-chases. Note: The left panel gives unit-specific standardised cumulative effects for the four months following the decision, with 95% prediction intervals. The right panel gives the es-timated national average treatment effect ˆ ¯τt∗ by month. 
+
+Alt text: Summary of heterogeneous treatment effects across fifty jurisdictions in two panels, showing standardised cumulative effects and the national average effect over time. 
+
+July–October 2008, which supports attribution to the ruling rather than to election-related anxiety. As Section 3.3 notes, a placebo check can falsify a method but not confirm it. Under the matched one-step-ahead placebo protocol, segmented regression excludes zero at 58 to 67% of pre-treatment periods, flagging effects where none occurred, whereas the GP flags none. The contrast reproduces what the simulations of Section 5 report: an interval built around a fixed parametric trend does not widen as the forecast leaves that trend. The GP survives a falsification that segmented regression fails. In-sample residuals show no degradation as the treatment date approaches, and a sensitivity analysis across a wide range of b confirms that both the D.C. effect and the null national trend hold (Supplementary Material F). As a complementary validation, Heller addressed only handgun restrictions, so long gun checks serve as a placebo outcome. The standardised cumulative effect on long guns in D.C. is 0 .25, with a 95% interval of [ −5.2, 5.7], consistent with a null where the ruling did not apply. Supplementary Material E reports the cumulative effects, placebo comparisons, residual diagnostics, and long gun analysis. 
+
+21 7 Relation to Existing Approaches 
+
+Counterfactual outcomes draw on two sources of variation, cross-sectional contrasts between treated and untreated units and temporal contrasts within treated units before and after t0. Most designs, including DiD, SC, and their extensions, use both, requiring parallel trends or an untreated donor pool. Universal treatment removes the cross-sectional source, leaving methods that extrapolate temporally; these differ in the structure they impose on the counterfactual trajectory and in how they quantify extrapolation uncertainty. We compare the GP first to time series methods built for this setting and then to designs that rest on cross-sectional comparison. 
+
+Time Series Approaches. Classical ITS methods, from the intervention analysis of Box and Tiao (1975) to segmented regression, fix both the counterfactual trend and the treatment response pattern (e.g., step, pulse, or gradual transfer functions), commitments that aid estimation but constrain the analysis before any post-treatment data are seen. Recent work relaxes parts of this structure, with Miratrix (2022) simulating counterfactual trajectories around a linear prediction model and Felton (2023) imputing counterfactuals from ARIMA fits within the potential outcomes framework. The GP learns temporal dependence through the kernel, and the period-specific esti-mand τit ∗ traces how effects unfold. The CausalImpact method (Brodersen et al., 2015) employs Bayesian structural time series with latent state-space representations. As Hazlett and Xu (2018) show, CausalImpact assumes linearity in prior outcomes (LPO), that the counterfactual is linear in the pre-treatment outcomes. The GP does not escape this, since its posterior mean is a linear smoother , ˆ g(Xt∗ ) = P 
+
+> t
+
+wtYit .What sets it apart is that the weights are fixed by the kernel over the inputs, so the estimator recovers any gi ∈ H k rather than a fixed state-space form, and the posterior variance widens off-support where the state-space intervals do not (Section 4). The kernel relaxes the trend form, not the linearity in outcomes. C-ARIMA (Menchetti et al., 2023) brings ARIMA machinery into the potential outcomes framework and assumes stationarity of the differenced series; the GP places stationarity on the covariance rather than on the process, a weaker requirement. 
+
+Related Identification Strategies. Under simultaneous treatment, DiD and its modern vari-ants lack the contemporaneous controls that parallel trends compares, and synthetic control lacks donors that remain untreated. Where parallel trends governs cross-unit comparisons, Assump-tion 1 governs within-unit temporal stability. SC weights control units to match the pre-treatment trajectory under stable factor loadings, so that the mapping from unobserved factors to outcomes survives treatment; our approach runs the same logic temporally, asking the unit-specific CEF gi
+
+learned from a unit’s own history to remain stable past t0, with this temporal stability substituting for the missing donors. Regression discontinuity in time (RDiT) targets only the immediate effect at the temporal threshold, buying strong internal validity at the cutoff at the price of missing effects that unfold 
+
+22 gradually (Hausman and Rapson, 2018), and it faces difficulties when observations cluster at discrete time points (Bertoli et al., 2026; De la Cuesta and Imai, 2016). Our framework estimates τit ∗ at each post-treatment period and traces how effects evolve or decay. 
+
+# 8 Concluding Remarks 
+
+Universal treatment removes the contemporaneous controls that difference-in-differences and syn-thetic control rely on, leaving an ITS that must extrapolate the counterfactual from the unit’s own history. We show that the GP bounds the worst-case learning error for any counterfactual the kernel represents within a fixed complexity budget, so the reported interval widens with the extrapolation it carries. The approach rests on three components: an identification result stating what the ITS design can and cannot recover, an estimator whose predictive uncertainty grows with extrapolation distance, and an RKHS reading that gives the reported interval its frequentist content. Across the applications the estimator recovers established findings while tracing post-treatment dynamics that a single level shift cannot reveal, and an open-source R implementation accompanies the paper. Several limitations deserve emphasis. Performance depends on the kernel, which encodes how the counterfactual could evolve beyond the data; deeper extrapolation leans on the non-stationary components, where the worst-case bound scales with ∥g∗∥Hk , a quantity the data cannot estimate. The source-condition bounds tighten when the target aligns with the kernel’s leading directions, an order likewise not estimated. Fitting each series on its own forgoes the efficiency that cross-sectional structure could supply, which hierarchical or multi-task formulations (Ben-Michael et al., 2023) could recover for short panels at the cost of assumptions about cross-unit similarity. Computation is a further constraint, since inverting the kernel matrix scales poorly beyond a few thousand observations; sparse approximations (e.g., Titsias, 2009) may extend the method to long daily series. Two extensions merit exploration. The distance-based covariance accommodates irregularly spaced observations without modification, a common feature of administrative and judicial records; our applications use evenly spaced series, and a formal study of performance under missing obser-vations would be valuable. More broadly, the logic developed here applies wherever a credible counterfactual must be extrapolated from a unit’s own history and the conclusions drawn from it must remain extrapolation-aware. 
+
+Data availability The data and code for replication are available at https://github.com/soonhong-cho/gpits. The replication package will be deposited in the Harvard Dataverse upon acceptance. 
+
+# References 
+
+Abadie, A., Diamond, A., and Hainmueller, J. (2010). Synthetic control methods for compara-tive case studies: Estimating the effect of california’s tobacco control program. Journal of the 
+
+23 American statistical Association , 105(490):493–505. Abadie, A. and Gardeazabal, J. (2003). The economic costs of conflict: A case study of the basque country. American economic review , 93(1):113–132. Aronszajn, N. (1950). Theory of reproducing kernels. Transactions of the American mathematical society , 68(3):337–404. Ben-Michael, E., Arbour, D., Feller, A., Franks, A., and Raphael, S. (2023). Estimating the effects of a california gun control program with multitask gaussian processes. The Annals of Applied Statistics , 17(2):985–1016. Bernal, J. L., Cummins, S., and Gasparrini, A. (2017). Interrupted time series regression for the evaluation of public health interventions: a tutorial. International journal of epidemiology ,46(1):348–355. Bertoli, A., Jakli, L., and Pascoe, H. (2026). Analyzing the impact of events through surveys: Formalizing biases and introducing the dual randomized survey design. Political Science Research and Methods , 14(2):255–275. Box, G. E. and Tiao, G. C. (1975). Intervention analysis with applications to economic and environmental problems. Journal of the American Statistical association , 70(349):70–79. Brodersen, K. H., Gallusser, F., Koehler, J., Remy, N., and Scott, S. L. (2015). Inferring causal impact using bayesian structural time-series models. Annals of Applied Statistics , 9:247–274. Callaway, B. and Sant’Anna, P. H. (2021). Difference-in-differences with multiple time periods. 
+
+Journal of econometrics , 225(2):200–230. Campbell, D. T. and Stanley, J. C. (1963). Experimental and quasi-experimental designs for re-search . Rand McNally. Card, D. and Krueger, A. B. (1994). Minimum wages and employment: A case study of the fast-food industry in new jersey and pennsylvania. American Economic Review , 84(4):772–793. Cerqua, A., Letta, M., and Menchetti, F. (2023). Causal inference and policy evaluation without a control group. arXiv preprint arXiv:2312.05858 .Chattopadhyay, A. and Zubizarreta, J. R. (2023). On the implied weights of linear regression for causal inference. Biometrika , 110(3):615–629. Cho, S., Kim, D., and Hazlett, C. (2026). Inference at the data’s edge: Gaussian processes for estimation and inference in the face of extrapolation uncertainty. Political Analysis , pages 1–20. Damann, T. J., Kim, D., and Tavits, M. (2024). Women and men politicians’ response to war: Evidence from ukraine. International Organization , pages 1–20. De la Cuesta, B. and Imai, K. (2016). Misunderstandings about the regression discontinuity design in the study of close elections. Annual Review of Political Science , 19(1):375–396. Duvenaud, D., Lloyd, J., Grosse, R., Tenenbaum, J., and Zoubin, G. (2013). Structure discovery in nonparametric regression through compositional kernel search. In International Conference on Machine Learning , pages 1166–1174. PMLR. 
+
+24 Eggers, A. C., Tu˜ n´ on, G., and Dafoe, A. (2023). Placebo tests for causal inference. American Journal of Political Science , 68(3):1106—-1121. Felton, C. (2023). ‘13 reasons why’ probably increased emergency room visits for self-harm among teenage girls. Sociological Science , 10:930–963. Gibson, N., Aigrain, S., Roberts, S., Evans, T., Osborne, M., and Pont, F. (2012). A gaussian pro-cess framework for modelling instrumental systematics: application to transmission spectroscopy. 
+
+Monthly notices of the royal astronomical society , 419(3):2683–2694. Hartman, E., Hazlett, C., and Sterbenz, C. (2025). Kpop: A kernel balancing approach for reducing specification assumptions in survey weighting. Journal of the Royal Statistical Society Series A: Statistics in Society , 188(3):875–895. Hausman, C. and Rapson, D. S. (2018). Regression discontinuity in time: Considerations for empirical applications. Annual Review of Resource Economics , 10(1):533–552. Hazlett, C. and Xu, Y. (2018). Trajectory balancing: A general reweighting approach to causal inference with time-series cross-sectional data. Available at SSRN 3214231 .Jassal, N. (2020). Gender, law enforcement, and access to justice: Evidence from all-women police stations in india. American Political Science Review , 114(4):1035–1054. Kanagawa, M., Hennig, P., Sejdinovic, D., and Sriperumbudur, B. K. (2025). Gaussian processes and reproducing kernels: Connections and equivalences. arXiv preprint arXiv:2506.17366 .Kimeldorf, G. S. and Wahba, G. (1970). A correspondence between bayesian estimation on stochas-tic processes and smoothing by splines. The Annals of Mathematical Statistics , 41(2):495–502. Liu, L., Wang, Y., and Xu, Y. (2024). A practical guide to counterfactual estimators for causal inference with time-series cross-sectional data. American Journal of Political Science , 68(1):160– 176. MacKay, D. J. et al. (1998). Introduction to gaussian processes. NATO ASI series F computer and systems sciences , 168:133–166. McDowall, D., McCleary, R., and Bartos, B. J. (2019). Interrupted time series analysis . Oxford University Press. Menchetti, F., Cipollini, F., and Mealli, F. (2023). Combining counterfactual outcomes and arima models for policy evaluation. The Econometrics Journal , 26(1):1–24. Micchelli, C. A., Xu, Y., and Zhang, H. (2006). Universal kernels. Journal of Machine Learning Research , 7(12). Miratrix, L. W. (2022). Using simulation to analyze interrupted time series designs. Evaluation Review , 46(6):750–778. Neyman, J. (1923). On the application of probability theory to agricultural experiments. essay on principles (with discussion). section 9 (translated). Statistical Science , 5(4):465–472. Rasmussen, C. E., Williams, C. K., et al. (2006). Gaussian processes for machine learning , volume 1. Springer. 
+
+25 Rubin, D. B. (1974). Estimating causal effects of treatments in randomized and nonrandomized studies. Journal of educational Psychology , 66(5):688–701. Schaffer, A. L., Dobbins, T. A., and Pearson, S.-A. (2021). Interrupted time series analysis using autoregressive integrated moving average (arima) models: A guide for evaluating large-scale health interventions. BMC medical research methodology , 21(1):1–12. Shen, X. and Meinshausen, N. (2025). Engression: extrapolation through the lens of distributional regression. Journal of the Royal Statistical Society Series B: Statistical Methodology , 87(3):653– 677. Steidley, T. and Kosla, M. T. (2018). Toward a status anxiety theory of macro-level firearm demand. 
+
+Social Currents , 5(1):86–103. Sun, L. and Abraham, S. (2021). Estimating dynamic treatment effects in event studies with heterogeneous treatment effects. Journal of econometrics , 225(2):175–199. Titsias, M. (2009). Variational learning of inducing variables in sparse gaussian processes. In 
+
+Artificial intelligence and statistics , pages 567–574. PMLR. 
+
+26 Supplementary Material for: 
+
+# “Let Time Tell: Identification and Gaussian Process Estimation for Interrupted Time Series” 
+
+A Proof of Theorem 1 1B Connections to RKHS Theory 2
+
+B.1 RKHS Preliminaries . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 2B.2 Proof of Proposition 2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3B.3 RKHS of Kernel Sums, Source Condition, and Convergence Rates . . . . . . . . . . . 8B.3.1 Spectral Representation of the RKHS Norm . . . . . . . . . . . . . . . . . . . 9B.3.2 RKHS of Kernel Sums . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10 B.3.3 Source Condition . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11 B.3.4 Convergence Rates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13 B.4 Extrapolation Uncertainty of the Model Class . . . . . . . . . . . . . . . . . . . . . . 15 
+
+C Simulation Details 18 
+
+C.1 Common Structure . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 C.2 Three Regimes . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 C.3 Design Choices . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19 
+
+D Additional Empirical Examples 20 
+
+D.1 All-Women Police Stations and Gender-based Crime . . . . . . . . . . . . . . . . . . 20 D.2 The Russian Invasion of Ukraine . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 D.3 Identifying Assumption Plausibility in the Running Examples . . . . . . . . . . . . . 22 
+
+E Additional Results for the Empirical Applications 25 
+
+E.1 Out-of-Sample Predictive Performance with Placebo Checks: Comparison to Seg-mented Regression . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 E.2 Cumulative National Average Effects . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 E.3 Residual Analysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 E.4 A Pseudo-Placebo Outcome: Long Gun Purchases . . . . . . . . . . . . . . . . . . . 31 
+
+F Details on Covariate Processing and Kernel 31 A Proof of Theorem 1 
+
+Proof of Theorem 1. Fix a unit i and a post-treatment period t∗ ≥ t0. Since Dit ∗ = 1, consis-tency (1) gives Yit ∗ = Yit ∗ (1), so the individual effect δit ∗ = Yit ∗ (1) − Yit ∗ (0) has its treated outcome observed and its untreated outcome missing. Replacing the unobserved Yit ∗ (0) by its conditional mean gives the target estimand (7), and 
+
+τit ∗ = Yit ∗ (1) − E[Yit ∗ (0) | Xit ∗ ] = Yit ∗ − E[Yit ∗ (0) | Xit ∗ ] = Yit ∗ − gi(Xit ∗ ), (A.1) so it remains to identify gi(Xit ∗ ) = E[Yit ∗ (0) | Xit ∗ ] from the observed data. The counterfactual conditional mean coincides with gi by definition. By the structural model (3) and the linearity of conditional expectation, 
+
+E[Yit ∗ (0) | Xit ∗ ] = Ehi(Xit ∗ , Uit ∗ ) + εit ∗ | Xit ∗
+
+
+
+= Ehi(Xit ∗ , Uit ∗ ) | Xit ∗
+
+ + Eεit ∗ | Xit ∗
+
+
+
+=
+
+Z
+
+> U
+
+hi(Xit ∗ , u) dP (Uit ∗ = u | Xit ∗ ) = gi(Xit ∗ ), (A.2) where E[εit ∗ | Xit ∗ ] = EE[εit ∗ | Xit ∗ , Uit ∗ ] | Xit ∗
+
+ = 0 by iterated expectations applied to (3), and the last equality is the definition (4). Identity (A.2) holds for any model of the form (3), with or without Assumption 1; it does not identify gi(Xit ∗ ), since its right-hand side depends on the unobserved distribution P (Uit ∗ | Xit ∗ ) and at t∗ only Yit ∗ = Yit ∗ (1) is observed. Assumption 1 supplies the link. For each t it states E[Yit (0) | Xit , Uit ] = E[Yit (0) | Xit ]; the left-hand side equals hi(Xit , Uit ) and the right-hand side equals gi(Xit ), so 
+
+hi(Xit , Uit ) = gi(Xit ) a.s. , ∀ t. (A.3) Because hi enters (3) with a form not depending on t (Section 2), the gi in (A.3) is common across periods, so the systematic part of Yit (0) depends on Xit alone and is identical before and after t0.It remains to recover gi from pre-treatment data. For t < t 0, consistency (1) and no anticipa-tion (2) give Yit = Yit (0), so by (3) and (A.3), 
+
+Yit = hi(Xit , Uit ) + εit = gi(Xit ) + εit , E[εit | Xit ] = 0 , t < t 0. (A.4) This is a nonparametric regression of the observed Yit on Xit with regression function gi, so gi is identified on the support of Xi, pre . Since (A.3) holds at t∗ with the same gi, evaluating this function at Xit ∗ returns gi(Xit ∗ ) = E[Yit ∗ (0) | Xit ∗ ] by (A.2), and substituting into (A.1) identifies τit ∗ .The recovery of gi in (A.4) is on the support of the pre-treatment inputs, whereas Xit ∗ lies beyond it in the time coordinate; evaluating gi at t∗ therefore extrapolates. The residual indeterminacy this leaves is the extrapolation uncertainty ωB (Xit ∗ ) = 2 B ∥k⊥ 
+
+> t∗
+
+∥Hk of Definition 1 (Corollary B.2), and 
+
+1the reported band is what carries it. No parametric form is imposed on gi; segmented regression, ARIMA, and Bayesian structural time series share this identification argument, differing only in the restrictions they place on gi.
+
+# B Connections to RKHS Theory 
+
+This appendix proves the results in Section 4 of the main text. For the link between GPs and RKHS theory, see Rasmussen et al. (2006, Ch. 6) and Kanagawa et al. (2025). We suppress the unit subscript i throughout for notational simplicity. Proposition 1 is immediate, since taking the conditional expectation of the four-term decomposition (20) and applying the drop-out argument of Section 4 leaves only the approximation and learning terms. The substantive result is Proposition 2, proved below. 
+
+# B.1 RKHS Preliminaries 
+
+Let k : X × X → R be a positive definite kernel. Its reproducing kernel Hilbert space Hk is the completion of span {k(·, x) : x ∈ X } under the inner product determined by 
+
+⟨k(·, x), k (·, x′)⟩Hk = k(x, x′), (B.1) for all x, x′ ∈ X . This inner product yields the reproducing property: for any f ∈ H k,
+
+f (x) = ⟨f, k (·, x)⟩Hk , (B.2) so point evaluation is the inner product of f with k(·, x). Applying Cauchy–Schwarz to (B.2) gives 
+
+|f (x)| ≤ ∥ f ∥Hk
+
+pk(x, x), (B.3) which establishes that point evaluation is a bounded linear functional on Hk and underlies the worst-case bound of Proposition 2. The norm ∥f ∥Hk = p⟨f, f ⟩Hk measures the complexity of f relative to the kernel, with functions aligned with its covariance structure carrying a small norm and functions requiring features the kernel does not naturally accommodate carrying a large one. It is distinct from the L2(PX) norm 
+
+∥f ∥2 
+
+> L2
+
+= R f (x)2 dP X(x), which measures average size under the marginal distribution of X. The regularity that g ∈ H k requires depends on the kernel. For the Gaussian kernel Hk consists of smooth functions, and for the linear kernel k(x, x′) = x⊤x′ it consists of linear functions with 
+
+∥f ∥Hk equal to the Euclidean norm of the coefficient vector. The best approximation within budget g∗ of (19) minimises the L2(PX) distance to g subject to 
+
+∥f ∥Hk ≤ B, and the factor entering the worst-case bound is ∥g∗∥Hk , which the budget caps at B.The minimiser exists and is unique, since for a bounded continuous kernel on a compact domain the 
+
+2inclusion Hk ,→ L2(PX) is compact, so the constraint set is convex and closed in L2(PX). Dropping the constraint removes both properties whenever Hk is dense in L2(PX), since the infimum is then zero and unattained. The pre-treatment inputs span a finite-dimensional subspace of Hk,
+
+Spre = span {k(·, X1), . . . , k (·, Xt0−1)}. (B.4) By the representer theorem (Kimeldorf and Wahba, 1970), the minimiser of the regularised empirical risk over Hk lies in Spre , and for squared loss with regularisation σ2 the GP posterior mean takes the form ˆg =
+
+> t0−1
+
+X
+
+> t=1
+
+wtk(·, Xt), w = ( Kpre + σ2I)−1Ypre , (B.5) recovering the kernel ridge regression estimator (Rasmussen et al., 2006, Ch. 6). The regularisation parameter σ2 in (B.5) penalises the RKHS norm, pulling the estimate toward functions the kernel favours; in dual form it shrinks the coefficients w, but the effect in function space is smoothing rather than the sparsity an ℓ1 penalty in a fixed basis would deliver (Ghosal and Van der Vaart, 2017). The learning error arises because ˆ g is confined to Spre while g∗ may have a component orthogonal to it, which the observed covariate values cannot recover. 
+
+# B.2 Proof of Proposition 2 
+
+We prove Proposition 2 stated in Section 4 of the main text. The proof follows results in Kanagawa et al. (2025), adapted to our setting. 
+
+Proposition B.1 (Proposition 2 (GP posterior variance controls the learning error)) . Suppose g lies in the unit ball F1, so that g∗ = g, and suppose outcomes are observed with noise, Yt = g∗(Xt) + εt,where εt are mean-zero with variance σ2 > 0. The GP posterior mean is the weighting estimator 
+
+ˆg(Xt∗ ) = P 
+
+> t
+
+wtYt with weights w = ( Kpre + σ2I)−1kt∗ , and its posterior variance is 
+
+Vt∗ = k(Xt∗ , Xt∗ ) − k⊤ 
+
+> t∗
+
+(Kpre + σ2I)−1kt∗ .
+
+Let k⊥ 
+
+> t∗
+
+= k(·, Xt∗ ) − P 
+
+> t
+
+wt k(·, Xt) be the residual of the test feature after its ridge reconstruction from the training features Spre = span {k(·, Xt)}, coinciding with the orthogonal-projection residual onto Spre as σ2 → 0. Then the learning error decomposes as 
+
+g∗(Xt∗ ) − ˆg(Xt∗ ) = 
+
+
+
+g∗(Xt∗ ) − P 
+
+> t
+
+wt g∗(Xt)
+
+| {z }
+
+> deterministic error
+
+− P 
+
+> t
+
+wt εt
+
+| {z }
+
+> noise propagation
+
+,
+
+3and its two sources are controlled by the two summands of the GP posterior variance: 
+
+g∗(Xt∗ ) − X
+
+> t
+
+wtg∗(Xt) ≤ ∥ k⊥ 
+
+> t∗
+
+∥Hk , Var  X 
+
+> t
+
+wtεt
+
+ = σ2∥w∥2, ∥k⊥ 
+
+> t∗
+
+∥2 
+
+> Hk
+
++ σ2∥w∥2 = Vt∗
+
+| {z }
+
+> GP posterior variance
+
+.
+
+Therefore Vt∗ bounds the worst case of the deterministic error through its first summand and carries the exact variance of the propagated noise in its second. Proof of Proposition B.1. Let w = ( Kpre + σ2I)−1kt∗ denote the posterior mean weights, where 
+
+kt∗ = ( k(X1, Xt∗ ), . . . , k (Xt0−1, Xt∗ )) ⊤. By (B.5), ˆ g(Xt∗ ) = P 
+
+> t
+
+wtYt. Recall the residual feature 
+
+k⊥ 
+
+> t∗
+
+= k(·, Xt∗ ) −
+
+> t0−1
+
+X
+
+> t=1
+
+wtk(·, Xt), (B.6) the residual of the test feature after the ridge reconstruction. As σ2 → 0 the weights become the orthogonal projection coefficients K−1pre kt∗ and ∥k⊥ 
+
+> t∗
+
+∥Hk reduces to the geometric distance between 
+
+Xt∗ and the training data; for σ2 > 0 it carries an additional dependence on σ2 through w;Corollary B.1 states the limiting case. By the reproducing property, 
+
+g∗(Xt∗ ) − X
+
+> t
+
+wtg∗(Xt) = ⟨g∗, k ⊥ 
+
+> t∗
+
+⟩Hk . (B.7) Applying Cauchy–Schwarz: 
+
+g∗(Xt∗ ) − X
+
+> t
+
+wtg∗(Xt) ≤ ∥ g∗∥Hk · ∥ k⊥ 
+
+> t∗
+
+∥Hk . (B.8) It remains to bound ∥k⊥ 
+
+> t∗
+
+∥Hk . Expanding via the reproducing property and bilinearity: 
+
+∥k⊥ 
+
+> t∗
+
+∥2 
+
+> Hk
+
+= k(Xt∗ , Xt∗ ) − 2k⊤ 
+
+> t∗
+
+w + w⊤Kpre w. (B.9) Substituting Kpre = ( Kpre + σ2I) − σ2I and using the definition of w:
+
+w⊤Kpre w = k⊤ 
+
+> t∗
+
+(Kpre + σ2I)−1kt∗ − σ2∥w∥2. (B.10) Since k⊤ 
+
+> t∗
+
+w = k⊤ 
+
+> t∗
+
+(Kpre + σ2I)−1kt∗ , combining terms yields 
+
+∥k⊥ 
+
+> t∗
+
+∥2 
+
+> Hk
+
+= k(Xt∗ , Xt∗ ) − k⊤ 
+
+> t∗
+
+(Kpre + σ2I)−1kt∗
+
+| {z }
+
+V[f (Xt∗ ) | Xpre , Y pre ]
+
+− σ2∥w∥2
+
+| {z } 
+
+> ≥0
+
+. (B.11) Combining (B.8) with (B.11) and ∥g∗∥Hk ≤ 1 gives the deterministic bound |g∗(Xt∗ ) −
+
+P 
+
+> t
+
+wtg∗(Xt)| ≤ ∥ k⊥ 
+
+> t∗
+
+∥Hk , while the noise propagation P 
+
+> t
+
+wtεt is mean-zero with variance σ2∥w∥2.
+
+4Rearranging (B.11) gives ∥k⊥ 
+
+> t∗
+
+∥2 
+
+> Hk
+
++ σ2∥w∥2 = Vt∗ , so the two summands of the posterior variance are exactly the two scales just bounded, and in particular ∥k⊥ 
+
+> t∗
+
+∥Hk ≤ √Vt∗ . This completes the proof. Under kernel misspecification the GP posterior variance can understate the true prediction error (Beckers et al., 2018), but the worst-case bound remains valid for any g∗ ∈ H k. Figure B.1 illustrates the decomposition. The noiseless case isolates the geometric leg as a result of its own. 
+
+Corollary B.1 (Noiseless training) . Suppose the pre-treatment outcomes are observed without noise, Yt = g∗(Xt) for t < t 0, with Kpre invertible. In the limit σ2 → 0 of Proposition 2, the weights become the interpolation weights w = K−1pre kt∗ , the residual k⊥ 
+
+> t∗
+
+is the orthogonal projection residual of k(·, Xt∗ ) onto Spre , and the learning error is deterministic with 
+
+g∗(Xt∗ ) − ˆg(Xt∗ ) ≤ ∥ k⊥ 
+
+> t∗
+
+∥Hk = pVt∗ , (B.12) 
+
+with equality attained at g∗ ∝ k⊥ 
+
+> t∗
+
+.
+
+The corollary follows by setting σ2 = 0 in (B.11), whereupon the noise propagation term vanishes and the posterior variance reduces to ∥k⊥ 
+
+> t∗
+
+∥2 
+
+> Hk
+
+alone. The pre-treatment data pins the counterfactual down wherever it lies in Spre , and what the record cannot see is at once the entire error and the entire posterior standard deviation. Proposition 2 is sharp over the unit ball rather than merely an upper bound, since ∥k⊥ 
+
+> t∗
+
+∥Hk =sup ∥g∗∥Hk ≤1 |⟨ g∗, k ⊥ 
+
+> t∗
+
+⟩Hk |, attained at g∗ ∝ k⊥ 
+
+> t
+
+. Figure B.2 reads this in function space, drawing a family of least favourable targets that meet the band, each at one horizon. 
+
+Minimax Optimality at the Extrapolation Point. Proposition 2 and Corollary B.1 bound what the GP posterior mean loses against the least favourable target. A stronger question is whether any other estimator could lose less. To make this precise, consider noiseless training and let D(g) = ( g(X1), . . . , g (Xt0−1)) collect the pre-treatment evaluations of g. An estimator of 
+
+g(Xt∗ ) is any map φ : Rt0−1 → R that reads the pre-treatment data and returns a single number, an unrestricted class that includes the GP posterior mean, kernel ridge regression, and segmented regression. The minimax risk at the extrapolation point is 
+
+R(Xt∗ ) = inf  
+
+> φ
+
+sup  
+
+> ∥g∥Hk≤1
+
+g(Xt∗ ) − φ(D(g)) . (B.13) The infimum searches over all estimators; the supremum searches over all regression functions in the unit ball. The question is what the cleverest possible use of the pre-treatment data can guarantee against the hardest possible target. 
+
+5Spre 
+
+# k(·, X1)
+
+# k(·, X2)
+
+# S⊥
+
+> pre
+
+# Term II 
+
+approximation 
+
+# ∥k⊥ 
+
+> t∗
+
+# ∥Hk
+
+# σ∥w∥
+
+# Term III 
+
+√Vt∗ (worst-case) 
+
+# gg∗
+
+# PSpre g∗
+
+# ˆg
+
+# Vt∗ = ∥k⊥ 
+
+> t∗
+
+# ∥2 
+
+> Hk
+
+# + σ2∥w∥2Figure B.1. Schematic of the error decomposition at t∗ in Hk. Note: The plane is 
+
+Spre = span {k(·, X1), . . . , k (·, Xt0−1)}. The true CEF g lies outside Hk, its best RKHS ap-proximation g∗ is estimated by ˆ g ∈ S pre , the gap g − g∗ is the approximation error (Term II), and g∗ − ˆg is the learning error (Term III), which splits into a component orthogonal to Spre 
+
+and a noise component within it. Over ∥g∗∥Hk ≤ 1 the geometric leg is longest for the target aligned with k⊥ 
+
+> t∗
+
+, drawn here with length ∥k⊥ 
+
+> t∗
+
+∥Hk ; a generic target gives the smaller ⟨g∗, k ⊥ 
+
+> t∗
+
+⟩.With the noise leg σ∥w∥ the two legs combine into the hypotenuse, Vt∗ , when σ2 = 0 and approximately otherwise. 
+
+Proposition B.2 (Minimax optimality of the noiseless band) . Under the conditions of Corol-lary B.1, with ∥k⊥ 
+
+> t∗
+
+∥Hk > 0,
+
+R(Xt∗ ) = ∥k⊥ 
+
+> t∗
+
+∥Hk = pVt∗ ,
+
+and the GP posterior mean ˆg(Xt∗ ) = k⊤ 
+
+> t∗
+
+K−1pre Ypre attains the infimum. Over the ball of budget B
+
+the risk scales to B ∥k⊥ 
+
+> t∗
+
+∥Hk , attained by the same estimator. Proof. Lower bound. Set g± = ± k⊥ 
+
+> t∗
+
+/∥k⊥ 
+
+> t∗
+
+∥Hk . Both have unit norm, so both lie in the unit ball. Because k⊥ 
+
+> t∗
+
+is orthogonal to Spre , both functions vanish at every pre-treatment input: D(g+) = 
+
+6t0 -2 -1 0120 10 20 30 40 50 Month Outcome (outcome SDs) Posterior mean Worst-case bound Figure B.2. Attainment in Proposition 2, in function space. The GP posterior mean (black) interpolates the noisy pre-treatment series (points) and extrapolates past t0 (dashed). The shaded band is the geometric term ∥k⊥ 
+
+> t
+
+∥Hk of the posterior variance, the largest error any counterfactual with ∥g∗∥Hk ≤ 1 agreeing with the pre-treatment series can incur at t∗, so it is the attained worst case rather than a loose envelope, exactly under noiseless training (Corollary B.1) and approximately under regularisation. The bold red curve is the least favourable admissible counterfactual at the furthest horizon, meeting the band edge at t∗
+
+(point); the thin curves meet it at their own horizons ( t∗ = 2 , 4, 6, 8, 10), so the bound is attained pointwise across the window. 
+
+D(g−) = 0. Any estimator/mapping φ therefore returns the same value d = φ(0) for both. Yet at the extrapolation point the two functions separate. By the reproducing property and the orthogonal decomposition k(·, Xt∗ ) = k⊥ 
+
+> t∗
+
++ PSpre k(·, Xt∗ ), 
+
+g±(Xt∗ ) = ⟨k⊥ 
+
+> t∗
+
+, k (·, Xt∗ )⟩Hk
+
+±∥ k⊥ 
+
+> t∗
+
+∥Hk
+
+= ± ∥ k⊥ 
+
+> t∗
+
+∥Hk .
+
+The two values sit at ±∥ k⊥ 
+
+> t∗
+
+∥Hk , so for every d ∈ R,max  |g+(Xt∗ ) − d|, |g−(Xt∗ ) − d| ≥ ∥ k⊥ 
+
+> t∗
+
+∥Hk ,
+
+and the floor R(Xt∗ ) ≥ ∥ k⊥ 
+
+> t∗
+
+∥Hk follows. 
+
+Upper bound. Corollary B.1 states that the GP posterior mean satisfies |g(Xt∗ ) − ˆg(Xt∗ )| ≤ ∥k⊥ 
+
+> t∗
+
+∥Hk for every g in the unit ball. Its worst case therefore meets the floor, and the two bounds coincide. The budget-B statement follows by replacing g with g/B . The argument adapts the 
+
+7classical theory of optimal recovery (Golomb and Weinberger, 1959; Micchelli and Rivlin, 1977) to the extrapolation target of the ITS design. The pair g± is a thought experiment, not a claim about what the true regression function looks like. In the lower-bound argument the pre-treatment data happen to be zero, because g±
+
+are constructed to live entirely in the direction the training data cannot see. The upper bound, by contrast, holds for every function in the ball and every dataset, zero or not. Together the two bounds say that the GP posterior mean extracts everything the pre-treatment data contains about the extrapolation target, and the reported band is the residual indeterminacy that no procedure can remove. 
+
+Data-conditional sharpening. The unconditional minimax risk ∥k⊥ 
+
+> t∗
+
+∥Hk is the worst case across all datasets. With a specific observed series Ypre , the argument tightens. Let ˆ g be the minimum-norm interpolant of Ypre , satisfying ∥ˆg∥Hk ≤ 1. Any admissible function g with D(g) = 
+
+Ypre and ∥g∥Hk ≤ 1 decomposes as g = ˆ g + u with u ⊥ S pre . By the Pythagorean identity, 
+
+∥u∥2 
+
+> Hk
+
+≤ 1 − ∥ ˆg∥2 
+
+> Hk
+
+, so u has less budget to spend in the unseen direction. The reproducing property gives g(Xt∗ ) − ˆg(Xt∗ ) = ⟨u, k ⊥ 
+
+> t∗
+
+⟩Hk , and applying Cauchy–Schwarz yields the identified set 
+
+ g(Xt∗ ) : ∥g∥Hk ≤ 1, D (g) = Ypre =  ˆg(Xt∗ ) ±
+
+q
+
+1 − ∥ ˆg∥2 
+
+> Hk
+
+∥k⊥ 
+
+> t∗
+
+∥Hk
+
+,
+
+with the endpoints attained at u ∝ ± k⊥ 
+
+> t∗
+
+. Fitting the pre-treatment data consumes part of the RKHS budget, leaving less for the adversary to deploy at t∗. The reported band ˆ g(Xt∗ ) ± ∥ k⊥ 
+
+> t∗
+
+∥Hk
+
+contains this identified set for every dataset, coincides with it in the least favourable one ( ∥ˆg∥Hk =0), and the GP posterior mean sits at the midpoint throughout. 
+
+Noise does not restore learnability. With noisy training, Yt = g(Xt) + εt, the pair g±
+
+induces identical distributions of the observed data, since both conditional means vanish at every pre-treatment input. For any estimator φ, coupling the two DGPs and applying the triangle inequality gives sup ∥g∥Hk ≤1 E |g(Xt∗ )−φ(Ypre )| ≥ ∥ k⊥ 
+
+> t∗
+
+∥Hk , where k⊥ 
+
+> t∗
+
+is the ridge projection residual of Proposition 2. Lengthening the pre-treatment data moves this floor only through the geometry of Spre , not through the sample size: additional observations refine the in-support fit but leave the component orthogonal to Spre unidentified. 
+
+# B.3 RKHS of Kernel Sums, Source Condition, and Convergence Rates 
+
+This section develops the machinery underlying Section 4, namely the spectral representation that makes norm inflation precise (Section B.3.1), norm control via kernel sums (Section B.3.2), the source condition for kernel–target alignment (Section B.3.3), and convergence rates with their limits under extrapolation (Section B.3.4). 
+
+8B.3.1 Spectral Representation of the RKHS Norm 
+
+Let PX be the marginal distribution of X and Tk : L2(PX) → L2(PX) the kernel integral operator 
+
+Tk(f )( x) = R k(x, x′)f (x′) dP X(x′). On a compact domain with a continuous kernel, Tk is compact, positive, and self-adjoint, with Mercer decomposition 
+
+k(x, x′) = X
+
+> j≥1
+
+μj ϕj (x)ϕj (x′), (B.14) where μ1 ≥ μ2 ≥ · · · > 0 are eigenvalues and {ϕj } are eigenfunctions orthonormal in L2(PX)(Steinwart and Christmann, 2008). The RKHS norm then admits the representation 
+
+∥f ∥2 
+
+> Hk
+
+= X
+
+> j≥1
+
+f 2
+
+> j
+
+μj
+
+, (B.15) with fj = ⟨f, ϕ j ⟩L2(PX) (Kanagawa et al., 2025). Energy on eigenfunctions with large eigenvalues costs little, while energy on high-frequency eigenfunctions, those with small μj , pays a steep penalty. A stationary kernel carries a trend only by spreading it across many small-eigenvalue directions, and (B.15) charges for each. The reproducing property fixes the total charge without computing the spectrum. Take g(t) = βt over a window of length T and let h approximate it to within ε in the supremum norm. Applying (B.2) and Cauchy–Schwarz to the difference of two feature maps, 
+
+∥h∥HGaussian ≥ |h(T ) − h(0) |√2 ≥ |β| T − 2ε
+
+√2 , (B.16) since ∥k(·, T ) − k(·, 0) ∥2 
+
+> Hk
+
+= 2 − 2k(0 , T ) ≤ 2 for a unit-diagonal kernel, while h must climb at least 
+
+|β|T − 2ε across the window. The cost of a trend is the distance it climbs, and no bandwidth avoids it: the bound reads the kernel only through its diagonal. Two consequences follow. At a fixed tolerance the cost grows with the length of the series. As the tolerance shrinks the cost grows without bound, since approximants of bounded norm would place g inside HGaussian , and g is not there on any window: members over [0 , T ] extend to the whole line (Aronszajn, 1950) and are analytic there (Steinwart et al., 2006), so a member agreeing with 
+
+βt on the window agrees with it everywhere, yet (B.3) bounds every member and βt is unbounded. Universality therefore buys approximation rather than membership, and charges for it by the length of the window. The Aronszajn decomposition (B.18) removes the charge by carrying the trend in 
+
+Hlin , where ∥βt ∥2 
+
+> Hlin
+
+= β2 whatever the window. For a single kernel the cost of a trend can be bounded analytically, as in (B.16); for a sum the norm is an infimum over decompositions (B.18) and no such bound is available, so we read the fitted spectrum instead. Figure B.3 does this on the national Heller pre-treatment series. On an equally spaced monthly design the Gaussian kernel matrix is unchanged by reversing time, so each eigenvector is either symmetric or antisymmetric about the midpoint; the leading one is symmetric 
+
+91e-05 1e-03 1e-01 0 20 40 60 Eigenvalue index j Share of trace Combined Gaussian only Fitted Spectra unit-ball budget 04812 0 20 40 60 Eigenvalue index j Cumulative ||gtrend|| Hk 2Combined Gaussian only Cost of Representing the Trend Figure B.3. What the kernel sum buys, on the national Heller pre-treatment series ( n = 72 months). Left panel plots the eigenvalues of each fitted kernel matrix as shares of its trace on a logarithmic scale, the prior variance the kernel assigns to each orthogonal direction on the design. Right panel accumulates over those same directions the squared RKHS norm a unit-variance trend costs, with the dotted line marking the unit-ball budget of Proposition 2. Under the combined kernel the trend is the leading direction, carrying thirty-four percent of the trace, and costs 0 .924 with ninety percent of that paid in the leading direction alone. Under the Gaussian-only kernel the leading direction is orthogonal to the trend, which is assembled instead from many small directions at a cost of 12 .4. In norm the budgets are 
+
+B = 0 .96 and B = 3 .52. 
+
+and the centred trend is antisymmetric, leaving the two orthogonal at any bandwidth. The trend is then assembled from many small directions, each charged by (B.15), and the budget reaches 
+
+B = 3 .52, in line with the lower bound of (B.16). The linear component supplies the missing direction, and the budget falls to B = 0 .96, inside the unit ball. Universality is not what separates the two specifications, since a Gaussian kernel does represent the trend on this window; the price of doing so is. 
+
+B.3.2 RKHS of Kernel Sums 
+
+Theorem B.1 (Aronszajn 1950) . For positive definite kernels k1, . . . , k m on X , the RKHS of 
+
+k = k1 + · · · + km is 
+
+Hk = f1 + · · · + fm : fj ∈ H kj , (B.17) 
+
+with norm 
+
+∥f ∥2 
+
+> Hk
+
+= inf 
+
+nPmj=1 ∥fj ∥2
+
+> Hkj
+
+: f = Pmj=1 fj , f j ∈ H kj
+
+o
+
+. (B.18) 
+
+10 The infimum is attained. When the component RKHSs intersect only at {0}, the decomposition is unique and Hk is an orthogonal direct sum. 
+
+The infimum assigns each function the cost of its cheapest decomposition. For our kernel k =
+
+kGaussian + kper + klin the component RKHSs overlap on a compact domain, so the decomposition is not unique and the infimum is no larger than any particular feasible decomposition. Suppose g ∈ H k with decomposition g = glin + gper + gGaussian . Theorem B.1 yields the bound 
+
+∥g∥2 
+
+> Hk
+
+≤ ∥ glin ∥2 
+
+> Hlin
+
++ ∥gper ∥2 
+
+> Hper
+
++ ∥gGaussian ∥2 
+
+> HGaussian
+
+, (B.19) which follows by dropping the infimum in (B.18) over any feasible decomposition. The linear kernel norm ∥glin ∥2 
+
+> Hlin
+
+= ∥β∥2 depends only on the slope and not on the horizon, the periodic norm depends on the seasonal amplitude and smoothness, and the Gaussian norm is moderate because gGaussian is a stationary residual the Gaussian kernel represents efficiently. By contrast, a Gaussian-only specification pays a norm that grows with the window’s length for the same target (Section B.3.1, Figure B.3). Substituting into the worst-case bound of Proposition 2 yields the combined bound (23), in which the first factor measures each component’s complexity in its natural RKHS and the second grows with extrapolation distance. 
+
+B.3.3 Source Condition 
+
+The source condition (Caponnetto and De Vito, 2007) characterises kernel–target alignment more finely than membership by quantifying how fast the eigencoefficients of g∗ decay relative to the kernel’s eigenvalues. 
+
+Definition B.1 (Source condition) . Let Tk be the kernel integral operator with Mercer eigensystem 
+
+{(μj , ϕ j )}j≥1, and define T rk f = P 
+
+> j≥1
+
+μrj fj ϕj for r ≥ 0, with fj = ⟨f, ϕ j ⟩L2(PX). The best RKHS approximation g∗ satisfies a source condition of order r if there exists v ∈ H k with 
+
+g∗ = T rk v. (B.20) We take r = 0 to mean plain membership g∗ ∈ H k, the assumption of Proposition 2. The condition constrains the learning target g∗ and is separate from Term II. Because v ∈ H k = T 1/2 
+
+> k
+
+(L2(PX)), our order r corresponds to r + 1 /2 in the L2 parameterisation common in the learning-theory literature, so the saturation point r = 1 /2 here is the familiar value of one (Caponnetto and De Vito, 2007). In Sobolev scales with Hk ≃ W s 
+
+> 2
+
+(s > d/ 2) and g∗ ∈ W s0 
+
+> 2
+
+, r = ( s0 − s)/(2 s), so r = 0 corresponds to s0 = s and r = 1 /2 to s0 = 2 s. This calibration requires polynomial eigenvalue decay; the combined kernel’s components have exponential or finite-rank spectra, but Figure B.4 shows the effect of r on the fitted kernel directly. The Sobolev scale calibrates r against a familiar quantity, but the combined kernel does not sit on that scale, so Figure B.4 reads r off the fitted eigensystem instead, as Figure B.3 reads the cost 
+
+11 r = 0 r = 1 2 0 0.25 0.5 0.75 1 0 0.25 0.5 0.75 1-3 -2 -1 012tFigure B.4. The source condition means alignment with the kernel’s leading directions. Each panel shows three draws g = T rk v with v uniform on the unit sphere of Hk, computed from the empirical eigensystem of the fitted combined kernel and rescaled to unit sample variance for display; the same three v appear in both panels. The left panel takes r = 0, plain membership, and the right panel takes r = 1 /2, the saturation order of Theorem B.2. Raising r damps the small-eigenvalue directions, so the draws in panel (b) carry less local movement. 
+
+of a trend. Its leading direction is the standardised trend. At r = 0 a target in Hk may still carry local movement that the leading directions do not describe, and pays for it in norm; at r = 1 /2that movement is damped and what remains is close to what those directions already describe. Alignment is therefore a property of the kernel and the design together, not of g∗ alone. 
+
+Proposition B.3 (Norm control under the source condition) . If g∗ = T rk v for some v ∈ H k and 
+
+r ≥ 0, then 
+
+∥g∗∥2 
+
+> Hk
+
+≤ μ2r 
+
+> 1
+
+∥v∥2 
+
+> Hk
+
+. (B.21) 
+
+Proof. Since g∗ = T rk v, its L2 eigencoefficients are ( g∗)j = μrj vj with vj = ⟨v, ϕ j ⟩L2(PX). By (B.15), 
+
+∥g∗∥2 
+
+> Hk
+
+= X
+
+> j≥1
+
+(μrj vj )2
+
+μj
+
+= X
+
+> j≥1
+
+μ2r−1 
+
+> j
+
+(vj )2 ≤ μ2r
+
+> 1
+
+X
+
+> j≥1
+
+(vj )2
+
+μj
+
+= μ2r 
+
+> 1
+
+∥v∥2 
+
+> Hk
+
+,
+
+where the inequality uses μj ≤ μ1.The ratio ∥g∗∥2 
+
+> Hk
+
+/∥v∥2 
+
+> Hk
+
+= P 
+
+> j
+
+μ2rj (v2 
+
+> j
+
+/μ j )∥v∥2 
+
+> Hk
+
+is a weighted average of μ2rj over the spectral directions in which v carries energy, with μ2r 
+
+> 1
+
+as the worst case. The source condition concen-trates the target on directions the kernel represents cheaply, controlling the norm factor ∥g∗∥Hk in 
+
+12 Proposition 2; Proposition B.4 below controls the geometric factor ∥k⊥ 
+
+> t∗
+
+∥Hk separately. Under the standard normalisation μ1 ≤ 1 the factor μ2r 
+
+> 1
+
+is a genuine reduction; for an unnormalised composite kernel it quantifies spectral alignment rather than unconditional norm reduction. The source condition refines the worst-case learning bias of Proposition 2 directly rather than only through the norm factor, since over the source class of order r the worst-case bias is governed by a smoothed residual. 
+
+Proposition B.4 (Alignment-refined worst-case learning bias) . Suppose g∗ satisfies the source condition of order r ≥ 0 (Definition B.1), g∗ = T rk v with ∥v∥Hk ≤ 1. Then the deterministic learning bias of Proposition 2 satisfies 
+
+g∗(Xt∗ ) − P 
+
+> t
+
+wt g∗(Xt) = ⟨g∗, k ⊥ 
+
+> t∗
+
+⟩Hk ≤ T rk k⊥  
+
+> t∗Hk
+
+, (B.22) 
+
+and the right-hand side is the exact worst case as g∗ ranges over {T rk v : ∥v∥Hk ≤ 1}. Writing 
+
+aj = ⟨k⊥ 
+
+> t∗
+
+, √μj ϕj ⟩Hk and νj = μj /μ 1 ∈ (0 , 1] ,
+
+T rk k⊥ 
+
+> t∗
+> 2
+> Hk
+
+= μ2r
+
+> 1
+
+X
+
+> j≥1
+
+ν 2rj a2 
+
+> j
+
+≤ μ2r 
+
+> 1
+
+k⊥ 
+
+> t∗
+> 2
+> Hk
+
+, (B.23) 
+
+with equality iff k⊥ 
+
+> t∗
+
+is supported on the leading eigenspace. At r = 0 the bound equals the constant 
+
+∥k⊥ 
+
+> t∗
+
+∥Hk of Proposition 2. Proof. The first equality is the representer identity used for Proposition 2. In the orthonormal basis {√μj ϕj }j≥1 of Hk the operator T rk is diagonal with entries μrj , hence self-adjoint on Hk, so 
+
+⟨T rk v, k ⊥ 
+
+> t∗
+
+⟩Hk = ⟨v, T rk k⊥ 
+
+> t∗
+
+⟩Hk . Maximising over ∥v∥Hk ≤ 1 gives ∥T rk k⊥ 
+
+> t∗
+
+∥Hk , attained at v ∝ T rk k⊥ 
+
+> t∗
+
+.Expanding k⊥ 
+
+> t∗
+
+= P 
+
+> j
+
+aj √μj ϕj and applying T rk coordinatewise yields (B.23); the inequality uses 
+
+νj ≤ 1. Membership in the combined Hk holds the norm factor ∥g∗∥Hk finite and horizon-free (Sec-tion B.3.2). A source condition of order r > 0 tightens the geometric factor: by (B.23), 
+
+∥T rk k⊥ 
+
+> t∗
+
+∥2 
+
+> Hk
+
+= μ2r
+
+> 1
+
+P 
+
+> j
+
+ν2rj a2 
+
+> j
+
+with νj = μj /μ 1 ∈ (0 , 1], so P 
+
+> j
+
+ν2rj a2 
+
+> j
+
+≤ P 
+
+> j
+
+a2 
+
+> j
+
+= ∥k⊥ 
+
+> t∗
+
+∥2 
+
+> Hk
+
+is a strict reduction whenever k⊥ 
+
+> t∗
+
+has energy outside the leading eigenspace, regardless of whether μ1 ≤ 1. 
+
+B.3.4 Convergence Rates 
+
+L2 rate for a single kernel. The source condition and the spectral decay together determine how fast the posterior mean converges on the pre-treatment support. The rate below is the in-support benchmark; extrapolation points, where the fill distance is fixed by the study design, fall outside its scope. 
+
+Theorem B.2 (L2 convergence of the GP posterior mean; adapted from Caponnetto and De Vito 2007) . Let k be a continuous positive definite kernel on a compact domain X ⊂ Rd with Mercer 
+
+13 eigenvalues μj ≍ j−β for β > 1 and bounded diagonal sup x∈X k(x, x) ≤ κ2 < ∞. Suppose g∗
+
+satisfies the source condition of order 0 ≤ r ≤ 1/2 (Definition B.1) with ∥v∥Hk ≤ R, and the noise 
+
+εt is sub-Gaussian. Let ˆg be the GP posterior mean (B.5) with regularisation set to the rate-optimal scale λn ≍ n−β/ ((2 r+1) β+1) . Then 
+
+∥ˆg − g∗∥2 
+
+> L2(PX)
+
+= Op
+
+
+
+n− (2 r+1) β
+
+> (2 r+1) β+1
+
+
+
+, n = t0 − 1, (B.24) 
+
+where the Op constant depends on R, σ2, and the kernel hyperparameters. 
+
+Theorem B.2 shows the in-support L2 error is controlled by the pre-treatment length n and the alignment order r, each entering the rate exponent. The theorem restates the upper bound of Caponnetto and De Vito (2007, Theorem 1) in the parameterisation of Definition B.1. The re-striction r ≤ 1/2 is the saturation point of ridge-type regularisation, beyond which the penalty bias dominates and the L2 rate ceases to improve (Engl et al., 1996). The deterministic worst-case bound of Proposition B.4 does not saturate: as a finite-sample bound rather than a rate, it reflects additional smoothness at every order r ≥ 0. The rate improves with both n and r and attains the minimax rate at the rate-optimal penalty (Caponnetto and De Vito, 2007). Two features of our estimation strategy place this optimum out of reach: the marginal-likelihood estimate ˆ σ2 gives an effective penalty λ = ˆ σ2/n that decays as O(n−1), faster than the rate-optimal scale, and the covariate-only bandwidth rule of Hartman et al. (2025) does not adapt to the target’s smoothness as the Gaussian-type regime (B.25) requires, admitting only logarithmic contraction (Ghosal and Van der Vaart, 2017). Both choices serve the design–analysis separation of Section 3.2, and the cost is small at the estimand that matters: the fill distance at a post-treatment point is fixed by the study design, so no in-support rate applies there, and the operative guarantee is the finite-sample bound of Proposition 2. When k = kGaussian , the eigenvalues fall outside the polynomial regime of Theorem B.2, decaying exponentially in j1/d , μj ≤ C exp( −c j 1/d ) (Belkin, 2018). The kernel then adapts to a finitely smooth target through its bandwidth rather than through the source order. If g∗ ∈ W β 
+
+> 2
+
+(X ) for 
+
+β > d/ 2 and the bandwidth shrinks with n at the appropriate rate, the posterior mean attains, up to an arbitrarily small polynomial loss, 
+
+∥ˆg − g∗∥2 
+
+> L2
+
+= Op
+
+
+
+n− 2β
+
+> 2β+d
+
+
+
+, (B.25) minimax-optimal over W β 
+
+> 2
+
+(Stone, 1980). In d = 1 with β = 2 this is Op(n−4/5). 
+
+Pointwise behaviour and the limits of extrapolation. The L2 rate (B.24) governs aver-age accuracy across the pre-treatment support; counterfactual prediction instead requires pointwise accuracy at Xt∗ , which may lie outside it. For interpolation within the support, Kanagawa et al. (2025) show 
+
+V[f (x) | Xpre , Y pre ] = O hn(x)2s−d, (B.26) 
+
+14 where s is the Sobolev-equivalent smoothness of the kernel and hn(x) is the local fill distance at 
+
+x, the radius of the largest gap in the training inputs within a fixed neighbourhood of x. For equally spaced temporal data in d = 1, hn = O(n−1), so V = O(n−(2 s−1) ), contracting faster than any polynomial rate for the Gaussian kernel; with Proposition 2 the deterministic error at any pre-treatment point is O(n−(s−1/2) ). For extrapolation, hn(Xt∗ ) does not shrink with n; it is the gap between the pre-treatment frontier and t∗, fixed by the study design, so (B.26) does not apply, and the non-stationary linear component instead makes V[f (Xt∗ ) | · ] grow with temporal distance. For the combined kernel, Tk does not share eigenfunctions with its components and none has a polynomially decaying spectrum (the Gaussian and MacKay periodic kernels are C∞, the linear kernel finite-rank), so the relevant in-support regime is the Gaussian-type one of (B.25) rather than the polynomial-spectrum rate of Theorem B.2. The posterior mean converges when the target lies in Hk, and faster when it is better aligned; Figure B.5 shows both, and shows what is left when neither holds. In support, the aligned target is learned quickly and the (discontinuous) level-shift target slowly, the fitted slopes near −1/2 and less than half as steep. The slow one never arrives. It sits outside Hk, so its remaining progress is a closer approximation bought at a larger budget, which the shrinking penalty σ2/n permits; hold the budget at B and the gap stops closing and reappears as Term II. Outside the support neither row improves as the window fills in, and what the band reports there is the extrapolation uncertainty of the model class itself, whose closed form Section B.4 derives. 
+
+# B.4 Extrapolation Uncertainty of the Model Class 
+
+This section proves the closed form of the extrapolation uncertainty ωB of Definition 1 and places the model class on the scale of Shen and Meinshausen (2025). 
+
+Corollary B.2 (Closed form of the extrapolation uncertainty) . Under the conditions of Corol-lary B.1, with k⊥ 
+
+> t∗
+
+the orthogonal projection residual, 
+
+ωB (Xt∗ ) = 2 B ∥k⊥ 
+
+> t∗
+
+∥Hk = 2 BpVt∗ . (B.27) 
+
+Proof. Write u = f − f ′ for an admissible pair. Then ∥u∥Hk ≤ 2B by the triangle inequality, and u
+
+vanishes at every pre-treatment input, so u ⊥ S pre by the reproducing property. Conversely, every 
+
+u ⊥ S pre with ∥u∥Hk ≤ 2B arises from the admissible pair ( u/ 2, −u/ 2). Hence 
+
+ωB (Xt∗ ) = sup |⟨ u, k ⊥ 
+
+> t∗
+
+⟩Hk | : ∥u∥Hk ≤ 2B, u ⊥ S pre = 2 B ∥k⊥ 
+
+> t∗
+
+∥Hk ,
+
+where the first equality uses u(Xt∗ ) = ⟨u, k (·, Xt∗ )⟩Hk = ⟨u, k ⊥ 
+
+> t∗
+
+⟩Hk for u ⊥ S pre , and the second is Cauchy–Schwarz with equality at u ∝ k⊥ 
+
+> t∗
+
+, the pair Bg ± of Proposition B.2. The corollary ties the objects of this appendix together. The extrapolation uncertainty is twice the minimax risk of Proposition B.2. Conditioning on an observed series shrinks it: by the same 
+
+15 decomposition, if ρ is the norm of the minimum-norm interpolant of Ypre , the data-conditional set of Section B.2 has diameter 2 pB2 − ρ2 ∥k⊥ 
+
+> t∗
+
+∥Hk at Xt∗ , reaching ωB (Xt∗ ) only at ρ = 0, and Figure B.2 draws the attaining pairs. The coupling argument of the paragraph Noise does not restore learnability extends the necessity direction to noisy training, and is the fixed-design instance of the necessity clause of Shen and Meinshausen (2025, Theorem 1(ii)) for post-additive noise models. Since the target is the CEF, the operative notion is their mean extrapolability (their Definition 2), which under post-additive noise with a fixed error law coincides with the functional notion used here. On their scale the class sits between the extremes. Linear functions carry zero uncertainty (their Example 1), L-Lipschitz classes grow as 2 Lδ in the distance δ from the support (Exam-ple 2), and unrestricted monotone classes are already at infinity (Example 3). FB has the finite closed form (B.27): under a stationary kernel ∥k⊥ 
+
+> t∗
+
+∥Hk never exceeds pk(Xt∗ , Xt∗ ), so the profile is bounded and flattens below the Lipschitz rate, and the linear component lifts that ceiling, the horizon profile inheriting the component structure of Section B.3.2. Their extrapolability gain, the difference between the uncertainties of two specifications, transfers by evaluating each at the budget the same trajectory requires, both terms computable from (B.27). On the Heller series of Section 6 the trend costs B = 0 .96 under the combined kernel against B = 3 .52 under a Gaussian-only kernel, a budget gap that the norm growth of Section B.3.1 widens with every added pre-treatment year. 
+
+16 n = 25 n = 50 n = 100 n = 400            
+
+> r = 1 2  g ∉ Hk 0.0 0.4 0.8 0.0 0.4 0.8 0.0 0.4 0.8 0.0 0.4 0.8 -2 0240246
+
+tTarget GP posterior mean r = 1 2, slope = -0.44 g ∉ Hk, slope = -0.19 0.05 0.10 0.30 25 50 100 200 500 1000 
+
+> n
+> In-support L 2 error
+
+Figure B.5. The source condition means faster rates. In the upper grid, rows fix the target and columns fill in the pre-treatment window, n = 25 , 50 , 100 , 400 on [0 , 0.8], with the shaded region marking extrapolation; tuning is pipeline-consistent, the bandwidth selected by variance maximisation from the design and σ2 fixed at the true noise variance, so the penalty σ2/n falls as the window fills. In the upper row the target satisfies the source condition at the saturation order r = 1 /2, drawn from the empirical eigensystem as in Figure B.4; in the lower row it carries a level shift no finite budget contains, since every member of the combined RKHS is continuous. The posterior mean closes on the target more quickly in the upper row. The bottom panel reports the in-support L2 error over thirty replications on log-log axes with fitted slopes, the aligned slope near the saturation rate of minus one half and the level-shift slope less than half as steep. In the shaded region neither row contracts with n. 17 C Simulation Details 
+
+This section records the data-generating processes for the calibrated simulation of Section 5 and connects each regime to the error decomposition of Section 4. 
+
+# C.1 Common Structure 
+
+We generate monthly outcomes yt = g(t) + εt for t = 1 , . . . , n pre + 12, with εt ∼ N (0 , σ 2), treatment beginning at t0 = npre + 1, a fixed twelve-month post-treatment horizon, and a constant effect 
+
+τ added over that horizon. We write zt for the time index standardised on the pre-treatment window, and the annual period is twelve. All three regimes share monthly seasonality and a short pre-treatment data to mirror the application of Section 6, and all include a small random Gaussian bump 
+
+r(t) = a exp −(t − μ)2/(2 w2) , a ∼ U (−0.3, 0.3) , μ ∼ U (8 , n pre − 4) , w ∼ U (4 , 8) ,
+
+that displaces each trend from a clean closed form. The bump introduces transient local deviations of the kind an applied series would carry, so the estimator cannot exploit exact knowledge of the parametric shape. Throughout, β ∼ U (0 .8, 1.3), A ∼ U (0 .7, 1), ϕ ∼ U (0 , 2π), σ2 = 0 .05 and 
+
+τ = 0 .6. The noise level gives a signal-to-noise ratio typical of monthly administrative data after unit-variance standardisation, and τ = 0 .6 is moderate relative to the pre-treatment standard deviation, large enough to detect but not so large that every method finds it. 
+
+# C.2 Three Regimes 
+
+The regimes place the target g at increasing distance from the estimator, from a kernel-based one to shapes it can only approximate, so the simulation traces how coverage degrades as the four error terms of Section 4 come into play. 
+
+Smooth. A kernel-based random function: 
+
+g(t) = 1 .5 ¯f (t), f (t) = 
+
+> 10
+
+X
+
+> j=1
+
+ωj k(zt, z j ), ωj ∼ N (0 , 1) , zj ∼ U (z1, z npre +12 ),
+
+with ¯f the pre-treatment standardisation of f and k the Gaussian + periodic + linear kernel of Section 3.2 at a fixed length-scale. Because g is a finite linear combination of kernel evaluations, it lies in Hk with a finite norm, so the approximation error (Term II) vanishes. The target also satisfies the source condition (Appendix B.3.3) at a positive order, since the random weights ωj
+
+do not concentrate on the high-frequency eigenfunctions of the kernel integral operator, and draws from a GP prior satisfy a source condition of order r = 1 /2 in expectation. The regime therefore isolates Term III and Term IV: the only errors are the learning gap the finite pre-treatment data 
+
+18 leaves and the propagated noise. The estimator still selects its own length-scale hyperparameter and includes the calendar month as a covariate, so the target is not exactly in its span, and coverage depends on whether the worst-case bound of Proposition 2 tracks the realised error at realistic sample sizes. 
+
+Nonlinear trend. A concave, decelerating trend with milder seasonality: 
+
+g(t) = ¯ m(t) + 0 .7 A sin(2 πt/ 12 + ϕ) + r(t), m(t) = 3 β1 − exp  −(t − 2) +/0.22 npre 
+
+ ,
+
+with ¯ m the pre-treatment standardisation of m, mimicking a bounded growth path whose incre-ments shrink as the series matures. Many social and economic series exhibit this pattern, for instance adoption curves for new technologies or the approach to a regulatory ceiling. The ex-ponential saturation is smooth and well approximated by the combined kernel on the observed window, but it does not belong to Hlin , so the Aronszajn decomposition (B.18) charges the curva-ture to the Gaussian component at a cost that grows with the window length. Term II is therefore nonzero at any fixed budget, and the DGP tests whether the interval remains calibrated when the target sits near but not inside the unit ball. The reduced seasonal amplitude (0 .7 A versus 1 .3 β in the third regime) keeps the periodic component from dominating, so the extrapolation challenge falls mainly on the trend. 
+
+Saturating trend. A strong annual cycle above a levelling trend: 
+
+g(t) = 1 .3 β sin(2 πt/ 12 + ϕ) + 0 .9 β tanh(0 .9 zt) + r(t),
+
+where seasonality dominates and the trend flattens at both ends. This is the most demanding regime for extrapolation. The tanh sigmoid is again outside Hlin , and the large seasonal amplitude forces the periodic component to carry substantial norm, so both legs of the Aronszajn bound (23) are loaded. The regime mirrors series in which a strong cyclical pattern sits above a level that has largely stabilised, such as seasonal background-check volumes in states with mature handgun markets. With trend and seasonality both large, the budget B required to contain g in the RKHS ball is the highest of the three regimes, and the test is whether the GP interval widens enough to remain calibrated even when the counterfactual is expensive in RKHS norm. 
+
+# C.3 Design Choices 
+
+The three DGPs are designed to be ordered by the distance from the estimator’s function class, and Figure 2 suggests that the theoretical ordering shows up empirically. In the Smooth regime, where Terms I and II are absent, coverage sits near or above nominal at every pre-treatment length, the outcome the worst-case bound of Proposition 2 predicts. In the Nonlinear trend and Saturating trend regimes, Term II is positive and the budget is larger, so the GP runs conservative, widening 
+
+19 its interval beyond what the realised error requires. The conservatism is a feature rather than a failure: the interval reports the worst case over the RKHS ball rather than the realised target, and a target that sits inside the ball but near its boundary should produce coverage above, not at, the nominal rate. The estimator in each regime follows the same pipeline as the application, with the length-scale selected by the variance-maximisation rule, and σ2 then estimated by marginal likelihood. No regime gives the estimator access to the true hyperparameters, so the simulation tests the full estimation pipeline rather than an oracle version. The GP uses the Gaussian+Periodic+Linear kernel on the monthly index with the calendar month entered as a categorical covariate and 95% intervals. The three comparators are (i) a segmented regression carrying a linear pre-trend and an annual harmonic, (ii) C-ARIMA , a coun-terfactual ARIMA model (Menchetti et al., 2023), and (iii) CausalImpact , a Bayesian structural time-series model (Brodersen et al., 2015). The harmonic rather than eleven month indicators keeps the segmented fit estimable at the shortest record, and C-ARIMA and CausalImpact receive the annual period the GP is given. 
+
+# D Additional Empirical Examples 
+
+Beyond the Heller application of the main text, we apply the method to two further settings. The All-Women Police Stations example adds a daily series with strong weekly seasonality and a spillover-inclusive estimand, and the Ukraine example pushes the design to a severe case, a military invasion whose aftermath is hard to separate from the initial shock, where the placebo check flags a pre-trend that the analysis then carries into bounded conclusions. 
+
+# D.1 All-Women Police Stations and Gender-based Crime 
+
+We reanalyse Jassal (2020), who examines whether AWPS improve women’s access to justice in India. On August 28, 2015, 20 AWPS opened simultaneously across Haryana state, a universal treatment affecting all 285 police stations. Using daily gendered crime registration rates per 100,000 population from January 2015 to August 2017 (8 months pre-treatment, 2 years post-treatment; Figure D.1), the original segmented regression analysis found a 27–49% reduction at standard stations without a system-wide increase, consistent with bureaucratic deflection as standard stations redirect women to AWPS. We employ the Gaussian+Periodic+Linear kernel with 7-day periodicity and day-of-week co-variates. Following the original study, we examine effects at both standard stations and system-wide, restricting analysis to two months post-treatment to limit the scope for concurrent events that would threaten Assumption 1. The abrupt opening date supports no anticipation for stations; Appendix D.3 takes up the residual concern of advance media coverage. 
+
+20 AWPS Open (Aug 28, 2015) 0.05 0.10 0.15 0.20 Jan 2015 Apr 2015 Jul 2015 Oct 2015 All Police Stations AWPS Open (Aug 28, 2015) 0.05 0.10 0.15 0.20 Jan 2015 Apr 2015 Jul 2015 Oct 2015 Standard Police Stations Daily Rate of Registered Gendered Crime Figure D.1. Raw Outcome Data for the AWPS Application. Note: Daily gendered crime registration rates per 100,000 population. The vertical dashed line marks the simultaneous opening of the All-Women Police Stations (August 28, 2015). Avg Daily Effect: -0.016 [-0.043, 0.011] -0.1 0.0 0.1 -60 -40 -20 0 20 40 60 Day Since Introduction of AWPS All Police Stations (SPS+AWPS) Avg Daily Effect: -0.049 [-0.076, -0.023] -0.1 0.0 0.1 -60 -40 -20 0 20 40 60 Day Since Introduction of AWPS Standard Police Stations (SPS) Effect of AWPS on Gendered Crime 
+
+Figure D.2. Impact of All-Women Police Stations on Gendered Crime Registration per 100,000 (Jassal, 2020). Note: Left panel: daily treatment effects on gendered crime registra-tions across all police stations. Right panel: effects at Standard Police Stations (SPS) only. Pre-AWPS placebo estimates shown in blue. The introduction of AWPS did not significantly affect system-wide registration rates (left) but led to a substantial reduction at SPS (right). 
+
+Figure D.2 shows contrasting patterns. System-wide registration rates show no significant change (left panel), while standard stations exhibit substantial reductions (right panel). The av-erage two-month effect at standard stations is −0.049 registrations per 100,000 population, with a 
+
+21 95% interval of [ −0.076 , −0.023], a decrease of at least 23% from baseline. The null system-wide total is more consistent with redirection to AWPS than with net deterrence, which would lower the system-wide count. The reduction at standard stations intensifies over time, a dynamic that sev-eral gradual processes could produce, including increasing redirection as the new stations become established. Segmented regression, summarising the post-treatment period as a single level shift, cannot reveal this pattern. Under the matched one-day-ahead protocol the GP covers close to the nominal rate across the 60 pre-treatment points, while the segmented alternatives fall far short (Appendix E). 
+
+# D.2 The Russian Invasion of Ukraine 
+
+We reanalyse Damann et al. (2024), who study how the Russian invasion of Ukraine on 24 February 2022 affected gendered patterns in politicians’ public engagement. The original study fits linear ITS models with Newey-West standard errors to the Facebook posting of 469 Ukrainian politicians (81 women, 388 men) from November 2021 to June 2022 (Figure D.3). We restrict to a one-month post-treatment window to limit the scope for components of U taking values they never took before 
+
+t0, and fit a separate GP per politician on pre-invasion data. Our estimates align with the original findings: both groups increased posting after the invasion, men more so (Figure D.4). Here the placebo check does the falsification work of Section 3.3, surfacing a slight upward pre-trend for women that signals a possible violation of Mean Sufficiency. The pre-trend biases the women’s counterfactual upward and so understates their own effect, which is therefore a lower bound. The gender gap is a separate matter: understating the women’s effect widens the estimated men-minus-women difference, so the “men more so” comparison is best read as an upper bound rather than a conservative one. 
+
+# D.3 Identifying Assumption Plausibility in the Running Examples 
+
+Section 2 of the main text states the identifying assumptions in general form. Here we read each one across our three applications, asking what each assumption requires, what would break it, and why we judge it credible (or not). The three settings stress the assumptions differently, and reading them together shows where the design is most and least comfortable. This is the substantive work the placebo checks (Section 3.3) cannot do on their own. 
+
+Consistency. This requires that each unit’s treatment is a single well-defined intervention switching on at a known date. All three meet it, since the Heller ruling, the AWPS openings, and the invasion each take force on one administratively or historically fixed date. The one subtlety is the AWPS standard stations, which are not treated directly but through the altered institu-tional environment around them, so their estimand is the total effect on a standard station under the new regime, inclusive of spillovers such as bureaucratic deflection. Consistency would break 
+
+22 Russian Invasion of Ukraine (Feb 24, 2022) 050 100 150 Nov 2021 Dec 2021 Jan 2022 Feb 2022 Mar 2022 Day Posts per Politician (n=459) Pre-treatment Post-treatment Figure D.3. Daily Facebook Posts by Ukrainian Politicians. Note: Daily Facebook posts of politicians from November 2021 to March 2022. Individual politician trajectories shown, pre-treatment (black) and post-treatment (blue). The vertical dashed line marks the Russian invasion on February 24, 2022. One politician is dropped for improved visualisation. 
+
+if “treatment” bundled several coincident changes, leaving the effect unattributable to a single intervention. 
+
+No Anticipation. This requires that pre-treatment outcomes are undisturbed by the coming treatment, so Yit = Yit (0) for t < t 0 and gi is learned from genuinely untreated data. Because the counterfactual is the continuation of the pre-treatment regime (Section 2), expectations held at a stable level do not violate the assumption, and what breaks it is behaviour that shifts as the event approaches. Bertoli et al. (2026) show that such anticipatory drift can threaten even seemingly unexpected events, when background public awareness or structural signals alter behaviour during the lead-up period, and that its severity depends on the counterfactual scenario the researcher chooses. At post-treatment periods the covariate equality Xit ∗ (1) = Xit ∗ (0) is additionally re-quired; it holds by construction when Xit consists of time and calendar indicators, and substantive covariates require the researcher to justify that they are not downstream of treatment. For Heller , the live case traces back to the March 2008 oral arguments, three months ahead 
+
+23 -2.5 0.0 2.5 5.0 -30 -20 -10 0 10 20 Day Since Russian invasion of Ukraine Average Number of Posts Women Politicians -2 0246-30 -20 -10 0 10 20 Day Since Russian invasion of Ukraine Average Number of Posts Men Politicians Figure D.4. Daily Average Treatment Effects by Gender. Note: Estimated daily treat-ment effects with 95% prediction intervals. Left panel shows effects for women politicians; right panel for men. A one-month pre-treatment period serves as the placebo (blue). While both groups show increased engagement, men exhibit larger effects. 
+
+of the decision, which could have moved purchasing in anticipation. We treat the ruling date it-self as unanticipated because the 5–4 outcome was not a foregone conclusion, and the strictness of D.C.’s handgun ban structurally prevented preemptive legal purchasing, so the pre-treatment series remains uncontaminated by anticipatory behaviour. An analyst worried about partial antici-pation elsewhere can set t0 at the oral-argument date as a robustness check. For AWPS the abrupt opening gives station personnel no reason to redirect women beforehand, and the residual concern, advance media coverage, is mitigated because the eight-month pre-treatment window largely pre-dates public awareness. For the invasion the preceding military build-up could have moved posting in anticipation, which is pre-treatment drift that the placebo checks probe directly and that we return to under Mean Sufficiency. 
+
+Mean Sufficiency (Assumption 1). This is the assumption the design leans on most heavily. It requires that, conditional on observed covariates, no other time-varying factor shifts the mean untreated outcome, so gi carries across t0. It breaks when a component of U takes values after t0
+
+that it never took before (Term I, Section 4). Measurement error that is mean-zero given ( Xit , Uit )joins εit and widens the intervals without biasing them; a stable recording convention joins the regime gi learns and a constant miscount differences out of τit ∗ . A change in the measurement process near t0 is a component of Uit taking values it never took before, the same failure. For 
+
+Heller the leading threat is political anxiety following Obama’s November 2008 victory, removed by truncating the window at four months. For AWPS the parallels are concurrent shifts in recording practice or seasonal dynamics beyond the periodic kernel, whose scope the two-month window keeps 
+
+24 narrow. The invasion is the hardest case; we restrict to one month and carry the detected women’s pre-trend into bounded conclusions (Section D.2). If treatment changed how observables predict the outcome, that is a treatment effect operating through behaviour, not a violation of an assumption restricting untreated potential outcomes. 
+
+# E Additional Results for the Empirical Applications 
+
+This section reports the placebo comparison against segmented regression for the Heller and AWPS applications, and adds three further diagnostics for Heller : cumulative effects, residual analysis, and a placebo outcome on long gun purchases. Heller Decision (June 26, 2008) 0100 200 300 400 Jan 2004 Jan 2006 Jan 2008 Monthly Handgun Background Checks per 100,000 
+
+Figure E.1. Raw Outcome Data for the Heller Application. Note: Monthly handgun background checks per 100,000 population from the FBI’s National Instant Criminal Back-ground Check System (NICS), for each state and the nationwide average. The vertical dashed line marks the Heller decision (June 26, 2008). 25 E.1 Out-of-Sample Predictive Performance with Placebo Checks: Comparison to Segmented Regression 
+
+Segmented regression is the workhorse ITS model in applied works (Bernal et al., 2017). To compare it with the GP on equal terms, we hold both to the one-step-ahead placebo of Section 3.3 on the aggregated national mean series, fitting on periods 1 through t and recording whether the 95% interval covers Yt+1 . The segmented specification is 
+
+Yt = β0 + β1I{t ≥ tm 
+
+> 0
+
+} + β2(t − tm 
+
+> 0
+
+) + β3I{t ≥ tm 
+
+> 0
+
+}(t − tm 
+
+> 0
+
+) + f (t) + εt,
+
+where tm 
+
+> 0
+
+is a placebo treatment time, I is the indicator taking the value one when t ≥ tm 
+
+> 0
+
+, and 
+
+f (t) carries polynomial terms up to cubic order together with month dummies. The coefficient β1
+
+is the placebo treatment effect, and we use HC1 robust standard errors. Segmented Cubic GP Segmented Linear Segmented Quadratic            
+
+> -12 -10 -8 -6 -4 -2 -12 -10 -8 -6 -4 -2 -20 020 40 -20 020 40
+
+Time Since Treatment Estimate Interval Contains Zero Not 
+
+Figure E.2. Placebo Check Performance: GP and Segmented Regression for Heller exam-ple. Note: The one-month-ahead placebo check results for 1 year, comparing GP against segmented regression with linear, quadratic, and cubic time trends. Points indicate placebo treatment effects with 95% prediction intervals, coloured by whether the interval contains zero (black) or not (red). 26 Figures E.2 and E.3 report the comparison. For Heller the GP intervals cover at or above the nominal 95%, while the segmented regressions cover 33 to 42% of placebo periods, rising slightly as the trend order increases; equivalently, they exclude zero at 58 to 67% of those periods, the figure quoted in Section 6. The AWPS application of Section D.1 shows the same pattern on a daily series, with the GP covering 90% of placebo points against 35 to 38% for the segmented regressions. Segmented Cubic GP Segmented Linear Segmented Quadratic               
+
+> -60 -50 -40 -30 -20 -10 0-60 -50 -40 -30 -20 -10 0-0.10 -0.05 0.00 0.05 0.10 -0.10 -0.05 0.00 0.05 0.10 Time Since Treatment Estimate Interval Contains Zero Not
+
+Figure E.3. Placebo Check Performance: GP and Segmented Regression for Jassal (2020) example. Note: The one-day-ahead placebo check results for 3 months, comparing GP against segmented regression with linear, quadratic, and cubic time trends. Points indicate placebo treatment effects with 95% prediction intervals, coloured by whether the interval contains zero (black) or not (red). 
+
+The gap follows from the trend form rather than from any single tuning choice. A polynomial trend fixes the shape of the counterfactual in advance, so its interval reflects only the uncertainty in the fitted coefficients and not the uncertainty about whether that shape extrapolates. The raw series move in ways linear, quadratic, and cubic trends do not track (Figure E.1), so out-of-sample the realised value often falls outside an interval built on the wrong shape, and a researcher reading these intervals would mistake ordinary fluctuation for a treatment effect. The GP’s Gaussian, periodic, and linear kernel spans a wider set of admissible shapes and widens its interval as the 
+
+27 horizon lengthens (Section 4), which is what holds its placebo coverage near nominal. 
+
+28 E.2 Cumulative National Average Effects 
+
+The per-period national average effects of Section 6 can be accumulated to summarise how the response builds over the post-treatment window. Figure E.4 plots the cumulative national average effect of the Heller ruling on handgun background checks, summing the per-period effects and their uncertainty across months. The band widens as the horizon lengthens, since each additional month extrapolates the counterfactual one step further beyond the pre-treatment series, so the growth reflects accumulating extrapolation uncertainty rather than instability in the estimate. -100 -50 050 100 0 1 2 3Months Since Heller Decision 
+
+Figure E.4. Cumulative National Average Effects. Note: The plot shows the estimated national cumulative effects of the Heller ruling on handgun background checks, discussed in Section 6 of the main text. 29 E.3 Residual Analysis 
+
+A natural concern is that the estimated effects are an artefact of unusually noisy data around the 2008 treatment period rather than a response to the ruling. To check whether the pre-treatment fit deteriorates as the cutoff approaches, we fit a single GP to the entire series for each state and examine the residuals (Felton, 2023). This diagnostic differs from the placebo checks, which assess out-of-sample prediction through iterative one-step-ahead forecasting; here we ask whether in-sample fit is stable across the study period. Figure E.5 shows the result. The residual variance stays stable through the pre-treatment period, with no sign of growing prediction error as June 2008 approaches. The one conspicuous exception, Louisiana in September 2005, reflects Hurricane Katrina, which made landfall in late August, rather than model failure; we read it as a substantive shock of the kind the placebo discussion flags rather than as a sign of instability. This stability supports reading the post-treatment deviations as treatment rather than noise. -50 050 100 150 2004 2006 2008 Residuals 
+
+Figure E.5. Residuals from Full-Period GP Fit. Note: Residuals from a single GP model fitted to the entire time series for each state. Each point represents the “residuals”, i.e., difference between observed and fitted values. The vertical dashed line indicates the treatment onset. 30 E.4 A Pseudo-Placebo Outcome: Long Gun Purchases 
+
+Heller struck down a ban on handguns, not long guns, so background checks for long guns are an outcome the ruling should not move. This makes them a placebo outcome, the cross-outcome counterpart to the temporal placebo (cf. Felton, 2023). Figure E.6 runs the same analysis for long gun checks that Figure 4 runs for handguns. The state-specific effects cluster around zero with no clear geographic or political pattern, and the national effects fluctuate around zero without trend. A null response where the legal scope predicts none is what a clean placebo outcome should show, and it strengthens the causal reading of the handgun results. MT ID MN WY NE WI OR ND MS IN UT MO IL IA AZ PA WA NC OH NY ME MI KY SC VT SD NH TN AR WV DC NM KS AL GA OK FL RI TX CT VA MD CO LA DE NJ MA CA NV AK -5 0 5(Standardized) Cumulative Effect Cumulative Effect (Standardized) -100 -50 050 100 150 -4 -2 0 2Months Since Heller Decision Effect on Long Guns, by Time 
+
+Figure E.6. Effects of Heller on Long Gun Background Checks. Note: State-specific (standardised) cumulative treatment effects (left panel) for the four-month period and na-tional average treatment effects over time (ˆ ¯τt∗ , right panel) for long gun background checks following Heller . In contrast to handgun purchases, long gun checks show no systematic response to the decision, with effects centred near zero across both states and time periods. 
+
+# F Details on Covariate Processing and Kernel 
+
+Covariate scaling. We centre the continuous covariates and the outcome and scale each to unit variance within every unit, so the kernel reads all continuous coordinates on a common scale and its behaviour does not depend on the units in which variables were recorded (Doudchenko and Imbens, 2016; Hainmueller and Hazlett, 2014). Posterior means and intervals are then mapped back to the original outcome scale, so estimated effects and their uncertainty are reported in the natural units of the outcome. Categorical coordinates enter the same distance through a separate convention. 
+
+31 Categorical covariates. Categorical covariates, such as the month and day-of-week indicators used in our applications, need different treatment from the continuous case (Johannemann et al., 2019). Ordinary regression drops one level to avoid collinearity, but a kernel reads the covariates through distances, and dropping a level would make those distances asymmetric across categories, since the omitted level would sit at the origin and appear closer to every other level than the remaining levels are to one another. We instead one-hot encode without a reference level, writing 
+
+e(ℓ) for the indicator vector of level ℓ; any two distinct levels are then equidistant, ∥e(a)−e(b)∥2 = 2, the symmetry appropriate for unordered categories with no natural baseline. We then rescale each indicator by p1/2, so that a mismatch on a categorical covariate contributes 
+
+q 12 e(a) −
+
+q 12 e(b) 2 = 12 (1 + 1) = 1 , a̸ = b, (F.1) the same amount as a one-standard-deviation difference in a standardised continuous covariate (Hartman et al., 2025). Without this adjustment a categorical mismatch would weigh twice as much as such a difference, and a covariate with many levels would dominate the Euclidean distance, driving the Gaussian kernel towards zero for most pairs and distorting which observations the kernel treats as similar. The rescaling fixes the relative weight of categorical and continuous coordinates in the same spirit as the normalisation that balances the additive kernel components in Section 3.2, so that functions encoding category-specific shifts retain a moderate norm ∥g∥Hk (Appendix B) and the worst-case bound of Proposition 2 stays informative. 
+
+Length-scale hyperparameter b. Hartman et al. (2025) select the length-scale b by max-imising the variance of the off-diagonal entries of the kernel matrix. The length-scale governs how fast covariance decays with distance and so trades bias against variance, with small b yielding lo-calised kernels that track fine patterns but risk overfitting and large b yielding smoother kernels that generalise but can mask local heterogeneity. We assess whether our findings depend on this rule by re-estimating all effects across a broad range of b around the data-driven choice. The findings are stable. The large positive D.C. effect and the flat national trend both persist across b (Figure F.1), and the state-specific distribution keeps its shape, a sharp peak at zero with D.C. as the outlier (Figure F.2). The localised D.C. effect and the national null are therefore not artefacts of hyperparameter selection. 
+
+Period hyperparameter p. Periodicity corresponds to translation invariance f (x) = f (x+p), so the periodic kernel reaches maximum correlation when |x − x′| is a multiple of p, telling the model to expect similar values every p units. The parameter should match the natural cycle in the data’s time units, for example p = 12 for monthly data with annual seasonality, p = 52 for weekly data, and p = 7 for daily data with weekly cycles. When the period is unknown, it can be selected automatically by detrending the pre-treatment series with local regression, computing the periodogram by FFT, taking the frequency of maximum power, and converting it to p (Bloomfield, 
+
+32 0.0 2.5 5.0 7.5 10.0 0 1 2 3Months Since Treatment Effect Estimates D.C. Monthly Effects by b value 020 40 0 1 2 3Months Since Treatment Effect Estimates National Average Effects by b values b value (original scale) 1 5 10 50 94.731 (optimal) 100 150 Figure F.1. Sensitivity Analysis for Hyperparameter b. Note: The left panel shows the estimated monthly treatment effect for Washington D.C. The right panel shows the estimated national average (ˆ ¯τt∗ ). For D.C., the large, positive effect is robust and stable across a broad range of b values. For the national average, the flat, null trend is also robust. This demonstrates that our findings are not artefacts of hyperparameter selection. The solid black line in each plot indicates ˆb chosen via variance-maximisation of the kernel matrix. Prediction intervals are omitted for visual clarity. 
+
+2004). 
+
+33 0.0 0.1 0.2 0 10 20 30 Cumulative Effect Estimates (Standardized) Density b value (original scale) 1 5 10 50 94.731 (optimal) 100 150 Figure F.2. State-Specific Treatment Effect Estimates Across b Values. Note: Distribution of state-specific cumulative treatment effects estimated using different b values given kernel choice. The optimal length-scale ( ˆb = 94 .73, solid black line) is compared against alternative 
+
+b selections (dashed coloured lines). Despite varying length-scale choices, the distributions demonstrate the stability of effect estimates across different b parameter values. Intervals are dropped for improved visualisation. 34 References 
+
+Aronszajn, N. (1950). Theory of reproducing kernels. Transactions of the American mathematical society , 68(3):337–404. Beckers, T., Umlauft, J., and Hirche, S. (2018). Mean square prediction error of misspecified gaussian process models. In 2018 IEEE Conference on Decision and Control (CDC) , pages 1162–1167. IEEE. Belkin, M. (2018). Approximation beats concentration? an approximation view on inference with smooth radial kernels. In Conference On Learning Theory , pages 1348–1361. PMLR. Bernal, J. L., Cummins, S., and Gasparrini, A. (2017). Interrupted time series regression for the evaluation of public health interventions: a tutorial. International journal of epidemiology ,46(1):348–355. Bertoli, A., Jakli, L., and Pascoe, H. (2026). Analyzing the impact of events through surveys: Formalizing biases and introducing the dual randomized survey design. Political Science Research and Methods , 14(2):255–275. Bloomfield, P. (2004). Fourier analysis of time series: an introduction . John Wiley & Sons. Brodersen, K. H., Gallusser, F., Koehler, J., Remy, N., and Scott, S. L. (2015). Inferring causal impact using bayesian structural time-series models. Annals of Applied Statistics , 9:247–274. Caponnetto, A. and De Vito, E. (2007). Optimal rates for the regularized least-squares algorithm. 
+
+Foundations of Computational mathematics , 7(3):331–368. Damann, T. J., Kim, D., and Tavits, M. (2024). Women and men politicians’ response to war: Evidence from ukraine. International Organization , pages 1–20. Doudchenko, N. and Imbens, G. W. (2016). Balancing, regression, difference-in-differences and synthetic control methods: A synthesis. Technical report, National Bureau of Economic Research. Engl, H. W., Hanke, M., and Neubauer, A. (1996). Regularization of inverse problems , volume 375. Springer Science & Business Media. Felton, C. (2023). ‘13 reasons why’ probably increased emergency room visits for self-harm among teenage girls. Sociological Science , 10:930–963. Ghosal, S. and Van der Vaart, A. W. (2017). Fundamentals of nonparametric Bayesian inference ,volume 44. Cambridge University Press. Golomb, M. and Weinberger, H. F. (1959). Optimal approximation and error bounds. In Langer, R. E., editor, On Numerical Approximation , pages 117–190. University of Wisconsin Press, Madi-son. Hainmueller, J. and Hazlett, C. (2014). Kernel regularized least squares: Reducing misspecification bias with a flexible and interpretable machine learning approach. Political Analysis , 22(2):143– 168. 
+
+35 Hartman, E., Hazlett, C., and Sterbenz, C. (2025). Kpop: A kernel balancing approach for reducing specification assumptions in survey weighting. Journal of the Royal Statistical Society Series A: Statistics in Society , 188(3):875–895. Jassal, N. (2020). Gender, law enforcement, and access to justice: Evidence from all-women police stations in india. American Political Science Review , 114(4):1035–1054. Johannemann, J., Hadad, V., Athey, S., and Wager, S. (2019). Sufficient representations for categorical variables. arXiv preprint arXiv:1908.09874 .Kanagawa, M., Hennig, P., Sejdinovic, D., and Sriperumbudur, B. K. (2025). Gaussian processes and reproducing kernels: Connections and equivalences. arXiv preprint arXiv:2506.17366 .Kimeldorf, G. S. and Wahba, G. (1970). A correspondence between bayesian estimation on stochas-tic processes and smoothing by splines. The Annals of Mathematical Statistics , 41(2):495–502. Menchetti, F., Cipollini, F., and Mealli, F. (2023). Combining counterfactual outcomes and arima models for policy evaluation. The Econometrics Journal , 26(1):1–24. Micchelli, C. A. and Rivlin, T. J. (1977). A survey of optimal recovery. In Micchelli, C. A. and Rivlin, T. J., editors, Optimal Estimation in Approximation Theory , pages 1–54. Plenum Press, New York. Rasmussen, C. E., Williams, C. K., et al. (2006). Gaussian processes for machine learning , volume 1. Springer. Shen, X. and Meinshausen, N. (2025). Engression: extrapolation through the lens of distributional regression. Journal of the Royal Statistical Society Series B: Statistical Methodology , 87(3):653– 677. Steinwart, I. and Christmann, A. (2008). Support vector machines . Springer Science & Business Media. Steinwart, I., Hush, D., and Scovel, C. (2006). An explicit description of the reproducing kernel hilbert spaces of gaussian rbf kernels. IEEE Transactions on Information Theory , 52(10):4635– 4643. Stone, C. J. (1980). Optimal rates of convergence for nonparametric estimators. The annals of Statistics , pages 1348–1360. 
+
+36
