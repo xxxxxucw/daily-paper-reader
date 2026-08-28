@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-08-27</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-28</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 9 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 14 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>6</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>3</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>8</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>6</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-08-27 16:02:53 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-08-28 17:39:10 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,7 +62,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精读6篇、速读3篇，其中《Replicable Conformal Prediction》与《EXAONE Tabular 1.0》均获满分，值得优先关注。可复制预测聚焦统计可靠性，EXAONE则展示表格大模型技术细节，是当前最亮眼的两大方向。若时间有限，建议从速读中的电商因果优化或时间序列解释切入，快速把握应用价值。</p>
+<p>今日精读8篇、速读6篇，聚焦因果推断与电商搜索优化；其中线性规划用于因果顺序部分识别、电商长期用户价值建模两篇最值得精读；建议优先关注因果效应在决策与搜索场景中的落地方法。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -71,12 +71,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">6 篇</strong>
+    <strong class="dpr-home-dashboard-count">8 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Replicable Conformal Prediction">Replicable Conformal Prediction</span></li><li><span class="dpr-home-dashboard-paper-title" title="EXAONE Tabular 1.0 : Technical Report">EXAONE Tabular 1.0 : Technical Report</span></li><li><span class="dpr-home-dashboard-paper-title" title="Tabular Foundation Models for Multi-View Information Cascade Popularity Prediction">Tabular Foundation Models for Multi-View Information Cascade Popularity Prediction</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Partial Identification under Causal Orders by Linear Programming">Partial Identification under Causal Orders by Linear Programming</span></li><li><span class="dpr-home-dashboard-paper-title" title="DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search">DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search</span></li><li><span class="dpr-home-dashboard-paper-title" title="Multi-Expert Conformal Risk Control for Pairwise LLM Judging in Open-Ended Dialogue">Multi-Expert Conformal Risk Control for Pairwise LLM Judging in Open-Ended Dialogue</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">two-sided <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>4</strong></span><span class="dpr-home-dashboard-tag">cp <strong>4</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -84,12 +84,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">3 篇</strong>
+    <strong class="dpr-home-dashboard-count">6 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search">DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search</span></li><li><span class="dpr-home-dashboard-paper-title" title="Towards A Unified Information Bottleneck Framework for Time Series Explanations">Towards A Unified Information Bottleneck Framework for Time Series Explanations</span></li><li><span class="dpr-home-dashboard-paper-title" title="MetaSieve: Faster Relational Deep Learning through SQL-Based Metapath Selection">MetaSieve: Faster Relational Deep Learning through SQL-Based Metapath Selection</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Causal Modelling of Support Interventions for Student Competency Assessment">Causal Modelling of Support Interventions for Student Competency Assessment</span></li><li><span class="dpr-home-dashboard-paper-title" title="Endogenous Selection and Spillovers: Bayesian Inference for Policy-Relevant Causal Effects">Endogenous Selection and Spillovers: Bayesian Inference for Policy-Relevant Causal Effects</span></li><li><span class="dpr-home-dashboard-paper-title" title="TabuLM: Morphology-Aware Tabular Pre-training for Low-Resource Languages">TabuLM: Morphology-Aware Tabular Pre-training for Low-Resource Languages</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span><span class="dpr-home-dashboard-tag">two-sided <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>3</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>3</strong></span></div>
 </section>
 </div>
 

@@ -1,0 +1,548 @@
+Title: DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search
+
+URL Source: https://arxiv.org/pdf/2608.25635v1
+
+Published Time: Thu, 27 Aug 2026 00:51:30 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+# DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search 
+
+# Junzhao Zhang 
+
+junzhao.zjz@alibaba-inc.com Taobao & Tmall Group of Alibaba Hangzhou, Zhejiang, China 
+
+# Tao Zhang 
+
+Taobao & Tmall Group of Alibaba Beijing, China quen.zt@alibaba-inc.com 
+
+# Liren Yu 
+
+Taobao & Tmall Group of Alibaba Hangzhou, Zhejiang, China yuliren.ylr@taobao.com 
+
+# Feiyi Dong 
+
+Taobao & Tmall Group of Alibaba Hangzhou, Zhejiang, China dongfeiyi.dfy@taobao.com 
+
+# Zhixuan Zhang 
+
+Taobao & Tmall Group of Alibaba Hangzhou, Zhejiang, China zhibing.zzx@taobao.com 
+
+# Dan Ou 
+
+Taobao & Tmall Group of Alibaba Hangzhou, Zhejiang, China oudan.od@taobao.com 
+
+# Haihong Tang 
+
+Taobao & Tmall Group of Alibaba Hangzhou, Zhejiang, China piaoxue@taobao.com 
+
+## Abstract 
+
+Industrial e-commerce search systems ultimately aim to optimize the user-level long-term objective, such as 𝑛 -day cumulative pur-chases or gross merchandise value (GMV) per user. However, such objectives are defined at the user level, whereas search ranking is based on item-level scores within each request. Existing methods typically bridge this granularity gap through manually designed multi-objective fusion, where predicted scores for multiple item-level objectives, such as click, cart, purchase, and transaction value, are combined into a ranking score that serves as a proxy for the ulti-mate objective. Such hand-crafted fusion schemes rely on a small set of manually tuned weights, limiting fine-grained personalization and leading to suboptimal alignment with the ultimate objective. In this paper, we propose DCEO (Direct Causal Effect Optimiza-tion), a data-driven framework for learning item-level proxy scores that are better aligned with the ultimate objective. We first aggre-gate the item-level proxy scores into a user-level proxy metric and quantify its alignment with the ultimate objective using a relative causal effect. We then develop an actor-critic framework, where the critic estimates the ultimate objective for a given user-level proxy metric, and the actor dynamically generates context-dependent fusion weights over multiple objectives to construct the item-level proxy scores and is trained to directly optimize the relative causal effect. Extensive offline experiments and analyses demonstrate the effectiveness and interpretability of DCEO. In addition, DCEO has been deployed in a large-scale industrial e-commerce search system, outperforming the conventional GMV proxy by 0.36% in GMV in a 41-day online A/B test. 
+
+## CCS Concepts 
+
+• Information systems → Learning to rank ; • Computing methodologies → Causal reasoning and diagnostics .
+
+## Keywords 
+
+e-commerce search, learning to rank, long-term user value, multi-objective fusion, causal effect optimization, personalized ranking 
+
+## 1 Introduction 
+
+E-commerce search systems ultimately aim to optimize user-level long-term objectives, such as cumulative purchases or gross mer-chandise value (GMV) over an 𝑛 -day window. For each request, the ranking stage assigns a score to each candidate item and orders the items by their scores [6, 8]. However, these ranking scores are de-fined at the item level, whereas the ultimate objective summarizes a user’s outcome over multiple requests and impressions. This gran-ularity gap prevents the user-level objective from directly serving as an item-level training label, making it challenging to optimize long-term user value through item ranking. Industrial ranking systems commonly mitigate this granular-ity gap with manually designed multi-objective fusion. Upstream models predict multiple item-level objectives, such as click, cart, purchase, and transaction value [10], and the fusion module com-bines their predicted scores into a ranking score [19]. Practitioners improve the alignment between this ranking score and the user-level long-term objective by adding new signals or tuning fusion parameters through repeated online A/B tests. This process has two limitations: the small set of globally shared parameters provides limited personalization across users and requests, and repeated on-line experiments are costly and time-consuming. We therefore seek to develop a data-driven method for learning a context-dependent item-level proxy score directly from the user-level ultimate objec-tive and incorporating it into the existing multi-objective fusion formula. The key to learning such a proxy score is to define its alignment with the user-level ultimate objective. We evaluate the item-level proxy scores through their aggregated user-level proxy metric, which has the same granularity as the ultimate objective. A nat-ural approach is to optimize the predictive association between the proxy metric and the ultimate objective. However, predictive association does not imply that increasing the proxy metric through ranking will produce a large improvement in the ultimate objective [11]. Since adding the proxy score to the fusion formula is intended to increase the proxy metric, we instead evaluate how much the 
+
+> 1arXiv:2608.25635v1 [cs.LG] 26 Aug 2026 Junzhao Zhang, Tao Zhang, Liren Yu, Feiyi Dong, Zhixuan Zhang, Dan Ou, and Haihong Tang
+
+ultimate objective improves under a given relative increase in the proxy metric. This motivates optimizing the relative causal effect of the proxy metric on the ultimate objective. In this paper, we propose Direct Causal Effect Optimization (DCEO), a data-driven actor-critic framework that directly optimizes the rel-ative causal effect of the proxy metric on the ultimate objective. The actor generates context-dependent weights over selected upstream predicted scores and combines them into an item-level proxy score. DCEO aggregates the proxy scores over a user’s impressions and calibrates the aggregate to a reference impression count, yielding a user-level proxy metric. The critic predicts the ultimate objective from the user features and proxy metric, and its predictions before and after a relative increase in the proxy metric provide the training signal for the actor. By maximizing the estimated causal effect, the actor learns a personalized item-level proxy score directly from user-level supervision. DCEO separates offline training from online serving. The critic and calibrated user-level aggregation are used only during training, while only the actor is deployed online. Given user and request features available online and selected upstream predicted scores, the actor generates an item-level proxy score. This score is added as a new term to the existing multi-objective fusion formula, while the original fusion weights and score components remain unchanged. In this way, DCEO learns an item-level score from user-level long-term supervision for direct use in online ranking. The main contributions of this work are summarized as follows: 
+
+• We formulate learning an item-level proxy score from a user-level long-term objective as a cross-granularity opti-mization problem. We characterize the alignment between the proxy score and the ultimate objective using the relative causal effect of an aggregated user-level proxy metric on the ultimate objective. 
+
+• We propose DCEO, a data-driven actor-critic framework that learns context-dependent proxy scores by directly opti-mizing the critic-estimated relative causal effect. Calibrated user-level aggregation connects item-level actor outputs with user-level supervision, enabling end-to-end learning of the proxy score. 
+
+• Extensive offline experiments and analyses demonstrate the effectiveness and interpretability of DCEO. In a 41-day online A/B test in a large-scale industrial e-commerce search system, DCEO outperforms the conventional GMV proxy by 0.36% in GMV. 
+
+## 2 Related Work 2.1 Long-Term User Value Modeling 
+
+Recent studies have increasingly shifted from optimizing item-level short-term feedback to optimizing user-level long-term objectives. However, these objectives are typically delayed, sparse, and defined at a coarser granularity than item-level ranking, making it difficult to derive effective item-level training signals. To address this chal-lenge, one line of research constructs proxy objectives. Behavior-based methods identify signals associated with future visits and retention from interaction logs [12, 14], while human-feedback methods use return-intent surveys or preference comparisons to capture aspects of long-term user experience that may not be re-flected by immediate behavior [1, 16]. AURO converts session-level return time into a terminal retention reward and propagates it to preceding ranking decisions through sequential policy learning [17]. Future Impact Decomposition more explicitly bridges the granular-ity gap by allocating request-level future value to items according to immediate feedback or learned weights, thereby constructing item-level learning targets [13]. These methods derive tractable item-level supervision by constructing proxy objectives or decom-posing future value, rather than directly learning an item-level proxy score from the ultimate objective. Another line of research directly incorporates the ultimate ob-jective into supervision without explicitly decomposing it into item-level targets. IURO learns item-level retention scores by using attention-based aggregation to connect item-level representations with a user-level retention outcome and introduces manually de-signed auxiliary attribution tasks for interpretability [3]. However, the attention weights that establish this connection during training are unavailable in the same form during online serving, resulting in training-serving inconsistency. Despite their different formu-lations, these methods primarily learn predictive associations: a signal that accurately predicts the ultimate objective does not nec-essarily imply that increasing it through ranking will improve that objective. In contrast, DCEO aggregates item-level proxy scores into a user-level proxy metric and, to the best of our knowledge, is the first framework to learn the item-level proxy score from the user-level ultimate objective by directly optimizing the estimated relative causal effect of the proxy metric on the ultimate objective. 
+
+## 2.2 Multi-Objective Fusion 
+
+Multi-objective fusion combines heterogeneous predicted scores into a single ranking score. Industrial systems traditionally rely on hand-crafted formulas with globally shared parameters, which require repeated online tuning and provide limited personaliza-tion. One line of work learns context-dependent fusion parameters through reward or policy optimization. Value-aware recommenda-tion maps user actions to monetized rewards and optimizes their aggregate economic value [9]. BatchRL-MTF formulates fusion as a session-level Markov decision process and uses offline reinforce-ment learning to optimize a reward constructed from user stickiness and activeness [18]. More recent methods improve policy learning under sparse industrial feedback: GRADE combines group-relative optimization with structured exploration over fusion weights [5], while SaFRO constructs a query-level satisfaction reward and em-ploys dual-relative policy optimization for short-video search [20]. These methods improve personalized fusion, but their optimization targets are monetized behaviors or manually constructed satis-faction and retention rewards rather than the user-level ultimate objective itself. Another line of work replaces the hand-crafted fusion formula with a trainable ensemble model. Pantheon inherits hidden repre-sentations from upstream task models and uses iterative Pareto op-timization to balance multiple objectives [2]. EMER organizes can-didates at the request level and uses a Transformer-based listwise model with self-evolving multi-objective supervision [4]. UMRE 
+
+> 2DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search
+
+learns personalized monotonic transformations of upstream pre-dicted scores before combining them with a lightweight ensemble model [15]. These approaches substantially increase the capacity and personalization of the fusion module, but they are trained pri-marily with item-level behavior labels and task-specific metrics. They therefore do not directly address the granularity gap between item-level ranking and user-level long-term objectives. Whole-page optimization introduces long-term causal evidence by estimating the effects of page-level quality metrics on delayed user feedbacks from quasi-experimental data [7]. However, the esti-mated effects are used to construct fixed weights for a whole-page objective rather than serving as the optimization target for learning an item-level proxy. In contrast, DCEO learns a personalized proxy score from the user-level ultimate objective. It connects item-level actor outputs with user-level supervision through calibrated ag-gregation and directly optimizes the relative causal effect of the resulting proxy metric on the ultimate objective. 
+
+## 3 Problem Formulation 3.1 User-Level Ultimate Objective and Granularity Gap 
+
+Let 𝑢 , 𝑟 , and 𝑖 index a user, a search request from the user, and an item shown for that request, respectively. For each user 𝑢 , we consider a reference day and define 
+
+I𝑢 = {( 𝑟, 𝑖 ) : 𝑖 is shown for request 𝑟 on the reference day }. (1) Let 𝑁 𝑢 = |I 𝑢 | denote the corresponding impression count for user 
+
+𝑢 .Let 𝑌 𝑢 denote the user-level long-term objective accumulated over an 𝑛 -day outcome window starting on the reference day. 𝑌 𝑢 
+
+may be defined as cumulative purchases, cumulative GMV, or an-other user-level long-term value metric. Search ranking orders items within each request according to item-level scores, whereas 𝑌 𝑢 is a user-level quantity that summa-rizes the user’s outcome over multiple requests. The granularity mismatch between item-level ranking scores and the user-level ob-jective prevents 𝑌 𝑢 from directly serving as an item-level training label: all items exposed to the same user would otherwise receive the same label despite contributing differently to the outcome. Ac-cordingly, we seek to learn item-level proxy scores that are better aligned with 𝑌 𝑢 .
+
+## 3.2 Multi-Objective Fusion 
+
+For a request 𝑟 from user 𝑢 , let C𝑢𝑟 denote the set of candidate items entering the ranking stage. For each item 𝑖 ∈ C 𝑢𝑟 , the ranking stage provides 𝐾 predicted scores: 
+
+x𝑢𝑟𝑖 = [𝑥 1 
+
+> 𝑢𝑟𝑖
+
+, . . . , 𝑥 𝐾 𝑢𝑟𝑖 ] ∈ R𝐾 , (2) These predicted scores correspond to click, cart, purchase, trans-action value, and other business objectives. The multi-objective fusion module combines them into a ranking score 
+
+𝑠 𝑢𝑟𝑖 =
+
+> 𝐾
+
+∑︁ 
+
+> 𝑘 =1
+
+𝜆 𝑘 log 
+
+
+
+max {𝑥 𝑘 𝑢𝑟𝑖 , 𝜖 }
+
+
+
+, (3) where 𝜖 > 0 and each 𝜆 𝑘 is constant. Candidate items are ranked in descending order of 𝑠 𝑢𝑟𝑖 .
+
+## 3.3 Item-Level Proxy Score and User-Level Proxy Metric 
+
+Consider an item-level proxy objective for the ultimate objective 
+
+𝑌 𝑢 . Let 𝑦 𝑢𝑟𝑖 denote its label and 𝑝 𝑢𝑟𝑖 its predicted score. We assume that 𝑝 𝑢𝑟𝑖 is a calibrated prediction of 𝑦 𝑢𝑟𝑖 , that is 
+
+E[𝑝 𝑢𝑟𝑖 ] = E[𝑦 𝑢𝑟𝑖 ]. (4) A practical way to use this proxy objective to improve ranking is to add its predicted score to the multi-objective fusion formula: 
+
+𝑠 𝑢𝑟𝑖 ← 𝑠 𝑢𝑟𝑖 + 𝜆 log (max {𝑝 𝑢𝑟𝑖 , 𝜖 }) , (5) where 𝜆 > 0 is a constant. Empirically, adding a proxy score into the multi-objective fu-sion formula increases the action rate of the corresponding proxy objective. However, neither the daily action count nor the daily action rate is a suitable proxy metric because they both depend on the impression count, which is affected by ranking. For example, deboosting items with high predicted dislike scores may reduce the dislike rate while increasing user activity, thereby increasing the impression count. The daily dislike count may then increase despite the lower dislike rate. At a fixed impression count, however, the action count and action rate do not suffer from this problem. We therefore use the fixed-impression action rate as the user-level proxy metric. Under the calibration assumption, this rate can be expressed equivalently using the proxy score: 
+
+E(𝑟,𝑖 ) ∈ I 𝑢 [𝑦 𝑢𝑟𝑖 | 𝑁 𝑢 = 𝐶 ] = E(𝑟,𝑖 ) ∈ I 𝑢 [𝑝 𝑢𝑟𝑖 | 𝑁 𝑢 = 𝐶 ]. (6) We thus define 𝑃 𝑢 = E(𝑟,𝑖 ) ∈ I 𝑢 [𝑝 𝑢𝑟𝑖 | 𝑁 𝑢 = 𝐶 ] as the user-level proxy metric. Accordingly, adding 𝑝 𝑢𝑟𝑖 to the fusion formula will increase 𝑃 𝑢 . The magnitude of this increase is controlled by 𝜆 , with a larger 𝜆 producing a larger increase in 𝑃 𝑢 .
+
+## 3.4 Relative Causal Effect of the Proxy Metric on the Ultimate Objective 
+
+Suppose that adding the proxy score to the fusion formula increases 
+
+𝑃 𝑢 by a relative amount 𝛿 > 0: 
+
+𝑃 𝑢 −→ ( 1 + 𝛿 )𝑃 𝑢 . (7) If the proxy metric is better aligned with the ultimate objective 𝑌 𝑢 ,the same relative increase in 𝑃 𝑢 should produce a larger relative increase in 𝑌 𝑢 . We use this relative increase in 𝑃 𝑢 as the treatment and measure its effect on the ultimate objective. Let 𝑌 𝑢 (𝑃 ) denote the ultimate objective when 𝑃 𝑢 = 𝑃 . We define the relative causal effect as RCE = E𝑢 [𝑌 𝑢 (( 1 + 𝛿 )𝑃 𝑢 ) − 𝑌 𝑢 (𝑃 𝑢 )] 
+
+E𝑢 [𝑌 𝑢 (𝑃 𝑢 )] . (8) A larger positive RCE indicates better alignment of the proxy metric, and hence the underlying item-level proxy scores, with the ultimate objective. Accordingly, the learning objective is to find an item-level proxy score that maximizes RCE. 
+
+## 4 Method 4.1 Overview 
+
+Figure 1 presents the training and serving framework of DCEO. Each training sample contains all impressions of a user on a ref-erence day, together with the corresponding user-level features                                                
+
+> 3Junzhao Zhang, Tao Zhang, Liren Yu, Feiyi Dong, Zhixuan Zhang, Dan Ou, and Haihong Tang
+> User/request features
+> z𝑢 ,z𝑢𝑟
+> Selected upstream predicted scores v𝑢𝑟𝑖
+> Actor
+> w𝑢𝑟 =𝑓 𝜃 (z𝑢 ,z𝑢𝑟 )
+> Proxy score
+> 𝑝 𝑢𝑟𝑖 =Í𝑀 𝑚 =1𝑤 𝑚 𝑢𝑟 𝑣 𝑚 𝑢𝑟𝑖
+> Proxy metric
+> 𝑃 𝑢 =Aggregation (𝑟,𝑖 ) ∈I 𝑢 (𝑝 𝑢𝑟𝑖 )
+> Critic
+> ℎ𝜙 (z𝑢 , 𝑃 𝑢 )
+> Actor loss
+> Lactor =LCE +𝛼 LCNR
+> Critic loss
+> Lcritic
+> Offline training
+> User/request features
+> z𝑢 ,z𝑢𝑟
+> Selected upstream predicted scores v𝑢𝑟𝑖
+> Actor
+> w𝑢𝑟 =𝑓 𝜃 (z𝑢 ,z𝑢𝑟 )
+> Proxy score
+> 𝑝 𝑢𝑟𝑖 =Í𝑀 𝑚 =1𝑤 𝑚 𝑢𝑟 𝑣 𝑚 𝑢𝑟𝑖
+> Multi-objective fusion formula
+> 𝑠 𝑢𝑟𝑖 ←𝑠 𝑢𝑟𝑖 +𝜆 log (max {𝑝 𝑢𝑟𝑖 , 𝜖 } ) Item ranking
+> Online serving
+
+Figure 1: Overview of DCEO. During offline training, the actor 𝑓 𝜃 generates request-specific weights w𝑢𝑟 from the user and request features z𝑢 and z𝑢𝑟 . The weights combine the selected upstream predicted scores v𝑢𝑟𝑖 into the item-level proxy score 
+
+𝑝 𝑢𝑟𝑖 , which is aggregated into the user-level proxy metric 𝑃 𝑢 . The critic ℎ𝜙 models the ultimate objective 𝑌 𝑢 from z𝑢 and 𝑃 𝑢 . The actor and critic are optimized using Lactor and Lcritic , respectively. During online serving, only 𝑓 𝜃 is deployed, and 𝑝 𝑢𝑟𝑖 is added to the multi-objective fusion score 𝑠 𝑢𝑟𝑖 to improve the item ranking. 
+
+z𝑢 , request-level features z𝑢𝑟 , selected upstream predicted scores 
+
+v𝑢𝑟𝑖 , and ultimate-objective label 𝑌 𝑢 . The actor 𝑓 𝜃 generates request-specific weights w𝑢𝑟 from z𝑢 and z𝑢𝑟 and combines w𝑢𝑟 with v𝑢𝑟𝑖 to produce the item-level proxy score 𝑝 𝑢𝑟𝑖 (𝜃 ). DCEO then aggregates the proxy scores over the user’s impressions and uses the calibra-tion model 𝑔 𝜓 to calibrate the aggregate to a reference impression count, yielding the user-level proxy metric 𝑃 𝑢 (𝜃 ).The critic ℎ𝜙 estimates the ultimate objective 𝑌 𝑢 from z𝑢 and 
+
+𝑃 𝑢 (𝜃 ). Its predictions before and after the relative intervention 
+
+𝑃 𝑢 (𝜃 ) → ( 1 + 𝛿 )𝑃 𝑢 (𝜃 ) define the causal effect loss LCE . The condi-tional normalized ranking loss LCNR further regularizes the actor by aligning the ordering of the proxy metric with that of the ultimate objective after conditional normalization. These two losses form the actor loss Lactor , while 𝑔 𝜓 , ℎ𝜙 , and the normalization model 𝑒 𝜁 
+
+are optimized with their corresponding losses. All four models are trained jointly. During online serving, only the actor 𝑓 𝜃 is deployed. It generates 
+
+w𝑢𝑟 and computes 𝑝 𝑢𝑟𝑖 from the online user and request features and selected upstream predicted scores. The proxy score is added to the existing multi-objective fusion score 𝑠 𝑢𝑟𝑖 to improve the item ranking. We next describe each component in detail. 
+
+## 4.2 User-Level Training Sample 
+
+Each training sample contains all impressions of a user on a ref-erence day. The inputs consist of user-level, request-level, and impression-level features. The user-level features z𝑢 include the user’s profile features and historical purchase sequence. They are stored only once in each sample because these features remain unchanged throughout the reference day. For each impression 
+
+(𝑟, 𝑖 ), the request-level features z𝑢𝑟 include the query and con-textual features, and the impression-level features include the se-lected upstream predicted scores v𝑢𝑟𝑖 ∈ R𝑀 . The request-level and impression-level features vary across impressions, so each feature is stored as a sequence of length 𝑁 𝑢 .Each sample is associated with multiple user-level outcome la-bels, including the cumulative click count, purchase count, and GMV over an 𝑛 -day window starting on the reference day. One of these outcomes or a combination of them serves as the ultimate-objective label 𝑌 𝑢 .
+
+## 4.3 Actor 
+
+4.3.1 Item-Level Proxy Score. For each impression (𝑟, 𝑖 ), the actor model 𝑓 𝜃 generates request-specific weights from the user features 
+
+> 4DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search
+
+z𝑢 and request features z𝑢𝑟 
+
+w𝑢𝑟 = 𝑓 𝜃 (z𝑢 , z𝑢𝑟 ), 𝑤 𝑚 𝑢𝑟 ≥ 0,
+
+> 𝑀
+
+∑︁ 
+
+> 𝑚 =1
+
+𝑤 𝑚 𝑢𝑟 = 1. (9) The weights are then combined with the selected upstream pre-dicted scores v𝑢𝑟𝑖 to produce the item-level proxy score 
+
+𝑝 𝑢𝑟𝑖 (𝜃 ) =
+
+> 𝑀
+
+∑︁ 
+
+> 𝑚 =1
+
+𝑤 𝑚 𝑢𝑟 𝑣 𝑚 𝑢𝑟𝑖 . (10) 
+
+4.3.2 User-Level Proxy Metric. After calculating the item-level proxy scores 𝑝 𝑢𝑟𝑖 (𝜃 ), we aggregate them into the user-level proxy metric 𝑃 𝑢 (𝜃 ). According to the definition in Section 3.3, we estimate 
+
+𝑃 𝑢 (𝜃 ) as 
+
+𝑃 raw  
+
+> 𝑢
+
+(𝜃 ) = 1
+
+𝑁 𝑢 ∑︁ (𝑟,𝑖 ) ∈ I 𝑢 
+
+𝑝 𝑢𝑟𝑖 (𝜃 ), (11) 
+
+𝑃 𝑢 (𝜃 ) = 𝑃 raw  
+
+> 𝑢
+
+(𝜃 )× sg 
+
+ 𝑔 𝜓 (z𝑢 , 𝐶 )
+
+max {𝑔 𝜓 (z𝑢 , 𝑁 𝑢 ), 𝜖 𝑔 }
+
+
+
+, (12) where 𝐶 = 100 is the reference impression count and 𝑔 𝜓 estimates the average of the item-level proxy scores 𝑃 raw  
+
+> 𝑢
+
+(𝜃 ) for user 𝑢 at a given impression count. The operator sg (·) preserves its argument during the forward pass and blocks gradients through it during backpropagation. We train 𝑔 𝜓 using a mean squared error loss 
+
+L𝑔 = E𝑢 
+
+h 𝑔 𝜓 (z𝑢 , 𝑁 𝑢 ) − sg  𝑃 raw  
+
+> 𝑢
+
+(𝜃 ) 2 i
+
+. (13) Equivalently, Eqs. (11) and (12) first compute the average proxy score over the observed 𝑁 𝑢 impressions and then multiply it by an impression-count calibration factor that maps the average at the observed count 𝑁 𝑢 to its counterpart at the reference count 𝐶 .
+
+## 4.4 Critic 
+
+The critic model ℎ𝜙 estimates the ultimate objective 𝑌 𝑢 for user 𝑢 
+
+given the user-level proxy metric 𝑃 𝑢 (𝜃 ). We train ℎ𝜙 using a mean squared error loss 
+
+Lcritic = E𝑢 
+
+(ℎ𝜙 (z𝑢 , sg (𝑃 𝑢 (𝜃 ))) − 𝑌 𝑢 )2  . (14) 
+
+## 4.5 Optimization 
+
+The actor is trained with two losses: the causal effect loss LCE and the conditional normalized ranking loss LCNR .
+
+4.5.1 Causal Effect Loss. We use the critic model to estimate the causal effect of increasing the user-level proxy metric from 𝑃 𝑢 (𝜃 )
+
+to (1 + 𝛿 )𝑃 𝑢 (𝜃 ) and use its negative as the causal effect loss 
+
+LCE = −E𝑢 [ℎsg (𝜙 ) (z𝑢 , (1 + 𝛿 )𝑃 𝑢 (𝜃 )) − ℎsg (𝜙 ) (z𝑢 , 𝑃 𝑢 (𝜃 ))] . (15) When calculating LCE , the parameters of the critic model ℎ𝜙 are frozen so that LCE updates only the parameters of the actor model 
+
+𝑓 𝜃 .The causal effect loss preserves the optimization direction of RCE while avoiding the instability of directly optimizing a ratio. The batch estimate of the baseline response E𝑢 [ℎ𝜙 (z𝑢 , 𝑃 𝑢 (𝜃 ))] varies little across training batches and can therefore be treated as ap-proximately constant. Consequently, RCE is approximately pro-portional to −L CE , so minimizing LCE approximately maximizes RCE. Directly using RCE as the actor loss would instead backprop-agate through its denominator, making the gradients sensitive to fluctuations in the baseline response. We therefore optimize the unnormalized response difference in Eq. (15). 
+
+4.5.2 Conditional Normalized Ranking Loss. The causal effect loss induces a highly non-convex optimization landscape for the actor, making it difficult to optimize effectively on its own. We therefore introduce a conditional normalized ranking loss as a regularizer. The goal of the conditional normalized ranking loss is to map all 
+
+(𝑃 𝑢 (𝜃 ), 𝑌 𝑢 ) pairs into the same distribution and then optimize their ordering. We first estimate the means 𝜇 𝑃 and 𝜇 𝑌 and the log standard deviations log 𝜎 𝑃 and log 𝜎 𝑌 of 𝑃 𝑢 (𝜃 ) and 𝑌 𝑢 using a model 𝑒 𝜁 
+
+(𝜇 𝑃 , 𝜇 𝑌 , log 𝜎 𝑃 , log 𝜎 𝑌 ) = 𝑒 𝜁 (z𝑢 ). (16) 
+
+𝑒 𝜁 is trained by minimizing the Gaussian negative log-likelihood 
+
+L𝑒 = E𝑢 
+
+"
+
+log 𝜎 𝑃 +
+
+  sg (𝑃 𝑢 (𝜃 )) − 𝜇 𝑃 
+
+2
+
+2𝜎 2
+
+> 𝑃
+
+#
+
++ E𝑢 
+
+"
+
+log 𝜎 𝑌 +
+
+ 𝑌 𝑢 − 𝜇 𝑌 
+
+2
+
+2𝜎 2
+
+> 𝑌
+
+#
+
+.
+
+(17) We then define 
+
+e𝑃 𝑢 (𝜃 ) = 𝑃 𝑢 (𝜃 ) − sg (𝜇 𝑃 )
+
+max {sg (𝜎 𝑃 ), 𝜖 𝑒 } ,
+
+e𝑌 𝑢 = 𝑌 𝑢 − sg (𝜇 𝑌 )
+
+max {sg (𝜎 𝑌 ), 𝜖 𝑒 } .
+
+(18) We compute the conditional normalized ranking loss from e𝑃 𝑢 (𝜃 )
+
+and e𝑌 𝑢 using the Bradley–Terry loss: 
+
+LCNR = 1
+
+|B pair |∑︁ (𝑢,𝑣 ) ∈ B pair 
+
+log 
+
+
+
+1 + exp −( e𝑃 𝑢 (𝜃 ) − e𝑃 𝑣 (𝜃 ))  
+
+, (19) where Bpair = {( 𝑢, 𝑣 ) : e𝑌 𝑢 > e𝑌 𝑣 } denotes the set of ordered user pairs. Intuitively, LCNR can be viewed as a coarse but stable approxima-tion to LCE . The causal effect loss implicitly groups users by their features z𝑢 and, within each group, encourages 𝑃 𝑢 to preserve the ordering of 𝑌 𝑢 . Conditional normalization instead maps all (𝑃 𝑢 , 𝑌 𝑢 )
+
+pairs to a common reference distribution, effectively placing them in a single group; the pairwise ranking loss then enforces the same ordering. Although this approximation discards some fine-grained conditioning on z𝑢 , the ranking signal is more stable than the dif-ference between two critic predictions. Therefore, LCNR provides a stable complementary signal for optimizing the actor. 
+
+4.5.3 Joint Training. The final loss for the actor model is 
+
+Lactor = LCE + 𝛼 LCNR , (20) where 𝛼 = 0.3 in the final configuration. We jointly train the parameters of 𝑓 𝜃 , 𝑔 𝜓 , ℎ𝜙 , and 𝑒 𝜁 using the overall loss 
+
+L = Lactor + L 𝑔 + L critic + L 𝑒 . (21) 
+
+> 5Junzhao Zhang, Tao Zhang, Liren Yu, Feiyi Dong, Zhixuan Zhang, Dan Ou, and Haihong Tang
+
+## 4.6 Online Serving 
+
+During online serving, only the actor model 𝑓 𝜃 is deployed to com-pute request-specific weights 
+
+w𝑢𝑟 = 𝑓 𝜃 (z𝑢 , z𝑢𝑟 ). (22) We then combine the selected upstream predicted scores v𝑢𝑟𝑖 with the weights w𝑢𝑟 to calculate the item-level proxy scores 
+
+𝑝 𝑢𝑟𝑖 =
+
+> 𝑀
+
+∑︁ 
+
+> 𝑚 =1
+
+𝑤 𝑚 𝑢𝑟 𝑣 𝑚 𝑢𝑟𝑖 . (23) We add 𝑝 𝑢𝑟𝑖 to the multi-objective fusion formula 
+
+𝑠 𝑢𝑟𝑖 ← 𝑠 𝑢𝑟𝑖 + 𝜆 log (max {𝑝 𝑢𝑟𝑖 , 𝜖 }) . (24) 
+
+## 5 Experiments 5.1 Research Questions 
+
+We evaluate DCEO by answering the following research questions: 
+
+• RQ1: How does DCEO perform under the final configura-tion? 
+
+• RQ2: Is causal effect optimization better than predictive association optimization? 
+
+• RQ3: How do the actor losses and upstream predicted-score set affect performance? 
+
+• RQ4: How does the definition of the ultimate objective affect the learned weights? 
+
+• RQ5: Does DCEO outperform a conventional GMV proxy in online search? 
+
+## 5.2 Experimental Setup 
+
+5.2.1 Offline Data and Configuration. We construct the user-level training samples described in Section 4.2 from search logs of a large-scale e-commerce search system. For each offline experiment, we train the model on the same 14 consecutive days of data and evaluate it on the following day. Unless otherwise specified, the ultimate objective is the cumulative GMV over four days starting on the reference day. DCEO uses 17 selected upstream predicted scores listed in Ta-ble 1. A simple transformation maps every predicted score into the interval [0, 1] while keeping its mean close to 0 .1, making the average actor weights comparable across scores. We set 𝐶 = 100, 
+
+𝛿 = 0.05, and 𝛼 = 0.3 in the final configuration. Unless otherwise specified, we vary only the factor under study and keep all other settings fixed. 
+
+5.2.2 Implementation Details. DCEO does not rely on a specialized network architecture. All four models are multilayer perceptrons (MLPs) whose input features are represented as feature embeddings. The actor concatenates the user and request feature embeddings and uses a softmax output layer to produce the 𝑀 nonnegative weights in Eq. (9). The critic takes the user feature embeddings and the scalar proxy metric as input and produces a scalar prediction of the ultimate objective. The calibration model takes the user feature embeddings and impression count as input and outputs a scalar to estimate the average of the item-level proxy scores, while the normalization model takes the user feature embeddings as input and outputs the four conditional statistics in Eq. (16). All four models are trained jointly as described in Section 4.5.3. 
+
+Table 1: Selected upstream predicted scores used by DCEO. These predicted scores are estimated by upstream models.                   
+
+> Score name Meaning
+> impr2click Probability of a click after an impression.
+> impr2cart Probability of a cart addition after an impression.
+> impr2pay Probability of a purchase after an impression.
+> impr2gmv GMV generated after an impression.
+> impr2pay10 Probability of a purchase with transaction value above 10 after an impression.
+> impr2pay30 Probability of a purchase with transaction value above 30 after an impression.
+> impr2pay100 Probability of a purchase with transaction value above 100 after an impression.
+> impr2pay300 Probability of a purchase with transaction value above 300 after an impression.
+> impr2pay1000 Probability of a purchase with transaction value above 1,000 after an impression.
+> click2pay Probability of a purchase after a click.
+> click2gmv GMV generated after a click.
+> click2pay10 Probability of a purchase with transaction value above 10 after a click.
+> click2pay30 Probability of a purchase with transaction value above 30 after a click.
+> click2pay100 Probability of a purchase with transaction value above 100 after a click.
+> click2pay300 Probability of a purchase with transaction value above 300 after a click.
+> click2pay1000 Probability of a purchase with transaction value above 1,000 after a click.
+> cart2gmv GMV generated after a cart addition.
+
+5.2.3 Offline Evaluation. Our primary offline metric is the relative causal effect defined in Eq. (8), computed on the evaluation data as RCE = E𝑢 [ℎ𝜙 (z𝑢 , 1.05 𝑃 𝑢 ) − ℎ𝜙 (z𝑢 , 𝑃 𝑢 )] 
+
+E𝑢 [ℎ𝜙 (z𝑢 , 𝑃 𝑢 )] . (25) We report RCE as a ratio, so an RCE of 0 .053 corresponds to a 5 .3% relative increase in the ultimate objective under a 5% increase in the proxy metric. To analyze the actor, we report the mean and standard deviation of each weight over all impressions. Because all predicted scores have the same range and a similar mean, their weight statistics are directly comparable. The weight mean reflects the importance of the corresponding predicted score in constructing the proxy score, while the weight standard deviation measures its personalization strength, with a larger value indicating stronger weight variation across user and request contexts. 
+
+5.2.4 Online Evaluation. We conduct a 41-day online A/B test in a large-scale e-commerce search system. The control group uses the conventional GMV proxy, defined as 
+
+𝑝 GMV = pCTR ×pCVR ×E[transaction value | purchase = 1]. (26) The treatment group uses the DCEO proxy. Both proxies are in-corporated into the existing multi-objective fusion formula using the same integration mechanism and boost strength. We report the relative changes of the treatment group over the control group in click count, purchase count, and GMV. GMV is the primary metric because it directly corresponds to the ultimate objective. 
+
+## 5.3 Analysis of the Final Model (RQ1) 
+
+Under the final configuration, DCEO achieves an RCE of 0 .053. Table 2 summarizes the six predicted scores that receive most of the actor weight. impr2click receives the largest mean weight, while 
+
+click2pay10 , click2pay30 , click2pay100 , and click2pay1000 
+
+collectively receive substantial weight. 
+
+> 6DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search
+
+All six predicted scores have nonzero weight standard deviations, showing that DCEO learns context-dependent weights rather than a single fixed combination. 
+
+## 5.4 Causal Effect Optimization versus Predictive Association Optimization (RQ2) 
+
+Predictive association optimization trains the actor to maximize the ultimate objective predicted by the critic, ℎ𝜙 (z𝑢 , 𝑃 𝑢 (𝜃 )) , and there-fore favors proxy metrics associated with high ultimate-objective values. In contrast, causal effect optimization seeks a proxy metric whose increase produces a large estimated relative improvement in the ultimate objective. However, predictive association does not capture the effect of increasing the proxy metric on the ultimate objective. We therefore compare the two optimization paradigms. We compare three actor losses: the predictive-association loss 
+
+−ℎsg (𝜙 ) (z𝑢 , 𝑃 𝑢 (𝜃 )) , the causal effect loss LCE , and the complete actor loss Lactor . All other configurations remain unchanged. We evaluate the three variants using RCE, which directly measures the estimated relative improvement in the ultimate objective under a 5% increase in the proxy metric. As shown in Table 3, replacing predictive association optimization with LCE increases RCE from 0.022 to 0 .031. Adding the conditional normalized ranking loss fur-ther increases RCE to 0 .053, a 2 .41 × improvement over predictive association optimization. These results show that directly optimiz-ing the causal effect better aligns changes in the proxy metric with changes in the ultimate objective. 
+
+## 5.5 Component Ablation Study (RQ3) 
+
+5.5.1 Effect of the Actor Losses. We next study the contributions of LCE and LCNR and vary their trade-off coefficient 𝛼 . Table 4 shows that using LCE alone yields an RCE of 0 .031, while LCNR 
+
+alone achieves an RCE of 0 .048. Combining the two losses further increases RCE, with 𝛼 = 0.3 achieving the best result of 0 .053. A smaller coefficient of 0 .1 performs similarly, whereas increasing it to 1.0 reduces RCE to 0 .047. These results indicate that the conditional normalized ranking loss provides useful regularization for actor learning, but overemphasizing it weakens RCE. We therefore use 
+
+𝛼 = 0.3 in the final configuration. 
+
+5.5.2 Effect of the Predicted-Score Set. We compare five predicted-score sets that provide different types of information about the conversion process and transaction value. The GMV-only set uses 
+
+impr2gmv as the item-level counterpart of the 4-day GMV objec-tive. The basic set contains impr2click , impr2cart , impr2pay , and 
+
+impr2gmv , representing the main outcomes after an impression. The value-aware set contains impr2click , impr2cart , impr2pay ,
+
+impr2pay10 , click2pay30 , click2pay100 , and click2pay1000 to incorporate transaction-value information. The conversion-funnel set contains impr2click , impr2cart , impr2pay , click2pay , click2gmv ,and cart2gmv to represent multiple stages of the conversion funnel. The full set combines all 17 predicted scores in Table 1. As shown in Table 5, the GMV-only set obtains an RCE of 0 .027, while the basic set improves it to 0 .039. The value-aware and conversion-funnel sets achieve RCEs of 0 .041 and 0 .040, respec-tively, and the full set achieves the highest RCE of 0 .053. These results show that impr2gmv alone is insufficient to construct a well-aligned proxy and suggest that predicted scores from different conversion stages and transaction-value ranges provide comple-mentary information for learning a proxy that is better aligned with 4-day GMV. 
+
+## 5.6 Effect of the Ultimate Objective (RQ4) 
+
+5.6.1 Effect of the Objective Type. We train DCEO with four user-level ultimate objectives while keeping the other settings fixed. Table 6 reports the mean weights of six representative predicted scores. When the ultimate objective is 4-day click count, the actor assigns nearly all weight to impr2click . For 4-day purchase count, it retains a large impr2click weight but shifts substantial mass to 
+
+click2pay and click2pay10 . When optimizing 4-day GMV, the actor distributes more weight across transaction-value thresholds, including a weight of 0 .205 on click2pay1000 . The composite purchase-and-GMV objective produces a related but distinct alloca-tion. These changes show that DCEO does not learn a fixed fusion rule: its proxy composition responds to the specified user-level objective. 
+
+5.6.2 Effect of the Objective Horizon. We further fix the ultimate ob-jective to GMV and vary its accumulation window from 1 to 4 days. Table 7 reports the resulting mean actor weights. The impr2click 
+
+weight increases from 0 .331 for 1-day GMV to 0 .404 for 4-day GMV. A larger impr2click weight gives greater preference to items with high impr2click scores and therefore tends to increase click count. A higher click count indicates that users explore more items. This pattern suggests that DCEO encourages more exploration when optimizing GMV over a longer horizon and provides further evi-dence that DCEO adapts the composition of its proxy score to the definition of the ultimate objective. 
+
+## 5.7 Online A/B Test (RQ5) 
+
+Table 8 presents the online A/B test results. Compared with the conventional GMV proxy, DCEO increases GMV by 0 .36%. It also increases click count and purchase count by 0 .36% and 0 .12%, re-spectively. The improvement in GMV demonstrates that DCEO is more effective than the conventional GMV proxy in optimizing the ultimate objective. The increases in click count and purchase count show that the GMV gain does not come at the cost of fewer clicks or purchases. 
+
+## 6 Limitations 
+
+DCEO has several limitations. First, RCE is a model-based local ef-fect estimate obtained from a critic trained on observational logs. Its causal interpretation requires the user features to capture the major confounders between the proxy metric and the ultimate objective, sufficient data support for both 𝑃 𝑢 and (1 + 𝛿 )𝑃 𝑢 , and accurate critic predictions within this local region. Unobserved confounding may bias causal identification, while insufficient support or critic misspecification may introduce estimation error. We use a small intervention magnitude of 𝛿 = 0.05 to reduce local extrapolation, although this does not eliminate bias from unobserved confounding. The online A/B test validates the end-to-end effectiveness of the learned proxy score but does not directly validate the numerical RCE estimate. Future work could randomly vary the proxy-score boost strength 𝜆 to collect interventional data and more directly 
+
+> 7Junzhao Zhang, Tao Zhang, Liren Yu, Feiyi Dong, Zhixuan Zhang, Dan Ou, and Haihong Tang
+
+Table 2: Mean and standard deviation of representative actor weights in the final 4-day GMV model. The standard deviation measures personalization strength and is computed over impressions.                   
+
+> Statistic impr2click impr2pay click2pay10 click2pay30 click2pay100 click2pay1000
+> Mean 0.404 0.032 0.154 0.079 0.105 0.205 Standard deviation 0.115 0.096 0.057 0.046 0.049 0.067
+
+Table 3: Comparison of predictive association and causal effect optimization. Higher RCE is better. 
+
+Actor loss RCE Predictive association optimization: −ℎsg (𝜙 ) (z𝑢 , 𝑃 𝑢 (𝜃 )) 0.022 Causal effect optimization: LCE 0.031 Causal effect optimization: Lactor 0.053 Table 4: Ablation of the actor losses. Higher RCE is better. 
+
+Actor loss RCE 
+
+LCE 0.031 
+
+LCNR 0.048 
+
+LCE + 0.1LCNR 0.052 
+
+LCE + 0.3LCNR 0.053 
+
+LCE + 1.0LCNR 0.047 
+
+Table 5: Effect of the upstream predicted-score set. Higher RCE is better. 
+
+Predicted-score set RCE 
+
+impr2gmv only 0.027 Basic impression-level set 0.039 Value-aware set 0.041 Conversion-funnel set 0.040 Full 17-score set 0.053 
+
+estimate the response of the ultimate objective to changes in the proxy metric. Second, calibrating the proxy metric to a fixed impression count makes action counts and rates comparable across users. This design, however, deliberately excludes changes in the ultimate objective that arise through ranking-induced changes in user activity and impression count. The offline RCE should therefore be interpreted as an alignment metric at the reference impression count rather than an estimate of the total deployment effect. The online A/B test complements this metric by measuring the end-to-end impact of DCEO, including changes in user activity and impression count. Future work could jointly model the per-impression response and the impression count to capture both pathways offline. Third, a more general actor could directly map impression-level features to an item-level proxy score. However, the resulting func-tion space was difficult to optimize stably under our current critic-based objective. We therefore restrict the actor to predicting context-dependent weights that form a convex combination of selected upstream predicted scores. Compared with direct proxy-score pre-diction, this parameterization improves optimization stability and enables interpretable, lightweight online serving. The trade-off is re-duced expressiveness: the actor cannot recover information absent from the upstream scores and inherits limitations in their cover-age and quality. Future work will improve optimization stability to support more expressive actors that directly use impression-level features. Finally, our evaluation is limited to one e-commerce search sys-tem and objective horizons of up to four days. Validation on ad-ditional platforms, objectives, and longer horizons is needed to establish broader generalizability. 
+
+## 7 Conclusion 
+
+In this paper, we presented DCEO, a data-driven framework for addressing the granularity gap between item-level ranking and user-level long-term objectives in industrial e-commerce search. DCEO learns context-dependent item-level proxy scores, aggre-gates them into a user-level proxy metric, and uses an actor-critic framework to directly optimize the relative causal effect of the proxy metric on the ultimate objective. During online serving, only the actor is deployed, and the learned proxy score is added to the ex-isting multi-objective fusion formula. Extensive offline experiments and analyses demonstrate the effectiveness and interpretability of DCEO. In a 41-day online A/B test, DCEO outperforms the conven-tional GMV proxy by 0 .36% in GMV. These results demonstrate the effectiveness of learning item-level ranking signals directly from user-level long-term supervision. 
+
+## 8 Ethical Considerations 
+
+This study uses behavioral logs and user-side features from an industrial e-commerce search system, which may contain sensi-tive information about users’ interests and purchasing behavior. Responsible use requires appropriate data access controls, minimiza-tion, de-identification, and aggregation. We report only aggregate experimental results. DCEO may inherit biases from historical in-teractions, upstream models, and the existing ranking system, and may change the exposure of different items and merchants. Deploy-ments should therefore evaluate relevant user, item, and merchant groups and monitor fairness, diversity, and user experience. Online A/B tests should use staged rollout, continuous monitoring, and rollback mechanisms. Since the impact of DCEO depends on the chosen objective, objective selection requires human oversight and consideration of affected stakeholders. 
+
+## References  
+
+> [1] Saeideh Bakhshi, Phuong Mai Nguyen, Robert Schiller, Tiantian Xu, Pawan Kodandapani, Andrew Levine, Cayman Simpson, and Qifan Wang. 2026. Reten-tive Relevance: Capturing Long-Term User Value in Recommendation Systems. 8
+
+DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search 
+
+Table 6: Mean actor weights under different ultimate objectives. The table reports representative predicted scores defined in Table 1; the remaining predicted scores account for the unreported weight mass. 
+
+Ultimate objective impr2click click2pay click2pay10 click2pay30 click2pay100 click2pay1000 
+
+4-day click count 0.999 0.000 0.000 0.000 0.000 0.000 4-day purchase count 0.531 0.101 0.256 0.000 0.000 0.000 4-day GMV 0.404 0.032 0.154 0.079 0.105 0.205 4-day purchase count + 0.1× GMV 0.407 0.000 0.056 0.098 0.103 0.187 
+
+Table 7: Mean actor weights for GMV objectives with different accumulation windows. The table reports representative predicted scores defined in Table 1; the remaining predicted scores account for the unreported weight mass. 
+
+Ultimate objective impr2click click2pay click2pay10 click2pay30 click2pay100 click2pay1000 
+
+1-day GMV 0.331 0.034 0.108 0.144 0.127 0.158 2-day GMV 0.379 0.000 0.000 0.140 0.129 0.189 3-day GMV 0.417 0.000 0.155 0.081 0.122 0.202 4-day GMV 0.404 0.032 0.154 0.079 0.105 0.205 
+
+Table 8: Online relative changes of DCEO over the conven-tional GMV proxy in the 41-day A/B test. 
+
+Metric Relative change Click count +0.36% Purchase count +0.12% GMV +0.36 %
+
+Proceedings of the International AAAI Conference on Web and Social Media 20, 1 (2026), 205–217. doi:10.1609/icwsm.v20i1.42633 [2] Jiangxia Cao, Pengbo Xu, Yin Cheng, Kaiwei Guo, Jian Tang, Shijun Wang, Dewei Leng, Shuang Yang, Zhaojie Liu, Yanan Niu, Guorui Zhou, and Kun Gai. 2025. Pantheon: Personalized Multi-objective Ensemble Sort via Iterative Pareto Policy Optimization. In Proceedings of the 34th ACM International Conference on Information and Knowledge Management . Association for Computing Machinery, New York, NY, USA. arXiv:2505.13894 [3] Rui Ding, Ruobing Xie, Xiaobo Hao, Xiaochun Yang, Kaikai Ge, Xu Zhang, Jie Zhou, and Leyu Lin. 2023. Interpretable User Retention Modeling in Recom-mendation. In Proceedings of the 17th ACM Conference on Recommender Sys-tems . Association for Computing Machinery, New York, NY, USA, 702–708. doi:10.1145/3604915.3608818 [4] Tiantian He, Minzhi Xie, Runtong Li, Xiaoxiao Xu, Jiaqi Yu, Zixiu Wang, Lantao Hu, Han Li, and Kun Gai. 2025. An End-to-End Multi-objective Ensemble Ranking Framework for Video Recommendation. arXiv:2508.05093 [cs.IR] doi:10.48550/ arXiv.2508.05093 [5] Tingfeng Hong, Pingye Ren, Xinlong Xiao, Chao Wang, Chenyi Lei, Wenwu Ou, and Han Li. 2026. GRADE: Personalized Multi-Task Fusion via Group-relative Reinforcement Learning with Adaptive Dirichlet Exploration. In Proceedings of the ACM Web Conference 2026 . Association for Computing Machinery, New York, NY, USA, 8232–8240. arXiv:2510.07919 [6] Yujing Hu, Qing Da, Anxiang Zeng, Yang Yu, and Yinghui Xu. 2018. Reinforce-ment Learning to Rank in E-Commerce Search Engine: Formalization, Analysis, and Application. In Proceedings of the 24th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining . Association for Computing Machinery, New York, NY, USA, 368–377. doi:10.1145/3219819.3219846 [7] Pratik Lahiri, Bingqing Ge, Zhou Qin, Aditya Jumde, Shuning Huo, Lucas Scottini, Yi Liu, Mahmoud Mamlouk, and Wenyang Liu. 2026. Design and Evaluation of Whole-Page Experience Optimization for E-commerce Search. In Proceedings of the Nineteenth ACM International Conference on Web Search and Data Mining .Association for Computing Machinery, New York, NY, USA, 1175–1179. doi:10. 1145/3773966.3779374 [8] Shichen Liu, Fei Xiao, Wenwu Ou, and Luo Si. 2017. Cascade Ranking for Opera-tional E-Commerce Search. In Proceedings of the 23rd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining . Association for Computing Machinery, New York, NY, USA, 1557–1565. doi:10.1145/3097983.3098011 [9] Changhua Pei, Xinru Yang, Qing Cui, Xiao Lin, Fei Sun, Peng Jiang, Wenwu Ou, and Yongfeng Zhang. 2019. Value-aware Recommendation based on Reinforced Profit Maximization in E-commerce Systems. arXiv:1902.00851 [cs.IR] doi:10. 48550/arXiv.1902.00851 [10] Shubhra Kanti Karmaker Santu, Parikshit Sondhi, and ChengXiang Zhai. 2017. On Application of Learning to Rank for E-Commerce Search. In Proceedings of the 40th International ACM SIGIR Conference on Research and Development in Information Retrieval . Association for Computing Machinery, New York, NY, USA, 475–484. doi:10.1145/3077136.3080838 [11] Tyler J. VanderWeele. 2013. Surrogate Measures and Consistent Surrogates. 
+
+Biometrics 69, 3 (2013), 561–565. doi:10.1111/biom.12071 [12] Dingsu Wang, Filip Ryzner, Kelly He, Armando Ordorica, David Woo, Aditya Mantha, Liyao Lu, Usha Amrutha Nookala, Haoran Guo, Jiacong He, Olafur Gudmundsson, Matt Chun, Krystal Benitez, Dhruvil Deven Badani, and Yi-jie Dylan Wang. 2026. Long-term User Engagement Optimization through Model-agnostic Downstream Rewards Learning. arXiv:2607.14192 [cs.IR] doi:10.48550/arXiv.2607.14192 [13] Xiaobei Wang, Shuchang Liu, Xueliang Wang, Qingpeng Cai, Lantao Hu, Han Li, Peng Jiang, Kun Gai, and Guangming Xie. 2024. Future Impact Decomposition in Request-level Recommendations. In Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining . Association for Computing Machinery, New York, NY, USA, 5905–5916. doi:10.1145/3637528.3671506 [14] Yuyan Wang, Mohit Sharma, Can Xu, Sriraj Badam, Qian Sun, Lee Richardson, Lisa Chung, Ed H. Chi, and Minmin Chen. 2022. Surrogate for Long-Term User Experience in Recommender Systems. In Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining . Association for Computing Machinery, New York, NY, USA, 4100–4109. doi:10.1145/3534678.3539073 [15] Zhengrui Xu, Zhe Yang, Zhengxiao Guo, Shukai Liu, Luocheng Lin, Xiaoyan Liu, Yongqi Liu, and Han Li. 2025. UMRE: A Unified Monotonic Transformation for Ranking Ensemble in Recommender Systems. arXiv:2508.07613 [cs.IR] doi:10. 48550/arXiv.2508.07613 [16] Wanqi Xue, Qingpeng Cai, Zhenghai Xue, Shuo Sun, Shuchang Liu, Dong Zheng, Peng Jiang, Kun Gai, and Bo An. 2023. PrefRec: Recommender Systems with Human Preferences for Reinforcing Long-term User Engagement. In Proceedings of the 29th ACM SIGKDD Conference on Knowledge Discovery and Data Mining .Association for Computing Machinery, New York, NY, USA, 2874–2884. doi:10. 1145/3580305.3599473 [17] Zhenghai Xue, Qingpeng Cai, Bin Yang, Lantao Hu, Peng Jiang, Kun Gai, and Bo An. 2025. AURO: Reinforcement Learning for Adaptive User Retention Opti-mization in Recommender Systems. In Proceedings of the ACM Web Conference 2025 . Association for Computing Machinery, New York, NY, USA, 1618–1629. doi:10.1145/3696410.3714956 [18] Qihua Zhang, Junning Liu, Yuzhuo Dai, Yiyan Qi, Yifan Yuan, Kunlun Zheng, Fan Huang, and Xianfeng Tan. 2022. Multi-Task Fusion via Reinforcement Learning for Long-Term User Satisfaction in Recommender Systems. In Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining .Association for Computing Machinery, New York, NY, USA, 4510–4520. doi:10. 1145/3534678.3539040 [19] Zhe Zhao, Lichan Hong, Li Wei, Jilin Chen, Aniruddh Nath, Shawn Andrews, Aditee Kumthekar, Maheswaran Sathiamoorthy, Xinyang Yi, and Ed H. Chi. 2019. Recommending What Video to Watch Next: A Multitask Ranking System. In 9Junzhao Zhang, Tao Zhang, Liren Yu, Feiyi Dong, Zhixuan Zhang, Dan Ou, and Haihong Tang 
+
+Proceedings of the 13th ACM Conference on Recommender Systems . Association for Computing Machinery, New York, NY, USA, 43–51. doi:10.1145/3298689.3346997 [20] Renzhe Zhou, Songyang Li, Feiran Zhu, Chenglei Dai, Yi Zhang, Yi Wang, and Jingwei Zhuo. 2026. SaFRO: Satisfaction-Aware Fusion via Dual-Relative Policy Optimization for Short-Video Search. In Proceedings of the 32nd ACM SIGKDD Conference on Knowledge Discovery and Data Mining . Association for Computing Machinery, New York, NY, USA. doi:10.1145/3770855.3818475 10
