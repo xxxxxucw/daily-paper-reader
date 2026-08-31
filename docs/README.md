@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-08-28</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-31</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 14 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 11 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>8</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>6</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>3</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-08-28 17:39:10 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-08-31 11:20:46 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,7 +62,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精读8篇、速读6篇，聚焦因果推断与电商搜索优化；其中线性规划用于因果顺序部分识别、电商长期用户价值建模两篇最值得精读；建议优先关注因果效应在决策与搜索场景中的落地方法。</p>
+<p>今日精读8篇、速读3篇，共处理11篇论文，聚焦大模型推理与风险决策前沿；</p>
+<p>最值得看的两篇满分工作：LLM反事实推理的失效机制剖析，以及基于保形预测的风险规避决策方法；</p>
+<p>建议优先精读这两篇论文，并可将速读中的符号回归特征工程作为实践补充。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -74,9 +76,9 @@
     <strong class="dpr-home-dashboard-count">8 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Partial Identification under Causal Orders by Linear Programming">Partial Identification under Causal Orders by Linear Programming</span></li><li><span class="dpr-home-dashboard-paper-title" title="DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search">DCEO: Direct Causal Effect Optimization for Long-Term User Value Modeling in E-commerce Search</span></li><li><span class="dpr-home-dashboard-paper-title" title="Multi-Expert Conformal Risk Control for Pairwise LLM Judging in Open-Ended Dialogue">Multi-Expert Conformal Risk Control for Pairwise LLM Judging in Open-Ended Dialogue</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="The Illusion of $\textit{What If}$: Evaluating the Breakdown of Counterfactual Reasoning in LLMs">The Illusion of $\textit{What If}$: Evaluating the Breakdown of Counterfactual Reasoning in LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Conformal Risk-Averse Decision Making with Optimized Certainty Equivalent Risk Control">Conformal Risk-Averse Decision Making with Optimized Certainty Equivalent Risk Control</span></li><li><span class="dpr-home-dashboard-paper-title" title="Conformal Uncertainty Quantification Guarantees for Neural Operators">Conformal Uncertainty Quantification Guarantees for Neural Operators</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>4</strong></span><span class="dpr-home-dashboard-tag">cp <strong>4</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>3</strong></span><span class="dpr-home-dashboard-tag">cp <strong>3</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -84,12 +86,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">6 篇</strong>
+    <strong class="dpr-home-dashboard-count">3 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Causal Modelling of Support Interventions for Student Competency Assessment">Causal Modelling of Support Interventions for Student Competency Assessment</span></li><li><span class="dpr-home-dashboard-paper-title" title="Endogenous Selection and Spillovers: Bayesian Inference for Policy-Relevant Causal Effects">Endogenous Selection and Spillovers: Bayesian Inference for Policy-Relevant Causal Effects</span></li><li><span class="dpr-home-dashboard-paper-title" title="TabuLM: Morphology-Aware Tabular Pre-training for Low-Resource Languages">TabuLM: Morphology-Aware Tabular Pre-training for Low-Resource Languages</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="SymboLLM-FE: LLM-Accelerated Symbolic Regression for Automated Feature Engineering on Tabular Data">SymboLLM-FE: LLM-Accelerated Symbolic Regression for Automated Feature Engineering on Tabular Data</span></li><li><span class="dpr-home-dashboard-paper-title" title="Are We Shooting Flies with Cannons? Trade-off Analysis for AI-based 5G Intrusion Detection">Are We Shooting Flies with Cannons? Trade-off Analysis for AI-based 5G Intrusion Detection</span></li><li><span class="dpr-home-dashboard-paper-title" title="Discovering Relationships in Data Lakes Using Large Language Models: An Industrial Case">Discovering Relationships in Data Lakes Using Large Language Models: An Industrial Case</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>3</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>3</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>3</strong></span></div>
 </section>
 </div>
 
