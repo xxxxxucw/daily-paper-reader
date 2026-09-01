@@ -1,0 +1,542 @@
+Title: RAD: Rule-Augmented Relational Anomaly Detection
+
+URL Source: https://arxiv.org/pdf/2608.23468v1
+
+Published Time: Tue, 25 Aug 2026 02:20:55 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# RAD: Rule-Augmented Relational Anomaly Detection 
+
+## Noah Dahle 
+
+Vanderbilt University Nashville, Tennessee, USA noah.dahle@vanderbilt.edu 
+
+## Anne Tumlin 
+
+Vanderbilt University Nashville, Tennessee, USA anne.m.tumlin@vanderbilt.edu 
+
+## Ngoc Tran 
+
+Vanderbilt University Nashville, Tennessee, USA ngoc.n.tran@vanderbilt.edu 
+
+## Xenofon Koutsoukos 
+
+Vanderbilt University Nashville, Tennessee, USA xenofon.koutsoukos@vanderbilt.edu 
+
+## Tyler Derr 
+
+Vanderbilt University Nashville, Tennessee, USA tyler.derr@vanderbilt.edu 
+
+## Abstract 
+
+Anomaly detection is often applied to data stored in relational databases, yet most existing methods require flattening multiple tables into a single feature matrix. This flattening can obscure entity identity, schema structure, and multi-hop dependencies, limiting the detection of anomalies that depend on relational context rather than isolated feature values. Beyond preserving relational struc-ture, relational anomaly detection raises an additional challenge: how to incorporate symbolic behavioral evidence into learned re-lational representations. To address these challenges, we study relational anomaly detection, where the goal is to identify anoma-lous entities or events in a multi-table database. We propose RAD, a rule-augmented relational anomaly detector that combines hetero-geneous graph representation learning with refined symbolic rule signals. RAD derives candidate rules from random-forest paths over flattened summaries of the entities or events being scored, refines them into compact interpretable predicates, injects the resulting rule features into the graph model, and learns anomaly scores using reconstruction-based and pairwise-ranking supervision. To evalu-ate this setting, we introduce a relational anomaly detection bench-mark spanning three settings: LANL cybersecurity event detection and two unexpected user-churn anomaly tasks derived from Ama-zon and H&M relational databases. Experiments show that RAD improves anomaly ranking over flattened tabular detectors and re-lational baselines under natural class imbalance, achieving the best average rank on AUROC and AUPRC across the benchmark. Abla-tions show that direct rule injection and ranking-based supervision are key contributors to performance, while edge reconstruction is not uniformly beneficial. Our code and data are available at: https://github.com/noahd15/RAD_RelationalAnomalyDetection. 
+
+## Keywords 
+
+relational anomaly detection, symbolic rule mining, relational deep learning, cybersecurity event detection, unexpected user-churn 
+
+ACM Reference Format: 
+
+Noah Dahle, Anne Tumlin, Ngoc Tran, Xenofon Koutsoukos, and Tyler Derr. 2026. RAD: Rule-Augmented Relational Anomaly Detection. In Proceedings of the 35th ACM International Conference on Information and Knowledge 
+
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> CIKM ’26, Rome, Italy
+> © 2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2539-5/2026/11 https://doi.org/10.1145/3799682.3841086
+
+Management (CIKM ’26), November 07–11, 2026, Rome, Italy. ACM, New York, NY, USA, 11 pages. https://doi.org/10.1145/3799682.3841086 
+
+## 1 Introduction 
+
+Anomaly detection is widely used to identify rare or unexpected be-havior in domains such as cybersecurity, fraud detection, healthcare, and cyber-physical systems [5, 7, 19]. In many of these settings, the data is not naturally stored as a single table of independent feature vectors. Instead, the data is stored in relational databases contain-ing multiple entity and event types connected through primary-foreign key relationships. For example, a cybersecurity database may include users, machines, and authentication events. A single authentication event may look normal in isolation but become sus-picious when linked to an unusual user-machine pair [11, 20]. This creates two related challenges for anomaly detection on relational databases: preserving relational structure and incorporating sym-bolic behavioral evidence into learned anomaly representations. Consider an authentication event that is unremarkable in iso-lation but anomalous because the user-machine pair has never co-occurred before, the machine is otherwise accessed only by ser-vice accounts, and the user authenticated to four other machines in the preceding ten minutes. Recovering these facts requires joins across authentication history and multi-hop neighbor context — information a flattened row-level summary discards. To apply these methods to relational databases, practitioners often flatten multiple tables into a single feature matrix using joins, aggregations, and hand-crafted features [11, 20, 25]. Although this makes the data compatible with tabular anomaly detectors, it can also obscure the signals that define relational anomalies. Entity identity, schema roles, multi-hop dependencies, and temporal con-text may be lost during flattening [11, 20]. As a result, anomalies whose abnormality depends on cross-table structure can be difficult to detect from flattened row-level features alone. In this work, we study relational anomaly detection: the task of ranking anomalous target entities or events in a multi-table rela-tional database. In this setting, each target instance must be scored not only from its own attributes but also from its relational con-text. This context may include linked entities, typed relationships, historical activity, and schema-dependent interactions. Unlike or-dinary tabular anomaly detection, relational anomaly detection requires models to preserve and reason over the structure of the database while still producing anomaly scores that are useful under severe class imbalance. Recent work on relational deep learning has shown that relational data can be modeled directly as graphs while arXiv:2608.23468v1 [cs.LG] 24 Aug 2026 CIKM ’26, November 07–11, 2026, Rome, Italy Noah Dahle, Anne Tumlin, Ngoc Tran, Xenofon Koutsoukos, and Tyler Derr 
+
+preserving table and relationship structure, but this line of work is not itself an anomaly detection framework and does not define anomaly-specific scoring objectives [11, 20]. Moreover, preserving relational structure alone is not sufficient for relational anomaly detection. Many anomalies correspond to behavioral or semantic patterns that are difficult to capture from relational message pass-ing alone. In practice, anomaly detection systems often rely on symbolic behavioral rules, heuristics, or analyst-defined patterns that encode suspicious combinations of events, entities, or activi-ties. A central challenge is therefore how to incorporate symbolic behavioral evidence into learned relational representations while still preserving end-to-end anomaly-oriented learning. We propose RAD, a rule-augmented relational anomaly detector for multi-table databases. RAD represents a relational database as a heterogeneous graph, mines symbolic rules from an auxiliary flattened view using random forests [2], injects the resulting rule features into target nodes, and learns anomaly scores via a het-erogeneous graph autoencoder with GraphSAGE-style message passing [12], reconstruction-based scoring, and pairwise ranking supervision. We evaluate RAD on a new relational anomaly detec-tion benchmark spanning LANL cybersecurity event detection and two unexpected user-churn tasks derived from the Amazon and H&M relational databases in RelBench [20]. Experiments on LANL, Amazon, and H&M compare RAD against flattened tabular anomaly detectors [17, 21–23, 25], as well as re-lational baselines based on Relational Deep Learning [11]. More specifically, we structure our empirical evaluation around five re-search questions: (RQ1) how RAD compares with tabular and re-lational baselines across relational anomaly tasks; (RQ2) whether mined rule features improve detection; (RQ3) the effect of graph edge reconstruction; (RQ4) how much LLM-assisted rule refine-ment adds over random-forest rules alone; and (RQ5) how sensitive unexpected-churn results are to anomaly prevalence. Results show that relational modeling and rule augmentation improve anomaly detection, especially on ranking-oriented metrics such as AUPRC and precision@k. These metrics are important because anomaly detection is usually highly imbalanced, and practical systems often care most about whether true anomalies appear near the top of the ranked anomaly list [4]. The results also show that rule features are most useful when injected into the graph representation rather than added after graph scoring. Ranking-based supervision fur-ther improves anomaly retrieval under class imbalance. Ablations show that direct rule injection and ranking-based supervision are key contributors to performance, while edge reconstruction has dataset-dependent effects and is not uniformly beneficial. Our contributions are summarized as follows: 
+
+• We formalize relational anomaly detection as distinct from standard tabular and graph anomaly detection, where anoma-lousness may depend on cross-table, multi-hop, temporal, and schema-dependent interactions. 
+
+• We propose RAD, a rule-augmented relational anomaly detec-tor for multi-table databases. RAD mines rules from relational summaries, injects rule-derived features into target nodes, and learns anomaly scores with heterogeneous-graph representa-tions, reconstruction, and pairwise-ranking objectives. 
+
+• We introduce a relational anomaly detection benchmark suite combining LANL cybersecurity event detection with two un-expected user-churn anomaly tasks derived from the Amazon and H&M datasets [20]. The benchmark provides unified tar-get definitions, anomaly-label constructions, relational graph construction, and ranking-based evaluation protocols. 
+
+• We empirically compare RAD against tabular anomaly detec-tors, relational baselines, and targeted ablations, showing that direct rule injection improves anomaly retrieval under severe class imbalance. 
+
+## 2 Related Work 
+
+Existing anomaly detection methods differ in how they represent data, how they define anomalousness, and whether they expose interpretable evidence for a detected anomaly. Relational anomaly detection requires all three: the model must preserve multi-table structure, produce useful anomaly rankings under severe class imbalance, and integrate symbolic behavioral evidence that may be difficult to express through relational message passing alone. Prior work addresses these requirements only partially. In this section, we review these existing paradigms and close by positioning our proposed framework against the limitations of current literature. 
+
+## 2.1 From Tabular Anomaly Detection to Relational Structure 
+
+Most classical anomaly detection methods assume each instance can be represented as an independent feature vector. Isolation Forest [17], one-class SVM [23], autoencoder-based anomaly de-tection [22], Deep SVDD [21], and recent tabular representation-learning methods, e.g., DRL [25], define anomalousness through isolation, support estimation, reconstruction error, compact latent representations, or learned feature decompositions. The difficulty is that relational databases are not naturally collec-tions of independent feature vectors. Applying tabular anomaly de-tectors to multi-table data requires flattening the database through joins, aggregations, and hand-crafted features. Flattening makes standard detectors applicable, but it changes the object being mod-eled: entity identity, schema roles, multi-hop dependencies, and temporal context must be compressed into row-level summaries. This is a poor fit for anomalies whose suspiciousness is relational, such as an event that appears ordinary in isolation but unusual given the user, machine, product, transaction, or activity history to which it is connected. Thus, tabular anomaly detection provides useful scoring objectives, but its representation is mismatched to relational anomaly detection. 
+
+## 2.2 From Graph Anomaly Detection to Relational Databases 
+
+Graph-based anomaly detection addresses part of this limitation by modeling dependencies among entities. Methods such as DOMI-NANT [9] and SL-GAD [27] use graph neural networks and self-supervised objectives to combine attribute and structural informa-tion when detecting anomalies. However, graph anomaly detection is usually formulated for graph data rather than relational databases. A relational database contains typed tables, primary-foreign key relationships, event records, entity records, and schema-dependent roles. Treating such data as a generic graph can blur distinctions RAD: Rule-Augmented Relational Anomaly Detection CIKM ’26, November 07–11, 2026, Rome, Italy 
+
+among entity types and relation types that are important for inter-preting anomalies. Relational Deep Learning [11] and RelBench [20] address this representation issue by preserving multi-table struc-ture and enabling learning directly over relational databases. This makes relational learning a natural foundation for relational anom-aly detection. The remaining gap is the anomaly objective. Relational learning frameworks are typically designed for supervised prediction, and while graph imbalance has been studied across the node, edge, and graph levels [24, 26, 26], they are not for ranking rare anomalous target entities under severe class imbalance. In contrast, anomaly detection requires scoring functions and evaluation protocols that prioritize retrieval of rare positives near the top of a ranked list. Our benchmark suite builds on this distinction: LANL provides a cyber-security relational anomaly setting, while the Amazon and H&M relational databases from RelBench are adapted into unexpected-churn anomaly detection tasks. The underlying RelBench databases are existing resources, but the anomaly-oriented task construction and unified ranking protocol are specific to this work. 
+
+## 2.3 From Symbolic Rules to Learned Anomaly Scoring 
+
+Symbolic and rule-based methods provide another piece of the problem. Association-rule mining [1], tree-derived rules [2], and interpretable decision sets [16] can expose human-readable regu-larities in structured data. Recent work such as ChatRule [18] and KnowGraph [28] further shows how logical rules and knowledge-guided reasoning can capture semantic patterns that are difficult to express through dense embeddings alone. The limitation is that symbolic rules and learned relational rep-resentations are often treated as separate components. Rule-based methods may expose interpretable behavioral patterns, but they are commonly used only for explanation, filtering, or post-hoc reason-ing rather than as part of the representation-learning process itself. Conversely, graph and relational neural models can learn expressive embeddings from relational structure, but the resulting anomaly representations may be difficult to connect to explicit behavioral evidence or analyst-defined suspicious patterns. Thus, preserving relational structure alone is often insufficient for relational anom-aly detection. A central challenge is how to incorporate symbolic behavioral evidence into learned relational representations while still supporting end-to-end anomaly-oriented learning. 
+
+## 2.4 Summary of Gaps and Our Contribution 
+
+Positioned against this landscape, RAD’s contribution is threefold. First, we formalize relational anomaly detection as a setting distinct from tabular and graph anomaly detection, and introduce a bench-mark suite spanning a cybersecurity task with externally verified ground truth and two derived e-commerce tasks under a unified ranking protocol. Second, we identify the point at which symbolic evidence enters the model as a design decision: rule features are injected into target nodes before message passing, allowing them to shape learned representations rather than just adjust scores after the fact, and the ablation in Section 7 evaluates the choice directly against post-hoc fusion. Third, we report empirical findings that hold independent of RAD’s specific architecture: edge reconstruc-tion is not uniformly beneficial, and LLM-assisted rule refinement functions well as a compaction and deduplication step rather than as just a source of new signal. With our contributions positioned against this landscape, we next formalize the mathematical founda-tions of our setting. 
+
+## 3 Preliminaries 
+
+We represent a relational database as a collection of typed tables, 
+
+D = {𝑇 1,𝑇 2, . . . ,𝑇 𝑚 }. Each table 𝑇 𝑖 contains rows of a particular entity or event type, and the database schema S specifies table attributes, primary keys, foreign keys, and relationships among tables[20]. For example, rows may correspond to users, computers, authentication events, customers, reviews, transactions, or articles depending on the dataset. A relational database can be converted to a graph, G = (𝑉 , 𝐸, 𝜏, 𝜌 ),where each row becomes a node 𝑣 ∈ 𝑉 , each primary-foreign key relationship becomes an edge 𝑒 ∈ 𝐸 , 𝜏 (𝑣 ) gives the node type of 
+
+𝑣 , and 𝜌 (𝑒 ) gives the edge type of 𝑒 . This construction follows the relational database-to-graph view used in relational deep learn-ing, where tables and schema relationships define typed nodes and typed edges for message passing [11, 20]. Unlike a flattened feature matrix, this representation preserves entity identity, table type, and schema-defined relationships. Let 𝑇 target be a designated target table whose rows are the objects to be scored. The corresponding target nodes are denoted 𝑉 target ⊂
+
+𝑉 . The target type is dataset-dependent. In LANL, target nodes are authentication events, while in the Amazon and H&M settings, target nodes are users or customers [13, 20]. Each target node 
+
+𝑣 ∈ 𝑉 target may have a binary label 𝑦 𝑣 ∈ { 0, 1}, where 𝑦 𝑣 = 1indicates an anomaly and 𝑦 𝑣 = 0 indicates a normal target node. Labels may be available only for a subset of target nodes. 
+
+## 4 Problem Definition 
+
+We formally introduce our proposed problem setting as follows: 
+
+Definition 4.1 (Relational Anomaly Detection). Given a relational database D with schema S, a designated target table 𝑇 target , a heterogeneous graph representation G = (𝑉 , 𝐸, 𝜏 ), target nodes 
+
+𝑉 target ⊂ 𝑉 , and anomaly labels for a training subset 𝑉 train ⊂ 𝑉 target ,the goal is to learn an anomaly scoring function, 𝑠 : 𝑉 target → R,such that anomalous target nodes receive higher scores than nor-mal target nodes. For labeled target nodes 𝑣 𝑖 , 𝑣 𝑗 ∈ 𝑉 train with 𝑦 𝑖 = 1and 𝑦 𝑗 = 0, the desired ranking behavior is 𝑠 (𝑣 𝑖 ) > 𝑠 (𝑣 𝑗 ).The learned scoring function is evaluated on a held-out test set 
+
+𝑉 test ⊂ 𝑉 target , where 𝑉 train ∩ 𝑉 test = ∅. Evaluation is performed by ranking nodes in 𝑉 test according to 𝑠 (𝑣 ).When timestamps are available, we impose temporal consistency. For a target node 𝑣 observed at time 𝑡 𝑣 , the scoring function may only use graph structure and node attributes available at or before 𝑡 𝑣 :
+
+𝑠 (𝑣 ) = 𝑓 (G ≤𝑡 𝑣 , 𝑋 ≤𝑡 𝑣 ). This prevents future information from leak-ing into the representation of earlier target nodes. The constraint is especially important for event-level cybersecurity detection and churn-style prediction tasks. Unlike ordinary supervised classification or tabular anomaly detection, the goal here is a ranking that depends on typed relational context in G, not a calibrated per-instance label. CIKM ’26, November 07–11, 2026, Rome, Italy Noah Dahle, Anne Tumlin, Ngoc Tran, Xenofon Koutsoukos, and Tyler Derr 
+
+## 5 RAD: Rule-Augmented Relational Anomaly Detection 
+
+RAD is a rule-augmented relational anomaly detector for multi-table databases. The model has four stages, shown in Figure 1. First, the relational database is converted into a heterogeneous graph that preserves entity types and schema-defined relationships. Second, RAD constructs an auxiliary flattened feature view for the target entities and mines symbolic rules from this view. Third, the selected rules are evaluated on each target entity and injected as binary rule features into the corresponding target nodes. Fourth, a heterogeneous graph autoencoder learns rule-aware relational representations and produces anomaly scores using reconstruction-based and ranking-based objectives. The design separates rule discovery from relational represen-tation learning. The flattened view is used only to discover inter-pretable rule predicates. The final anomaly detector operates on the heterogeneous graph, where rules are injected into target nodes before message passing. As a result, symbolic evidence can shape node embeddings and interact with relational context, rather than being added only as a post-hoc adjustment to final anomaly scores. 
+
+## 5.1 Relational Graph Construction 
+
+Given the heterogeneous graph representation from Section 3, RAD constructs typed nodes from table rows and typed edges from primary-foreign key relationships. Each target row corresponds to a target node, and neighboring nodes correspond to related entities or events connected through the database schema. The exact target and relation types are dataset-dependent and are described in Section 6. Each node has an initial feature vector. Since different node types may have different attributes and feature dimensions, RAD uses type-specific input projections before message passing. Graph construction respects the temporal constraint of Section 4 The goal of this step is not to flatten the database into one feature matrix, but to preserve typed relational structure so that anomaly scores can depend on both node attributes and relational context. 
+
+## 5.2 Rule Mining and Validation 
+
+RAD mines symbolic rules from an auxiliary flattened feature view of the target entities. This flattened view is used only for rule discovery, rule evaluation, and tabular baselines; it does not replace the heterogeneous graph used by RAD for relational representation learning. Rule mining’s purpose is to extract compact behavioral predicates that can later be injected into target-node features. Given the flattened training view and the available anomaly labels, RAD trains a random forest classifier after removing identi-fier, timestamp, label, and unavailable future-information columns. Numeric features are coerced to numeric values, missing values are imputed, and categorical features are encoded before training. Each root-to-leaf path in the trained forest defines a candidate rule. A path is converted into a conjunctive predicate by tracing the feature-threshold decisions from the leaf back to the root. Each split contributes one condition of the form 𝑥 𝑗 ≤ 𝑐 or 𝑥 𝑗 > 𝑐 , producing a candidate predicate defined as: 
+
+𝑞 (𝑣 ) = 𝑐 1 (𝑣 ) ∧ 𝑐 2 (𝑣 ) ∧ · · · ∧ 𝑐 𝑚 (𝑣 ).Heterogeneous GAE                            
+
+> Encoder Decoder Rank Target ID Scores 1vᵢ s(i) 2vⱼs(j) ... ... ... nvₖs(k)
+> Anomaly Scores and Ranking Rule-Augmented Relational Graph Relational Graph Construction
+> Relational Database
+> ⊕
+> =
+> Target ID R₁ R₂ ... v₁ ... ... ...
+> Rule Feature Matrix
+> Node-level Feature Augmentation with Rule Features
+> . . .
+> Extracted Rules
+> R₁: If avg_rate ≤ 2 ∧
+> review_count ≤ 5 R₂: ...
+> ...
+> Rₙ: ...
+> Rule Filter and Ranker
+> ID ... ... ... ... ... Flattened Feature View as Feature Matrix
+> Random Forest
+> R₁: If avg_rate ≤ 2 ∧review_count ≤ 5 ∧...
+> .
+> .
+> .
+> LLM-Enhanced Rules Ranked
+> R₂: ...
+> LLM
+> Sample Paths
+> ...
+> Rule Mining with Random Forests
+> Rₙ: ...
+> Reconstruction Loss Ranking Loss Edge-Reconstruction Loss Total Loss
+
+Figure 1: Overview of RAD. A database is represented by a flattened view for rule mining and a heterogeneous graph for representation learning. Random-forest paths are refined into predicates, converted into binary features, and injected into nodes before heterogeneous graph encoding. The model produces anomaly scores and ranks target nodes. 
+
+Following standard rule mining notions of support, confidence, and lift [1], we adapt these quantities to candidate anomaly predi-cates over target nodes. Let 𝑆 denote a labeled split, let 𝑣 ∈ 𝑆 be a target node, let 𝑦 𝑣 ∈ { 0, 1} be its anomaly label, and let 𝑞 (𝑣 ) ∈ { 0, 1}
+
+indicate whether candidate predicate 𝑞 covers node 𝑣 . The indicator 
+
+1[·] equals one when its argument is true and zero otherwise. The support of predicate 𝑞 on split 𝑆 is support 𝑆 (𝑞 ) =∑︁ 
+
+𝑣 ∈𝑆 
+
+1[𝑞 (𝑣 ) = 1],
+
+which counts the number of nodes covered by the predicate. The confidence of 𝑞 is the ratio of covered nodes that are anomalous: confidence 𝑆 (𝑞 ) =
+
+Í𝑣 ∈𝑆 1[𝑞 (𝑣 ) = 1 ∧ 𝑦 𝑣 = 1]
+
+Í𝑣 ∈𝑆 1[𝑞 (𝑣 ) = 1] .
+
+When the denominator is zero, confidence is defined as zero. We also compute lift by comparing predicate confidence against the anomaly prevalence in the same split: lift 𝑆 (𝑞 ) = confidence 𝑆 (𝑞 )
+
+𝜋 𝑆 
+
+, 𝜋 𝑆 = 1
+
+|𝑆 |∑︁ 𝑣 ∈𝑆 
+
+1[𝑦 𝑣 = 1].
+
+Lift measures whether a predicate covers anomalies at a higher rate than expected from the base anomaly prevalence. Candidate predicates are filtered before being used as features. Predicates that reference identifiers, label fields, unavailable columns, or future information are removed. Predicates that fail parsing, fail execution, or do not satisfy the minimum coverage requirements are RAD: Rule-Augmented Relational Anomaly Detection CIKM ’26, November 07–11, 2026, Rome, Italy 
+
+also discarded. The remaining predicates are ranked using support, confidence, and lift computed only from the training or validation data designated for rule selection. Duplicate predicates are removed. From the retained candidate predicates, RAD samples a smaller set of seed rules for optional LLM-assisted refinement. The LLM is used only as a constrained rule-proposal mechanism. Given the flattened feature schema, feature statistics, compact positive exam-ples from the training data, and sampled random-forest seed rules, it proposes SQL WHERE predicates that prune, tighten, combine, or generalize the seed predicates. The LLM does not assign anomaly labels, produce anomaly scores, introduce external attributes, or access test labels. Generated predicates are validated before use. Each generated predicate is executed against the flattened rule-selection view and rescored using the same support, confidence, and lift definitions above. Invalid predicates and predicates that fail the required cov-erage checks are discarded. The highest-ranked valid predicates are retained as the final rule set. The final rule set is frozen after training and validation. At test time, RAD only evaluates these fixed predicates on held-out target entities. No rule mining, rule selection, threshold relaxation, or predicate updating uses test labels. Each retained predicate is converted into a binary rule feature. For rule 𝑘 , the rule feature for target entity 𝑣 is 
+
+𝑟 𝑘 (𝑣 ) =
+
+(
+
+1, if 𝑣 satisfies rule 𝑘, 
+
+0, otherwise .
+
+The full rule vector is 
+
+𝑟 (𝑣 ) = [𝑟 1 (𝑣 ), 𝑟 2 (𝑣 ), . . . , 𝑟 𝐾 (𝑣 )] .
+
+The resulting binary rule matrix is aligned with the corresponding target nodes and injected into the heterogeneous graph as described in Section 5.3. 
+
+## 5.3 Rule-Augmented Node Features 
+
+After rule mining and validation, RAD evaluates the final rule set on each target entity. This produces a binary rule vector 𝑟 (𝑣 ) for each target node 𝑣 ∈ 𝑉 target . Each entry indicates whether the target entity satisfies one selected rule. RAD injects this rule vector directly into the target node features before message passing. For each target node 𝑣 , the augmented feature vector is ˜𝑥 𝑣 = [𝑥 𝑣 ∥𝑟 (𝑣 )] ,
+
+where 𝑥 𝑣 is the original target-node feature vector and ∥ denotes concatenation. Non-target nodes keep their original feature vectors. This direct injection is a key design choice. Because rule features are added before graph encoding, rule evidence can influence mes-sage passing and representation learning. A target node’s embed-ding can therefore reflect not only its own attributes and relational neighborhood, but also the symbolic rules it satisfies. This differs from post-hoc rule fusion, where rule features are added after the graph model has already produced anomaly scores. Post-hoc fusion can adjust final scores, but it cannot change the representations learned by the graph encoder. We evaluate this design choice in the direct-injection versus post-hoc-fusion ablation in Section 8. 
+
+## 5.4 Heterogeneous Graph Encoder 
+
+RAD uses a heterogeneous graph encoder to learn rule-aware node representations from the augmented relational graph. Because dif-ferent node types may have different feature spaces, each node type first uses a type-specific input projection. For target nodes, the input is the rule-augmented feature vector ˜ 𝑥 𝑣 ; for non-target nodes, the input is the original feature vector 𝑥 𝑣 .After projection, RAD applies relation-aware message passing over the typed edges of the relational graph. Messages are aggre-gated separately for each relation type and then combined to update the node representation. This preserves schema information by al-lowing messages arriving through different database relationships to contribute separately before being merged. In our implementation, the encoder is a two-layer heteroge-neous GraphSAGE model with mean aggregation [12]. After the final message-passing layer, each target node 𝑣 has an embedding 
+
+𝑧 𝑣 that encodes its original attributes, injected rule features, and typed relational neighborhood. These embeddings are used by the reconstruction and ranking objectives described next. Formally, for node 𝑣 of type 𝜏 (𝑣 ), the encoder computes 
+
+ℎ(0) 
+
+> 𝑣
+
+= 𝑊 𝜏 (𝑣 ) ˜𝑥 𝑣 + 𝑏 𝜏 (𝑣 ) ,𝑚 (𝑙,𝑟 ) 
+
+> 𝑣
+
+= 1
+
+|N 𝑟 (𝑣 )| ∑︁ 𝑢 ∈ N 𝑟 (𝑣 )
+
+ℎ(𝑙 −1) 
+
+> 𝑢
+
+,ℎ(𝑙 ) 
+
+> 𝑣
+
+= 𝜎 ©«
+
+𝑊 (𝑙 ) 
+
+> self
+
+ℎ(𝑙 −1) 
+
+> 𝑣
+
++∑︁  
+
+> 𝑟 ∈ R ( 𝑣 )
+
+𝑊 (𝑙 ) 
+
+> 𝑟
+
+𝑚 (𝑙,𝑟 )
+
+> 𝑣
+
+ª®¬
+
+,𝑧 𝑣 = ℎ(𝐿 ) 
+
+> 𝑣
+
+, 𝐿 = 2,
+
+where N𝑟 (𝑣 ) denotes the neighbors of 𝑣 under relation 𝑟 , R ( 𝑣 ) the relation types incident to 𝜏 (𝑣 ), and ˜ 𝑥 𝑣 the rule-augmented feature vector from Section 4.3 for target nodes and 𝑥 𝑣 otherwise. We use GraphSAGE-style mean aggregation because it is inductive (required for scoring LANL’s sampled subgraphs at test time), stable under variable-degree sampled neighborhoods, and matches the RDL baseline encoder in Section 7.3, isolating the effect of rule injection from backbone choice. 
+
+## 5.5 Anomaly Scoring and Training Objective 
+
+RAD scores target nodes using a graph autoencoder objective with optional structure reconstruction and ranking-based anomaly su-pervision, following the general use of graph autoencoders to learn latent node representations and reconstruct graph structure [14]. 
+
+5.5.1 Attribute Reconstruction. The attribute decoder attempts to reconstruct the rule-augmented target-node features ˜ 𝑥 𝑣 from the target-node embedding 𝑧 𝑣 , which we formalize as: ˆ˜𝑥 𝑣 = 𝑔 𝜙 (𝑧 𝑣 ).
+
+The attribute reconstruction loss for target node 𝑣 is 
+
+Lattr (𝑣 ) = ˆ˜𝑥 𝑣 − ˜𝑥 𝑣  
+
+> 22
+
+.
+
+This term encourages the encoder to learn representations that preserve target-node attributes and rule features. The reconstruc-tion error also provides an anomaly signal. Target nodes that do CIKM ’26, November 07–11, 2026, Rome, Italy Noah Dahle, Anne Tumlin, Ngoc Tran, Xenofon Koutsoukos, and Tyler Derr 
+
+not follow common attribute, rule, or relational patterns should be harder to reconstruct. 
+
+5.5.2 Edge Reconstruction. RAD can also include an edge recon-struction term. For an edge (𝑢, 𝑣, 𝑟 ) of relation type 𝑟 , the structure decoder predicts whether the edge exists from the node embeddings. This can be formalized as follows: ˆ𝑎 (𝑟 ) 
+
+> 𝑢𝑣
+
+= 𝜎  𝑧 ⊤ 
+
+> 𝑢
+
+𝑊 𝑟 𝑧 𝑣 
+
+ ,
+
+where 𝑊 𝑟 is a relation-specific decoder parameter and ˆ 𝑎 (𝑟 ) 
+
+> 𝑢𝑣
+
+is the predicted probability that an edge of type 𝑟 exists between nodes 𝑢 
+
+and 𝑣 in the relational graph. The edge reconstruction loss is binary cross-entropy over ob-served edges and sampled non-edges: 
+
+Lstruct = −∑︁  
+
+> (𝑢,𝑣,𝑟 ) ∈ 𝐸 +∪𝐸 −
+
+h
+
+𝑎 (𝑟 ) 
+
+> 𝑢𝑣
+
+log ˆ 𝑎 (𝑟 ) 
+
+> 𝑢𝑣
+
++
+
+
+
+1 − 𝑎 (𝑟 )
+
+> 𝑢𝑣
+
+
+
+log 
+
+
+
+1 − ˆ𝑎 (𝑟 )
+
+> 𝑢𝑣
+
+i 
+
+.
+
+Here, 𝐸 + is the set of observed typed edges, 𝐸 − is a set of sampled negative edges, and 𝑎 (𝑟 ) 
+
+> 𝑢𝑣
+
+∈ { 0, 1} indicates whether the typed edge exists. We treat edge reconstruction as optional because it may help when anomalousness is expressed through unusual links, but it may also overemphasize sampled graph topology. We therefore evaluate both BCE and no-BCE variants in Section 8. The no-BCE variant sets the edge-reconstruction weight to zero. 
+
+5.5.3 Ranking-Based Anomaly Supervision. Reconstruction alone is an indirect anomaly detection objective. A powerful autoencoder may reconstruct some anomalous nodes well, and the practical goal is to rank rare anomalies near the top rather than to produce calibrated binary predictions. For this reason, RAD uses pairwise ranking supervision when anomaly labels are available, follow-ing pairwise learning-to-rank objectives that encourage positive instances to score above negative instances [3]. Let 𝑃 be the set of labeled anomalous target nodes and 𝑁 be the set of presumed-normal target nodes. RAD samples pairs (𝑖, 𝑗 ) ∼ 
+
+𝑃 × 𝑁 and encourages anomalous nodes to receive higher anomaly scores than normal nodes: 
+
+Lrank = E(𝑖,𝑗 )∼ 𝑃 ×𝑁 
+
+softplus (𝑠 𝑗 − 𝑠 𝑖 ) .
+
+Here, 𝑠 𝑖 and 𝑠 𝑗 are anomaly scores for the anomalous and normal target nodes, respectively. In our implementation, the anomaly score is based on reconstruction error, optionally combined with the edge-reconstruction score when used. The full training objective is 
+
+L = Lattr + 𝛼 Lstruct + 𝛽 Lrank ,
+
+where 𝛼 controls the contribution of edge reconstruction and 𝛽 
+
+controls the contribution of ranking supervision. In no-BCE abla-tions, 𝛼 = 0. This objective aligns RAD with anomaly ranking under class imbalance while still using reconstruction to learn rule-aware relational representations. 
+
+## 6 Relational Anomaly Detection Benchmark 
+
+We introduce a relational anomaly detection benchmark suite for evaluating anomaly ranking in multi-table databases. The suite 
+
+Table 1: Summary of the relational anomaly detection bench-mark tasks. LANL is treated as a multi-table event database, while Amazon and H&M are derived from relational user-behavior databases and converted into unexpected churn anomaly detection tasks.                     
+
+> Task Domain Target Tables Records Targets Anomaly LANL Cybersecurity Auth event 71.65B 1.64B Red-team auth. Amazon E-commerce Customer 315.0M 1.85M Unexpected review churn H&M Retail Customer 316.7M 1.37M Unexpected purchase churn
+
+contains one cybersecurity task based on the LANL Comprehen-sive, Multi-Source Cybersecurity Events dataset [13] and two e-commerce tasks derived from the Amazon and H&M relational databases in RelBench [20]. The underlying Amazon and H&M databases are not new; our contribution is to adapt them into unexpected-churn anomaly detection tasks and evaluate all three tasks under a unified relational anomaly detection protocol. 
+
+## 6.1 Benchmark Design Principles 
+
+A task is suitable for relational anomaly detection when anoma-lousness may depend on relational context rather than only on the target entity’s own attributes. We therefore select tasks that contain multiple schema-linked tables, define a target entity or event type, provide anomaly labels or a principled anomaly-label construction, contain rare positives suitable for ranking-based eval-uation, and include temporal information when needed to prevent leakage. These criteria distinguish relational anomaly detection from flattened tabular anomaly detection: the target score may depend on linked entities, typed relationships, historical behavior, and multi-hop schema-dependent context. Table 1 summarizes the benchmark tasks, target entities, data-base scale, and anomaly definitions. For Amazon and H&M, the default unexpected-churn anomaly rate is 1.5%, with 0.5% and 3.0% used in the prevalence-sensitivity sweep. 
+
+## 6.2 LANL Cybersecurity Event Detection 
+
+The LANL cybersecurity dataset contains enterprise authentica-tion events, process execution logs, DNS activity, network flows, and red-team attack labels [13]. We use authentication events as target entities and red-team authentication events as anomalies. This task represents event-level anomaly detection in a relational cybersecurity database. LANL is well suited for relational anomaly detection because suspicious authentication behavior often depends on context: a login may appear normal as a row but become sus-picious when linked to unusual users, machines, process activity, etc. As the full dataset is large, we evaluate sampled relational subgraphs centered on authentication events. Anchor events are sampled across the full time range, with a small number of red-team events included to ensure positives. For each anchor, we retrieve linked users, source and destination computers, and nearby process, DNS, and flows when available. RAD: Rule-Augmented Relational Anomaly Detection CIKM ’26, November 07–11, 2026, Rome, Italy 
+
+## 6.3 Unexpected User-Churn Detection 
+
+We derive two unexpected-churn tasks from relational user-behavior databases. Unlike ordinary churn prediction, these tasks treat churn as anomalous only when it occurs without a preceding activity de-cline that would make the churn expected. This distinction is impor-tant since predictable disengagement is not necessarily anomalous. The resulting tasks ask whether relational context helps identify users whose behavior changes in surprising ways across linked reviews, purchases, products, transactions, and item metadata. 
+
+6.3.1 Amazon Review Churn. The Amazon task scores customers whose reviewing behavior ends unexpectedly. Each customer is connected to review events and reviewed products, allowing the relational graph to represent not only how often a customer re-views, but also what kinds of products they review and how their activity relates to product-level context. The auxiliary flattened view for Amazon summarizes each customer’s own review activity, review counts, rating history, product diversity as a count, and review-history span, and does not incorporate attributes of the re-viewed products themselves. Mined rules for this task are therefore restricted to one-hop customer-level aggregates; multi-hop product context reaches the model only through message passing over the customer-review-product graph, not through rule features. 
+
+6.3.2 H&M Purchase Churn. The H&M task evaluates unexpected disappearance from purchase activity. Customers are linked to transaction records and articles, with article attributes providing item-level context for purchase behavior. This task differs from Amazon because activity is expressed through purchases rather than reviews, and because product metadata can help distinguish ordinary inactivity from unusual changes in shopping behavior. The flattened view summarizes recent transactions, price history, article diversity, and transaction-history span, while the relational graph preserves customer-transaction-article links. 
+
+6.3.3 Unexpected-Churn Label Construction. For Amazon and H&M, we convert churn labels into unexpected-churn anomaly labels by removing churn cases that are explained by a strong prior activity decline. A user is therefore anomalous only if they churn and their previ-ous activity does not already indicate an expected disengagement pattern. The unexpected-churn label is derived from the original RelBench [20] churn label via the activity-decline filter below, not an independent construction. The filter removes only those churned users whose own prior activity history already signals disengage-ment; it does not introduce a new labeling criterion unrelated to the underlying data. The prevalence sweep in Section 7 varies the filtering threshold across 0 .5% , 1.5% , and 3 .0% and shows that RAD’s ranking advantage over the supervised RDL baseline is stable across this range, which is the evidence that the default 1 .5% threshold was not selected to favor a particular result. Let 𝑦 churn  
+
+> 𝑢
+
+∈ { 0, 1} denote the original churn label for user 𝑢 . We compute a recent activity-change score 𝑔 𝑢 and a baseline activity level 𝜇 𝑢 from the user’s activity history before the prediction time. A user is marked as having an expected activity decline when 
+
+𝐷 (𝑢 ) = 1 [𝑔 𝑢 ≤ − 𝜃 (𝜇 𝑢 )] ,
+
+Figure 2: Unexpected-churn filtering. Churned users with an expected prior activity decline are removed; remaining churned users are treated as unexpected-churn anomalies. 
+
+where 
+
+𝜃 (𝜇 𝑢 ) = 𝜆 0 + log 𝜆 1 (𝜇 𝑢 + 1)( 1 + 𝜆 2𝜇 𝑢 ).
+
+The threshold adapts to the user’s baseline activity level, so users with different activity histories are not judged using the same fixed decline cutoff. In our experiments, we use 𝜆 0 = 0.05, 𝜆 1 = 10 .0, and 
+
+𝜆 2 = 0.02. The filtered anomaly label is 
+
+𝑦 anom  
+
+> 𝑢
+
+= 𝑦 churn  
+
+> 𝑢
+
+(1 − 𝐷 (𝑢 )) .
+
+Thus, a user is labeled anomalous only if the user churned and was not already identified as having an expected activity decline. Churned users with an expected prior decline are removed from the positive anomaly class. After filtering, training positives are down-sampled to a target anomaly prevalence of 1.5%, and the validation set is downsampled to match the resulting training prevalence. Evaluation is performed on held-out target users using ranking metrics. 
+
+6.3.4 Prevalence Sweep for Label Sensitivity. The unexpected-churn label depends on the strictness of the filtering threshold used to remove expected churn cases. To test whether the benchmark is robust to this design choice, we perform a prevalence sweep over the target anomaly labeling rate. After constructing candidate unexpected-churn positives, we vary the retained positive rate to produce target prevalences of 0.5%, 1.5%, and 3.0%. The 1.5% task is used as the default benchmark configuration, while the 0.5% and 3.0% tasks evaluate sensitivity under stricter and more permissive anomaly definitions. For each prevalence level, we preserve the same train/validation/test protocol and compare RAD against the supervised RDL baseline using AUROC and AUPRC. The sweep changes only the anomaly-label filtering rate; the relational graph construction, feature views, model architecture, and evaluation protocol are otherwise held fixed. This isolates the effect of label prevalence from changes in model design. 
+
+## 6.4 Dataset-Specific Flattened Views and Rule Mining 
+
+Although RAD operates on heterogeneous relational graphs, rule mining and tabular baselines require an auxiliary flattened view for each target entity. Table 2 summarizes the dataset-specific flattened feature views along with random-forest and predicate-filtering settings that instantiate Section 5.2’s generic rule-mining procedure. CIKM ’26, November 07–11, 2026, Rome, Italy Noah Dahle, Anne Tumlin, Ngoc Tran, Xenofon Koutsoukos, and Tyler Derr 
+
+Table 2: Feature views and random-forest rule-mining set-tings by dataset.                                             
+
+> Setting LANL Amazon H&M Feature groups Auth attrs.; user-pair novelty; recent auth., DNS, flow, process Recent reviews; rating history; product diversity; review-history span Recent purchases; price history; article diversity; activity trend/level Training cap 500K 200K 200K Forest size 1200 200 200 Depth / leaf None / 1 10 / 5 10 / 5 Class weight Balanced Balanced Balanced Path extraction First 200 First 100 First 100 Leaf filter ≥8, 𝑝 +≥.50 ≥5, 𝑝 +≥.50 ≥5, 𝑝 +≥.50
+> Selection split Validation Train sample Train sample Rule filter Supp. ≥3, conf. ≥.02 Supp. ≥1Supp. ≥1Seed / pool 30 / 2000 30 / 2000 30 / 2000
+
+## 7 Experiments 
+
+The experiments evaluate whether RAD improves relational anom-aly detection through relational representation learning, rule aug-mentation, and anomaly-oriented supervision, returning to the five research questions introduced in Section 1. 
+
+## 7.1 Experimental Protocol 
+
+We evaluate RAD on the benchmark from Section 6, using the pipeline described in Section 5. Each setting defines a target entity type (authentication events for LANL, customers for Amazon and H&M); the model produces a continuous anomaly score per target node, evaluated only on held-out entities. Flattened rows are aligned with graph target nodes by target identifier so all methods share the same target population and splits. The supervised MLP uses ground-truth training labels and is evaluated on the same held-out test entities; test labels are used only for evaluation. Results are reported over ten random seeds as mean ± standard deviation, using AUROC, AUPRC, and precision@k, with AUPRC and precision@k emphasized because anomaly detection is highly imbalanced and practical systems prioritize retrieving true anomalies near the top of a ranked list [4]. 
+
+## 7.2 Implementation Details 
+
+RAD uses a two-layer relation-aware GraphSAGE encoder with mean aggregation, hidden dimension 128, Adam optimization, learn-ing rate 0.001, MSE attribute reconstruction, optional BCE edge reconstruction, and early stopping on validation AUPRC. The struc-ture weight 𝛼 , ranking weight 𝛽 , and model hyperparameters are se-lected using Optuna on the validation split, with validation AUPRC as the optimization objective. The selected configuration is then fixed for held-out test evaluation. The supervised MLP operates on the flattened target-entity fea-tures and is trained using binary cross-entropy on ground-truth training labels. For LANL, MLP hyperparameters are selected us-ing the validation split. For Amazon and H&M, the MLP uses the default, untuned hyperparameters. In all cases, the resulting model is evaluated on the held-out test split over ten random seeds. For experiments with edge reconstruction, the structure recon-struction weight 𝛼 controls the contribution of the binary cross-entropy edge reconstruction term; no-BCE ablations set 𝛼 to zero. For LANL, rule mining uses the validation-based filtering and support thresholds described in Table 2. 
+
+## 7.3 Baselines 
+
+We compare against flattened tabular anomaly detectors, including Isolation Forest [17], Deep SVDD [21], autoencoder reconstruc-tion [22], AE+Rank, and DRL [25]. We also compare against rela-tional deep learning baselines that operate directly on the hetero-geneous graph without rule augmentation [11]. Finally, we include a supervised MLP trained on the flattened target-entity features as a fully supervised reference baseline. This provides a reference for how the anomaly detection methods perform relative to a model trained directly using ground-truth anomaly labels. These baselines separate the effects of tabular scoring, relational representation learning, rule augmentation, ranking supervision, and full label supervision. Table 3 summarizes the baselines. 
+
+Table 3: Baselines compared in our experiments, categorized by input representation and supervision signal. 
+
+Model Tab. Graph Rank Sup. Isolation Forest [17] ✓ ✗ ✗ ✗
+
+Deep SVDD [21] ✓ ✗ ✗ ✗
+
+AE [22] ✓ ✗ ✗ ✗
+
+AE + Rank ✓ ✗ ✓ ✗
+
+DRL [25] ✓ ✗ ✗ ✗
+
+RDL GNN [11] ✗ ✓ ✗ ✗
+
+Supervised MLP ✓ ✗ ✗ ✓
+
+> “Tab.” indicates flattened tabular input, “Graph” indicates het-erogeneous relational graph input, “Rank” indicates pairwise anomaly-ranking supervision, and “Sup.” indicates direct su-pervision using ground-truth anomaly labels.
+
+## 7.4 Evaluation Metrics 
+
+All methods produce a continuous anomaly score for each held-out target entity, where larger scores indicate greater anomalousness. We report AUROC for global ranking quality, AUPRC for precision-recall performance on the anomalous class, and precision@k for the fraction of true anomalies among the top-𝑘 ranked targets, with 𝑘 set to the number of positives in the test set. We emphasize AUPRC and precision@k because precision-recall evaluation is more informative than ROC analysis under severe class imbalance, and because practical anomaly detection systems often inspect only the top-ranked alerts [4, 8]. AUROC is the probability that a uniformly drawn positive target node receives a higher score than a uniformly drawn negative one. AUPRC is the area under the precision-recall curve, summed across recall levels. Precision@k is the fraction of true positives among the top-𝑘 ranked targets, with 𝑘 set to the number of positives in the evaluated split. 
+
+## 8 Results 
+
+The results evaluate whether RAD improves relational anomaly de-tection through relational graph modeling, rule augmentation, and anomaly-oriented supervision. We focus primarily on AUPRC and precision@k because the benchmark tasks are highly imbalanced and require retrieving rare anomalies near the top of a ranked list. RAD: Rule-Augmented Relational Anomaly Detection CIKM ’26, November 07–11, 2026, Rome, Italy 
+
+Table 4: Main results across datasets over 10 seeds. Results are reported as mean ± standard deviation. Avg. rank columns report the average rank per metric across datasets; lower is better.                                                                                                                                                                                                                                  
+
+> LANL Amazon H&M Avg. Rank Model AUROC AUPRC P@k AUROC AUPRC P@k AUROC AUPRC P@k AUROC AUPRC P@k RAD (rules, no BCE) 0.996 ±0.001 0.659 ±0.053 0.601 ±0.012 0.693 ±0.010 0.043 ±0.003 0.050 ±0.007 0.828 ±0.071 0.143 ±0.017 0.129 ±0.022 2.01.22.0
+> RAD (rules, BCE) 0.860 ±0.155 0.557 ±0.029 0.572 ±0.008 0.695 ±0.010 0.043 ±0.004 0.051 ±0.004 0.787 ±0.074 0.110 ±0.020 0.125 ±0.022 3.31.82.3
+> RDL weighted [11] 0.553 ±0.158 0.007 ±0.014 0.021 ±0.064 0.720 ±0.002 0.037 ±0.000 0.062 ±0.004 0.700 ±0.005 0.035 ±0.001 0.064 ±0.013 4.74.83.7
+> RDL unweighted [11] 0.685 ±0.205 0.015 ±0.028 0.026 ±0.078 0.713 ±0.002 0.037 ±0.001 0.062 ±0.005 0.693 ±0.019 0.039 ±0.004 0.064 ±0.016 4.33.83.3
+> AE+Rank [22] 0.943 ±0.035 0.525 ±0.078 0.540 ±0.065 0.518 ±0.014 0.016 ±0.001 0.015 ±0.003 0.456 ±0.024 0.013 ±0.000 0.005 ±0.004 5.25.25.7
+> DRL [25] 0.673 ±0.159 0.004 ±0.002 0.005 ±0.004 0.463 ±0.022 0.013 ±0.001 0.003 ±0.000 0.456 ±0.012 0.013 ±0.001 0.009 ±0.009 7.58.27.2
+> AE [22] 0.888 ±0.046 0.009 ±0.003 0.000 ±0.000 0.474 ±0.013 0.014 ±0.001 0.014 ±0.009 0.408 ±0.020 0.012 ±0.000 0.007 ±0.005 6.77.37.8
+> Deep SVDD [21] 0.736 ±0.073 0.005 ±0.002 0.001 ±0.003 0.458 ±0.031 0.013 ±0.001 0.003 ±0.001 0.412 ±0.023 0.012 ±0.001 0.002 ±0.003 7.78.78.8
+> Isolation Forest [17] 0.644 ±0.018 0.003 ±0.000 0.000 ±0.000 0.450 ±0.002 0.013 ±0.000 0.001 ±0.000 0.402 ±0.014 0.012 ±0.000 0.004 ±0.005 9.79.39.5
+> Supervised MLP 0.965 ±0.003 0.050 ±0.011 0.093 ±0.035 0.659 ±0.024 0.027 ±0.003 0.041 ±0.009 0.642 ±0.028 0.027 ±0.005 0.039 ±0.023 4.04.74.7
+
+## 8.1 RQ1: Overall Relational Anomaly Detection Performance 
+
+Table 4 reports the main results across LANL, Amazon, and H&M. RAD achieves the strongest average AUPRC rank across the bench-mark, with the clearest gains on LANL. On LANL, RAD substantially outperforms flattened tabular detectors and relational baselines on AUPRC and precision@k, indicating that relational structure and rule augmentation are especially useful for retrieving rare suspi-cious authentication events. On Amazon, the supervised RDL baselines achieve stronger AU-ROC and precision@k than RAD, but RAD achieves higher AUPRC. This suggests that RDL provides strong global ranking on this task, while RAD improves precision-recall behavior over the anomalous class. On H&M, RAD achieves the best performance across AUROC, AUPRC, and precision@k. Overall, these results support the cen-tral motivation of relational anomaly detection: anomaly ranking benefits from modeling both relational context and rule-derived behavioral evidence, especially under severe class imbalance. 
+
+## 8.2 RQ2: Effect of Rule Augmentation 
+
+Figure 3 evaluates the contribution of rule augmentation and rule construction choices. Rule-augmented RAD variants generally im-prove anomaly retrieval relative to variants without rule features, especially on AUPRC and precision@k. This indicates that symbolic predicates provide useful behavioral evidence beyond the original target-node attributes and relational graph structure. The comparison between rule-construction variants shows that compact predicate-based rules are more useful than raw decision-feature injection. Random-forest path rules already provide mean-ingful anomaly signal, while LLM-assisted refinement helps filter, tighten, and compact the candidate predicates before they are in-jected into the graph. These results support the design choice of converting mined rules into explicit binary rule features rather than treating the random forest only as a black-box auxiliary model. 
+
+## 8.3 RQ3: Effect of Structure Reconstruction 
+
+The effect of explicit graph structure reconstruction is mixed and dataset-dependent. In Table 4, the no-BCE RAD variant is strongest overall: it achieves higher average AUROC, AUPRC, and preci-sion@k ranks than the BCE variant. On LANL, disabling BCE gives 
+
+Figure 3: Rule-construction and structure-reconstruction ab-lations across datasets over 10 seeds. Bars show means and error bars show standard deviations. The y-axis is broken to separate AUROC from smaller AUPRC and P@k values. 
+
+substantially stronger AUROC, AUPRC, and precision@k, suggest-ing that edge reconstruction may overemphasize artifacts of the sampled cybersecurity subgraphs. On Amazon, BCE and no-BCE perform similarly, with BCE slightly higher on AUROC and pre-cision@k but essentially tied on AUPRC. On H&M, the no-BCE variant is stronger across all three metrics. These results suggest that edge reconstruction should be treated as an optional auxiliary objective rather than a uniformly bene-ficial component. It may help when anomalousness is expressed through relational topology, but it can also distract the model from anomaly ranking when the sampled graph structure is noisy or only indirectly related to the anomaly label. 
+
+## 8.4 RQ4: Effect of LLM-Assisted Rule Refinement 
+
+LLM-assisted rule refinement provides a useful but not uniformly dominant improvement over random-forest-derived rules alone. The largest benefits appear on LANL, where refined rules improve anomaly retrieval compared with less compact rule representa-tions. On Amazon and H&M, refined rules remain competitive with random-forest sampled rules, suggesting that the LLM stage should be viewed primarily as a rule-filtering and rule-compaction step rather than as a replacement for random-forest rule mining. Importantly, the LLM does not assign labels or produce anomaly scores. Its role is limited to proposing candidate predicates that CIKM ’26, November 07–11, 2026, Rome, Italy Noah Dahle, Anne Tumlin, Ngoc Tran, Xenofon Koutsoukos, and Tyler Derr 0.5% (n=520) 1.5% (n=1575) 3.0% (n=3198) Target anomaly labeling rate (with count) 0.56 0.57 0.58 0.59 0.60 0.61 0.62 0.63 Mean AUROC (solid) 
+
+> Amazon
+> Supervised RDL (AUROC) RAD (AUROC) Supervised RDL (AUPRC) RAD (AUPRC) 0.01 0.02 0.03 0.04 0.05 Mean AUPRC (dotted)
+
+(a) Amazon 0.5% (n=71) 1.5% (n=214) 3.0% (n=434) Target anomaly labeling rate (with count) 0.42 0.44 0.46 0.48 0.50 0.52 0.54 0.56 0.58 Mean AUROC (solid)   
+
+> H&M
+> Supervised RDL (AUROC) RAD (AUROC) Supervised RDL (AUPRC) RAD (AUPRC) 0.005 0.010 0.015 0.020 0.025 0.030 0.035 0.040 Mean AUPRC (dotted)
+
+(b) H&M 
+
+Figure 4: Label-prevalence sensitivity for unexpected-churn detection. AUROC uses the left axis and AUPRC the right axis for target prevalences of 0.5%, 1.5%, and 3.0%; counts show retained positives. 
+
+are subsequently validated, filtered, and scored using the same training/validation rule-selection procedure described in Section 5.2. This keeps the anomaly detection pipeline grounded in the observed relational data and prevents test-label leakage. 
+
+## 8.5 RQ5: Sensitivity to Unexpected-Churn Prevalence 
+
+Figure 4 evaluates whether the unexpected-churn results depend on the target anomaly prevalence used in the label filter. Across 0.5%, 1.5%, and 3.0% prevalence settings, the main performance trends remain broadly stable. On Amazon, RAD achieves its strongest AUROC at the default 1.5% setting and its strongest AUPRC at 3.0%, while supervised RDL improves more gradually as additional positives are retained. On H&M, increasing prevalence generally improves performance, and RAD remains competitive and often stronger than supervised RDL across the sweep. These results support using 1.5% as the default benchmark con-figuration while showing that the conclusions are not driven by a single arbitrary prevalence threshold. The prevalence sweep also shows how performance changes as the anomaly definition be-comes more permissive, while the relative comparison between RAD and the supervised relational baseline remains stable enough to support the benchmark design. 
+
+## 8.6 Limitations 
+
+RAD’s rule mining is bounded by the auxiliary flattened view and requires labeled data for both the random-forest stage and sup-port/confidence/lift ranking, so it does not extend as-is to unlabeled settings. Amazon and H&M results are reported on a held-out par-tition of the validation split rather than a leaderboard test set, since RelBench withholds true test labels for these tasks. The unexpected-churn label itself is a derived construction; Section 8.5’s prevalence sweep shows conclusions are stable across filter thresholds but the filter formula remains a design choice. LANL evaluation uses sam-pled subgraphs around anchor events rather than the full authenti-cation log, and several tabular/relational baselines show substantial seed variance on LANL. 
+
+## 9 Conclusion 
+
+This paper introduced RAD, a rule-augmented framework for anom-aly detection in relational databases. RAD is motivated by the ob-servation that many anomalies are not isolated row-level outliers, but deviations whose meaning depends on relationships among entities, events, and historical behavior. Flattening relational data into a single feature matrix can obscure these dependencies, while relational representation learning alone does not provide explicit behavioral evidence or an anomaly-specific scoring objective. RAD combines heterogeneous graph representation learning, mined symbolic rule features, reconstruction-based scoring, and ranking-based anomaly supervision. The relational graph preserves database structure, while the rule-mining component provides com-pact behavioral predicates derived from flattened summaries. By injecting rule features into target nodes before message passing, RAD allows symbolic evidence to influence learned relational rep-resentations rather than only post-hoc anomaly scores. Across LANL cybersecurity event detection, Amazon review churn, and H&M purchase churn, RAD improves anomaly retrieval under class imbalance, especially on AUPRC. The results suggest that relational anomaly detection is best treated as a joint problem of representation, scoring, and behavioral evidence. Several promising directions remain for future work. Scaling relational anomaly detection to larger databases and longer tem-poral histories will require more efficient graph construction and inference, consistent with recent work identifying scalability and temporal modeling as key challenges for relational deep learning [10, 15]. RAD also could be extended toward unsupervised rule dis-covery and rules defined directly over complex multi-hop relational structure rather than flattened summaries. Finally, richer relational architectures [6] could provide even stronger backbones, while symbolic rules could be further leveraged to provide interpretable explanations for detected anomalies. 
+
+## Acknowledgments 
+
+This work was supported by the National Security Agency (NSA) under grant number H98230-23-C-0279, and by the National Science Foundation (NSF) under grant numbers IIS-2239881, ECCS-2325417, IIS-2524380, and DGE-2622415. RAD: Rule-Augmented Relational Anomaly Detection CIKM ’26, November 07–11, 2026, Rome, Italy 
+
+## GenAI Usage Disclosure 
+
+Generative AI tools were used to assist with code development and manuscript writing. All experimental design, implementation choices, results, analysis, and final manuscript decisions were re-viewed by the authors. 
+
+## References 
+
+[1] Rakesh Agrawal and Ramakrishnan Srikant. 1994. Fast algorithms for mining as-sociation rules in large databases, VLDB’94: Proceedings of the 20th International Conference on Very Large Data Bases. San Francisco, CA, USA (1994), 487–499. [2] Leo Breiman. 2001. Random forests. Machine learning 45 (2001), 5–32. [3] Chris Burges, Tal Shaked, Erin Renshaw, Ari Lazier, Matt Deeds, Nicole Hamilton, and Greg Hullender. 2005. Learning to rank using gradient descent. In Proceedings of the 22nd international conference on Machine learning . 89–96. [4] Guilherme O. Campos, Arthur Zimek, Jörg Sander, Ricardo J. Campello, Barbora Micenková, Erich Schubert, Ira Assent, and Michael E. Houle. 2016. On the evaluation of unsupervised outlier detection: measures, datasets, and an empirical study. Data Min. Knowl. Discov. 30, 4 (July 2016), 891–927. doi:10.1007/s10618-015-0444-8 [5] Varun Chandola, Arindam Banerjee, and Vipin Kumar. 2009. Anomaly detection: A survey. ACM Comput. Surv. 41, 3, Article 15 (July 2009), 58 pages. doi:10.1145/ 1541880.1541882 [6] Tianlang Chen, Charilaos Kanatsoulis, and Jure Leskovec. 2025. Relgnn: Compos-ite message passing for relational deep learning. arXiv preprint arXiv:2502.06784 
+
+(2025). [7] Austin Coursey, Junyi Ji, Marcos Quinones-Grueiro, William Barbour, Yuhang Zhang, Tyler Derr, Gautam Biswas, and Daniel B Work. 2024. FT-AED: Benchmark dataset for early freeway traffic anomalous event detection. Advances in Neural Information Processing Systems 37 (2024), 15526–15549. [8] Jesse Davis and Mark Goadrich. 2006. The relationship between Precision-Recall and ROC curves. In Proceedings of the 23rd international conference on Machine learning . 233–240. [9] Kaize Ding, Jundong Li, Rohit Bhanushali, and Huan Liu. 2019. Deep anomaly detection on attributed networks. In Proceedings of the 2019 SIAM international conference on data mining . SIAM, 594–602. [10] Vijay Prakash Dwivedi, Charilaos Kanatsoulis, Shenyang Huang, and Jure Leskovec. 2025. Relational deep learning: Challenges, foundations and next-generation architectures. In Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2 . 5999–6009. [11] Matthias Fey, Weihua Hu, Kexin Huang, Jan Eric Lenssen, Rishabh Ranjan, Joshua Robinson, Rex Ying, Jiaxuan You, and Jure Leskovec. 2024. Position: Relational Deep Learning - Graph Representation Learning on Relational Databases. In 
+
+Proceedings of the 41st International Conference on Machine Learning (Proceedings of Machine Learning Research, Vol. 235) , Ruslan Salakhutdinov, Zico Kolter, Kather-ine Heller, Adrian Weller, Nuria Oliver, Jonathan Scarlett, and Felix Berkenkamp (Eds.). PMLR, 13592–13607. https://proceedings.mlr.press/v235/fey24a.html [12] William L. Hamilton, Rex Ying, and Jure Leskovec. 2017. Inductive Representation Learning on Large Graphs. In Advances in Neural Information Processing Systems .[13] Alexander D. Kent. 2015. Comprehensive, Multi-Source Cyber-Security Events. Los Alamos National Laboratory. doi:10.17021/1179829 [14] Thomas N Kipf and Max Welling. 2016. Variational graph auto-encoders. arXiv preprint arXiv:1611.07308 (2016). [15] Veronica Lachi, Antonio Longa, Beatrice Bevilacqua, Bruno Lepri, Andrea Passerini, and Bruno Ribeiro. 2025. Boosting relational deep learning with pretrained tabular models. arXiv preprint arXiv:2504.04934 (2025). [16] Himabindu Lakkaraju, Stephen H Bach, and Jure Leskovec. 2016. Interpretable decision sets: A joint framework for description and prediction. In Proceedings of the 22nd ACM SIGKDD international conference on knowledge discovery and data mining . 1675–1684. [17] Fei Tony Liu, Kai Ming Ting, and Zhi-Hua Zhou. 2008. Isolation forest. In 2008 eighth ieee international conference on data mining . IEEE, 413–422. [18] Linhao Luo, Jiaxin Ju, Bo Xiong, Yuan-Fang Li, Gholamreza Haffari, and Shirui Pan. 2024. ChatRule: Mining Logical Rules with Large Language Models for Knowledge Graph Reasoning. arXiv:2309.01538 [cs.AI] https://arxiv.org/abs/2309.01538 [19] Guansong Pang, Chunhua Shen, Longbing Cao, and Anton Van Den Hengel. 2021. Deep Learning for Anomaly Detection: A Review. ACM Comput. Surv. 54, 2, Article 38 (March 2021), 38 pages. doi:10.1145/3439950 [20] Joshua Robinson, Rishabh Ranjan, Weihua Hu, Kexin Huang, Jiaqi Han, Alejandro Dobles, Matthias Fey, Jan Eric Lenssen, Yiwen Yuan, Zecheng Zhang, Xinwei He, and Jure Leskovec. 2024. RelBench: A Benchmark for Deep Learning on Relational Databases. Advances in Neural Information Processing Systems 37 (2024). https://arxiv.org/abs/2407.20060 [21] Lukas Ruff, Robert Vandermeulen, Nico Goernitz, Lucas Deecke, Shoaib Ahmed Siddiqui, Alexander Binder, Emmanuel Müller, and Marius Kloft. 2018. Deep One-Class Classification. In Proceedings of the 35th International Conference on Machine Learning (Proceedings of Machine Learning Research, Vol. 80) , Jennifer Dy and Andreas Krause (Eds.). PMLR, 4393–4402. https://proceedings.mlr.press/ v80/ruff18a.html [22] Mayu Sakurada and Takehisa Yairi. 2014. Anomaly Detection Using Autoen-coders with Nonlinear Dimensionality Reduction (MLSDA’14) . Association for Computing Machinery, New York, NY, USA, 4–11. doi:10.1145/2689746.2689747 [23] Bernhard Schölkopf, Robert C Williamson, Alex Smola, John Shawe-Taylor, and John Platt. 1999. Support Vector Method for Novelty Detection. In Advances in Neural Information Processing Systems , S. Solla, T. Leen, and K. Müller (Eds.), Vol. 12. MIT Press. https://proceedings.neurips.cc/paper_files/paper/1999/file/ 8725fb777f25776ffa9076e44fcfd776-Paper.pdf [24] Yu Wang, Yuying Zhao, Neil Shah, and Tyler Derr. 2022. Imbalanced graph classification via graph-of-graph neural networks. In Proceedings of the 31st ACM international conference on information & knowledge management . 2067–2076. [25] Hangting Ye, He Zhao, Wei Fan, Mingyuan Zhou, Dan dan Guo, and Yi Chang. 2025. DRL: Decomposed Representation Learning for Tabular Anomaly Detection. In The Thirteenth International Conference on Learning Representations . https: //openreview.net/forum?id=CJnceDksRd [26] Tianxiang Zhao, Xiang Zhang, and Suhang Wang. 2021. Graphsmote: Imbalanced node classification on graphs with graph neural networks. In Proceedings of the 14th ACM international conference on web search and data mining . 833–841. [27] Yu Zheng, Ming Jin, Yixin Liu, Lianhua Chi, Khoa T. Phan, and Yi-Ping Phoebe Chen. 2023. Generative and Contrastive Self-Supervised Learning for Graph Anomaly Detection. IEEE Transactions on Knowledge and Data Engineering 35, 12 (2023), 12220–12233. doi:10.1109/TKDE.2021.3119326 [28] Andy Zhou, Xiaojun Xu, Ramesh Raghunathan, Alok Lal, Xinze Guan, Bin Yu, and Bo Li. 2024. KnowGraph: Knowledge-Enabled Anomaly Detection via Logical Reasoning on Graph Data. arXiv:2410.08390 [cs.CR] https://arxiv.org/abs/2410. 08390
