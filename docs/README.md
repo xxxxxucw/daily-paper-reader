@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-01</span>
+      <span class="dpr-home-dashboard-kicker">2026-09-02</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 12 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 10 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>7</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>5</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>3</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-01 10:18:31 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-02 09:44:04 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,7 +62,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精读7篇、速读5篇，共处理12篇论文，聚焦时序轨迹预测与因果发现。最值得关注的是满分论文《Conformal Prediction Regions for Continuous-Time Trajectories》及9分的《Jigsaw-CRL》局部因果序恢复。建议优先精读这两篇，速读可略览异常检测、视觉语言去偏与隐私表格合成三个7分方向。</p>
+<p>今日精读10篇，聚焦神经网络表格预测与文本因果混杂调整，另速读多跳检索与关系模型等议题。</p>
+<p>最值得关注：表格内预测用合成数据评估深度网络（9.0分），以及利用稀疏自编码器调整文本因果混杂（9.0分）两篇高分研究。</p>
+<p>建议优先精读上述两篇论文，再结合速读的PEARL与上下文窗口故障分析，理解关系型表检索的边界与改进空间。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -74,9 +76,9 @@
     <strong class="dpr-home-dashboard-count">7 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Conformal Prediction Regions for Continuous-Time Trajectories under Random Sampling">Conformal Prediction Regions for Continuous-Time Trajectories under Random Sampling</span></li><li><span class="dpr-home-dashboard-paper-title" title="Jigsaw-CRL: Recovering Global Latent Causal Order from Fragmented Multi-Client Interventions">Jigsaw-CRL: Recovering Global Latent Causal Order from Fragmented Multi-Client Interventions</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Unified Perspective on Conformal Prediction and Wasserstein Distributionally Robust Optimization for Uncertainty Quantification">A Unified Perspective on Conformal Prediction and Wasserstein Distributionally Robust Optimization for Uncertainty Quantification</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Solving In-Table Prediction Problems by Deep Neural Networks with Performance Evaluation Using Synthetic Data">Solving In-Table Prediction Problems by Deep Neural Networks with Performance Evaluation Using Synthetic Data</span></li><li><span class="dpr-home-dashboard-paper-title" title="Exploring Sparse Autoencoders in Text-Based Causal Confounding Adjustment">Exploring Sparse Autoencoders in Text-Based Causal Confounding Adjustment</span></li><li><span class="dpr-home-dashboard-paper-title" title="EvoSCM: Scientific Belief Revision Through Causal Model Evolution and Experimentation">EvoSCM: Scientific Belief Revision Through Causal Model Evolution and Experimentation</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>3</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>4</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -84,12 +86,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">5 篇</strong>
+    <strong class="dpr-home-dashboard-count">3 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="RAD: Rule-Augmented Relational Anomaly Detection">RAD: Rule-Augmented Relational Anomaly Detection</span></li><li><span class="dpr-home-dashboard-paper-title" title="GGSS: Geodesic-Gated Spherical Steering for Inference-Time Debiasing of Generative Vision-Language Models">GGSS: Geodesic-Gated Spherical Steering for Inference-Time Debiasing of Generative Vision-Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Creation begins with understanding: LLMs as strategy designers for privacy-preserving tabular data synthesis">Creation begins with understanding: LLMs as strategy designers for privacy-preserving tabular data synthesis</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="PEARL: Front-Loading Relational Chains for Multi-Hop Table Retrieval">PEARL: Front-Loading Relational Chains for Multi-Hop Table Retrieval</span></li><li><span class="dpr-home-dashboard-paper-title" title="Context Window Failures in Relational Foundation Models">Context Window Failures in Relational Foundation Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Relational Task Generation Language: A Declarative Specification Framework for Relational Deep Learning">Relational Task Generation Language: A Declarative Specification Framework for Relational Deep Learning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>3</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>3</strong></span></div>
 </section>
 </div>
 

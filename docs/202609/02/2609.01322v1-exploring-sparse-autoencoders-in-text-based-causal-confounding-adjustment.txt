@@ -1,0 +1,561 @@
+Title: Exploring Sparse Autoencoders in Text-Based Causal Confounding Adjustment
+
+URL Source: https://arxiv.org/pdf/2609.01322v1
+
+Published Time: Wed, 02 Sep 2026 01:30:31 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+## Exploring Sparse Autoencoders in Text-Based Causal Confounding Adjustment 
+
+Mian Zhong 
+
+Johns Hopkins University 
+
+mzhong8@jh.edu 
+
+Katherine A. Keith 
+
+Williams College / Cohere 
+
+kak5@williams.edu 
+
+Anjalie Field 
+
+Johns Hopkins University 
+
+anjalief@jhu.edu 
+
+Abstract 
+
+In many settings, studying causal questions based on text data requires adjusting for con-founding information within texts. Yet there is a tradeoff in constructing text representations for adjustment: they must be sufficiently large and/or dense to preserve the confounding vari-ables necessary for unbiased effect estimation, but sufficiently small and/or sparse to satisfy finite-sample overlap and yield low-variance estimates. To address this tradeoff, we turn to sparse autoencoders (SAEs), and propose a novel causal adjustment pipeline that itera-tively selects a minimal set of SAE features via conditional independence tests. We find that SAE representations achieve better adjustments (lower bias and and higher coverage) than alternative representations in standard semi-synthetic evaluations with binary confounders, and their interpretability offers opportunities for falsification. We also introduce a more real-istic semi-synthetic evaluation that uses multi-label data as the unobserved confounders and find off-the-shelf adjustment methods require increased investigation for these more complex settings. § Code: sae-text-confounder 
+
+1 Introduction 
+
+Does the type of media coverage of a legislative bill affect the number of legislators who vote for it? Does opting-in for an AI peer reviewer affect the acceptance of a manuscript to a venue? Does browsing on a mobile device versus computer af-fect the rates at which people share news articles? These are all questions about the causal effects of a treatment variable (e.g., media coverage type, review policy, or reading device) on an outcome 
+
+variable (e.g., number of votes, paper acceptance, or article popularity). Furthermore, these are the kinds of causal questions in which randomized con-trolled trails may be inaccessible or infeasible and researchers may only have access to observational data. In these observational settings, language data is often a confounding variable that must be ad-justed for to obtain unbiased causal estimates. For example, the topic of a news article may influence a user’s choice of device and proclivity to share. Adjusting for confounding variables is well-studied in causal inference. However, adjusting for text-as-confounders remains difficult due to the high-dimensional nature of text and the limited interpretability of black-box text representations and causal adjustment methods (Keith et al., 2020; Feder et al., 2022). Often, the challenges faced in applied work are mismatched with the “best” esti-mators. For example, while double machine learn-ing is theoretically unbiased and can accommodate high-dimensional data types (Chernozhukov et al., 2017), the black-box nature of this method makes it difficult to detect failures such as “lack of common support” (Hill and Su, 2013) in applied settings. Roberts et al. (2020) propose combining structural topic models with causal matching to increase inter-pretability, reduce extrapolation, and allow human oversight of adjustment quality. Yet, they rely on the topic model representations from bag-of-words input sufficiently capturing confounders. Recent work has demonstrated that sparse au-toencoders (SAEs) (Makhzani and Frey, 2014) pro-duce atomic, expressive, and interpretable features in the decomposition of large language models (Huben et al., 2024; Bricken et al., 2023; Temple-ton et al., 2024; Bills et al., 2023). Two charac-teristics of SAEs suggest their potential value for causal adjustment. First, SAEs have been shown to be expressive and interpretable representations in correlational analyses of text data, including in comparison to topic modeling approaches (Movva et al., 2025; Jiang et al., 2025; Choi et al., 2025). Second, the sparsity of an SAE representation is an asset when adjusting for confounding since as the dimension of the adjustment set grows, strict overlap decreases (D’Amour et al., 2021) and es-timator variance increases. Because only a small 1arXiv:2609.01322v1 [cs.CL] 1 Sep 2026 number of SAE features are active for a given text, the effective adjustment set is small even when the number of SAE features are large. Motivated by these charateristics, we propose, implement, and empirically evaluate a causal ad-justment pipeline with SAE representations. Given standard assumptions in observational causal infer-ence (overlap, homogeneous effect etc.) and text-specific assumptions such as causally sufficient rep-resentations (see §3.1 for specifics), our pipeline aims to achieve unbiased, low-variance estimates along with interpretable diagnostics supporting fal-sification for applied researchers. At a high-level, our pipeline trains an SAE on all input text and then uses a Lasso logistic regression model with conditional independence tests to select a minimal subset of SAE features that correlate with treatment. Then our subsetted SAE features can be used with downstream causal estimators; in this work, we compare double machine learning and matching. We empirically compare our method to alternatives using four semi-synthetic evaluations, including new multi-class and multi-label confounder eval-uations. 1 In evaluations with binary confounders, with similar setups as prior work (Roberts et al., 2020; Veitch et al., 2020; Veljanovski and Wood-Doughty, 2024), we find SAEs recover simulated treatment effects more accurately than alternatives. Our primary contributions include: • A method to combine SAEs with confounding adjustment methods that offers strong empiri-cal performance in standard binary and multi-class semi-synthetic evaluation settings and diagnostics supporting falsification. • A new semi-synthetic evaluation for text as confounding, the first to our knowledge, that uses multi-label oracle confounding, moving closer to realistic text as confounding settings. Our results for this setting are mixed, encour-aging applied researchers to be cautious when using black-box adjustment methods. 
+
+2 Related Work 
+
+Causal Inference with Text Applications of causal inference with text span a variety of do-mains, such as linguistics, social sciences, and pub-lic health (Keith et al., 2020; Feder et al., 2022).   
+
+> 1In the causal literature, semi-synthetic evaluations use some variables from real-world data, i.e., confounders and text data, and other variables are created synthetically so the true causal effect is known and can be evaluated; see Keith et al. (2023) for a comparison of other causal evaluation strategies.
+
+While causal adjustment methods often involve us-ing standard off-the-shelf approaches like propen-sity matching or regression with extracted text fea-tures (Keith et al., 2020), a few studies have de-signed methods for text specifically. Approaches in-volve text classifiers (Wood-Doughty et al., 2018), fine-tuning pre-trained models with causal-focused loss objectives (Veitch et al., 2020), clustering off-the-shelf text embeddings (Zhang et al., 2023), di-rectly applying pre-trained embeddings with dou-ble machine learning (Schulte et al., 2025), com-bining low-rank training of large language mod-els with double machine learning (Veljanovski and Wood-Doughty, 2024), or using zero-shot LLMs in proximal causal inference (Chen et al., 2024). Sim-ilar to our motivation, Roberts et al. (2020) propose matching representations from topic models, with the motivation that interpretable representations and adjustments methods are particularly useful in text settings, as text is human-readable, facilitating human oversight of the analysis. We follow this motivation in focusing on interpretable representa-tions from SAEs. 
+
+Sparse Autoencoders (SAEs) SAEs are trained to compress data into a hidden representation and then reconstruct the original input. They differ from general autoencoders in that they enforce spar-sity in the hidden representation. For example, K-Sparse autoencoders (Makhzani and Frey, 2014) enforce that at most k dimensions in the hidden rep-resentations are non-zero. SAEs have gained popu-larity for enabling interpretation of LLMs, where constructing sparse high-dimensional representa-tions of model activation vectors aims to provide visibility into what information is encoded where (Bricken et al., 2023; Bills et al., 2023; Huben et al., 2024; Templeton et al., 2024; Gao et al., 2025). Re-cent works have continued to demonstrate their po-tential as direct representations of text data that can facilitate discovering concepts in datasets (Jiang et al., 2025; Choi et al., 2025; Peng et al., 2026) and hypothesis generation (Movva et al., 2025). Our work similarly leverages SAEs as representa-tions of text, but for adjusting for confounders in causal inference studies. 
+
+3 Preliminaries on Confounding Adjustment 
+
+Understanding causal effects with (large-scale) ob-servational data requires statistically adjusting for confounders on the “backdoor path” between the 2treatment T and the outcome Y . We limit our scope to domains in which we have access to texts D = {d1, . . . , d N } that encode unobserved confounder(s) U (e.g., the semantic content of a bill). As in most modern text-based work, we must obtain a representation of D which we de-note X ∈ RN ·M .
+
+3.1 Causal identification assumptions 
+
+As in all causal studies, our method and causal esti-mates rest on causal identification assumptions that cannot be verified from data alone, including (1) No unmeasured confounding, (2) Overlap/Common Support, (3) Consistency, and (4) Homogeneous effects. 2 We also make the two identification as-sumptions specific to text: 1. Pre-treatment text. All texts are generated temporally prior to treatment. 2. Causally sufficient representations. We can infer from text “representations that preserve sufficient information for causal identification” (Veitch et al., 2020). Notably, (2) can be violated in several ways. First, the text may not carry all confounding in-formation, meaning no choice of representation, SAE or otherwise, is sufficient. Other violations are subtler and ones we explore in this work: for example the dimensionality of an inferred represen-tation may be too low to represent all confounding information. This exposes a tension between suf-ficiency and sparsity. Causal sufficiency pushes toward richer representations, since any confound-ing the representation fails to encode results in a biased effect estimate. Yet, as the dimensionality or density of the adjustment set grows, strict overlap becomes increasingly difficult to satisfy (D’Amour et al., 2021) and the variance of the resulting esti-mates grows. We hypothesize SAEs may be one representation (of possibly many) that strikes a bal-ance between sufficiency and sparsity. 
+
+3.2 Adjustment estimators 
+
+Once we obtain text representations X, they can be plugged into downstream causal adjustment es-timators. In this work, we compare double ma-chine learning (DoubleML) (Chernozhukov et al., 2017) and matching (Stuart, 2010). DoubleML 
+
+> 2See §A for a refresher.
+
+has gained popularity due to its asymptotic unbi-asedness 3 and its flexibility to combine machine learning models for the treatment and outcome pro-cesses. However, as we discuss later in §6.2, the black-box nature of DoubleML can also hide fi-nite data issues such as “lack of common support”. Matching estimators instead find “matched” treat-ment and control units in the representation space, such that the covariate distributions are balanced across the two groups. We hypothesize that match-ing will benefit from the sparsity of SAE repre-sentations because matching quality depends on distance in the adjustment space, and distances de-grade rapidly as dimension grows: under a dense high-dimensional representation, all pairs become roughly equidistant and the nearest available con-trol may still be a poor match. Additionally, be-cause SAE features are individually interpretable, a match can be inspected directly — an analyst can read off which features the matched pair shares and which it does not, rather than assessing balance only through aggregate summary statistics. 
+
+4 Pipeline: Causal Adjustment with SAEs 
+
+We propose a pipeline that trains texts D into SAE features and then uses statistical testing to obtain a minimal set of these features that are correlated with treatment in order to minimize variance. 
+
+Step 1: Infer Text Representations via Sparse Autoencoders Given N input text sam-ples, we first encode input texts using off-the-shelf pre-trained text embeddings Dembed := 
+
+{e1, . . . , e N }, e i ∈ RE . Then all embeddings are used to train a top-K sparse autoencoder with di-mension M (Makhzani and Frey, 2014): 
+
+hi = TopK (W · ei + bias ), W ∈ RM ·E
+
+that enforces sparsity by keeping K active neurons out of M neurons. We thus obtain SAE representa-tion XSAE ∈ RN ·M . We discuss the sensitivity to these hyperparameters in §6.4. 
+
+Step 2: Subset to Minimal SAE Features that Correlate with Treatment Many different sub-sets of features can be “valid” adjustment sets that block the backdoor path between treatment and outcome and result in unbiased effect estimates.  
+
+> 3Under the causal identification assumptions of §3.1, stan-dard regularity conditions, and the requirement that the nui-sance estimators converge at rate o(n−1/4); cross-fitting re-moves the bias from overfitting the nuisance models.
+
+3Choosing a minimal adjustment set results in lower variance in the estimates, and for finite data sam-ples, fewer variables means its easier to satisfy strict overlap resulting in inference that is actu-ally tractable (D’Amour et al., 2021; Tamarchenko, 2023). Thus, rather than conducting adjustment on the full XSAE , we first introduce a process to select the SAE features that are most informative on treatment T ,4 leveraging the atomic and inter-pretable tendencies of SAE dimensions. To achieve this, data is split into a train and a test set, and we use a logistic regression model with Lasso regu-larization on the train set to select features on T .The selection follows a grid search style: Starting with no features, we iteratively decrease regular-ization strength to select a subset of SAE features 
+
+X′ ∈ RN ·M ′
+
+, M ′
+
+≤ M . We then perform the following validation on the test set and stop at a desirable minimal set X⋆.
+
+Step 3: Optimize Feature Subsetting with Condi-tional Independence Tests A minimal sufficient set X∗ is a subset such that the treatment variable is conditionally independent of the remaining fea-tures in X given the selected subset X⋆:
+
+T ⊥ X \ X⋆ | X⋆
+
+To validate if X′ from Step 2 satisfies such condi-tional independence, we employ likelihood ratio test between two logistic regression models on T
+
+with the subset X′ and the full set XSAE using the test set data. Loosely, the null hypothesis tests on whether using this subset X′ to model T is equally good as using the full set XSAE . Rejecting the null hypothesis implies that including more features from XSAE \ X′ may provide more information about T . Thus, T and X \ X′ are not yet con-ditionally independent. Practically, we perform a chi-square test on the log-likelihood ratio with a significance level (e.g., 0.05). If the p-value is be-low the significance level, we return to Step 2 to include more features. Finally, by iteratively running Step 2 & 3, we reach a p-value equal to or larger than the signifi-cance level and obtain the desirable set of features 
+
+X⋆ ∈ RN ·M ⋆
+
+, M ⋆ ≤ M . Note, it is possible that 
+
+X⋆ = XSAE the full set of features. 
+
+Step 4: Plug-In Final Subsetted Features to a Causal Estimator We complete adjustment   
+
+> 4We acknowledge some work selects features that correlate with Yto reduce variance; we leave exploration of these differences to future work.
+
+using two methods: Coarsened Exact Match (CEM) (Iacus et al., 2012; Stuart, 2010) and dou-ble machine learning (DoubleML) (Chernozhukov et al., 2017). CEM converts each continuous-valued covariate into discrete bins and performs exact match on the discretized-valued samples. A bin is retained only if it contains both treatment and control samples.Then, causal estimands are calcualted over the retained bins. The binning strategy can be fixed numeric cut-off, like topic mass ≥ 0.1, or more adaptive rules, like binning by (25% , 50% , 75%) quantiles. Double ML integrates machine learning mod-els for estimating nuisance functions. In our ex-periments, the propensity score model e(X) = 
+
+P (T = 1 |X) is estimated using logistic regres-sion with L2 penalty, and, the outcome regression 
+
+mt(X) = E(Y |T = t, X ) is estimated using lin-ear regression. Both nuisance estimates are then combined to estimate the treatment effect. For both CEM and DoubleML we target the average treat-ment effect on the treated (ATT). 
+
+4.1 Interpretable Falsification Diagnostics 
+
+We identify two aspects of our pipeline that offer opportunities for falsification, i.e., identifying that the pipeline as-implemented failed to achieve its intended behavior or violated an assumption. 
+
+Selecting M First, as discussed in §3.1, the SAE representation needs to be rich enough to capture confounding information. Our selection process in Step 2 and 3 offers a simple diagnostic to test this: if selection identifies X⋆ = XSAE , meaning every SAE dimension is informative of T , and XSAE 
+
+does not capture any additional information, the choice of M may be too small. As M ⋆ < M 
+
+does not guarantee that XSAE is sufficient, this heuristics offers an opportunity for falsification, rather than a test of correctness. 
+
+Qualitative Analysis of SAE features Second, following Movva et al. (2025), we can map SAE dimensions to interpretable concepts by identify-ing commonalities in texts that have each neuron active. This interpretation allows a researcher to identify what specific aspects of the text were iden-tified as reflecting confounders and check for face validity, i.e., if the identified confounders make in-tuitive sense based on their knowledge of the data. The presence of non-intuitive confounders or the absence of expected confounders would provide an opportunity to falsify the pipeline. 45 Semi-Synthetic Experiments 
+
+Semi-synthetic data – using real covariates but a synthetic data generating process so true causal effects are known – is used extensively in causal estimation research. Next, we describe our semi-synthetic set-up and the necessity of creating a new, more complex setting compared to previous work. 
+
+5.1 Data generating processes (DGPs) 
+
+With access to texts and pre-defined true con-founders (e.g., topics), we simulate treatment and outcome variables through DGPs. Then, adjust-ment approaches and causal estimators use text and synthetic treatment/outcomes during evalua-tion with no access to the true confounders. In our experiment, we represent a true confounder U as a one-hot vector, for example, U = [0 , 1, 0] in a 3-class setting. Similar to prior work, we construct simulations where U is single-dimensional, repre-senting a single binary confounder (Roberts et al., 2020; Veitch et al., 2020; Veljanovski and Wood-Doughty, 2024), and we introduce new simulations in which U reflects multi-class and multi-labeled documents. The DGP synthetically generates a binary treatment variable T and a continuous out-come variable Y for all simulations as follows: 
+
+T ∼ Bernoulli (σ(α + βU )) 
+
+where σ is the sigmoid function, α indicates a base-line strength to receive treatment, and a vector β
+
+denotes confounding strengths for treatment. Then, 
+
+Y = τ T + γU + ϵ, ϵ ∼ N 
+
+where a constant scalar τ indicates true treat-ment effect, γ is a vector controlling confounding strength, and ϵ is a gaussian noise. For all exper-iments, we set the true treatment effect τ = 2 
+
+and noise to be ϵ ∼ N (0 , 0.09) . Tab. 1 specifies DGP parameters used in our experiments. U α β γ                             
+
+> binary 0[0 ,2] [0 ,0.5]
+> multi-class 0.5[0 ,0.5,1] [0 .5,1.0,2.0]
+> multi-labeled 0.5[0 .0,0.1,0.2,0.3,0.4] [0 .5,0.75 ,1.0,1.5,2.0]
+> Table 1: Parameter set-ups for baseline strength αof re-ceiving treatment, confounding strength βfor treatment, and γfor outcome in our DGPs.
+
+5.2 Data 
+
+We use two datasets in our semi-synthetic DGPs. Label prevalence of both datasets and an example of treatment assignment distribution for different confounding settings can be found in §B. 
+
+20NewsGroups (20NG) This dataset comprises 18,331 singly-labeled newsgroup posts (Lang, 1995). We manually merge original 20 labels with similar topics into 10 final labels. In our semi-synthetic simulation, we pick a more frequent label (i.e., computer) and a less frequent one (i.e., re-ligion) as the true confounder to simulate binary confounder. We also craft a multi-class setting with 3 classes: computer, religion, and other. 
+
+EURLEX EURLEX (Chalkidis et al., 2021) is a multi-labeled multi-lingual dataset on EU laws. We use the English set and select the 5 most preva-lent labels to set up the multi-labeled confounding, i.e., for each sample, we remove labels that are not in these 5 labels. Our final dataset contains 62,007 samples. To our best knowledge, this is the first semi-synthetic simulation building on multi-labeled confounders. 
+
+5.3 Baseline Pipelines 
+
+To compare with our framework using SAEs, we select two prior end-to-end methods: Topical In-verse Regression Matching (TIRM) (Roberts et al., 2020) and DoubleML using pre-trained text embed-dings (Schulte et al., 2025). 
+
+TIRM Input texts D are formed as bag-of-words using common pre-processing (e.g., remove stop words, numbers, punctuations, low-frequency words). Then TIRM trains a structural topic model (STM) (Roberts et al., 2013) with the treatment variable as a content covariate and conducts a re-fitting step to finalize text representations. TIRM applies CEM matching on the constructed STM representations to conduct adjustment. In our ex-periments, we set the SAE and STM representa-tions to have the same number of dimensions for fair comparison. To isolate differences between representations and adjustment methods, we also report results when using STM representations with the same Double ML causal estimator as SAEs. 
+
+Off-the-shelf Embeddings + DoubleML Fol-lowing Schulte et al. (2025), we use pre-trained text embeddings as covariates for the DoubleML estimator. For a fair empirical comparison, these same pre-trained embeddings are used in the first step of training the SAE. We do not use CEM with pre-trained embeddings due to their high-5U Repr. CEM DoubleML Bias ↓ RMSE ↓ Cov. % ↑ T-ret.% ↑ Bias ↓ RMSE ↓ Cov. % ↑                                                                                                     
+
+> Binary Unadjusted 0.1530 0.1530 0.00 n/a (computer) TIRM (STM) 0.1149 0.1163 0.00 2.20 0.0663 0.0663 0.00 Embed n/a n/a n/a n/a 0.1873 0.1874 0.00 SAE 0.0361 0.0485 91.00 0.29 0.0480 0.0480 0.00 SAE select 0.0312 0.0416 65.00 15.25 0.0602 0.0604 0.00 Binary Unadjusted 0.0865 0.0865 0.00 n/a (religion) TIRM (STM) 0.0466 0.0481 5.00 2.39 0.0663 0.0663 0.00 Embed n/a n/a n/a n/a 0.1200 0.1201 0.00 SAE 0.0062 0.0246 92.00 0.40 0.0291 0.0291 0.00 SAE select 0.0390 0.0433 70.00 81.56 0.0377 0.0377 0.00 Multi-class Unadjusted 0.1572 0.1574 0.00 n/a TIRM (STM) 0.1036 0.1112 28.00 2.14 0.0801 0.0803 0.00 Embed n/a n/a n/a n/a 0.1906 0.1908 0.00 SAE 0.0205 0.0450 95.00 0.30 0.0536 0.0536 0.00 SAE select 0.0267 0.0444 77.00 4.77 0.0579 0.0581 0.00
+
+Table 2: Main results table for 20NG with metrics for which lower ( ↓) or higher ( ↑) is better. We compare our method of using SAE representations ( M = 128 , K = 32 ) without and with selection ( select ) with TIRM and pre-trained embeddings (Embed), using a coarsened exact matching (CEM) estimator (cut-points at 0 and at 50% quantile of positive value) and a Double ML estimator, with unadjusted estimate reported. For CEM, the percentage of treated retained (T-ret.%) after matching is reported. Metrics are the mean value from 100 simulations. 
+
+dimensionality as well as lack of evidence that in-dividual dimensions are semantically meaningful. 
+
+5.4 Metrics 
+
+For each simulation, we obtain an estimated treat-ment effect ˆτ via ATT and its confidence interval 
+
+CI . We compute mean bias, RMSE, and coverage across the simulations. Coverage is the percent-age of CI’s that covers the true treatment effect. To analyze the selection step of the pipeline un-der matching, we evaluate overlap with effective sample size (ESS) where a higher ESS suggests bet-ter overlap. Balance checking of matched data is measured with the absolute standardized mean dif-ference (|SMD|) on the true confounder U . Overlap and balance diagnostics are important for evaluat-ing the quality and credibility of matching adjust-ment. See §C for detailed calculations. 
+
+6 Results 
+
+For each of the four semi-synthetic DGPs (§5.1), we run simulations with 100 different random seeds and compare our method to the baselines under both CEM and DoubleML causal estimators when available. We train SAE and TIRM with a model dimension M = 128 and set K = 32 for SAE. We provide implementation details in §D. 
+
+6.1 Results for binary and multi-class (20NG) 
+
+Tab. 2 shows the results of all pipelines for the bi-nary and multi-class settings with 20NewsGroups (20NG). SAE-based approaches achieve the low-est bias, lowest RMSE, and highest coverage across all three settings. Notably, for the multi-class setting, the bias for SAE+CEM (0.0205) and SAE select +CEM (0.0267) is substantially lower than the unadjusted estimate (0.1572). Comparing to the two end-to-end baselines from prior work TIRM (0.1036) 5 and Embed+DoubleML (0.1906), SAEs achieve better performance under both CEM and DoubleML, with or without selection (bias ranges from 0.0205 to 0.0579). We hypothesize the decreased performance of TIRM is due to the dense nature of STM repre-sentations, leading to far fewer treated (and con-trol) units retained after matching (T-ret.%). The decreased performance of TIRM+DoubleML as compared to SAE+DoubleML additionally sug-gests that SAEs may better capture the topical information in U . As the same dense embed-dings ultimately underlie Embed+DoubleML and SAE+DoubleML, the performance differences here are more striking. We suspect that the sparse 
+
+> 5TIRM includes CEM as the causal estimator so we omit the notation of “CEM” for it throughout the results section and refer TIRM+DoubleML to solely using STM representations with DoubleML estimator.
+
+6Oracle Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML 
+
+> Estimation Pipelines
+> 1.85 1.90 1.95 2.00 2.05 2.10 2.15 2.20 2.25
+> Estimated ATT
+> 83 34 109 31 36 76 22 72 51 44
+> Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML True ATT
+> Confounder: Computer v.s. Religion v.s. Other (Multi-class)
+> Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML True ATT
+
+Figure 1: Multi-class breakdown . We report simulations across 10 (out of 100) randomly selected seeds for the oracle multi-class confounder ( U ) of computer versus religion versus other using the 20NewsGroups data. Horizontal lines are the average estimate across these 10 simulations. DML denotes DoubleML estimator. In SAE selection +CEM, the number of selected features is listed on the top of the CI bars. We omit SAE selection +DML as its performance not substantially different from SAE+DML as discussed from Tab. 2. 
+
+U Repr. CEM DoubleML Bias ↓ RMSE ↓ Cov. % ↑ T-ret.% ↑ Bias ↓ RMSE ↓ Cov. % ↑
+
+EURLEX Unadjusted 0.2863 0.2865 0.00 n/a multi-label TIRM 0.0335 0.0352 59.00 20.90 0.1461 0.1464 0.00 Embed n/a n/a n/a n/a 0.2912 0.2914 0.00 SAE 0.0344 0.0638 92.00 0.25 0.1324 0.1326 0.00 SAE select 0.0306 0.0558 91.00 0.42 0.1336 0.1338 0.00 
+
+Table 3: Main results table for EURLEX with metrics for which lower ( ↓) or higher ( ↑) is better. Refer to Tab. 2 for notations and full set-ups. 
+
+atomic nature of SAEs represent the topical in-formation in U in a way that is easier for sim-ple off-the-shelf nuisance functions to learn, and more careful selection and tuning of nuisance func-tions for high-dimension text data, e.g., as explored in Veljanovski and Wood-Doughty (2024), may lead to more comparable performance between Em-bed+DoubleML and SAE+DoubleML. However, reducing the need for careful selection of nuisance functions and their hyperparameters offers easier implementations in practical settings. Finally, in Fig. 1, we display 10 out of the 100 random seeds for each pipeline. Notably, although DoubleML often achieves low bias, estimates also have much narrower confidence intervals, resulting in the zero coverage observed in Tab. 2. Addition-ally, there is a large variance in the selection step: ranging from 22 to 109 of the 128 SAE features se-lected. We hypothesize this variance is due to many SAE features encoding the same underlying U and variance in which of these features are selected. Comparing SAE versus SAE select across all CEM settings (Tab. 2), the latter has similar bias metrics but retains far more treated and control units after matching. With DoubleML, selection offers little benefit for estimating ATT, and we hypothesize that the same effect is achieved implicitly by learned feature weighting in the nuisance functions. We further investigate the selection step in §6.3. 
+
+6.2 Results for multi-label (EURLEX) 
+
+Although the results for 20NG consistently showed the performance gains of SAEs, the results for the multi-label setting with EURLEX are more mixed (Tab. 3). We see that SAE+CEM (with and without selection) have low bias and high cover-age but matching retains less than 1% of treated units across both settings. In contrast, TIRM also achieves similar bias metrics, but has less coverage and retains far more treated units ( ≈ 21% ). Similar to §6.1, both STM and SAE when plugged into DoubleML reduce bias from the un-adjusted estimate (0.2863) with biases of 0.1461 710 2 10 3 10 4
+
+> Eff ective Sample Size (log scale)
+> computer religion multi-class multi-label
+> Experiment Category Overall ESS Before vs After Selection
+> Before Selection After Selection
+
+(a) ESS distribution across simulations 0.0 0.2 0.4 0.6 0.8  
+
+> Mean Absolute Standardized Mean Difference
+> multi_label|U_4 multi_label|U_3 multi_label|U_2 multi_label|U_1 multi_label|U_0 multiclass|U_2 multiclass|U_1 multiclass|U_0 religion|U_0 comp|U_0
+> Experiment Category
+> W/O Selection With Selection Before Adjustment
+
+(b) Average |SMD| on U
+
+Figure 2: Overlap support versus balance comparison, before and after feature selection on SAEs using the CEM estimator. For these diagnostics, we have access to the oracle confounder U .
+
+and 0.1324 respectively but the bias is still con-cernedly far from zero. When inspecting the Dou-bleML underlying nuisance estimators, we find the treatment classifier converges but there is a lack of convergence in the outcome estimator. Our hy-pothesis is this might be a finite data issue. In Appendix Fig. 10 we show the distribution across the multi-label confounders. Although our dataset has strict overlap, many of the confounding buckets have “lack of common support”, which Hill and Su (2013) define as neighborhoods of covariate space in which there are not sufficient numbers of treated and control units in the finite data sample. We find this an extremely interesting setting in which matching results in low bias but DoubleML results in high bias given the same input representations. We leave to future work deeper investigations of this phenomena and mitigation of lack of common support, e.g., building from Hill and Su (2013); Oberst et al. (2020). 
+
+6.3 Analysis of Selection Step 
+
+We conduct additional analysis of the step in our pipeline that selects a subset of SAE features for overlap and balance diagnostics when using CEM estimator. First, in Fig. 2, we report the effective sample size (ESS) across simulations before and after selection. For all confounding settings, selec-tion increases ESS substantially, corroborating the results in Tab. 2 and 3, which show that selection retains a greater percentage of data and improves overlap in matching. Second, we investigate if se-lection improves or degrades the balance of true confounders in the matched datasets. For balance checking, we employ standardized mean deviation where we compute the absolute |SM D | on the true confounders, U after adjusting using SAE and 
+
+SAE select . In Fig. 2b, we find selection step main-tains a better balance across true confounding vari-ables with the lower |SM D | for all settings except 
+
+U = religion . However, even for U = religion ,the SMD after selection is still maintained in a low reasonable area around 0.2 that is well below the unadjusted SMD (0.55). 0 20 40 60 80 100 120 
+
+> Number of Selected Features
+> Computer Religion Multi-class Multi-label
+> Confounder
+> SAE (M=128, K=32)
+
+(a) SAE ( M = 128 , K = 32 )0 5 10 15 20 25 30 
+
+> Number of Selected Features
+> Computer Religion Multi-class Multi-label
+> Confounder
+> SAE (M=32, K=8)
+
+(b) SAE ( M = 32 , K = 8 )
+
+Figure 3: Distribution of number of selected SAE fea-tures under different confounding settings across 100 simulations. 
+
+6.4 Analysis of SAE Hyperparameters 
+
+Next, we investigate the sensitivity of our SAE pipeline to hyperparameters, i.e., SAE M and K
+
+settings, and the opportunity for falsification of the setting of M, as proposed in §4.1. Fig. 3 shows the distribution of the number of selected 8features using SAE M = 128 and a smaller one 
+
+M = 32 (with a fixed KM ratio 0.25). In M = 128 ,more complex confounding settings like multi-class and multi-label in general select more fea-tures, where medians are above 40 out of 128. There is also variance in the number of selected features across simulations, which is consistent with the range of ESS in Fig. 2a. Between the binary confounders, the less frequent confounder (U = religion) has a larger variance in feature selection, suggesting SAE representations may en-code these less-frequent features less atomically. When we change the number of dimensions in the SAE representations to M = 32 , selection still reduces the feature set for binary confounders, but nearly all the neurons are selected in multi-class and multi-labeled settings. These results suggest 
+
+M = 32 is not sufficiently expressive to atomi-cally capture these more complex label sets. They also demonstrate the simple empirical falsification check that selection offers: if nearly all of the neu-rons are picked, a larger SAE is likely needed. Furthermore, with an increasing M , the decision of how to set the sparsity K becomes non-trivial. We conduct an ablation on different sparsity lev-els K = (8 , 16 , 32 , 64) for the multi-label setting and report results in Fig. 4. Greater sparsity gen-erally improves RMSE and retains more data, but coverage improves with less sparsity, suggesting practitioners may need choose which metrics they most care about and set K accordingly. Future work on hyperparameter setting would be benefi-cial for providing further guidance. 8 16 32 64 K (Sparsity Level in SAE) 0510 15 Treated Retained %           
+
+> Treated Retained % Coverage
+> 20 40 60 80 Coverage
+> Treated Retained % v.s. Coverage Trade-off
+> (a)
+> KBias RMSE 8.036 .038 16 .027 .031 32 .031 .056 64 .028 .125
+> (b)
+
+Figure 4: SAE sparsity ( K) ablation in our multi-label setting. For, SAE select with dimension M = 128 , a smaller K indicates greater sparsity of the model as only K neurons are retained. 
+
+6.5 Interpretability of SAE features 
+
+Finally, we qualitatively inspect SAE features to verify that they are interpretable and thus offer re-searchers greater oversight and opportunity for fal-sification than black-box methods, as proposed in §4.1. Following Movva et al. (2025), for neurons identified by selection, we prompt an LLM with texts that have each neuron active, instructing it to generate a label for the selected features. We use the 128-feature SAE and look at neurons that are selected at least 40 times out of 100 simula-tions. In our data, the selected neurons are highly relevant to the true confounder we set, offering face validity. For instance, in a multi-class set-ting (computer v.s. religion v.s. other), the top neurons include “Contains explicity Bible scripture references” and “Mentions PC motherboard/bus hardware standards”, while the binary setting on re-ligion only contains the former. For the multi-label setting, all selected neurons appear in at least 40 simulations, so we manually check for neurons in 
+
+≥ 95 simulations (25 in total) and find evidence for all five labels, for instance, “Contains the exact title phrase ‘establishing the standard import values for determining the entry price of certain fruit and vegetables” relates to Trade and Agri-foodstuffs. In a dataset where the selected neurons did not dis-play content relevant to hypothesized confounders, this diagnostic could expose results as unreliable, falsifying the pipeline. 
+
+7 Conclusion and Outlook 
+
+In this work, we construct a novel pipeline and ex-pand to complex causal simulation for adjusting for text as confounders by subsetting SAEs with statistically informed selection. Our exploration shows SAEs have the potential to aid in causal analyses and also opens channels for future work. SAEs may be sufficiently expressive to encode a wide range of confounding information beyond just topics, since the features they recover also in-clude stylistic and semantic variation. Future work can investigate more diverse text confounders (e.g., syntactic). Our results also suggest future inves-tigations are needed to more deeply understand performance in multi-label settings. With respect to the adjustment pipeline, we empirically com-pare pipelines where the learned representations are plugged into downstream estimators. Future investigations of methods that jointly learn the rep-resentations and estimators (Veljanovski and Wood-Doughty, 2024; Veitch et al., 2020) and systematic search on optimizing hyperparameters throughout the pipeline are needed. 9Limitations 
+
+Examining causal adjustment using semi-synthetic simulations involves multiple stages of parame-ter setting, such as, choices of confounder labels, different set-ups of confounding and treatment strength for the data-generating process, dimension-ality of representations, etc., and our results may vary under other settings. To reduce this limitation, at each step, we carefully motivated decisions as well as followed best practices from prior work, and we report results across multiple simulation settings and datasets. Moreover, to make comparisons among methods fair and principled, we used the same hyperparam-eter settings across pipelines. However, optimal parameter settings may vary across underlying rep-resentations. For instance, there may be differ-ent optimal binning rules of CEM for SAE repre-sentations and the constrained (0 , 1) continuous-valued topic representation from STM. Neverthe-less, SAEs seem to be more robust to such rules from our empirical results (See §E). Lastly, there are other SAE architectures that could be investigated. We defer these investigations to future work, as they can be easily integrated into our pipeline, and furthermore, comparisons of different SAEs offer minor refinements on our proposed work, rather than being necessary for our proposed adjustment approach to be usable. 
+
+References 
+
+Steven Bills, Nick Cammarata, Dan Mossing, Henk Tillman, Leo Gao, Gabriel Goh, Ilya Sutskever, Jan Leike, Jeff Wu, and William Saunders. 2023. Lan-guage models can explain neurons in language mod-els. OpenAI. Cited on pages 1 and 2. Trenton Bricken, Adly Templeton, Joshua Batson, Brian Chen, Adam Jermyn, Tom Conerly, Nicholas L Turner, Cem Anil, Carson Denison, Amanda Askell, Robert Lasenby, Yifan Wu, Shauna Kravec, Nicholas Schiefer, Tim Maxwell, Nicholas Joseph, Alex Tamkin, Karina Nguyen, Brayden McLean, and 5 others. 2023. Towards monosemanticity: Decompos-ing language models with dictionary learning. Trans-former Circuits Thread, Anthropic. Accessed: 2026-05-20. Cited on pages 1 and 2. Ilias Chalkidis, Manos Fergadiotis, and Ion Androut-sopoulos. 2021. MultiEURLEX - a multi-lingual and multi-label legal document classification dataset for zero-shot cross-lingual transfer. In Proceedings of the 2021 Conference on Empirical Methods in Natu-ral Language Processing , pages 6974–6996, Online and Punta Cana, Dominican Republic. Association for Computational Linguistics. Cited on page 5. Jacob M. Chen, Rohit Bhattacharya, and Katherine A. Keith. 2024. Proximal causal inference with text data. In The Thirty-eighth Annual Conference on Neural Information Processing Systems . Cited on page 2. Victor Chernozhukov, Denis Chetverikov, Mert Demirer, Esther Duflo, Christian Hansen, and Whitney Newey. 2017. Double/debiased/neyman machine learning of treatment effects. American Economic Review ,107(5):261–65. Cited on pages 1, 3, and 4. Jinho Choi, Hyesu Lim, Steffen Schneider, and Jaegul Choo. 2025. Conceptscope: Characterizing dataset bias via disentangled visual concepts. In Advances in Neural Information Processing Systems , volume 38, pages 9604–9639. Curran Associates, Inc. Cited on pages 1 and 2. Alexander D’Amour, Peng Ding, Avi Feller, Lihua Lei, and Jasjeet Sekhon. 2021. Overlap in observational studies with high-dimensional covariates. Journal of Econometrics , 221(2):644–654. Cited on pages 1, 3, and 4. Amir Feder, Katherine A. Keith, Emaad Manzoor, Reid Pryzant, Dhanya Sridhar, Zach Wood-Doughty, Ja-cob Eisenstein, Justin Grimmer, Roi Reichart, Mar-garet E. Roberts, Brandon M. Stewart, Victor Veitch, and Diyi Yang. 2022. Causal inference in natural lan-guage processing: Estimation, prediction, interpreta-tion and beyond. Transactions of the Association for Computational Linguistics , 10:1138–1158. Cited on pages 1 and 2. Leo Gao, Tom Dupre la Tour, Henk Tillman, Gabriel Goh, Rajan Troll, Alec Radford, Ilya Sutskever, Jan Leike, and Jeffrey Wu. 2025. Scaling and evaluating sparse autoencoders. In The Thirteenth International Conference on Learning Representations . Cited on page 2. Miguel A. Hernán. 2016. Does water kill? A call for less casual causal inferences. Annals of Epidemiol-ogy , 26(10):674–680. Cited on page 12. Jennifer Hill and Yu-Sung Su. 2013. Assessing lack of common support in causal inference using Bayesian nonparametrics: Implications for evaluating the ef-fect of breastfeeding on children’s cognitive out-comes. The Annals of Applied Statistics , 7(3):1386 – 1420. Cited on pages 1 and 8. Robert Huben, Hoagy Cunningham, Logan Smith, Aidan Ewart, and Lee Sharkey. 2024. Sparse au-toencoders find highly interpretable features in lan-guage models. In International Conference on Learn-ing Representations , volume 2024, pages 7827–7845. Cited on pages 1 and 2. Stefano M. Iacus, Gary King, and Giuseppe Porro. 2012. Causal inference without balance checking: Coars-ened exact matching. Political Analysis , 20(1):1–24. Cited on page 4. 
+
+10 Nicholas Jiang, Xiaoqing Sun, Lewis Smith, and Neel Nanda. 2025. Towards data-centric interpretabil-ity with sparse autoencoders. In Mechanistic Inter-pretability Workshop at NeurIPS 2025 . Cited on pages 1 and 2. Katherine A. Keith, Sergey Feldman, David Jurgens, Jonathan Bragg, and Rohit Bhattacharya. 2023. RCT rejection sampling for causal estimation evaluation. 
+
+Transactions on Machine Learning Research . Cited on page 2. Katherine A. Keith, David Jensen, and Brendan O’Connor. 2020. Text and causal inference: A review of using text to remove confounding from causal esti-mates. In Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics , pages 5332–5344, Online. Association for Computational Linguistics. Cited on pages 1 and 2. Ken Lang. 1995. Newsweeder: learning to filter net-news. In Proceedings of the Twelfth International Conference on International Conference on Machine Learning , ICML’95, page 331–339, San Francisco, CA, USA. Morgan Kaufmann Publishers Inc. Cited on page 5. Alireza Makhzani and Brendan J. Frey. 2014. k-Sparse autoencoders. In 2nd International Conference on Learning Representations, ICLR 2014, Banff, AB, Canada, April 14-16, 2014, Conference Track Pro-ceedings . Cited on pages 1, 2, and 3. Rajiv Movva, Kenny Peng, Nikhil Garg, Jon Kleinberg, and Emma Pierson. 2025. Sparse autoencoders for hypothesis generation. In Forty-second International Conference on Machine Learning . Cited on pages 1, 2, 4, and 9. Michael Oberst, Fredrik Johansson, Dennis Wei, Tian Gao, Gabriel Brat, David Sontag, and Kush Varshney. 2020. Characterization of overlap in observational studies. In Proceedings of the Twenty Third Inter-national Conference on Artificial Intelligence and Statistics , volume 108 of Proceedings of Machine Learning Research , pages 788–798. PMLR. Cited on page 8. Kenny Peng, Rajiv Movva, Jon Kleinberg, Emma Pier-son, and Nikhil Garg. 2026. Position: Use sparse autoencoders to discover unknowns. Cited on page 2. Margaret E. Roberts, Brandon M. Stewart, and Richard A. Nielsen. 2020. Adjusting for confound-ing with text matching. American Journal of Political Science , 64(4):887–903. Cited on pages 1, 2, and 5. Margaret E Roberts, Brandon M Stewart, Dustin Tin-gley, Edoardo M Airoldi, and 1 others. 2013. The structural topic model and applied social science. In 
+
+Advances in neural information processing systems workshop on topic models: computation, application, and evaluation , volume 4, pages 1–20. Harrahs and Harveys, Lake Tahoe. Cited on page 5. Rickmer Schulte, David Rügamer, and Thomas Nagler. 2025. Adjustment for confounding using pre-trained representations. In ICLR 2025 Workshop on Founda-tion Models in the Wild . Cited on pages 2 and 5. Elizabeth A. Stuart. 2010. Matching methods for causal inference: A review and a look forward. Statistical Science , 25(1). Cited on pages 3 and 4. Elijah Tamarchenko. 2023. Combining optimal adjust-ment set selection and post selection inference in unknown causal graphs. Bachelor’s thesis, Williams College, Williamstown, MA, May. Advisor: Rohit Bhattacharya. Cited on page 4. A Templeton, T Conerly, J Marcus, J Lindsey, T Bricken, B Chen, and 1 others. 2024. Scaling monoseman-ticity: Extracting interpretable features from claude 3 sonnet. transformer circuits thread. Transformer Circuits Thread, Anthropic. Cited on pages 1 and 2. Victor Veitch, Dhanya Sridhar, and David Blei. 2020. Adapting text embeddings for causal inference. In 
+
+Proceedings of the 36th Conference on Uncertainty in Artificial Intelligence (UAI) , volume 124 of Proceed-ings of Machine Learning Research , pages 919–928. PMLR. Cited on pages 2, 3, 5, and 9. Marko Veljanovski and Zach Wood-Doughty. 2024. DoubleLingo: Causal estimation with large language models. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Tech-nologies (Volume 2: Short Papers) , pages 799–807, Mexico City, Mexico. Association for Computational Linguistics. Cited on pages 2, 5, 7, and 9. Zach Wood-Doughty, Ilya Shpitser, and Mark Dredze. 2018. Challenges of using text classifiers for causal inference. In Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing ,pages 4586–4598, Brussels, Belgium. Association for Computational Linguistics. Cited on page 2. Raymond Zhang, Neha Nayak Kennard, Daniel Smith, Daniel McFarland, Andrew McCallum, and Kather-ine A. Keith. 2023. Causal matching with text embed-dings: A case study in estimating the causal effects of peer review policies. In Findings of the Asso-ciation for Computational Linguistics: ACL 2023 ,pages 1284–1297, Toronto, Canada. Association for Computational Linguistics. Cited on page 2. 
+
+A Causal identification assumptions 
+
+From §3.1, we listed the four causal identifica-tion assumptions that cannot be verified from data alone: 1. No unmeasured confounding. The unobserved variables U constitute a valid backdoor adjust-ment set for the effect of T on Y .11 2. Overlap. Every unit in the population has a nonzero probability of receiving each treat-ment level given its covariates, 0 < P r (T =
+
+t | U ) < 1, ∀t ∈ T
+
+3. Consistency. The outcome observed for each unit at treatment level t ∈ { 0, 1} is identical to the outcome we would have observed had the unit been assigned to treatment level t.6
+
+4. Homogeneous effects. The treatment effect is constant across units; we leave heterogeneous effects to future work. 
+
+B Data Statistics 
+
+In this section, we describe more statistics and pre-processing on the two datasets we use for semi-synthetic evaluations. 
+
+20NG The dataset originally contains 20 labels that are merged into 10 labels used in our experi-ments as follows, 1. computer: comp.graphics, comp.os.ms-windows.misc, comp.sys.ibm.pc.hardware, comp.sys.mac.hardware, comp.windows.x 2. politics: talk.politics.guns, talk.politics.misc, talk.politics.mideast 3. religion: alt.atheism, soc.religion.christian, talk.religion.misc 4. sport: rec.sport.baseball, rec.sport.hockey 5. automobile: rec.autos 6. cryptography:sci.crypt 7. medicine: sci.med 8. forsale: misc.forsale 9. electronics: sci.electronics 10. space: sci.space We present the prevalence of data labels of 20NG data by fraction in Fig. 5. In addition, as defined in our DGP (§5.1), we illustrate an example treatment assignment distribu-tion conditioned on the true confounder U from our simulation for each confounding scenario which we can visualize the overlap. We plot 20NG computer in Fig. 6, 20NG religion in Fig. 7, and multi-class (computer, religion, and other) in Fig. 8. 
+
+> 6
+
+Although consistency may sound like a trivial assump-tion to many readers unfamiliar with causal inference, we recommend the reader to Hernán (2016). 0.00 0.05 0.10 0.15 0.20 0.25 Fraction of samples space electronics forsale medicine cryptography automobile sport religion politics computer 
+
+> Label Prevalence (20 Newsgroups)
+
+Figure 5: Label prevalence in 20NG data by fraction of total samples. False True 20NG Single Confounding: Computer vs. Other 01000 2000 3000 4000 5000 6000 7000 Number of Samples T01
+
+Figure 6: Treatment Assignment on 20NG computer 
+
+EURLEX The original EURLEX dataset has 3-level hierarchical labels from coarse-grained to fine-grained. We use the coarsest level that con-tains 21 labels shown in Fig. 9 and select the top 5 labels: “trade”, “agri-foodstuffs”, “geography”, agriculture, forestry and fisheries”, and “EURO-PEAN UNION”. In our multi-labeled experiment, these chosen labels are represented in a vector for-mat. Finally, the distribution of the multi-labeled confounder of EURLEX in shown in Fig. 10. Furthermore, using one simulation from 100 sim-ulations, the treatment distribution of multi-label EURLEX data is illustrated in Fig. 11. We can see that overlap satisfies but certain regions have poor overlap. 12 False True 20NG Single Confounding: Religion vs. Other 01000 2000 3000 4000 5000 6000 7000 8000 Number of Samples T01Figure 7: Treatment Assignment on 20NG religion Other Computer Religion 20NG Multi-class Confounding: Computer vs. Religion vs. Other 01000 2000 3000 4000 5000 6000 7000 Number of Samples T01
+
+Figure 8: Treatment Assignment on 20NG multi-class (Computer, Religion, and Other) 
+
+C Metrics Details 
+
+Here we provide calculation details for the metrics. 
+
+ATT The Average Treatment Effect on the Treated (ATT) is the average effect of the treatment among treated units: 
+
+ATT = E [Y (1) − Y (0) | T = 1] ,
+
+where Y (1) and Y (0) are the potential outcomes under treatment and control, and T = 1 denotes treated units. Assume we run R simulations, with true ATT τ ,we compute the following empirical estimates for our method and baselines, • bias = 1
+
+R
+
+P(ˆ τ − τ )
+
+• RMSE =
+
+q 1
+
+R
+
+P(ˆ τ − τ )2
+
+• coverage = 1
+
+R
+
+P τ ∈ CI , the percentage of CI’s that cover the true treatment effect. 0.0 0.2 0.4 Fraction of samples international organisations science energy employment and working conditions politics law environment transport education and communications production, technology and research business and competition industry social questions economics international relations finance EUROPEAN UNION agriculture, forestry and fisheries geography agri-foodstuffs trade 
+
+Label Prevalence 
+
+Figure 9: Label prevalence in original multi-labeled EU-RLEX data by fraction of total samples. We select the five most common labels to create our multi-labeled con-founding experiment: “trade”, “agri-foodstuffs”, “geog-raphy”, “agriculture, forestry and fisheries”, and “EU-ROPEAN UNION”. 
+
+Effective Sample Size (ESS) To assess covariate overlap between treated and control units, we re-port the effective sample size (ESS) implied by the balancing weights. 
+
+ESS = (P
+
+i wi)2
+
+P
+
+i w2
+
+i
+
+where wi is the weight for each observational unit. Next, we describe how the weights are computed in coarsened exact matching (CEM) 
+
+Weights from CEM Recall that we have access to texts D = {d1, . . . , d N } containing unobserved confounder(s) U such as topics. For CEM, we bin the values of a covariate into several bins and perform exact match on these bins such that a bin containing only treatment units is dropped. Then, for an observational unit di, the weight is 0 if it is not matched, otherwise, denote the bin of the unit as b and the total number of units in this bin as Nb,the weight is calculated as follows, 
+
+wi =
+
+
+
+1, Ti = 1 
+
+N −PNi Ti
+
+PNi Ti
+
+· Nb−PNbi Ti
+
+PNbi Ti
+
+, Ti = 0 
+
+where the weight of a control unit ( Ti = 0 ) is the ratio between control and treatment units of the 13 0|1|0|1|0 0|1|0|1|1 1|0|0|0|1 0|0|1|1|0 0|1|1|1|0 0|1|0|0|0 0|0|1|0|1 1|0|0|0|0 0|1|0|0|1 0|0|0|0|1 0|0|0|1|0 0|1|1|0|0 0|0|1|0|0 0|1|1|0|1 0|1|1|1|1 1|1|0|1|0 1|0|1|0|1 1|1|0|0|1 1|1|0|1|1 1|1|0|0|0 1|0|1|0|0 0|0|1|1|1 0|0|0|1|1 1|1|1|0|0 1|1|1|1|0 1|1|1|0|1 1|0|1|1|0 1|1|1|1|1 1|0|0|1|0 1|0|1|1|1 1|0|0|1|1 Group (EUROPEAN UNION|trade|agriculture, forestry and fisheries|agri-foodstuffs|geography) 02000 4000 6000 8000 Number of Samples Figure 10: Distribution on multi-labeled true confounders in EURLEX 0|1|0|1|0 0|1|0|1|1 1|0|0|0|1 0|0|1|1|0 0|1|1|1|0 0|0|1|0|1 0|1|0|0|0 0|1|0|0|1 1|0|0|0|0 0|0|0|0|0 0|0|0|0|1 0|0|0|1|0 0|1|1|0|0 0|0|1|0|0 0|1|1|0|1 0|1|1|1|1 1|1|0|1|0 1|0|1|0|1 1|1|0|0|1 1|1|0|1|1 1|1|0|0|0 1|0|1|0|0 0|0|1|1|1 0|0|0|1|1 1|1|1|0|0 1|1|1|0|1 1|1|1|1|0 1|0|1|1|0 1|0|0|1|0 1|1|1|1|1 1|0|1|1|1 1|0|0|1|1 Group (EUROPEAN UNION|trade|agriculture, forestry and fisheries|agri-foodstuffs|geography) 01000 2000 3000 4000 5000 6000 Number of Samples T0.0 1.0 
+
+Figure 11: Treatment assignment on EURLEX 
+
+14 original population multiplied by the same ratio within the bin. 
+
+Standardized Mean Difference (SMD) We cal-culate the SMD of a true confounder U as follows, 
+
+|SM D (U )| = | ¯UT =1 − ¯UT =0 
+
+sd pooled 
+
+|
+
+sd pooled =
+
+r Var( UT =1 ) + Var( UT =0 )2
+
+Specifically, the means and variances are weighted such that the weights are all set to 1 before match-ing (i.e. each observational unit has equal weight), and are computed as above after matching. 
+
+D Experiment Implementation 
+
+For the text embeddings used as in-put for SAE and Embed+DML, we use 
+
+openai-text-embedding-3-small . Our se-lection step uses a 7:3 train-test split ratio and the train-test split remains the same across simulations. CEM’s binning rule uses cut-points at 0 and 50% 
+
+quantile of the positive values. For baseline TIRM, we run experiments in R with stm and cem libraries. For the rest baselines, we run experiments in python. We use package doubleml for double machine learning estimator implementation and 
+
+pymatchit for Coarsened Exact Matching. We follow hypothesaes to implement SAE models. We want to make a note that, because SAE does not require treatment and outcome variables, we train an SAE representation once and use it across all simulations. On the other hand, STMs in TIRM do depend on the treatment variable, requiring us to retrain the model for every simulation, making this approach more computationally expensive for semi-synthetic evaluations. 
+
+E Results: Complementary Figures and Tables 
+
+Unadjusted estimate The unadjusted treatment effect is E[Y |T = 1] − E[Y |T = 0] and in practice we calculate the difference of the mean of outcome variable between treatment and control samples. 
+
+Complementary results for main results tables 
+
+Specific to matching estimators, we report the per-centage of retained treated samples (T-ret.%) in Tab. 2 and Tab. 3 that indicates the proportion of treated samples retained after matching. Similarly computer religion multi-class multi-label TIRM 2.59 2.72 2.80 25.18 SAE 0.42 0.48 0.59 0.58 SAE select 18.59 82.04 6.68 0.92 
+
+> Table 4: Percentage of control retained for different confounding settings and pipeline using CEM estimator.
+
+we provide a complementary table about the con-trol retained rate in Tab. 4. They both indicate how much of the original treated(/control) population is actually supported by comparable controls(/treated) after matching. In addition, in Tab. 2 and Tab. 3, we compare methods where the matching estimator uses a bin-ning rule with 50% quantile cutpoint on positive values. We also experiment with a cutpoint with 
+
+80% quantile and present the results in Tab. 5. 
+
+Complementary figures for binary and multi-labeled confounding Similar to Fig. 1, we present the random 10-simulation adjustment per-formance across different pipelines figures for the other three confounding settings. We plot for bi-nary (computer) confounder in Fig. 12a, binary (re-ligion) confounder in Fig. 12b, and multi-labeled confounder in Fig. 12c. 
+
+F Interpretability of SAE features: Complementary Figures and Tables 
+
+We provide complementary figures and tables for the qualitative analysis in §6.5 on SAE features for different confounding settings. The prompting model is gpt-5.2 . For readability, we only plot the top five neurons that appear most frequent across 100 simulations in Fig. 13 for 20NG computer, Fig. 14 for 20NG religion, Fig. 15 for 20NG multi-class, and Fig. 16 for EURLEX multi-label. Amore comprehensive table for each confounding setting is provided. 15 Oracle Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML 
+
+Estimation Pipelines 
+
+1.90 1.95 2.00 2.05 2.10 2.15 2.20 
+
+> Estimated ATT  102 74 127 117 17 112 15 103 30 51 Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML True ATT
+
+Confounder: Computer v.s. Other 
+
+> Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML True ATT
+
+(a) Binary (computer) . Simulations across 10 randomly selected seeds for the oracle binary confounder U of computer versus other using the 20NewsGroups data. Oracle Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML 
+
+Estimation Pipelines 
+
+1.95 2.00 2.05 2.10 2.15 
+
+> Estimated ATT  11154 111 11 1 2
+> Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML True ATT
+
+Confounder: Religion v.s. Other 
+
+> Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML True ATT
+
+(b) Binary (religion) . Simulations across 10 randomly selected seeds for the oracle binary confounder U of religion versus other using the 20NewsGroups data. Oracle Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML 
+
+Estimation Pipelines 
+
+1.9 2.0 2.1 2.2 2.3 
+
+> Estimated ATT
+> 123 117 128 124 111 103 85 123 111 67
+> Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML True ATT
+
+Confounder: Multi-label Confounder on Eurlex (EU laws) 
+
+> Unadjusted Embed+DML TIRM STM+DML SAE+CEM SAE selection +CEM SAE+DML True ATT
+
+(c) EURLEX multi-label . Simulations across 10 randomly selected seeds for the oracle multi-label confounder U using the EURLEX data. 
+
+Figure 12: Simulation results across 10 out of 100 randomly selected seeds. Horizontal lines indicate the average estimate across these 10 simulations. DML denotes the DoubleML estimator. In SAE selection +CEM, the number of selected features is listed on top of the confidence-interval bars. 
+
+16 Confounder pipeline Bias ↓ RMSE ↓ Coverage % ↑ treated retained % ↑ control retained % ↑
+
+Binary TIRM 0.0411 0.0464 81.00 1.05 1.31 (computer) SAE 0.0344 0.0465 93.00 0.30 0.44 SAE select 0.0308 0.0420 56.00 17.63 21.64 
+
+Binary TIRM 0.0103 0.0165 93.00 1.29 1.46 (religion) SAE 0.0055 0.0240 93.00 0.41 0.51 SAE select 0.0416 0.0468 86.00 82.29 82.80 
+
+Multi-class TIRM 0.0259 0.0392 98.00 1.05 1.68 SAE 0.0201 0.0434 95.00 0.31 0.62 SAE select 0.0271 0.0446 75.00 6.04 8.44 
+
+Multi-labeled TIRM 0.0459 0.0467 7.00 26.94 31.01 
+
+SAE 0.0255 0.0492 91.00 0.45 0.97 SAE select 0.0255 0.0474 90.00 0.67 1.38 
+
+Table 5: Complementary table for Tab. 2 and Tab. 3. All settings keep the same except that CEM uses cut-points at 0 and at 80% quantile of positive values. 0 100 count Discusses X11 display/graphics color depth —speci fi cally 24-bit/TrueColor visuals or 8-bit colormaps (often mentioning tools like xdpyinfo, xli/xloadimage, XPutImage/XDrawLine, or XGA/X server) Mentions X Window System/OpenWindows/Motif tools or components (e.g., xwd, xterm, xinit, xdm, Xlib, Xt, X11R5) Mentions bitmap image/graphics fi le formats (e.g., GIF, TIFF, BMP, PCX) in the context of fi nding or using graphics/conversion/viewer software via FTP/shareware/freeware discussion of 1990s PC hardware bus standards (e.g., VLB/VL-bus, EISA, ISA, MCA, NuBus) and related motherboard/chipset/DMA performance details Classi fi ed-style for-sale listing that includes an asking price in dollars (e.g., “$150 ”, “Asking 200 ”, “sell 70 only ”) for an item being sold 
+
+comp_vs_other M=128 K=32 
+
+Figure 13: Top-5 most common neurons across 100 simulations for 20 news (computer) confounding 0 100 count Contains explicit Bible scripture citations with book names and chapter:verse notation (e.g., \"John 1:1\", \"Matthew 28:19\", \"Ephesians 4:4-6\") contains frequent discussion of morality/ethics using the words “moral ”, “morality ”, or “immoral ”
+
+religion_vs_other M=128 K=32 
+
+Figure 14: Top-5 most common neurons across 100 simulations for 20 news (religion) confounding 0 100 count Contains explicit Bible scripture references in the form of a book name plus chapter:verse (e.g., 'John 1:1', 'Matthew 5:17', 'Ephesians 4:4-6') Mentions PC motherboard/bus hardware standards (e.g., EISA, VLB/VL-bus, ISA, NuBus, MCA) in a technical discussion Mentions X Window System/OpenWindows/Motif-related tools or components (e.g., xwd, xterm, xdm, xinit, XView, X11R5) Requests or advice about obtaining graphics/image 
+
+fi le conversion or viewing software via anonymous FTP, often mentioning formats like GIF/TIFF/BMP/PCX and .ZIP/.EXE fi lenames discussion of automobiles/motorcycles and their performance or mechanical parts (e.g., car models, engines, transmissions, brakes, horsepower) 
+
+comp_vs_religion_vs_other M=128 K=32 
+
+Figure 15: Top-5 most common neurons across 100 simulations for 20 news (computer and religion) multi-class confounding 0 100 count EU legal acts speci fi cally about veterinary/animal health measures (mentions terms like 'veterinary', 'animal health', and/or diseases such as foot-and-mouth disease, scrapie, BSE/TSE) EU legal acts that are Directives (titled \"DIRECTIVE\" or \"COUNCIL/COMMISSION DIRECTIVE\" with an /EC or /EEC number) speci fi cally about wheeled agricultural or forestry tractors EU legal act text that explicitly refers to Spain/Spanish appointments (contains the word 'Spanish' or 'Spain' in the title/body) Mentions Central/Eastern European (post-communist) countries such as Bulgaria, Romania, Czechoslovakia/Czech Republic, Slovakia/Slovak, Hungary, Poland, Slovenia, Yugoslavia/FYROM, or former Soviet Union republics Contains the exact phrase \"establishing the standard import values for determining the entry price of certain fruit and vegetables\ 
+
+multilabel_top5 M=128 K=32 
+
+Figure 16: Top-5 most common neurons across 100 simulations for EURLEX multi-label confounding 
+
+17 Neuron Interpretations: 20NG Computer 
+
+Neuron Interpretation # Sim. 
+
+0 Discusses X11 display/graphics color depth—specifically 24-bit/TrueColor visuals or 8-bit colormaps (often mentioning tools like xdpyinfo, xli/xloadimage, XPutImage/XDrawLine, or XGA/X server) 100 7 Mentions X Window System/OpenWindows/Motif tools or components (e.g., xwd, xterm, xinit, xdm, Xlib, Xt, X11R5) 100 10 Mentions bitmap image/graphics file formats (e.g., GIF, TIFF, BMP, PCX) in the context of finding or using graphics/conversion/viewer software via FTP/shareware/freeware 100 18 discussion of 1990s PC hardware bus standards (e.g., VLB/VL-bus, EISA, ISA, MCA, NuBus) and related motherboard/chipset/DMA performance details 100 3 Classified-style for-sale listing that includes an asking price in dollars (e.g., “$150”, “Asking $200”, “sell $70 only”) for an item being sold 98 9 Contains the phrase "same problem" (case-insensitive) 97 13 contains MS-DOS era disk/storage terminology such as FDISK/FORMAT/CMOS partitions and IDE/SCSI hard drives 93 24 discussion of the Clipper Chip/key escrow (mentions ’Clipper’ or ’key escrow’ or ’Skipjack’) 93 5 contains electronics/DIY circuit-building content with specific component part numbers or values (e.g., 555, 741, 565, MC14536B, VAC/VDC, ohms, Hz, μF) 86 14 Discussion of automobiles or motorcycles using specific vehicle makes/models and performance/repair terminology (e.g., Mustang, Miata, Porsche 911, turbo/V-8, transaxle, carbs, clutch, hp) 85 22 Discussion of Candida/yeast (fungal) infections, often in the context of antibiotics and probiotics (e.g., Lactobacillus, yogurt) 79 25 Contains explicit Bible scripture citations using book names with chapter:verse notation (e.g., “John 1:1”, “Matthew 28:19”, “Hebrews 10:24-25”). 79 15 classified for-sale listings that include an explicit asking price marked with a dollar sign ($) 75 21 discussion of professional baseball (MLB) teams/standings/predictions (e.g., AL/NL divisions, Yankees/Orioles/Blue Jays, ROY/ROTY, Cy Young) 75 12 Contains the substring "==clip==" indicating clipped/truncated quoted sections 70 20 Mentions the Waco siege/Branch Davidians (e.g., Koresh, ATF/BATF, FBI) in a political argument context 69 
+
+Continued on next page 
+
+18 Table 6 – continued from previous page 
+
+Neuron Interpretation # Sim. 
+
+6 Discussion of spaceflight/space exploration missions or orbital mechanics (e.g., Moon missions, Earth orbit, planetary probes like Galileo/Cassini/Voyager) 66 11 Contains discussion of Middle East/Turkey/Armenia/Israel-Palestine political or ethnic conflict (e.g., Arabs/Jews/Zionism/Palestine/Turkiye/Greeks/Armenians) 60 2 contains political commentary about U.S. government/politicians (e.g., Clinton, Gore, liberals/conservatives) and civil liberties/rights 58 4 Contains discussion of Major League Baseball players/teams using multiple athlete proper names (e.g., Mays, Mattingly, Winfield) and baseball stats/terms (BA, OBP, steals, HR) 58 30 contains explicit discussion of U.S. law/constitution/civil-rights enforcement (e.g., mentions the Constitution, amendments, U.S.C., courts, or federal/state criminal charges) 57 17 discussion of morality/ethics using words like "moral", "morality", "immoral", or "objective morality 55 23 Contains explicit sarcasm/flame-style Usenet banter with direct insults or profanity (e.g., ’newbie’, ’bozo’, ’fuck off’, ’panties in a bunch’) in a quoted-reply thread format 54 48 Contains the word "Mac" or "Macintosh" (referring to Apple Macintosh computers) 52 99 Discussion of Apple Macintosh hardware models/upgrades (e.g., Mac IIvx/LC/Centris/SE-30/Duo/PowerBook/Mac Portable) including RAM/memory, accelerators, hard drives, or peripherals 47 31 contains the literal header field "Archive-name:" (or "Archive-Name:") at the start of an FAQ/archive posting 45 29 contains explicit deletion/removal marker text such as ’deleted’ or ’(Deletion)’ 44 90 Contains a quoted/attributed signature line with an identifier like "–" followed by a handle/ID number (e.g., "DoD #1224", "DoD#1919") 44 8 contains direct second-person accusations/challenges using ’you/your’ (e.g., ’you have yet to answer’, ’you are going to’, ’your lack of’) 42 19 Neuron Interpretations: 20NG Religion 
+
+Neuron Interpretation # Sim. 
+
+25 Contains explicit Bible scripture citations with book names and chapter:verse notation (e.g., "John 1:1", "Matthew 28:19", "Ephesians 4:4-6") 100 17 contains frequent discussion of morality/ethics using the words “moral”, “morality”, or “immoral” 47 20 Neuron Interpretations: 20NG Multi-class (Computer and Religion) 
+
+Neuron Interpretation # Sim. 
+
+25 Contains explicit Bible scripture references in the form of a book name plus chapter:verse (e.g., ’John 1:1’, ’Matthew 5:17’, ’Ephesians 4:4-6’) 100 18 Mentions PC motherboard/bus hardware standards (e.g., EISA, VLB/VL-bus, ISA, NuBus, MCA) in a technical discussion 99 7 Mentions X Window System/OpenWindows/Motif-related tools or components (e.g., xwd, xterm, xdm, xinit, XView, X11R5) 95 10 Requests or advice about obtaining graphics/image file conversion or viewing software via anonymous FTP, often mentioning formats like GIF/TIFF/BMP/PCX and .ZIP/.EXE filenames 91 14 discussion of automobiles/motorcycles and their performance or mechanical parts (e.g., car models, engines, transmissions, brakes, horsepower) 89 22 discussion of Candida/yeast (fungal) infections, often in the context of antibiotic use and probiotics (e.g., Lactobacillus/yogurt) 89 21 discussion of professional sports (especially MLB baseball) including team names, standings/predictions, or game commentary 89 17 contains multiple occurrences of the word "moral"/"morality" (including "moral system" or "moral behavior") 86 24 discussion of the Clipper Chip/key escrow telephone encryption proposal (mentions “Clipper”/wiretap chip/escrowed keys/NSA/NIST/Skipjack/DES in that context) 86 0 Discusses X11/X Window System display/graphics topics (e.g., XGA, X server visuals, xdpyinfo, xloadimage/xli, pixmaps/colormaps) 83 20 Mentions the Waco siege/Branch Davidians (e.g., Koresh, ATF/BATF, FBI) in a political discussion 80 11 contains explicit discussion of Middle East/Turkish/Armenian/Israeli/Palestinian ethnic-national conflict (e.g., mentions Jews/Arabs/Israel/Palestine/Turkiye/Greeks/Armenians/Zionism) 77 3 classified-style for-sale posting listing items and asking price/offer (e.g., ’for sale/forsale’, ’asking $’, ’make an offer’, ’buyer pays shipping’) 76 5 contains electronics/DIY circuit-building content with specific component names or part numbers (e.g., 555 timer, 741 op-amp, 565 PLL, MC14536B, MAX641) and voltage/frequency values 76 9 first-person technical troubleshooting report describing a recurring computer/printer hardware error/problem (often phrased as ’I have the same problem’ or asking if others have it) 71 
+
+Continued on next page 
+
+21 Table 8 – continued from previous page 
+
+Neuron Interpretation # Sim. 
+
+6 Discussion of space exploration/space missions (e.g., NASA, orbit, Moon, planets, probes like Galileo/Cassini/Voyager, spacecraft/launch systems) 69 4 Discussion of Major League Baseball players/teams using baseball-specific stats/terms (e.g., batting average/OBP/OPS, steals, pinch-hit ABs, Hall of Fame), with multiple player names 67 2 Political rant/opinion text about U.S. government/parties/media (explicit mentions like Clinton/Gore/liberals/conservatives/rights/privacy/gun control), rather than technical/marketplace/medical topics 66 23 Contains emoticon-style smiley faces made with punctuation (e.g., ’:-)’ or ’;)’ ) 64 19 Discussion of ice hockey (NHL/Stanley Cup) including player or team names 62 31 contains the literal header field "Archive-name:" (Usenet FAQ/archive-style header) 62 12 Contains the token "==clip==" indicating an edited/truncated quote 59 30 contains explicit discussion of U.S. law/constitutional rights (e.g., mentions Constitution, amendments, U.S.C., federal courts, or civil rights statutes) 59 15 Classified for-sale listings that include explicit prices using a dollar sign ($) for items 58 29 A standalone deletion marker (the word ’deleted’ or ’(Deletion)’ / ’stuff deleted...’) indicating removed content 56 8 contains multiple rhetorical questions marked with ’?’ 55 13 mentions DOS-era PC disk/drive management terms like FDISK/format/partitions and IDE vs SCSI hard drives 52 27 discussion of RS-232/serial COM port hardware or wiring (e.g., RS232, serial port, COM1/COM3, null modem, pinout, baud/parity) 49 26 Text about riding motorcycles (e.g., bikes, riding, helmets/gear, passenger/pillion advice, specific motorcycle models like Ninja/CBR/GSX-R) 47 73 contains the substring “LD” (uppercase L followed by uppercase D) somewhere in the text 46 58 contains at least one question mark (“?”) in the text 43 28 Contains a signature delimiter line consisting solely of two hyphens ("–") on its own line 43 93 discussion of Hell in a Christian/Biblical context (explicit mentions of Hell plus Bible passages/books like Luke, Matthew, Revelation, or doctrines like Atonement/resurrection) 43 
+
+Continued on next page 
+
+22 Table 8 – continued from previous page 
+
+Neuron Interpretation # Sim. 
+
+55 Mentions MSG (monosodium glutamate) explicitly 41 48 Mentions Apple Macintosh computers/products (e.g., Mac, Macintosh, Mac SE/Mac II, Apple, QuickDraw) 40 23 Neuron Interpretations 
+
+Neuron Interpretation # Sim. 
+
+2 EU legal acts specifically about veterinary/animal health measures (mentions terms like ’veterinary’, ’animal health’, and/or diseases such as foot-and-mouth disease, scrapie, BSE/TSE) 100 13 EU legal acts that are Directives (titled "DIRECTIVE" or "COUNCIL/COMMISSION DIRECTIVE" with an /EC or /EEC number) specifically about wheeled agricultural or forestry tractors 100 14 EU legal act text that explicitly refers to Spain/Spanish appointments (contains the word ’Spanish’ or ’Spain’ in the title/body) 100 18 Mentions Central/Eastern European (post-communist) countries such as Bulgaria, Romania, Czechoslovakia/Czech Republic, Slovakia/Slovak, Hungary, Poland, Slovenia, Yugoslavia/FYROM, or former Soviet Union republics 100 21 Contains the exact phrase "establishing the standard import values for determining the entry price of certain fruit and vegetables 100 31 Commission Regulation establishing the standard import values for determining the entry price of certain fruit and vegetables 100 101 Contains the exact phrase ’Only the French text is authentic’ 100 4 contains the phrase "Community support framework" (often in the title "on the establishment/approving the Community support framework for Community structural assistance") 99 9 Council Decision appointing member(s) and/or alternate member(s) of the Committee of the Regions 99 15 EU legal acts specifically about the marketing/sowing/authorization of agricultural seed (mentions “seed” in the context of arable crops/plant varieties, e.g., cereal/maize/vegetable seed) 99 44 Text is a Commission Regulation establishing “unit values for the determination of the customs value of certain perishable goods” (repeated phrase in the title/body) 99 5 Contains the exact phrase "concerning the classification of certain goods in the Combined Nomenclature 98 17 Begins with the phrase “COUNCIL DECISION” (including the variant “COUNCIL AND COMMISSION DECISION”) rather than “COMMISSION REGULATION/DECISION” 98 22 Contains the phrase ’protected designations of origin and protected geographical indications’ (often with PDO/PGI) in the title/opening lines 98 24 Contains the phrase "standing invitation to tender" (often with "special/individual invitation to tender") 98 
+
+Continued on next page 
+
+24 Table 9 – continued from previous page 
+
+Neuron Interpretation # Sim. 
+
+25 Text is a Commission Regulation amending Council Regulation (EC) No 881/2002 on restrictive measures linked to Usama bin Laden, the Al-Qaida network and the Taliban (often phrased as ’amending for the Nth time’) 98 89 Contains the exact phrase "private storage aid" (in the context of EU regulations granting private storage aid for cheeses) 98 0 Document header begins with five asterisks: "*****" (often "***** COMMISSION REGULATION (EEC)"/"***** COMMISSION DECISION") 97 27 Commission Regulation (EC) text fixing the maximum export refund on wholly milled round grain rice (often tied to an invitation to tender) 97 6 Issued by the European Parliament and the Council (contains the header phrase “THE EUROPEAN PARLIAMENT AND THE COUNCIL OF THE EUROPEAN UNION”) 95 7 Contains the exact phrase "representative prices and additional duties" (in the context of amending them for imports in the sugar sector) 95 16 Document header begins with the phrase “COUNCIL IMPLEMENTING” (as in “COUNCIL IMPLEMENTING REGULATION . . . ” or “COUNCIL IMPLEMENTING DECISION . . . ”). 95 26 EU Commission regulations specifically about butter intervention tenders, using the phrase ’fixing the maximum purchasing/buying-in price for butter’ or ’fixing the minimum selling prices for butter’ (often also mentioning aid for cream/butter/concentrated butter) under Regulation (EC) No 2571/97 or 2771/1999 95 33 Contains the exact phrase "establishing unit values for the determination of the customs value of certain perishable goods 95 65 Mentions the ’Canary Islands’ in the title/opening text (often as part of ’forecast supply balance’ regulations under Council Regulation (EEC) No 1601/92) 95 25
