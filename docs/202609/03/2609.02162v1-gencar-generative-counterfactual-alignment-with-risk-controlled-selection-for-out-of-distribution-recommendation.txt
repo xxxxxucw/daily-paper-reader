@@ -1,0 +1,1374 @@
+Title: GenCAR: Generative Counterfactual Alignment with Risk-Controlled Selection for Out-of-Distribution Recommendation
+
+URL Source: https://arxiv.org/pdf/2609.02162v1
+
+Published Time: Thu, 03 Sep 2026 00:38:19 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# GenCAR: Generative Counterfactual Alignment with Risk-Controlled Selection for Out-of-Distribution Recommendation 
+
+## Qianqian Wang a,b , Yunshan Li a, Jiawen Zeng c, Wenwu Gong a and Lili Yang a,b ,∗
+
+> a
+
+Shenzhen Key Laboratory of Safety and Security for Next Generation of Industrial Internet, Southern University of Science and Technology, Shenzhen, China 
+
+> b
+
+Department of Statistics and Data Science, Southern University of Science and Technology, Shenzhen, China 
+
+> c
+
+School of Engineering and Applied Science, University of Pennsylvania, Philadelphia, USA 
+
+A R T I C L E I N F O 
+
+Keywords :Out-of-distribution recommendation counterfactual reasoning large language models conformal prediction selective inference 
+
+A B S T R A C T 
+
+Serving useful recommendations under distribution shift is crucial for balancing utility and risk in out-of-distribution (OOD) recommendation. However, most existing OOD methods improve ranking or construct counterfactual candidates without controlling the proxy-label false discovery rate (FDR) of the served set. In this work, we formulate OOD serving as the 𝛼 -Valid Counterfactual Recommen-dation ( 𝛼 -VCR) problem to retain candidate support learned from counterfactual supervision while controlling proxy-label FDR, and propose GenCAR, which couples preference-grounded counter-factual supervision with calibrated set selection. In particular, GenCAR fixes the stable-preference representation while intervening on the environmental factor, grounds offline large language model proposals through preference anchors and trust-radius filtering, and uses conformal 𝑝 -values for Benjamini–Hochberg selection. We theoretically bound conditional counterfactual approximation error and prove finite-sample, distribution-free control of proxy-label FDR under exchangeability and positive regression dependence, with a Benjamini–Yekutieli guarantee under arbitrary dependence. Extensive experiments audit realized proxy false discovery proportions and demonstrate that GenCAR consistently enhances OOD candidate recovery across diverse benchmarks. 
+
+## 1. Introduction 
+
+Out-of-distribution (OOD) recommender systems serve users across changing environments, where interaction dis-tributions differ between training and serving [1, 2]. Due to changes in exposure, item popularity, and temporal context, ranking patterns learned from logged interactions may not transfer reliably to the serving environment [1, 3, 4]. In such settings, a naive strategy is to enlarge the top-ranked set served to each user, increasing the chance that it contains useful post-shift items. While this strategy can retain more useful items, it can also admit low-quality candidates and lead to recommendation failures as the set grows [5]. Thus, it is essential to determine which and how many candidates to serve for each user, which highlights the utility-risk trade-off in OOD recommendation. Recent research has proposed OOD recommenders that separate preference-related signals from environmental fac-tors to improve ranking after distribution shift [6, 3, 7]. Dis-tributionally robust objectives and causal diffusion extend this direction to broader forms of shift [4, 2, 8]. Yet, these methods are learned from interactions logged in the train-ing environment, which do not directly reveal which items remain useful in the serving environment. To obtain super-vision for this unobserved setting, a natural strategy is to construct item-level counterfactuals under an environmental intervention. Generative recommenders provide a practical 
+
+> ∗
+
+Corresponding authors  
+
+> 12331103@mail.sustech.edu.cn
+
+(Q. Wang); lyunshan565@gmail.com 
+
+(Y. Li); jiawenze@engineering.upenn.edu (J. Zeng); gongww@sustech.edu.cn 
+
+(W. Gong); yangll@sustech.edu.cn (L. Yang) 
+
+> ORCID
+
+(s): 
+
+mechanism for constructing such supervision by model-ing interaction distributions, generating oracle-like items, or augmenting training sequences [9–13]. However, their objectives optimize reconstruction or personalized ranking without specifying how stable preference should constrain generation under the intervention. Generated candidates can retain environment-specific patterns and produce recom-mendation failures after the shift. Counterfactual generation defines the candidate family, but serving still requires deciding which candidates to re-tain. Conformal recommendation controls the false discov-ery rate (FDR), the expected proportion of incorrect items among selected recommendations, for sets returned by a given ranker [5]. Recent work further controls unwanted recommendations and expands selected sets using observed user feedback [14]. These guarantees assume a fixed candi-date family and predefined relevance or unwanted-content labels. In our setting, candidates are generated under an environmental intervention, and their alignment with stable preference is represented by proxy labels. Existing methods do not jointly construct such candidates and control their proxy-label FDR during serving. This limitation raises a pivotal issue: 
+
+How can we retain counterfactual candidates while controlling proxy-label FDR in the served set? 
+
+In this work, we propose Generative Counterfactual Alignment with Risk-Controlled Selection (GenCAR), a two-stage framework that connects preference-grounded counterfactual supervision with calibrated set selection. We define the serving risk as the pooled FDR of candidate pairs labeled as misaligned by a proxy obtained from an 
+
+Wang et al.: Preprint submitted to Elsevier Page 1 of 19 arXiv:2609.02162v1 [cs.IR] 2 Sep 2026 GenCAR: Risk-Controlled OOD Recommendation 
+
+offline large language model (LLM). We formulate OOD serving as the 𝛼 -Valid Counterfactual Recommendation (𝛼 -VCR) problem (Definition 2), which seeks to retain counterfactual candidate support while keeping proxy-label FDR below a user-specified level 𝛼 . Overall, GenCAR is preference-grounded, risk-controlled, and LLM-free during online serving, as it transforms offline LLM supervision into 
+
+𝛼 -valid served sets through stable-preference constraints and conformal calibration. Theoretically, we establish finite-sample, distribution-free control of pooled proxy-label FDR under target-environment exchangeability and positive regression dependence on the proxy nulls (Theorem 1). A Benjamini– Yekutieli (BY) variant extends this guarantee to arbitrary dependence (Corollary 1). We also prove that Benjamini– Hochberg (BH) returns the largest member of its nested step-up family (Lemma 1), showing that calibrated selection retains the largest admissible set within this family. A proxy-transfer bound isolates the error required to relate the proxy-label certificate to causal misalignment (Corollary 2). For counterfactual construction, we bound the conditional approximation error introduced by anchor projection, LLM realization, and trust-radius filtering (Proposition 1). To evaluate the validity and effectiveness of GenCAR, we conduct studies on MovieLens (ML)-100K [15], Coat [1], and Amazon-Book [16], together with two additional calibration datasets. The results show that realized proxy FDP remains below 𝛼 on all five evaluated candidate pools and that GenCAR consistently improves OOD candidate recovery. Specifically, compared with the shared causal variational autoencoder (CausalVAE) backbone, GenCAR improves Recall@10 by 11.0%, 19.1%, and 43.5% on the three primary benchmarks. Moreover, GenCAR achieves the highest mean Recall@10 among methods with LLM-free serving on all three benchmarks. Matched ablations show that additional training pairs alone do not explain these gains. On Coat, GenCAR retains sub-millisecond online latency, while inference-time LLM reranking requires approximately 5.4 seconds per user. Our contributions are summarized as follows: • We formulate OOD serving as the 𝛼 -VCR problem ,establishing a principled framework to retain coun-terfactual candidate support while controlling pooled proxy-label FDR below a user-specified level 𝛼 .• We propose GenCAR, a two-stage framework that transforms offline LLM proposals into preference-grounded counterfactual supervision and calibrated served sets. GenCAR supports variable-size and empty outputs and remains LLM-free during online serving. • We derive a conditional approximation bound for counterfactual construction and establish finite-sample pooled proxy-label FDR control for calibrated selection. We further establish BH-family maximality and quantify the proxy error separating this certificate from causal misalignment. (a) Naive predictor   
+
+> (b) Disentangled VAE (no invariance)
+> Spurious
+> (c) GenCAR SCM (OOD-robust)
+> ✓invariant
+> Node Legend
+> latent (unobserved)
+> observed
+> query (per (u,j) pair)
+> (causal preference)
+> (environment)
+> (idiosyncratic noise)
+> ✗not OOD-robust
+
+Fig. 1. Structural causal models for OOD recommendation. (a) A naive predictor entangles user preference with the observed environment. (b) A disentangled model separates the latent factors but does not preserve preference across environments. (c) The target SCM changes the environmental factor 𝐳 𝑒 while keeping stable preference 𝐳 𝑐 fixed. 
+
+## 2. Background 
+
+In this section, we introduce OOD recommendation un-der environmental shift, discuss the misalignment risk asso-ciated with serving post-shift candidates, and formally de-fine the 𝛼 -Valid Counterfactual Recommendation ( 𝛼 -VCR) problem. 
+
+2.1. Preliminaries 
+
+Let  and  denote the user and item spaces. We use 
+
+(𝑢, 𝑗 ) for a fixed user–item pair and (𝑈 , 𝐽 ) for a random pair. For each user 𝑢 ∈  , let 𝑥 𝑢 denote the observed interaction history. The training log train = {( 𝑢, 𝑗 ) ∶ 𝑦 𝑢𝑗 = 1} is sampled from 𝑃 train , while serving pairs follow 𝑃 test . We consider an OOD setting in which 𝑃 train ≠ 𝑃 test because the exposure policy, item popularity, or temporal context changes between training and serving [1, 3, 2]. To determine which items remain suitable after an envi-ronmental change, we model each interaction with a struc-tural causal model (SCM). The latent state contains stable user preference 𝐳 𝑐 , an environmental factor 𝐳 𝑒 , and idiosyn-cratic noise 𝜂 . This factorization separates preference-related information from environment-dependent variation [17, 18]. Fig. 1 contrasts the resulting OOD recommendation problem with a naive predictor and a disentangled model without cross-environment invariance. 
+
+Assumption 1 (SCM decomposition) . For each user–item pair (𝑢, 𝑗 ), the interaction is generated according to 
+
+𝐳 𝑐 ∼ 𝑝 (𝐳 𝑐 ), 𝐳 𝑒 ∼ 𝑝 𝑒 (𝐳 𝑒 ), 𝜂 ∼ 𝑝 (𝜂 ), 𝑗 ∼ 𝑝 (𝑗 ∣ 𝐳 𝑐 , 𝐳 𝑒 , 𝜂 ).
+
+Here, 𝐳 𝑐 represents stable user preference, 𝐳 𝑒 captures the current environment, and 𝜂 accounts for idiosyncratic vari-ation. 
+
+Wang et al.: Preprint submitted to Elsevier Page 2 of 19 GenCAR: Risk-Controlled OOD Recommendation 
+
+Assumption 2 (Environmental shift) . For each environment 
+
+𝑒 , the joint distribution factorizes as 
+
+𝑃 𝑒 (𝐳 𝑐 , 𝐳 𝑒 , 𝜂, 𝑗 ) = 𝑝 (𝐳 𝑐 ) 𝑝 (𝜂 ) 𝑝 𝑒 (𝐳 𝑒 ) 𝑝 (𝑗 ∣ 𝐳 𝑐 , 𝐳 𝑒 , 𝜂 ).
+
+Across training and serving, 𝑝 (𝐳 𝑐 ), 𝑝 (𝜂 ), and the interaction mechanism 𝑝 (𝑗 ∣ 𝐳 𝑐 , 𝐳 𝑒 , 𝜂 ) remain invariant [19], while 
+
+𝑝 𝑒 (𝐳 𝑒 ) may change. 
+
+The environmental-shift assumption localizes the dis-tribution change to 𝐳 𝑒 . For a target environment ̃ 𝐳 𝑒 , the intervention do( 𝐳 𝑒 ∶= ̃ 𝐳 𝑒 ) changes the environment while preserving the stable preference of user 𝑢 . This intervention defines whether an item remains aligned with that user after the shift. 
+
+Definition 1 (Causal alignment target) . For a user–item pair 
+
+(𝑢, 𝑗 ), define 
+
+𝐺 𝑢𝑗 = 1 [𝑝 (𝑗 ∣ 𝐳 (𝑢 ) 
+
+> 𝑐
+
+, do( 𝐳 𝑒 ∶= ̃ 𝐳 𝑒 ), 𝜂 (𝑢 )) ≥ 𝛾 𝑢 
+
+] ,
+
+where 𝛾 𝑢 is a user-specific alignment threshold. The corre-sponding aligned item set is ̃ 𝐳 𝑒 (𝑢 ) = { 𝑗 ∈  ∶ 𝐺 𝑢𝑗 = 1} .
+
+The set ̃ 𝐳 𝑒 (𝑢 ) may be empty when no candidate item is aligned with user 𝑢 in the target environment. 
+
+OOD recommendation. A standard OOD recommender relies on a scoring function: 𝑠 𝜃 ∶  × → ℝ, where 𝑠 𝜃 (𝑢, 𝑗 )
+
+represents the predicted relevance of item 𝑗 to user 𝑢 under the target environment. We write 𝑢 for the top-𝐾 ranked items of user 𝑢 and () = {( 𝑢, 𝑗 ) ∶ 𝑢 ∈ , 𝑗 ∈ 𝑢 } for the pooled candidate family of a serving batch .Existing OOD recommenders improve 𝑠 𝜃 by separating preference-related signals from environmental factors or by optimizing performance under distribution shift [6, 3, 7, 2]. Generative recommenders extend this direction by con-structing additional supervision or candidate support beyond observed interactions [9–12]. These methods can recover useful items that are absent from the training environment. While effective for candidate recovery, the ranking score does not determine whether a candidate belongs to ̃ 𝐳 𝑒 (𝑢 ). A natural serving strategy is to retain the highest-ranked candi-dates. Fixed set sizes and uncalibrated thresholds, however, provide no control over the proportion of retained candidates that are misaligned with the target preference. Retaining more candidates can recover additional post-shift support and can also admit more misaligned recommendations. To this end, we formalize OOD serving as pooled risk control over ().
+
+2.2. Problem Formulation 
+
+Given a ranked candidate family (), we construct a set-valued selection rule Γ that returns a served set as Γ =Γ( ()) . We characterize Γ along two dimensions: proxy-label risk and retained candidate support. The causal null set contains candidate pairs that are not aligned with the target preference: 
+
+causal 0 = {( 𝑢, 𝑗 ) ∈ () ∶ 𝐺 𝑢𝑗 = 0} .
+
+The indicator 𝐺 𝑢𝑗 is not observed during serving. We there-fore construct an operational null set using the LLM-derived alignment proxy: 
+
+proxy 0 = {( 𝑢, 𝑗 ) ∈ () ∶ ( 𝑢, 𝑗 ) is labeled as misaligned by the proxy }.
+
+For a served set , define its proxy-label false discovery proportion (FDP) as 
+
+FDP proxy () = | ∩ proxy 0 |
+
+max{ ||, 1} .
+
+The corresponding pooled false discovery rate is 
+
+FDR proxy () = 𝔼 [FDP proxy ()] ,
+
+where the expectation is taken over the target candidate batch and any randomness in the selection rule. The retained candidate support is measured by 𝔼 [||].We formulate the goal of retaining candidate support while controlling proxy-label risk as the 𝛼 -Valid Counter-factual Recommendation ( 𝛼 -VCR) problem. 
+
+Definition 2 (𝛼 -Valid Counterfactual Recommendation) .
+
+Given a risk level 𝛼 ∈ (0 , 1) , the goal of 𝛼 -VCR is to find a selection rule Γ𝛼 whose served set satisfies the pooled proxy-label FDR constraint: 
+
+FDR proxy 
+
+(𝛼 ()) ≤ 𝛼. (1) 
+
+where 𝛼 () = Γ 𝛼 (()) . Among valid rules, larger 
+
+𝔼 [|𝛼 ()|] means that more candidate support is retained. 
+
+By bounding the expected proportion of proxy-misaligned pairs, 𝛼 -VCR prevents candidate expansion from relying on uncontrolled misaligned recommendations. The expected served-set size records how much post-shift candidate support remains under this risk constraint. In practice, the target proxy-null distribution is unknown, so the 𝛼 -VCR constraint cannot be evaluated exactly. A data-driven solution requires a finite calibration set. 
+
+Remark 1 (Interpretation of validity) . A rule is 𝛼 -valid when its pooled proxy-label FDR does not exceed 𝛼 . An empty set has zero FDP and represents abstention. Corol-lary 2 isolates the additional error needed to transfer this proxy certificate to causal misalignment. 
+
+## 3. GenCAR 
+
+In this section, we present Generative Counterfactual Alignment with Risk-Controlled Selection (GenCAR), a two-stage framework for solving the 𝛼 -VCR problem (Def-inition 2). GenCAR first constructs preference-grounded counterfactual supervision under a specified environmental intervention. The accepted counterfactuals train a ranker that forms the post-shift candidate family (). GenCAR next calibrates evidence against proxy misalignment and selects a variable-size served set satisfying the proxy-label FDR constraint in Eq. (1). All LLM calls and proxy labeling   
+
+> Wang et al.: Preprint submitted to Elsevier Page 3 of 19
+
+GenCAR: Risk-Controlled OOD Recommendation 
+
+Fig. 2. Overview of GenCAR. GenCAR operates in offline and online phases. Offline construction and calibration (left). 
+
+The backbone separates stable preference from the environmental factor. GenCAR fixes stable preference, intervenes on the environment, and grounds offline LLM proposals through preference anchors and trust-radius filtering. The accepted items fine-tune the ranker. A disjoint proxy-null split supplies the calibration scores used to compute conformal evidence. Risk-controlled serving (right). GenCAR forms a ranked candidate family without an LLM call and applies BH or BY at level 𝛼 . The resulting pooled served set is projected onto user-level lists, with an empty list representing abstention. .
+
+occur offline, leaving online serving to the learned ranker and stored calibration artifacts. As illustrated in Figure 2, GenCAR contains three modules. Preference-grounded counterfactual construction fixes the stable-preference representation, intervenes on the environmental factor, and converts offline LLM proposals into training supervision. Proxy-label risk calibration fits an alignment predictor and converts a disjoint proxy-null calibration set into conformal evidence. Risk-controlled serving applies BH or BY to the ranked candidate family and returns a pooled served set together with its user-level lists. The first two modules operate offline, while online serving uses only the stored model and calibration artifacts. 
+
+3.1. Preference-Grounded Counterfactual Construction 
+
+The ranked candidate family () must contain items suitable for the target environment, yet these post-shift in-teractions are absent from the training log. We construct item-level supervision by changing the environmental factor while preserving the learned stable-preference representa-tion. Given an interaction vector 𝑥 𝑢 ∈ {0 , 1} ||, the encoder 
+
+𝑞 𝜙 produces the factorized posterior 
+
+𝑞 𝜙 (𝐳 𝑐 , 𝐳 𝑒 , 𝜂 ∣ 𝑥 𝑢 ) = 𝑞 𝜙 (𝐳 𝑐 ∣ 𝑥 𝑢 )𝑞 𝜙 (𝐳 𝑒 ∣ 𝑥 𝑢 )𝑞 𝜙 (𝜂 ∣ 𝑥 𝑢 ).
+
+The three factors correspond to the SCM in Assump-tion 1. The stable-preference representation 𝐳 𝑐 determines ranking, while 𝐳 𝑒 records environment-dependent variation and 𝜂 captures residual variation. 
+
+Preference–environment factorization. The backbone combines reconstruction, Bayesian personalized ranking (BPR), and factor separation: 
+
+backbone = ELBO + 𝜆 BPR BPR + 𝜆 disent disent .
+
+Here, ELBO denotes the negative of the evidence lower bound (ELBO) and 𝜆 BPR , 𝜆 disent ≥ 0. Let obs denote the observed training triplets, where 𝑗 + is interacted and 𝑗 − is unobserved for user 𝑢 .The ranker scores item 𝑗 for user 𝑢 by ̂𝑟 𝑢𝑗 =
+
+⟨
+
+𝐳 (𝑢 ) 
+
+> 𝑐
+
+, 𝑒 𝑗 
+
+⟩
+
+,and optimizes the BPR objective [20] 
+
+BPR = − ∑
+
+> (𝑢,𝑗 +,𝑗 −)∈ obs
+
+log 𝜎 (̂𝑟 𝑢𝑗 + −̂𝑟 𝑢𝑗 −
+
+) .
+
+The reconstruction and ranking terms preserve predic-tive information, while disent separates 𝐳 𝑐 from 𝐳 𝑒 . Only 
+
+𝐳 𝑐 enters the ranking score ̂ 𝑟 𝑢𝑗 . This design makes the environmental intervention operational without redefining the learned preference coordinate. 
+
+Wang et al.: Preprint submitted to Elsevier Page 4 of 19 GenCAR: Risk-Controlled OOD Recommendation 
+
+Abduction and environmental intervention. We construct counterfactual supervision through abduction, action, and prediction [21]. For each user 𝑢 , the encoder infers 
+
+(̂ 𝐳 𝑐 (𝑢 ),̂ 𝐳 𝑒 (𝑢 ),̂𝜂 (𝑢 )) from 𝑥 𝑢 . We replace ̂ 𝐳 𝑒 (𝑢 ) with the target factor ̂ 𝐳 𝑒 while keeping ̂ 𝐳 𝑐 (𝑢 ) and ̂ 𝜂 (𝑢 ) fixed. The resulting counterfactual target is 
+
+𝑝 
+
+(
+
+𝑗 ∣̂ 𝐳 𝑐 (𝑢 ), do( 𝐳 𝑒 ∶= ̂ 𝐳 𝑒 ),̂𝜂 (𝑢 ))
+
+.
+
+This distribution describes item suitability in the target environment for the preference state inferred from the ob-served user history. 
+
+Anchor projection and LLM realization. The latent vec-tor ̂ 𝐳 𝑐 (𝑢 ) cannot be supplied directly to an LLM. We map this vector to the catalog items with the highest preference scores: 
+
+𝑢 = 𝑇 (̂𝐳 𝑐 (𝑢 )) = TopK 𝑗 ∈
+
+⟨̂
+
+𝐳 𝑐 (𝑢 ), 𝑒 𝑗 
+
+⟩
+
+.
+
+The item descriptions in 𝑢 provide a discrete rep-resentation of the learned preference neighborhood. Gen-CAR combines these anchors with the target-environment descriptor in the offline prompt. The LLM returns catalog item identifiers ̂ 𝑢 and an alignment score 𝑎 LLM  
+
+> 𝑢𝑗
+
+∈ [0 , 1] for each proposal. 
+
+Trust-radius filtering. Let 𝐸 0 = { 𝑒 0 
+
+> 𝑗
+
+}𝑗 ∈ be the backbone item embeddings used for anchor projection and filtering. Invalid catalog identifiers are removed, and each remaining proposal receives the distance 𝑑 0(̃ 𝑗, 𝐳 (𝑢 ) 
+
+> 𝑐
+
+) = 1 − cos( 𝑒 0̃𝑗 , 𝐳 (𝑢 ) 
+
+> 𝑐
+
+).The accepted counterfactual set is 
+
+cf  
+
+> 𝑢
+
+=
+
+{̃𝑗 ∈̂ 𝑢 ∩  ∶ 𝑑 0(̃𝑗, 𝐳 (𝑢 ) 
+
+> 𝑐
+
+) ≤ 𝛿 
+
+}
+
+. (2) Equation (2) leaves one offline supervision object: catalog-valid proposals inside the preference trust radius. 
+
+Counterfactual fine-tuning. The accepted proposals pro-vide item-level supervision for the target environment. Let 
+
+cf denote the users with accepted proposals. For each 
+
+𝑢 ∈ cf with accepted items, Πcf  
+
+> 𝑢
+
+pairs 𝑗 + ∈ cf  
+
+> 𝑢
+
+with an item 𝑗 − unobserved for that user. We keep the encoder fixed and update only the item embeddings with the observed and counterfactual BPR losses. GenCAR minimizes 
+
+CF (𝐸 ) = − ∑
+
+> 𝑢 ∈cf
+
+𝔼 (𝑗 +,𝑗 −)∼Π cf 
+
+> 𝑢
+
+[
+
+log 𝜎 
+
+(⟨ ̂
+
+𝐳 (𝑢 ) 
+
+> 𝑐
+
+, 𝑒 𝑗 +
+
+⟩
+
+−
+
+⟨̂
+
+𝐳 (𝑢 ) 
+
+> 𝑐
+
+, 𝑒 𝑗 −
+
+⟩)] 
+
+.
+
+(3) The counterfactual update is defined by ̂ 𝐸 cf ∈arg min 𝐸 CF (𝐸 ). The encoded preference representations ̂
+
+𝐳 𝑐 (𝑢 ) remain fixed, and 𝐸 is the optimized parameter block in Eq. (3). Below, 𝑒 𝑗 denotes the corresponding updated embedding in ̂ 𝐸 cf .Counterfactual fine-tuning changes item placement while preserving the preference representation used to construct the intervention. The updated ranker forms the candidate family (). LLM proposals provide offline supervision and are never returned directly during serving. The accepted set cf  
+
+> 𝑢
+
+supplies ranking supervision, whereas the proxy label introduced in Section 3.2 defines the operational null for risk-controlled selection. 
+
+Counterfactual approximation path. The intervention tar-get is not observed directly. We approximate it through anchor projection and LLM realization. For a fixed user and target environment, let 𝑃 ⋆, 𝑃 𝐴 , and 𝑃 𝑀 denote the target, anchor-projected, and LLM-realized distributions: 
+
+𝑃 ⋆(𝑗 ) = 𝑝 
+
+(
+
+𝑗 ∣̂ 𝐳 𝑐 (𝑢 ), do( 𝐳 𝑒 ∶= ̂ 𝐳 𝑒 ),̂𝜂 (𝑢 ))
+
+,𝑃 𝐴 (𝑗 ) = 𝑃 𝑀 
+
+(
+
+𝑗 ∣ 𝑇 (̂𝐳 𝑐 (𝑢 )), do( 𝐳 𝑒 ∶= ̂ 𝐳 𝑒 )
+
+)
+
+,𝑃 𝑀 (𝑗 ) = 𝑃 𝑀 
+
+(
+
+𝑗 ∣ prompt( 𝑇 (̂𝐳 𝑐 (𝑢 )),̂ 𝐳 𝑒 )
+
+)
+
+.
+
+(4) These distributions isolate the approximation introduced by anchor projection and LLM realization. Proposition 1 bounds their conditional discrepancy after trust-radius filter-ing. 
+
+3.2. Proxy-Label Risk Calibration 
+
+Counterfactual fine-tuning determines the ranked candi-date family (), while 𝛼 -VCR requires a separate decision about which pairs enter the served set. The target proxy-null score distribution is unknown, so its FDR constraint cannot be evaluated directly. GenCAR uses a finite, dis-joint calibration set to construct conformal evidence against proxy misalignment. This stage returns the pooled served set 
+
+𝛼 ().
+
+Proxy alignment predictor. The offline LLM alignment score defines the proxy label 
+
+𝑌 proxy  
+
+> 𝑢𝑗
+
+= 1
+
+[
+
+𝑎 LLM  
+
+> 𝑢𝑗
+
+≥ 𝜏 
+
+]
+
+. (5) Pairs with 𝑌 proxy  
+
+> 𝑢𝑗
+
+= 0 instantiate proxy 0 in Definition 2. This operational proxy label remains distinct from the unob-served causal indicator 𝐺 𝑢𝑗 . GenCAR trains ̂ℎ ∶ ( ̂𝐳 𝑐 (𝑢 ),̂ 𝐳 𝑒 (𝑢 ), 𝑒 𝑗 ) ⟼ [0 , 1] 
+
+to estimate proxy alignment. For brevity, we write ̂ℎ(𝑢, 𝑗 ) ∶= ̂ ℎ(̂ 𝐳 𝑐 (𝑢 ),̂ 𝐳 𝑒 (𝑢 ), 𝑒 𝑗 ). The predictor minimizes binary cross-entropy on the alignment split: 
+
+ℎ = − 1
+
+|align |∑
+
+> (𝑢,𝑗 )∈ align
+
+[
+
+𝑌 proxy  
+
+> 𝑢𝑗
+
+log ̂ ℎ(𝑢, 𝑗 )+ (1 − 𝑌 proxy  
+
+> 𝑢𝑗
+
+) log(1 − ̂ ℎ(𝑢, 𝑗 )) 
+
+]
+
+.
+
+(6) The predictor ̂ ℎ transfers the offline proxy labels to user– item pairs that appear in the serving candidate family. The encoder remains fixed while ̂ ℎ is trained. 
+
+Calibration split. Counterfactual fine-tuning, alignment training, and conformal calibration use disjoint user splits. In particular, 
+
+proxy = align ∪ cal , align ∩ cal = ∅ .  
+
+> Wang et al.: Preprint submitted to Elsevier Page 5 of 19 GenCAR: Risk-Controlled OOD Recommendation
+
+Let 
+
+(0) cal =
+
+{
+
+(𝑢 𝑖 , 𝑗 𝑖 ) ∈ cal ∶ 𝑌 proxy  
+
+> 𝑢 𝑖 𝑗 𝑖
+
+= 0 
+
+}
+
+denote the proxy-null calibration set. No pair in (0) cal is used to train the encoder, item embeddings, or alignment predic-tor. Conditional on these learned artifacts, the theoretical guarantee requires the proxy-null calibration scores to be exchangeable with proxy-null scores in the target candidate family. 
+
+Conformal evidence. For every user–item pair, we define the nonconformity score 𝑉 (𝑢, 𝑗 ) = 1 − ̂ ℎ(𝑢, 𝑗 ). For a candi-date pair (𝑢, 𝑗 ) in the serving batch, its lower-tail conformal 
+
+𝑝 -value is 
+
+𝑝 (𝑢, 𝑗 ) = 1 + ∑
+
+> (𝑢 𝑖 ,𝑗 𝑖 )∈ (0) cal
+
+1[𝑉 (𝑢 𝑖 , 𝑗 𝑖 ) ≤ 𝑉 (𝑢, 𝑗 )] 1 + |(0) cal | . (7) A small 𝑝 (𝑢, 𝑗 ) provides evidence against the proxy-misalignment null. Under conditional target-environment exchangeability, the 𝑝 -value is super-uniform for every pair in proxy 0 . Lemma 2 formalizes this property. 
+
+FDR-controlled set selection. For a serving batch , let 
+
+𝑁 = |()| and order the candidate 𝑝 -values as 𝑝 (1) ≤ ⋯ ≤
+
+𝑝 (𝑁 ). BH select ̂𝑘 𝛼 = max 
+
+{
+
+𝑘 ∶ 𝑝 (𝑘 ) ≤ 𝛼𝑘 𝑁 
+
+}
+
+, (8) with ̂ 𝑘 𝛼 = 0 when no index satisfies the condition, and returns 
+
+𝛼 () = 
+
+{
+
+(𝑢, 𝑗 ) ∈ () ∶ 𝑝 (𝑢, 𝑗 ) ≤ 𝛼̂𝑘 𝛼 
+
+𝑁 
+
+}
+
+. (9) The BH rule returns the largest member of its nested step-up family that satisfies the BH condition. Lemma 1 establishes this maximality property. Under the exchange-ability and dependence conditions of Theorem 1, the result-ing set controls pooled proxy-label FDR at level 𝛼 . When arbitrary dependence is allowed, we replace 𝛼 with the BY correction 𝛼 ∕𝐻 𝑁 , where 𝐻 𝑁 = ∑𝑁 𝑘 =1 𝑘 −1 .
+
+3.3. Risk-Controlled Serving 
+
+After offline training and calibration, We apply the learned ranker and stored calibration artifacts to each serving batch. The online state is 
+
+Θserve =
+
+(̂𝑞 𝜙 ,̂𝑒 1∶ ||,̂ ℎ, {𝑉 𝑖 }𝑖 ∈(0) cal 
+
+)
+
+.
+
+The decoder and LLM are not part of the online path. 
+
+Candidate ranking. For each user 𝑢 in a serving batch , the encoder infers (̂𝐳 𝑐 (𝑢 ),̂ 𝐳 𝑒 (𝑢 )) from 𝑥 𝑢 . The counterfactually fine-tuned ranker uses ̂ 𝐳 𝑐 (𝑢 ) to form 
+
+𝐾 𝑢 = TopK 𝑗 ∈
+
+⟨̂
+
+𝐳 𝑐 (𝑢 ), 𝑒 𝑗 
+
+⟩
+
+. The batch candidate family is 
+
+() = {(𝑢, 𝑗 ) ∶ 𝑢 ∈ , 𝑗 ∈ 𝐾 𝑢 
+
+} .
+
+Certified serving. We evaluate ̂ ℎ and compute conformal 
+
+𝑝 -values for all pairs in (). Applying Eq. (8) produces the pooled served set 𝛼 (). The list returned to user 𝑢 is 
+
+𝛼 = {𝑗 ∈ 𝐾 𝑢 ∶ ( 𝑢, 𝑗 ) ∈ 𝛼 ()} ,
+
+in the original ranker order; an empty list is an abstention. The FDR guarantee applies to the pooled set 𝛼 (). Each user-level list inherits the membership decisions of that set. The risk level 𝛼 is specified for the pooled serving batch. Each user-level list inherits membership decisions from 𝛼 (); the certificate does not assign a separate FDR guarantee to each user. Notably, GenCAR offers several compelling advantages: • Preference-grounded. GenCAR fixes 𝐳 𝑐 under the environmental intervention and constrains offline LLM proposals through preference anchors and trust-radius filtering. • Risk-controlled. Conformal evidence and BH or BY convert the user-specified level 𝛼 into pooled proxy-label FDR control under the conditions in Section 4. • LLM-free online serving. LLM generation and proxy labeling occur offline. Online serving uses the encoder, item embeddings, alignment predictor, and stored proxy-null scores. Algorithm 1 summarizes the complete offline and online pipeline. The next section bounds the conditional counter-factual approximation error, establishes maximality within the BH family, and proves that calibrated selection satisfies the proxy-label FDR constraint in 𝛼 -VCR. 
+
+## 4. Theoretical Analysis 
+
+In this section, we analyze the construction and selec-tion stages of GenCAR. We first bound the conditional approximation error introduced by anchor projection, LLM realization, and trust-radius filtering (Proposition 1). We next show that the BH candidate sets form a nested family with a largest step-up-admissible member (Lemma 1) and establish finite-sample validity of the proxy-null conformal 
+
+𝑝 -values (Lemma 2). Finally, we prove pooled proxy-label FDR control at level 𝛼 (Theorem 1), extend the guarantee to arbitrary dependence (Corollary 1), and provide a proxy-to-causal risk transfer bound (Corollary 2). 
+
+4.1. Counterfactual Approximation and Selection Structure 
+
+We first analyze the counterfactual construction stage. For a fixed user 𝑢 , let 𝑢 (𝛿 ) = { 𝑗 ∈  ∶ 𝑑 0(𝑗, 𝐳 (𝑢 ) 
+
+> 𝑐
+
+) ≤ 𝛿 }
+
+denote the trust-radius acceptance event. Recall that 𝑃 ⋆, 𝑃 𝐴 ,and 𝑃 𝑀 denote the counterfactual target, anchor-projected distribution, and LLM realization defined in Eq. (4). We compare the target and realized distributions after applying the same acceptance event.   
+
+> Wang et al.: Preprint submitted to Elsevier Page 6 of 19
+
+GenCAR: Risk-Controlled OOD Recommendation 
+
+Algorithm 1 GenCAR training and risk-controlled serving. 
+
+Input: Training data train , counterfactual split cf , alignment split align , calibration split cal , offline LLM , target in-tervention ̃ 𝐳 𝑒 , trust radius 𝛿 , anchor size 𝐾 𝑎 , candidate size 𝐾 
+
+and risk level 𝛼 
+
+Output: Pooled served set 𝛼 () and user lists 𝛼 (𝑢 )
+
+Offline construction  
+
+> 1:
+
+Train the backbone encoder and embeddings 𝐸 0 on train  
+
+> 2:
+
+for each user 𝑢 represented in cf do  
+
+> 3:
+
+Infer 𝐳 (𝑢 ) 
+
+> 𝑐
+
+and form preference anchors 𝑢  
+
+> 4:
+
+Generate ̂ 𝑢 ← (𝑢 ,̃ 𝐳 𝑒 ) 
+
+> 5:
+
+Filter proposals by Eq. (2) to obtain cf  
+
+> 𝑢
+> 6:
+
+Form Πcf  
+
+> 𝑢
+
+from 𝑗 + ∈ cf  
+
+> 𝑢
+
+and user-unobserved 𝑗 − 
+
+> 7:
+
+end for  
+
+> 8:
+
+Optimize Eq. (3) to obtain 𝐸 cf 
+
+Offline calibration  
+
+> 9:
+
+Label alignment and calibration pairs by Eq. (5)  
+
+> 10:
+
+Fit ℎ on align and form (0) cal  
+
+> 11:
+
+Store {𝑉 𝑖 = 1 − ℎ(𝑢 𝑖 , 𝑗 𝑖 )} (𝑢 𝑖 ,𝑗 𝑖 )∈ (0) cal 
+
+LLM-free serving  
+
+> 12:
+
+Infer 𝐳 (𝑢 ) 
+
+> 𝑐
+
+, 𝐳 (𝑢 ) 
+
+> 𝑒
+
+and rank each 𝑢 ∈  into 𝑢 ; pool () 
+
+> 13:
+
+Compute ℎ(𝑢, 𝑗 ) and Eq. (7) for all (𝑢, 𝑗 ) ∈ () 
+
+> 14:
+
+Apply Eqs. (8)–(9)  
+
+> 15:
+
+for each 𝑢 ∈  do  
+
+> 16:
+
+Return 𝛼 (𝑢 ) = { 𝑗 ∈ 𝑢 ∶ ( 𝑢, 𝑗 ) ∈ 𝛼 ()} in ranker order  
+
+> 17:
+
+end for 
+
+Proposition 1 (Conditional error propagation under trust-ra-dius filtering) . Assume 𝑃 ⋆(𝑢 (𝛿 )) > 0 and 𝑃 𝑀 (𝑢 (𝛿 )) > 0.Let 
+
+𝑃 ⋆𝛿 = 𝑃 ⋆(⋅ ∣ 𝑢 (𝛿 )) , 𝑃 𝑀 𝛿 = 𝑃 𝑀 (⋅ ∣ 𝑢 (𝛿 )) ,
+
+where TV denotes total variation distance, and let 
+
+𝜖 𝐴 = TV( 𝑃 ⋆, 𝑃 𝐴 ), 𝜖 𝑀 = TV( 𝑃 𝐴 , 𝑃 𝑀 ), and 𝜌 𝛿 =min{ 𝑃 ⋆(𝑢 (𝛿 )) , 𝑃 𝑀 (𝑢 (𝛿 ))} . Then 
+
+TV( 𝑃 ⋆𝛿 , 𝑃 𝑀 𝛿 ) ≤ 2( 𝜖 𝐴 + 𝜖 𝑀 )
+
+𝜌 𝛿 
+
+.
+
+For the causal-misalignment event 𝑢 = { 𝑗 ∈  ∶ 𝐺 𝑢𝑗 =0} ,
+
+𝑃 𝑀 𝛿 (𝑢 ) ≤ 𝑃 ⋆𝛿 (𝑢 ) + 2( 𝜖 𝐴 + 𝜖 𝑀 )
+
+𝜌 𝛿 
+
+.
+
+The proof is provided in Appendix A.1. Proposition 1 quantifies construction fidelity after trust-radius filtering. The terms 𝜖 𝐴 and 𝜖 𝑀 isolate the errors from anchor projec-tion and LLM realization, while 𝜌 𝛿 records the probability mass retained by the filter. The result links the realized counterfactual distribution to the target intervention on the accepted region. We next analyze the structure of the calibrated served sets. For a serving batch , let () contain 𝑁 candidate pairs. Write their ordered conformal 𝑝 -values as 𝑝 (1) ≤ ⋯ ≤
+
+𝑝 (𝑁 ), and let 𝑘 contain the 𝑘 pairs with the smallest 𝑝 -values. This family provides the candidate sets over which the BH rule operates. 
+
+Lemma 1 (Nestedness and step-up maximality) . The or-dered candidate sets form a nested family: 0 ⊆ 1 ⊆ ⋯ ⊆
+
+𝑁 . For a risk level 𝛼 ∈ (0 , 1) , define ̂𝑘 𝛼 = max 
+
+{
+
+𝑘 ∶ 𝑝 (𝑘 ) ≤ 𝛼𝑘 𝑁 
+
+}
+
+,
+
+with ̂ 𝑘 𝛼 = 0 when the set is empty. Then 𝛼 = ̂ 𝑘 𝛼 is the largest member of the nested family satisfying the BH step-up condition. Moreover, for any 0 < 𝛼 1 ≤ 𝛼 2 < 1,
+
+𝛼 1 ⊆ 𝛼 2 .
+
+The proof is given in Appendix A.2. Lemma 1 estab-lishes the size property used by GenCAR. At a fixed level 𝛼 ,the method returns the largest set admitted by the BH step-up family. The nesting in 𝛼 provides an ordered control over served-set size. 
+
+4.2. Proxy-Label Risk Control 
+
+We now present the main theoretical guarantee of Gen-CAR, and show that conformal evidence computed from a finite proxy-null calibration set controls the expected proxy-misalignment fraction in an unseen serving batch. Let 𝑛 0 = |(0) cal |. The same 𝑉 and 𝑝 from Eq. (7) are used in the algorithm and guarantee. The first result establishes the finite-sample validity of this evidence under the proxy-misalignment null. 
+
+Lemma 2 (Finite-sample proxy-null validity) . Suppose that the alignment predictor ̂ ℎ and candidate family 
+
+() are constructed independently of (0) cal . For every 
+
+(𝑢, 𝑗 ) ∈ proxy 0 , assume that its nonconformity score and the 𝑛 0 proxy-null calibration scores are exchangeable, conditional on the learned artifacts and candidate family. The 𝑝 -value is the weak-rank statistic defined in Eq. (7) .Then, for every 𝑡 ∈ [0 , 1] ,
+
+Pr (𝑝 (𝑢, 𝑗 ) ≤ 𝑡 ∣̂ ℎ, ()) ≤ 𝑡. 
+
+Thus, every proxy-null conformal 𝑝 -value is super-uniform. 
+
+The proof is provided in Appendix A.3. The weak-rank construction in Eq. (7) is super-uniform under exchange-ability and remains conservative when scores contain ties. Lemma 1 and Lemma 2 provide the two ingredients for calibrated selection. Nestedness identifies the largest BH-admissible set, while proxy-null validity supplies the evi-dence required for FDR control. 
+
+Theorem 1 (Proxy-label FDR control) . Condition on the learned artifacts and the candidate family (). Let 
+
+𝑁 = |()|, 𝑚 0 = |() ∩ proxy 0 |.
+
+Assume that the conditions of Lemma 2 hold and that the conformal 𝑝 -value vector is positive regression dependent on a subset (PRDS) of proxy-null hypotheses, conditional 
+
+Wang et al.: Preprint submitted to Elsevier Page 7 of 19 GenCAR: Risk-Controlled OOD Recommendation 
+
+on the candidate family. Then BH at level 𝛼 returns 𝛼 ()
+
+satisfying 
+
+𝔼 
+
+[ |𝛼 () ∩ proxy 0 |
+
+max{ |𝛼 ()|, 1} 
+
+||||||̂ℎ, ()
+
+]
+
+≤ 𝑚 0
+
+𝑁 𝛼 ≤ 𝛼. 
+
+Consequently, 
+
+FDR proxy 
+
+(𝛼 ()) ≤ 𝛼. 
+
+The proof is given in Appendix A.4. Theorem 1 con-trols the proxy-label risk at any finite calibration size with-out specifying a parametric null-score distribution. Shared-calibration marginal conformal 𝑝 -values satisfy PRDS un-der jointly independent and continuously distributed null scores [22]. 
+
+Remark 2 (Interpretation of the guarantee) . The certified object in Theorem 1 is the pooled candidate-pair set 𝛼 ().Each user-level list inherits the membership decisions of this set. The guarantee controls the expected proxy-misalignment fraction over the serving batch. 
+
+Corollary 1 (Arbitrary-dependence control) . Under the conditions of Lemma 2, define 𝐻 𝑁 = ∑𝑁 𝑘 =1 1 
+
+> 𝑘
+
+. Applying the Benjamini–Yekutieli rule at level 𝛼 ∕𝐻 𝑁 yields 
+
+FDR proxy 
+
+(BY  
+
+> 𝛼
+
+()) ≤ 𝛼 
+
+under arbitrary dependence among the candidate 𝑝 -values. 
+
+The proof is included in Appendix A.4. Corollary 1 pro-vides the same proxy-label certificate without a dependence restriction. GenCAR uses BH under PRDS and BY under arbitrary dependence. 
+
+Corollary 2 (Proxy-to-causal risk transfer) . Let causal 0 =
+
+{(𝑢, 𝑗 ) ∈ () ∶ 𝐺 𝑢𝑗 = 0 } denote the causal-misalignment null. Define 
+
+FDR causal () = 𝔼 
+
+[ | ∩ causal 0 |
+
+max{ ||, 1} 
+
+]
+
+and 
+
+Δproxy () = 𝔼 
+
+[ | ∩ ( causal 0 ⧵ proxy 0 )|
+
+max{ ||, 1} 
+
+]
+
+.
+
+The BH set in Theorem 1 satisfies 
+
+FDR causal 
+
+(𝛼 ()) ≤ 𝛼 + Δ proxy 
+
+(𝛼 ()).
+
+If causal 0 ⊆ proxy 0 , then Δproxy (𝛼 ()) = 0 and 
+
+FDR causal 
+
+(𝛼 ()) ≤ 𝛼. 
+
+The proof is provided in Appendix A.5. Corollary 2 isolates the causal nulls missed by the observable proxy. Proposition 1 supports the counterfactual construction stage. Theorem 1 answers the 𝛼 -VCR question for proxy-label risk, while Corollary 2 translates this certificate into a causal-risk bound through Δproxy .                    
+
+> Table 1
+> Dataset statistics for the ranking and calibration evaluations. T, E, and P denote temporal, exposure, and popularity shifts, respectively.
+> Dataset #Users #Items #Inter. Density Shift
+> MovieLens(ML)-100K 942 1,447 55,375 4.058% TCoat 290 300 6,960 8.000% EAmazon-Book 10,000 89,911 1,550,000 0.172% PAmazon-Beauty 22,363 12,101 198,502 0.073% PMovieLens(ML)-1M 6,040 3,706 1,000,209 4.468% T
+
+## 5. Experiments 
+
+In this section, we present the experimental results to validate four claims: (i) calibrated selection keeps realized proxy FDP below 𝛼 on the evaluated diagnostic pools; (ii) preference-grounded counterfactual supervision improves top-10 OOD candidate recovery; (iii) the gains arise from counterfactual content, preference grounding, and trust-radius filtering; and (iv) GenCAR preserves an LLM-free, sub-millisecond serving path under full and partial offline coverage. 
+
+5.1. Experimental Setup 
+
+Datasets. We evaluate GenCAR under three common forms of recommendation shift. ML-100K [15] represents temporal shift, Coat [1] represents exposure shift, and Amazon-Book [16] represents popularity shift. These three datasets form the main ranking evaluation. We further include MovieLens-1M [15] and Amazon-Beauty [16] to evaluate calibration across larger temporal and popularity-shift pools. Steam [23] is used to study the setting in which offline LLM generation is available for only a subset of users. Table 1 summarizes the datasets and their shift types. 
+
+Baselines and evaluation metrics. We compare GenCAR with the standard BPRMF ranker [20], propensity-based methods including CausE [24], MACR [25], and IPS-CN [1], and representation-based OOD recommenders including DICE [6], InvCF [3], and CDR [7]. We also include CausalDiffRec [8] as a generative baseline. TallRec [26] provides a separate reference for methods that invoke an LLM during serving. The CausalVAE backbone isolates the contribution of GenCAR’s offline counterfactual pipeline on ML-100K and Coat. We report Recall@ 𝐾 and normalized discounted cumulative gain (NDCG)@ 𝐾 for 𝐾 ∈ {10 , 20} . Recall@10 is the primary metric because GenCAR targets the recovery of useful candidates near the top of the served list. Inverse propensity score (IPS)-weighted evaluation measures the same utility after correcting for exposure frequency. Ranking results are averaged over seeds 2024, 2025, and 2026. All methods use the same shift-specific 80/10/10 interaction split and evaluation protocol. Model selection is performed on the validation split, and the reported results are computed on the held-out test split.   
+
+> Wang et al.: Preprint submitted to Elsevier Page 8 of 19
+
+GenCAR: Risk-Controlled OOD Recommendation 
+
+Table 2 
+
+Realized proxy FDP and proxy-alignment rate under BH selection. 
+
+Dataset 𝜶 𝑛 test 𝑛 sel ̂ 𝐅𝐃𝐏 𝟏 − ̂ 𝐅𝐃𝐏 
+
+Coat 0.30 1,376 16 0.188 0.812 ML-100K 0.30 16,614 241 0.195 0.805 ML-1M 0.30 172,586 3,891 0.089 0.911 Beauty 0.30 21,840 1,487 0.054 0.946 Amazon-Book 0.30 559,658 7,665 0.048 0.952 
+
+Implementation. All models are implemented in PyTorch and trained on NVIDIA L20 graphics processing units (GPUs). We use Adam with a learning rate of 10 −3 
+
+and weight decay of 10 −4 . The CausalVAE encoder produces factorized posteriors with dim( 𝐳 𝑐 ) = 64 and 
+
+dim( 𝐳 𝑒 ) = dim( 𝜂 ) = 16 from a shared 256-dimensional hidden representation. We set 𝜆 BPR = 1 .0, 𝜆 disent = 0 .05 ,and the Kullback–Leibler (KL) weight 𝜆 KL = 0.2. The disentanglement loss is computed with 256 sampled users per update. The fixkl configuration stabilizes the preference and environment factors before counterfactual generation. We use 𝐾 𝑎 = 5 preference anchors and set the default trust radius to 𝛿 = 0.7. DeepSeek-Chat generates the counterfactual candidates, and prompts are cached for each dataset and seed. The LLM is used only during offline training. Amazon-Book contains sparse long-tail interactions that provide weak item representations. We initialize its item embeddings with BAAI General Embedding (BGE)-small-en text representations projected by principal component analysis. An anchor penalty with 
+
+𝜆 anc = 5 keeps the fine-tuned embeddings close to this text prior. The proxy-alignment threshold is 𝜏 = 0 .85 , and the reported risk audit uses BH at 𝛼 = 0 .30 . Alignment fitting and calibration use disjoint users, so no user contributes to both predictor fitting and the null reference distribution. 
+
+5.2. Risk Control and Calibration 
+
+The first experiment audits calibrated selection on five constructed diagnostic pools, separately from the ranker-level candidate-recovery evaluation in Sec. 5.3. Table 2 evaluates realized proxy FDP and retained support, whereas Sec. 5.3 evaluates top-𝐾 OOD recovery. Proxy-alignment fitting and null calibration use disjoint users in every dataset, and BH at 𝛼 = 0 .30 is applied only to the held-out test pool. Table 2 reports both sides of the resulting selection profile: realized proxy FDP and the amount of retained support. 
+
+GenCAR keeps realized proxy FDP below 𝛼 on all five candidate pools. At 𝛼 = 0 .30 , Table 2 reports realized proxy FDP values of 0.188 , 0.195 , 0.089 , 0.054 , and 0.048 on Coat, ML-100K, ML-1M, Amazon-Beauty, and Amazon-Book, respectively. The selector retains between 16 and 7,665 user– item pairs. The corresponding retention rates are 1.16% ,
+
+1.45% , 2.25% , 6.81% , and 1.37% , showing how retained support varies with pool scale and calibration support at a fixed risk level. 10 2 10 3             
+
+> Positive calibration pairs ncal +
+> 020 40 60 80 100
+> BH pass rate (%)
+> Amazon-Book Coat'25 Coat'26 ML100K'26 ML100K'25 Coat'24 Beauty ML100K'24 ML1M
+> (a) Calibration support and BH pass rate
+> 0.60 0.65 0.70 0.75 0.80 0.85 0.90 0.95 1.00
+> Target proxy alignment 1 − α
+> 0.65 0.70 0.75 0.80 0.85 0.90 0.95 1.00 1.05
+> Realized proxy alignment  1 − ̂ FDP
+> Coat ML-100K ML-1M Beauty Amazon-Book (stratified)
+> pooled
+> (b) Proxy-alignment calibration
+
+Fig. 3. Finite-sample calibration diagnostics. (a) BH pass rate as a function of positive calibration support. (b) Empirical proxy alignment relative to the nominal target across runs. The Amazon-Book results compare global and popularity-stratified calibration at 𝛼 = 0 .10 .
+
+Positive calibration support tracks BH retention. The variation in retained support across pools motivates Fig. 3(a), which relates the observed BH pass rate to the number of positive calibration pairs 𝑛 cal+ . Across the five pools, larger positive support is associated with higher retention at the same 𝛼 .
+
+Popularity stratification aligns heterogeneous score re-gions. Fig. 3(b) examines popularity-dependent score het-erogeneity without changing the underlying recommenda-tions: global and popularity-stratified calibration are applied to the same Amazon-Book candidate pool at 𝛼 = 0 .10 , with the ranker and candidate pool held fixed. Candidates are grouped by training popularity, calibrated within each group, and pooled after selection. At 𝛼 = 0 .10 , this diagnostic raises empirical proxy alignment from 0.735 to 0.988 , exceeding the nominal target of 0.90 with the ranker fixed. 
+
+5.3. OOD Candidate Recovery 
+
+This experiment evaluates whether preference-grounded counterfactual supervision improves OOD candidate recovery under diverse shifts. We compare GenCAR with methods for propensity correction, invariant representation learning, and counterfactual generation. TallRec provides an inference-time LLM reference. Recall@10 is the primary metric because it measures useful candidates near the top of each ranked list. The matched CausalVAE comparison holds the backbone, data splits, and evaluation protocol fixed, leaving the offline counterfactual pipeline as the experimental difference. Table 3 reports the resulting means over three seeds. 
+
+GenCAR achieves the strongest LLM-free top-10 recov-ery across all three shifts. Table 3 reports means over three seeds. GenCAR ranks first in 10 of the 12 LLM-free dataset– metric comparisons and second in the remaining two. Its Recall@10 improves over the corresponding CausalVAE references from 0.0856 to 0.0950 , from 0.0639 to 0.0761 ,and from 0.0046 to 0.0066 , corresponding to gains of 11 .0% ,
+
+19 .1% , and 43 .5% . The gain is positive under all three shifts and in all nine dataset–seed comparisons (Fig. 4 and Fig. 6(c)). 
+
+Wang et al.: Preprint submitted to Elsevier Page 9 of 19 GenCAR: Risk-Controlled OOD Recommendation 
+
+Table 3 
+
+Mean OOD ranking performance over three seeds under temporal, exposure, and popularity shifts. Bold and underlined entries denote the best and second-best results among methods without online LLM calls. TallRec is included as an inference-time LLM reference. R@ 𝐾 and N@ 𝐾 denote Recall@ 𝐾 and NDCG@ 𝐾 , respectively; BB denotes the CausalVAE backbone. 
+
+ML-100K Coat Amazon-Book Method R@10 R@20 N@10 N@20 R@10 R@20 N@10 N@20 R@10 R@20 N@10 N@20 BPRMF [20] 0.0409 0.0794 0.0939 0.0990 0.0726 0.1238 0.0415 0.0586 0.0002 0.0003 0.0005 0.0005 DICE [6] 0.0445 0.0707 0.0929 0.0942 0.0730 0.1285 0.0403 0.0587 0.0001 0.0003 0.0005 0.0004 IPS-CN [1] 0.0329 0.0636 0.0699 0.0751 0.0674 0.1175 0.0409 0.0582 0.0001 0.0002 0.0003 0.0003 CausE [24] 0.0337 0.0623 0.0841 0.0854 0.0535 0.0956 0.0357 0.0502 0.0001 0.0002 0.0003 0.0003 MACR [25] 0.0013 0.0027 0.0032 0.0036 0.0157 0.0317 0.0119 0.0177 0.0001 0.0002 0.0003 0.0003 InvCF [3] 0.0322 0.0638 0.0748 0.0774 0.0641 0.1183 0.0374 0.0554 0.0001 0.0002 0.0003 0.0003 CDR [7] 0.0300 0.0591 0.0676 0.0713 0.0518 0.0825 0.0315 0.0416 0.0001 0.0002 0.0003 0.0003 CausalDiffRec [8] 0.0116 0.0225 0.0422 0.0439 0.0402 0.0596 0.0274 0.0345 0.0002 0.0004 0.0006 0.0006 
+
+LLM-based recommenders (inference-time LLM call) TallRec [26] (Qwen2.5-3B + LoRA) 0.0675 0.1231 0.1746 0.1669 0.0637 0.1194 0.0446 0.0606 0.0070 0.0124 0.0188 0.0177 CausalVAE (BB) 0.0856 0.1409 0.1808 0.1842 0.0639 0.1197 0.0417 0.0603 0.0046 0.0086 0.0116 0.0116 
+
+GenCAR 0.0950 0.1438 0.1820 0.1798 0.0761 0.1240 0.0438 0.0604 0.0066 0.0120 0.0165 0.0162 
+
+Δ vs BB 11.0% ↑ 2.1% ↑ 0.7% ↑ 2.4% ↓ 19.1% ↑ 3.6% ↑ 5.0% ↑ 0.2% ↑ 43.5% ↑ 39.5% ↑ 42.2% ↑ 39.7% ↑DICE IPS-CN InvCF CDR CausalDiffRec Backbone GenCAR 
+
+ML-100K (temporal) 
+
+> 0.00 0.02 0.04 0.06 0.08 0.10 0.12
+> R@10
+> +11.0%
+> DICE IPS-CN InvCF CDR CausalDiffRec Backbone GenCAR
+
+Coat (exposure) 
+
+> 0.00 0.02 0.04 0.06 0.08
+> R@10
+> +19.1%
+> DICE IPS-CN InvCF CDR CausalDiffRec Backbone GenCAR
+
+Amazon-Book (popularity) 
+
+> 0.000 0.001 0.002 0.003 0.004 0.005 0.006 0.007 0.008
+> R@10
+> +43.5%
+
+Fig. 4. OOD performance under temporal, exposure, and popularity shifts. Bars report means over three seeds. Percentages show GenCAR’s relative gains over the corresponding CausalVAE backbone 
+
+GenCAR preserves an LLM-free online path. The TallRec reference separates offline counterfactual supervision from LLM access during serving: GenCAR uses embedding-based inference, whereas TallRec invokes an LLM online on the same datasets and ranking metrics. GenCAR exceeds the inference-time TallRec reference on ML-100K ( 0.0950 versus 0.0675 ) and Coat ( 0.0761 versus 
+
+0.0637 ). On Amazon-Book, GenCAR approaches TallRec (0.0066 versus 0.0070 ) while retaining embedding-based online scoring. The cross-shift recovery gains therefore do not require an online LLM call. 
+
+5.4. Mechanism and Sensitivity Analysis 
+
+The preceding results establish GenCAR’s cross-shift Recall@10 gain. We next examine whether this gain arises from counterfactual content, candidate novelty, trust-radius filtering, or preference factorization. We vary one factor at a time under matched backbones and evaluation protocols. The resulting comparisons address four distinct explanations for the main gain: augmentation volume, candidate novelty, preference compatibility, and run-to-run variation. 
+
+Preference-grounded counterfactuals outperform matched augmentation controls. On Coat, random and inverse-popularity augmentation add the same number of training pairs as the LLM counterfactuals, controlling for augmentation volume. Under the shared ablation configuration, LLM counterfactuals achieve a Recall@10 of 0.0720 on Coat, compared with 0.0641 for random augmentation and 0.0653 for inverse-popularity sampling. The 12 .3% gain over the matched random control isolates the value of counterfactual content from the number of additional training pairs. 
+
+Wang et al.: Preprint submitted to Elsevier Page 10 of 19 GenCAR: Risk-Controlled OOD Recommendation Chat-default V4-Flash-light V4-Pro-strong 0510 15 20 25    
+
+> R@10 gain over backbone (%)
+> +8.0% +18.7% +11.5%
+> R@10 gain (%) CF novelty rate (%)
+> 75 80 85 90 95 100 105 110 115
+> CF novelty rate (%)
+> 89% 100% 100%
+> Fig. 5. Effect of the offline LLM on Coat. Bars report the Recall@10 improvement over the CausalVAE backbone. Circle markers report the fraction of generated candidates absent from the observed training support.
+
+Offline LLM choice separates novelty from ranking gain. 
+
+With augmentation volume controlled, candidate novelty remains a separate explanation. Fig. 5 compares the novelty profiles of DeepSeek-Chat, V4-Flash, and V4-Pro under the same Coat backbone with their Recall@10 gains over the backbone. DeepSeek-Chat generates 88 .6% novel can-didates and improves Recall@10 by 8.0% . V4-Flash and V4-Pro each reach 100% novelty, with gains of 18 .7% and 
+
+11 .5% . Equal novelty with different recovery gains shows that support expansion and candidate utility capture distinct properties. 
+
+Trust-radius filtering has a stable operating region on the primary ranking benchmarks. Because 𝛿 determines which generated candidates are treated as preference-compatible, we sweep 𝛿 ∈ {0 .3, 0.5, 0.7, 0.9, 1.0} on ML-100K and Coat with the remaining configuration fixed. Fig. 6(a) shows that ML-100K reaches its largest gain at 
+
+𝛿 = 0 .5, with gradual variation between 𝛿 = 0 .5 and 0.7.Coat exhibits a similarly stable region around the default value 𝛿 = 0 .7. These curves identify a broad operating range for filtering preference-compatible proposals. 
+
+KL-clamped preference factorization improves novelty and recovery together. The factorization analysis pairs counterfactual novelty with Recall@10 gain, comparing the original backbone with the KL-clamped (fixkl )configuration. Fig. 6(b) shows that novelty rises from 
+
+18 .3% to 70 .3% , while the Recall@10 gain rises from near zero to approximately 8.0% . This paired change links stable preference factorization to more useful counterfactual supervision. Fig. 6(c) then extends the aggregated comparison to the three individual seeds under each main shift. The figure reports positive Recall@10 gains in all nine dataset–seed comparisons, covering three shifts and three seeds. This consistency supports the repeatability of the main candidate-recovery result. 
+
+5.5. Qualitative Analysis 
+
+The aggregate evaluations quantify pooled proxy-label FDP and OOD candidate recovery. We next examine how GenCAR changes candidate composition for individual users. The analysis traces the environmental intervention, candidate-level proxy evidence, and latent candidate placement. 
+
+Environmental intervention changes candidate composi-tion under fixed preference. Fig. 7 follows Coat User 156 from logged missing-not-at-random (MNAR) exposure to the counterfactual missing completely at random (MCAR) intervention: 𝐳 𝑐 is fixed, 𝐳 𝑒 is replaced by the MCAR target, and counterfactual items found among the held-out positives are marked. Bomber jackets account for 50% of logged interactions and 33% of the counterfactual distribution. The intervention assigns 22% , 22% , and 23% to Packable, Rain, and Other jackets; Packable and Other also occur among the held-out MCAR positives. This case traces the change induced by do( 𝐳 𝑒 ∶= ̃ 𝐳 MCAR  
+
+> 𝑒
+
+) while 𝐳 𝑐 remains fixed. 
+
+Proxy-alignment scores organize candidate-level evidence before conformal calibration. Table 4complements the pooled risk audit with candidate-level evidence from five Amazon-Book users under popularity shift. Alignment scores are shown above, near, and below 
+
+𝜏 = 0.85 , with held-out positives marked for reference. For User 818, The Sense of an Ending receives a proxy-alignment score of 0.90 . This item is a held-out positive that is absent from the backbone shortlist. Users 166 and 449 include candidates above, near, and below the proxy threshold. These cases visualize the graded candidate-level evidence available before conformal calibration. The additional users show the same score ordering across different preference histories. For User 974, goal- and mastery-oriented titles receive scores of 0.85 –0.95 , while the more broadly related Wired to Care receives 0.50 . For User 1249, Dark Mirror and Starship Troopers receive 0.90 
+
+and 0.85 , compared with 0.30 for the cross-genre My Side of the Mountain . Across these cases, the scores provide graded candidate evidence for the specified counterfactual preference before conformal calibration. We complement the item-level cases with the latent-space view in Fig. 8. For panel (a), the two 64-dimensional representations of all Coat users are stacked into a shared 
+
+(2 𝑛 users ) × 64 matrix and projected jointly using t-distributed stochastic neighbor embedding (t-SNE) [27], with perplex-ity 20, 1,000 iterations, principal component analysis (PCA) initialization, and random seed 0. Panel (b) overlays the training interactions, backbone top-10, six counterfactual candidates, and held-out positives for User 240 on the 300-item map. Fig. 8(a) places the preference and environment rep-resentations in separated regions of the two-dimensional projection, which is consistent with the factorization used for counterfactual generation. Fig. 8(b) traces Coat User 240. One of six counterfactual candidates matches a held-out   
+
+> Wang et al.: Preprint submitted to Elsevier Page 11 of 19
+
+GenCAR: Risk-Controlled OOD Recommendation 0.3 0.5 0.7 0.9 1.0 
+
+Trust radius δ
+
+> 0246810 12 14 16 18
+> R@10 gain (%)
+
+(a) Trust-radius sweep     
+
+> ML-100K Coat
+> 025 50 75 100
+
+CF novelty rate (%) 
+
+> 0510 15 20
+> R@10 gain (%)
+> Original KL-clamped Chat V4-Pro V4-Flash
+
+(b) Novelty vs. gain   
+
+> 2024 2025 2026
+
+Seed 
+
+> 0510 15 20 25 30
+> R@10 gain (%)
+
+(c) Per-seed gains 
+
+> Coat ML-100K Amazon-Book
+
+Fig. 6. Mechanism and sensitivity analysis. (a) Recall@10 gain as the trust radius varies. (b) Association between counterfactual novelty and ranking gain. (c) Per-seed gains under the main GenCAR configuration. (a) Factual − MNAR Training 
+
+Self-selected (front-page exposed) 
+
+High Z e values → strong front-page bias 
+
+Interaction Distribution Over Jacket Types 
+
+(Factual) 
+
+MNAR → MCAR 
+
+LLM + T(Z c)
+
++ trust filter δ 
+
+Zc unchanged 
+
+(stable preference) 
+
+(b) Counterfactual − LLM-CF (MCAR) 
+
+Same Z c · Intervened Z e · Trust filter δ = 0.7 
+
+Low, uniform Z e → exposure-free recommendations 
+
+Interaction Distribution Over Jacket Types 
+
+(Counterfactual) 
+
+* item appears in MCAR test ground truth 
+
+50% 
+
+18% 
+
+16% 
+
+16% 
+
+33% 
+
+22% * 
+
+22% 
+
+23% * 
+
+Bomber  Field  Rain  Other Trench  Insulated  Packable Jacket type: 
+
+Coat Dataset, User ID: 156 
+
+Zc ZeMNAR 
+
+0.82 
+
+−0.31 
+
+## ... 
+
+0.15 
+
+0.91 
+
+0.88 
+
+## ... 
+
+0.76 
+
+Zc ZeMCAR 
+
+0.82 
+
+−0.31 
+
+## ... 
+
+0.15 
+
+0.23 
+
+0.17 
+
+## ... 
+
+0.29 
+
+Fig. 7. Environmental intervention for Coat User 156. (a) Logged interactions under MNAR exposure. (b) Counterfactual candidates under do( 𝐳 𝑒 ∶= ̃ 𝐳 MCAR  
+
+> 𝑒
+
+). The preference representation 𝐳 𝑐 remains fixed, and filled circles mark items that occur in the held-out MCAR positives. MNAR and MCAR denote missing not at random and missing completely at random, respectively. 
+
+positive, and several lie outside the backbone’s top-10 neigh-borhood. The generated set therefore expands this user’s shortlist with a relevant held-out item. 
+
+5.6. Serving Efficiency and Partial Offline Coverage 
+
+Deployment depends on both offline coverage and online cost, which we report separately in Tables 5 and 6. The partial-coverage study evaluates all 2,664 Steam users, although offline LLM counterfactuals are available for only 1,020 of them. The comparison includes the CausalVAE+BGE backbone, anchor counterfactual fine-tuning, and an auxiliary reranking variant that explicitly retains available counterfactual items. 
+
+GenCAR retains ranking utility under partial offline coverage. Table 5 evaluates 2,664 Steam users, of whom 1,020 receive offline LLM counterfactuals. With 38% offline coverage, anchor counterfactual fine-tuning remains close 
+
+Wang et al.: Preprint submitted to Elsevier Page 12 of 19 GenCAR: Risk-Controlled OOD Recommendation 
+
+Table 4 
+
+Amazon-Book counterfactual candidates under popularity shift. Blue denotes candidates with proxy-alignment scores at or above 
+
+𝜏 = 0 .85 , gray denotes candidates near the threshold, and yellow denotes candidates with lower scores. A ★ marks held-out positives. 
+
+User Training history LLM counterfactual items (alignment score) Held-out positives 
+
+U 818 The Dying Animal; Kafka on the Shore; Charlotte Sim-mons ( 71 total) A Visit from the Goon Squad (0.90) ; 
+
+The Sense of an Ending (0.90) ★ ; Year of Wonders (0.85) ; The Road (0.80) ; Stoner (0.75) 
+
+The Sense of an Ending ★;How to Live; Blue Nights ( 16 
+
+total) U 166 L.A. Requiem; Deck the Halls; Gone for Good; Hard Eight ( 56 total) Tuesdays with Morrie (0.95) ; The Alchemist (0.90) ; I Know Why the Caged Bird Sings (0.85) ; Harry Potter: Prisoner of Azkaban (0.80) ; War and Peace (0.60) When She Was Bad; Brim-stone; The Dark Tide (14 
+
+total) U 449 Catechism of the Catholic Church; Dreamcatcher; ASimple Plan ( 56 total) A Fine Balance (0.90) ; John Adams (0.85) ; A Simple Plan (0.85) ; Man’s Search For Meaning (0.80) ; Atlas Shrugged (0.75) Killing Floor (Jack Reacher); Cell: A Novel; No Country for Old Men (14 
+
+total) U 974 Atlas Shrugged; Capitalism: The Unknown Ideal; Extreme Programming Explained; Good to Great (71 total) Put Your Dream to the Test (0.95) ; Peaks and Valleys (0.90) ; Mastery (0.85) ; What Got You Here Won’t Get You There (0.82) ; Wired to Care (0.50) The Case Against the Fed; Buy-In; Your Brain at Work (18 total) U 1249 Starman Jones; Tunnel in the Sky; Imzadi; Dyson Sphere ( 56 total) Star Trek The Next Generation: Dark Mirror (0.90) ; Starship Troopers (0.85) ; Eaters of the Dead (0.80) ; Ringworld (0.75) ; My Side of the Mountain (0.30) The Fabulous Riverboat; Nightfall and Other Stories; Job: A Comedy of Justice (15 total) t-SNE dim 1 t-SNE dim 2 
+
+(a) Preference and environment factors   
+
+> zc(causal)
+> ze(environment)
+
+t-SNE dim 1 
+
+> User 240
+
+(b) Counterfactual candidate placement   
+
+> Other items (n=269) Train interactions (n=15) Backbone top-10 (n=10) LLM CF (n=6) Test (n=4) CF ∩Test (n=1)
+
+Fig. 8. Latent geometry and counterfactual candidate placement on Coat. (a) Two-dimensional t-distributed stochastic neighbor embedding (t-SNE) projection of the preference and environment representations. (b) Candidate neighborhood for User 240, including generated candidates, backbone top-10 items, and held-out positives. CF denotes counterfactual. Wang et al.: Preprint submitted to Elsevier Page 13 of 19 GenCAR: Risk-Controlled OOD Recommendation                                                              
+
+> Table 5
+> Ranking performance on Steam with offline LLM counterfac-tuals available for 38% of the evaluated users. GenCAR + rerank is the auxiliary explicit-retention variant. R@ 𝐾 and N@ 𝐾
+> denote Recall@ 𝐾 and NDCG@ 𝐾 ,respectively; CF denotes counterfactual.
+> Method R@10 R@20 N@10 N@20
+> CausalVAE + BGE backbone 0.0411 0.0646 0.0678 0.0690 GenCAR anchor CF fine-tune 0.0409 0.0628 0.0677 0.0686
+> GenCAR + rerank 0.0449 0.0661 0.0725 0.0719
+> Table 6
+> Model size and online serving cost on Coat. One-time offline LLM counterfactual generation of GenCAR is excluded from inference latency. BB denotes the CausalVAE backbone; M denotes millions of parameters; CF denotes counterfactual.
+> Method Params Training Inference LLM
+> (M) (min/seed) (ms/user) Usage
+> BPRMF 0.04 2<1×
+> DICE/InvCF/CDR 0.08–0.12 8–12 <1×
+> CausalDiffRec 0.85 53 ∼35 ∗×
+> TallRec ∼3000 ∼30 ∼5400 †infer CausalVAE (BB) 0.15 30 <1×
+> GenCAR 0.15 30 + offline ‡<1Offline
+> ∗50 denoising steps. †LLM inference cost. ‡One-time offline CF.
+
+to the CausalVAE+BGE backbone ( 0.0409 versus 0.0411 
+
+in Recall@10). The auxiliary GenCAR + rerank variant explicitly retains available counterfactual items in the ranked list, raising Recall@10 to 0.0449 and NDCG@10 to 0.0725 ,gains of 9.2% and 6.9% . This variant measures partial-coverage utility; the standard pooled selector remains the certified output. 
+
+Offline counterfactual generation preserves sub-millisecond online serving. Table 6 reports trainable parameters, training time per seed, per-user inference latency, and online LLM usage on Coat. GenCAR’s one-time generation stage is treated as an offline cost, while TallRec’s inference-time LLM call is included in online latency. GenCAR and its CausalVAE backbone each contain 
+
+0.15 million trainable parameters and require less than one millisecond per user. TallRec requires approximately 5.4
+
+seconds per user in the reported setup. GenCAR’s online path consists of user encoding, inner-product scoring, and calibrated selection. Thus, we add counterfactual supervision while retaining the backbone’s model size and sub-millisecond serving profile. Together, these results define the deployment profile of GenCAR. Offline LLM counterfactuals can cover a subset of users, and online serving remains LLM-free and sub-millisecond. 
+
+## 6. Related Work 
+
+Our work connects two lines of research: counterfac-tual candidate construction for OOD recommendation and predictive inference for risk-controlled selection. Table 7 compares the relevant method families in terms of OOD scope, candidate construction, certified target, and online LLM usage. 
+
+OOD and counterfactual recommendation. Out-of-distribution recommendation seeks to preserve ranking utility when interaction distributions change between training and serving. Reviews organize causal recommendation through potential-outcome, structural causal model, and counterfactual formulations [28, 29]. Causal disentanglement and invariant learning separate preference-related factors from environmental correlations [6, 3, 7] [30, 31]. Distributionally robust objectives and causal diffusion extend this direction to broader forms of distribution shift [2, 8]. Contrastive learning with uniform data further reduces exposure bias in learned representations [32]. These methods primarily reweight observed interactions or learn shift-robust representations. Item-level supervision for a specified environmental intervention remains outside their main objective. Generative recommenders model complex interaction distributions through diffusion and preference-aware ob-jectives [9, 10, 33, 12] [34–37]. A recent review places these methods within the broader family of generative rec-ommender systems [13]. Surveys of LLM-enhanced rec-ommendation organize language models by their roles in feature construction, representation learning, ranking, and generation [38, 39]. Individual systems integrate collabo-rative semantics [40–42], external knowledge [43, 44], or LLM-based ranking [45, 46], further illustrating the role of language knowledge in recommendation [47] [48–50]. Their primary objectives are representation enrichment, ranking, or direct generation. Intervention-specific supervision con-strained by stable preference remains a separate requirement. GenCAR uses an offline LLM to construct item-level coun-terfactual pairs under an explicit environmental intervention. Stable-preference anchors and trust-radius filtering ground these proposals before ranker training. 
+
+Risk-controlled predictive inference. Predictive inference quantifies uncertainty and provides finite-sample guarantees for learned outputs [51]. Conformal prediction constructs distribution-free prediction sets [52, 53]. Conformal risk control extends calibration to the expected values of mono-tone losses [54], while conformal 𝑝 -values support selection with FDR control [22, 55]. Recommendation-specific methods apply these guaran-tees to set selection. Angelopoulos et al. [5] transform pre-trained ranker outputs into recommendation sets with finite-sample FDR control. Conformal Alignment [56] selects foundation-model outputs using a user-defined alignment criterion. De Toni et al. [14] bound unwanted recommenda-tions and expand selected sets using observed user feedback. Their guarantees apply to candidate families paired with observed relevance, alignment, or unwanted-content labels. GenCAR introduces intervention-specific supervision be-fore ranking and then calibrates the ranked candidate family   
+
+> Wang et al.: Preprint submitted to Elsevier Page 14 of 19
+
+GenCAR: Risk-Controlled OOD Recommendation 
+
+Table 7 Positioning of GenCAR across OOD candidate construction and risk-controlled serving. A dash indicates no finite-sample guarantee for the served set. “Partial” means that only some methods in the family explicitly address distribution shift.                            
+
+> Family OOD Candidate construction Certified target Online LLM
+> Invariant and robust OOD recommendation [3, 7, 2, 8] Yes Observed interactions and invariant representations —No Diffusion recommendation [9, 10, 33, 12] Partial Diffusion-generated interactions or sequences —No LLM-augmented recommendation [45, 43, 47] No LLM knowledge or language representations —Varies Reliable recommendation sets [5] No Fixed ranked candidates Relevance FDR No Conformal Alignment [56] No Foundation-model outputs Output-alignment FDR Model-dependent Conformal risk control for unwanted recommendations [14] No Ranked and previously consumed items Expected unwanted fraction No
+> GenCAR (ours) Yes Ranked candidates learned from environment-intervened, preference-grounded supervision Pooled proxy-label FDR No
+
+under proxy labels. The 𝛼 -VCR formulation makes pooled proxy-label FDR the explicit serving constraint, connecting preference-grounded candidate recovery with calibrated set selection. 
+
+## 7. Conclusion 
+
+In this paper, we presented GenCAR, a two-stage framework for preference-grounded counterfactual construction and risk-controlled selection in OOD recommendation. By formulating serving as the 𝛼 -Valid Counterfactual Recommendation (𝛼 -VCR) problem, GenCAR connects environment-intervened candidate construction with FDR-calibrated selection. Theoretically, we bounded conditional counterfactual approximation error, established finite-sample proxy-label FDR control under target-environment exchangeability and PRDS, and characterized the remaining discrepancy between proxy-label and causal risk. Empirically, realized proxy FDP remained below 𝛼 across five evaluated pools, and GenCAR improved top-10 OOD candidate recovery over the corresponding CausalVAE backbones under diverse shifts. Moving LLM-based counterfactual generation and proxy labeling offline preserves a sub-millisecond, LLM-free online path. GenCAR places counterfactual OOD serving on an explicit statistical footing, with guarantees scoped to proxy labels and their transfer assumptions. 
+
+## CRediT authorship contribution statement 
+
+Qianqian Wang: Conceptualization, Methodology, Software, Validation, Formal analysis, Investigation, Writing – original draft. Yunshan Li: Writing – review & editing. Jiawen Zeng: Software, Validation. Wenwu Gong: Writing – review & editing, Methodology, Conceptualization. Lili Yang: Supervision, Resources, Writing – review & editing. 
+
+## Declaration of competing interest 
+
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper. 
+
+## Acknowledgements 
+
+This research was funded by the SUSTech Presidential Postdoctoral Fellowship, the China Postdoctoral Science Foundation (Grant No. 2025M773057), Shenzhen Science and Technology Program (Grant No. ZDSYS20210623092007023), and the Shenzhen Key Laboratory of Safety and Security for Next Generation of Industrial Internet, Southern University of Science and Technology. 
+
+## Data availability 
+
+The MovieLens, Coat, Amazon-Book, Amazon-Beauty, and Steam datasets used in this study are publicly available from the sources cited in Section 5.1. Dataset sources, access instructions, and licensing restrictions are documented at 
+
+> https://github.com/nikewq/GenCAR-release
+
+. The model code, training and evaluation pipelines, trained checkpoints, processed evaluation splits, and complete result artifacts will be released in the same repository after manuscript acceptance. 
+
+## Declaration of generative AI use 
+
+The authors used generative AI tools only for language polishing and readability improvement. All technical ideas, experiments, analyses, and conclusions were developed and verified by the authors, who take full responsibility for the content of this paper. 
+
+Wang et al.: Preprint submitted to Elsevier Page 15 of 19 GenCAR: Risk-Controlled OOD Recommendation 
+
+## A. Proofs of Theoretical Results 
+
+A.1. Proof of Proposition 1 
+
+Proof. The triangle inequality for total variation gives 
+
+TV( 𝑃 ⋆, 𝑃 𝑀 ) ≤ 𝜖 𝐴 + 𝜖 𝑀 .
+
+Let 𝑃 = 𝑃 ⋆, 𝑄 = 𝑃 𝑀 , and 𝐴 = 𝑢 (𝛿 ). For any 𝐵 ⊆ ,
+
+|𝑃 (𝐵 ∣ 𝐴 ) − 𝑄 (𝐵 ∣ 𝐴 )|
+
+≤ |𝑃 (𝐵 ∩ 𝐴 ) − 𝑄 (𝐵 ∩ 𝐴 )|
+
+𝑃 (𝐴 )+ 𝑄 (𝐵 ∩ 𝐴 ) ||||
+
+1
+
+𝑃 (𝐴 ) − 1
+
+𝑄 (𝐴 )
+
+||||
+
+≤ 2 TV( 𝑃 , 𝑄 )
+
+𝜌 𝛿 
+
+.
+
+Taking the supremum over 𝐵 and combining the two bounds proves the first claim of Proposition 1. For the event 𝑢 ,
+
+𝑃 𝑀 𝛿 (𝑢 ) ≤ 𝑃 ⋆𝛿 (𝑢 ) + |||𝑃 𝑀 𝛿 (𝑢 ) − 𝑃 ⋆𝛿 (𝑢 )|||
+
+≤ 𝑃 ⋆𝛿 (𝑢 ) + 2( 𝜖 𝐴 + 𝜖 𝑀 )
+
+𝜌 𝛿 
+
+.
+
+This proves the second claim of Proposition 1. 
+
+A.2. Proof of Lemma 1 
+
+Proof. By construction, 𝑘 +1 contains all pairs in 𝑘 and one additional pair with the next smallest 𝑝 -value. Hence 
+
+𝑘 ⊆ 𝑘 +1 
+
+for every 𝑘 ∈ {0 , … , 𝑁 − 1} , which proves the nestedness claim of Lemma 1. The index ̂ 𝑘 𝛼 is defined as the largest index satisfying the BH inequality. Thus, ̂ 𝑘 𝛼 is the largest member of the nested family satisfying the step-up condition. Let 𝛼 1 ≤ 𝛼 2. Every index satisfying 𝑝 (𝑘 ) ≤ 𝛼 1𝑘 𝑁 also satisfies 𝑝 (𝑘 ) ≤ 𝛼 2𝑘 𝑁 . It follows that ̂ 𝑘 𝛼 1 ≤̂ 𝑘 𝛼 2 . Nestedness of {𝑘 }𝑁 𝑘 =0 gives 𝛼 1 ⊆ 𝛼 2 .
+
+A.3. Proof of Lemma 2 
+
+Proof. Fix a proxy-null candidate (𝑢, 𝑗 ) and condition on the learned artifacts and candidate family. Let 𝑅 + be the upper rank of 𝑉 (𝑢, 𝑗 ) among the 𝑛 0 calibration scores and the test score. The weak-rank 𝑝 -value in Eq. (7) satisfies 
+
+𝑝 (𝑢, 𝑗 ) = 𝑅 +
+
+𝑛 0 + 1 .
+
+Conditional on the multiset of the 𝑛 0 + 1 exchangeable scores, at most 𝑟 indices have upper rank no greater than 𝑟 .Exchangeability therefore gives 
+
+Pr (𝑅 + ≤ 𝑟 ∣̂ ℎ, ()) ≤ 𝑟 𝑛 0 + 1 
+
+for every 𝑟 ∈ {0 , … , 𝑛 0 + 1} . Setting 𝑟 = ⌊𝑡 (𝑛 0 + 1) ⌋ yields 
+
+Pr (𝑝 (𝑢, 𝑗 ) ≤ 𝑡 ∣̂ ℎ, ()) ≤ 𝑡. 
+
+Thus the implemented weak-rank 𝑝 -value is super-uniform. Ties can only increase the upper rank and hence preserve the bound. 
+
+A.4. Proof of Theorem 1 and Corollary 1 
+
+Proof. Condition on the learned artifacts and the candi-date family (). Lemma 2 establishes super-uniformity for every proxy-null 𝑝 -value. Under conditional PRDS on the proxy-null hypotheses, the BH result of Benjamini and Yekutieli [57] gives 
+
+𝔼 
+
+[ |𝛼 () ∩ proxy 0 |
+
+max{ |𝛼 ()|, 1} 
+
+||||||̂ℎ, ()
+
+]
+
+≤ 𝑚 0
+
+𝑁 𝛼 ≤ 𝛼. 
+
+Taking expectations over the conditioning variables and applying the tower property gives 
+
+FDR proxy 
+
+(𝛼 ()) ≤ 𝛼, 
+
+which proves Theorem 1. Under arbitrary dependence, the Benjamini–Yekutieli procedure replaces 𝛼 with 𝛼 ∕𝐻 𝑁 . Applying its general-dependence result conditionally and then using the tower property yields 
+
+FDR proxy 
+
+(BY  
+
+> 𝛼
+
+()) ≤ 𝛼. 
+
+This proves Corollary 1. 
+
+A.5. Proof of Corollary 2 
+
+Proof. For any selected set ,
+
+| ∩ causal 0 | ≤ | ∩ proxy 0 |
+
++ | ∩ ( causal 0 ⧵ proxy 0 )|.
+
+Dividing both sides by max{ ||, 1} and taking expectations gives 
+
+FDR causal () ≤ FDR proxy () + Δ proxy ().
+
+Applying Theorem 1 with  = 𝛼 () proves Corollary 2. If causal 0 ⊆ proxy 0 , then causal 0 ⧵ proxy 0 = ∅ . Thus, 
+
+Δproxy (𝛼 ()) = 0 , which proves the final statement. 
+
+## References       
+
+> [1] T. Schnabel, A. Swaminathan, A. Singh, N. Chandak, T. Joachims, Recommendations as treatments: Debiasing learning and evaluation, in: M. F. Balcan, K. Q. Weinberger (Eds.), Proceedings of The 33rd International Conference on Machine Learning, volume 48 of
+> Proceedings of Machine Learning Research , PMLR, New York, New York, USA, 2016, pp. 1670–1679. URL: https://proceedings.mlr. press/v48/schnabel16.html .[2] B. Wang, J. Chen, C. Li, S. Zhou, Q. Shi, Y. Gao, Y. Feng, C. Chen, C. Wang, Distributionally robust graph-based recommendation sys-tem, in: Proceedings of the ACM Web Conference 2024, WWW ’24, Association for Computing Machinery, New York, NY, USA, 2024, p. 3777–3788. URL: https://doi.org/10.1145/3589334.3645598 . doi: 10. 1145/3589334.3645598 .[3] A. Zhang, J. Zheng, X. Wang, Y. Yuan, T.-S. Chua, Invariant collab-orative filtering to popularity distribution shift, in: Proceedings of the ACM Web Conference 2023, WWW ’23, Association for Computing Machinery, New York, NY, USA, 2023, p. 1240–1251. URL: https: //doi.org/10.1145/3543507.3583461 . doi: 10.1145/3543507.3583461 .
+
+Wang et al.: Preprint submitted to Elsevier Page 16 of 19 GenCAR: Risk-Controlled OOD Recommendation 
+
+[4] Z. Yang, X. He, J. Zhang, J. Wu, X. Xin, J. Chen, X. Wang, A generic learning framework for sequential recommendation with distribution shifts, in: Proceedings of the 46th International ACM SIGIR Confer-ence on Research and Development in Information Retrieval, SIGIR ’23, Association for Computing Machinery, New York, NY, USA, 2023, p. 331–340. URL: https://doi.org/10.1145/3539618.3591624 .doi: 10.1145/3539618.3591624 .[5] A. N. Angelopoulos, K. Krauth, S. Bates, Y. Wang, M. I. Jordan, Rec-ommendation systems with distribution-free reliability guarantees, in: H. Papadopoulos, K. A. Nguyen, H. Boström, L. Carlsson (Eds.), Proceedings of the Twelfth Symposium on Conformal and Prob-abilistic Prediction with Applications, volume 204 of Proceedings of Machine Learning Research , PMLR, 2023, pp. 175–193. URL: 
+
+> https://proceedings.mlr.press/v204/angelopoulos23a.html
+
+.[6] Y. Zheng, C. Gao, X. Li, X. He, Y. Li, D. Jin, Disentangling user interest and conformity for recommendation with causal embedding, in: Proceedings of the Web Conference 2021, WWW ’21, Asso-ciation for Computing Machinery, New York, NY, USA, 2021, p. 2980–2991. URL: https://doi.org/10.1145/3442381.3449788 . doi: 10. 1145/3442381.3449788 .[7] W. Wang, X. Lin, L. Wang, F. Feng, Y. Ma, T.-S. Chua, Causal disentangled recommendation against user preference shifts, ACM Trans. Inf. Syst. 42 (2023). URL: https://doi.org/10.1145/3593022 .doi: 10.1145/3593022 .[8] C. Zhao, E. Yang, Y. Liang, P. Lan, Y. Liu, J. Zhao, G. Guo, X. Wang, Graph representation learning via causal diffusion for out-of-distribution recommendation, in: Proceedings of the ACM on Web Conference 2025, WWW ’25, Association for Computing Machinery, New York, NY, USA, 2025, p. 334–346. URL: https: //doi.org/10.1145/3696410.3714849 . doi: 10.1145/3696410.3714849 .[9] J. Zhao, W. Wenjie, Y. Xu, T. Sun, F. Feng, T.-S. Chua, Denoising diffusion recommender model, in: Proceedings of the 47th Inter-national ACM SIGIR Conference on Research and Development in Information Retrieval, SIGIR ’24, Association for Computing Ma-chinery, New York, NY, USA, 2024, p. 1370–1379. URL: https: //doi.org/10.1145/3626772.3657825 . doi: 10.1145/3626772.3657825 .[10] Z. Yang, J. Wu, Z. Wang, X. Wang, Y. Yuan, X. He, Generate what you prefer: Reshaping sequential recommendation via guided diffusion, in: A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, S. Levine (Eds.), Advances in Neural Information Processing Systems, volume 36, Curran Associates, Inc., 2023, pp. 24247– 24261. URL: https://proceedings.neurips.cc/paper_files/paper/ 2023/file/4c5e2bcbf21bdf40d75fddad0bd43dc9-Paper-Conference.pdf .doi: 10.52202/075280-1054 .[11] Q. Liu, F. Yan, X. Zhao, Z. Du, H. Guo, R. Tang, F. Tian, Diffusion augmentation for sequential recommendation, in: Proceedings of the 32nd ACM International Conference on Information and Knowledge Management, CIKM ’23, Association for Computing Machinery, New York, NY, USA, 2023, p. 1576–1586. URL: https://doi.org/ 10.1145/3583780.3615134 . doi: 10.1145/3583780.3615134 .[12] S. Liu, A. Zhang, G. Hu, H. Qian, T.-S. Chua, Preference diffusion for recommendation, in: Y. Yue, A. Garg, N. Peng, F. Sha, R. Yu (Eds.), International Conference on Learning Representations, volume 2025, 2025, pp. 79844–79881. URL: 
+
+> https://proceedings.iclr.cc/paper_files/paper/2025/file/ c6989f4c36acb6f0e0fdd60f1c12e8a0-Paper-Conference.pdf
+
+.[13] Y. Deldjoo, Z. He, J. McAuley, A. Korikov, S. Sanner, A. Ramisa, R. Vidal, M. Sathiamoorthy, A. Kasirzadeh, S. Milano, A review of modern recommender systems using generative models (gen-recsys), in: Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining, KDD ’24, Association for Computing Machinery, New York, NY, USA, 2024, p. 6448–6458. URL: https: //doi.org/10.1145/3637528.3671474 . doi: 10.1145/3637528.3671474 .[14] G. De Toni, E. Purificato, E. Gomez, A. Passerini, B. Lepri, C. Con-sonni, You don’t bring me flowers: Mitigating unwanted recom-mendations through conformal risk control, in: Proceedings of the Nineteenth ACM Conference on Recommender Systems, RecSys ’25, Association for Computing Machinery, New York, NY, USA, 2025, p. 492–502. URL: https://doi.org/10.1145/3705328.3748054 . doi: 10. 1145/3705328.3748054 .[15] F. M. Harper, J. A. Konstan, The movielens datasets: History and context, volume 5, Association for Computing Machinery, New York, NY, USA, 2015. URL: https://doi.org/10.1145/2827872 .doi: 10.1145/2827872 .[16] R. He, J. McAuley, Ups and downs: Modeling the visual evolution of fashion trends with one-class collaborative filtering, in: Proceedings of the 25th International Conference on World Wide Web, WWW ’16, International World Wide Web Conferences Steering Committee, Re-public and Canton of Geneva, CHE, 2016, p. 507–517. URL: https: //doi.org/10.1145/2872427.2883037 . doi: 10.1145/2872427.2883037 .[17] B. Schölkopf, F. Locatello, S. Bauer, N. R. Ke, N. Kalchbrenner, A. Goyal, Y. Bengio, Toward causal representation learning, Pro-ceedings of the IEEE 109 (2021) 612–634. doi: 10.1109/JPROC.2021. 3058954 .[18] I. Khemakhem, D. Kingma, R. Monti, A. Hyvarinen, Variational au-toencoders and nonlinear ica: A unifying framework, in: S. Chiappa, R. Calandra (Eds.), Proceedings of the Twenty Third International Conference on Artificial Intelligence and Statistics, volume 108 of 
+
+Proceedings of Machine Learning Research , PMLR, 2020, pp. 2207– 2217. URL: https://proceedings.mlr.press/v108/khemakhem20a.html .[19] M. Arjovsky, L. Bottou, I. Gulrajani, D. Lopez-Paz, Invariant risk minimization, arXiv preprint arXiv:1907.02893 (2019). [20] S. Rendle, C. Freudenthaler, Z. Gantner, L. Schmidt-Thieme, Bpr: Bayesian personalized ranking from implicit feedback, arXiv preprint arXiv:1205.2618 (2012). [21] L. G. Neuberg, Causality: Models, reasoning, and inference, by judea pearl, cambridge university press, 2000, Econometric Theory 19 (2003) 675–685. doi: 10.1017/S0266466603004109 .[22] S. Bates, E. Candès, L. Lei, Y. Romano, M. Sesia, Testing for outliers with conformal p-values, The Annals of Statistics 51 (2023) 149 – 178. URL: https://doi.org/10.1214/22-AOS2244 . doi: 10.1214/ 22-AOS2244 .[23] W.-C. Kang, J. McAuley, Self-attentive sequential recommendation, in: 2018 IEEE International Conference on Data Mining (ICDM), 2018, pp. 197–206. doi: 10.1109/ICDM.2018.00035 .[24] S. Bonner, F. Vasile, Causal embeddings for recommendation, in: Proceedings of the 12th ACM Conference on Recommender Sys-tems, RecSys ’18, Association for Computing Machinery, New York, NY, USA, 2018, p. 104–112. URL: https://doi.org/10.1145/3240323. 3240360 . doi: 10.1145/3240323.3240360 .[25] T. Wei, F. Feng, J. Chen, Z. Wu, J. Yi, X. He, Model-agnostic counterfactual reasoning for eliminating popularity bias in recom-mender system, in: Proceedings of the 27th ACM SIGKDD Con-ference on Knowledge Discovery & Data Mining, KDD ’21, Asso-ciation for Computing Machinery, New York, NY, USA, 2021, p. 1791–1800. URL: https://doi.org/10.1145/3447548.3467289 . doi: 10. 1145/3447548.3467289 .[26] K. Bao, J. Zhang, Y. Zhang, W. Wang, F. Feng, X. He, Tallrec: An effective and efficient tuning framework to align large language model with recommendation, in: Proceedings of the 17th ACM Conference on Recommender Systems, RecSys ’23, Association for Computing Machinery, New York, NY, USA, 2023, p. 1007–1014. URL: https: //doi.org/10.1145/3604915.3608857 . doi: 10.1145/3604915.3608857 .[27] L. van der Maaten, G. Hinton, Visualizing data using t-sne, Journal of Machine Learning Research 9 (2008) 2579–2605. URL: http: //jmlr.org/papers/v9/vandermaaten08a.html .[28] H. Luo, F. Zhuang, R. Xie, H. Zhu, D. Wang, Z. An, Y. Xu, Asurvey on causal inference for recommendation, The Innovation 5 (2024) 100590. URL: https://doi.org/10.1016/j.xinn.2024.100590 .doi: 10.1016/j.xinn.2024.100590 .[29] W. Wang, Y. Zhang, H. Li, P. Wu, F. Feng, X. He, Causal recommen-dation: Progresses and future directions, in: Proceedings of the 46th International ACM SIGIR Conference on Research and Development in Information Retrieval, SIGIR ’23, Association for Computing Machinery, New York, NY, USA, 2023, p. 3432–3435. URL: https: //doi.org/10.1145/3539618.3594245 . doi: 10.1145/3539618.3594245 .
+
+Wang et al.: Preprint submitted to Elsevier Page 17 of 19 GenCAR: Risk-Controlled OOD Recommendation 
+
+[30] H. Yoo, R. Qiu, C. Xu, F. Wang, H. Tong, Generalizable recommender system during temporal popularity distribution shifts, in: Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V.1, KDD ’25, Association for Computing Machinery, New York, NY, USA, 2025, p. 1833–1843. URL: https://doi.org/ 10.1145/3690624.3709299 . doi: 10.1145/3690624.3709299 .[31] Y. Liao, Y. Yang, M. Hou, L. Wu, H. Xu, H. Liu, Mitigating distribu-tion shifts in sequential recommendation: An invariance perspective, in: Proceedings of the 48th International ACM SIGIR Conference on Research and Development in Information Retrieval, SIGIR ’25, Association for Computing Machinery, New York, NY, USA, 2025, p. 1603–1613. URL: https://doi.org/10.1145/3726302.3730036 . doi: 10. 1145/3726302.3730036 .[32] X. Yang, Z. Liu, X. Lu, Y. Yuan, S. Lu, Y. Gao, Contrastive disentangled representation learning for debiasing recommendation with uniform data, in: Proceedings of the 33rd ACM International Conference on Information and Knowledge Management, CIKM ’24, Association for Computing Machinery, New York, NY, USA, 2024, p. 4188–4192. URL: https://doi.org/10.1145/3627673.3679889 . doi: 10. 1145/3627673.3679889 .[33] Z. Li, A. Sun, C. Li, Diffurec: A diffusion model for sequential recommendation, ACM Trans. Inf. Syst. 42 (2023). URL: https: //doi.org/10.1145/3631116 . doi: 10.1145/3631116 .[34] S. Rajput, N. Mehta, A. Singh, R. Hulikal Keshavan, T. Vu, L. Heldt, L. Hong, Y. Tay, V. Tran, J. Samost, M. Kula, E. Chi, M. Sathiamoorthy, Recommender systems with generative retrieval, in: A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, S. Levine (Eds.), Advances in Neural Information Processing Systems, volume 36, Curran Associates, Inc., 2023, pp. 10299– 10315. URL: https://proceedings.neurips.cc/paper_files/paper/ 2023/file/20dcab0f14046a5c6b02b61da9f13229-Paper-Conference.pdf .doi: 10.52202/075280-0452 .[35] H. Ma, R. Xie, L. Meng, X. Chen, X. Zhang, L. Lin, Z. Kang, Plug-in diffusion model for sequential recommendation, Proceedings of the AAAI Conference on Artificial Intelligence 38 (2024) 8886–8894. doi: 10.1609/aaai.v38i8.28736 .[36] J. Zhai, L. Liao, X. Liu, Y. Wang, R. Li, X. Cao, L. Gao, Z. Gong, F. Gu, J. He, Y. Lu, Y. Shi, Actions speak louder than words: Trillion-parameter sequential transducers for generative recommendations, in: R. Salakhutdinov, Z. Kolter, K. Heller, A. Weller, N. Oliver, J. Scar-lett, F. Berkenkamp (Eds.), Proceedings of the 41st International Conference on Machine Learning, volume 235 of Proceedings of Machine Learning Research , PMLR, 2024, pp. 58484–58509. URL: 
+
+> https://proceedings.mlr.press/v235/zhai24a.html
+
+.[37] Z. Cai, S. Wang, V. W. Chu, U. Naseem, Y. Wang, F. Chen, Unleash-ing the potential of diffusion models towards diversified sequential recommendations, in: Proceedings of the 48th International ACM SIGIR Conference on Research and Development in Information Retrieval, SIGIR ’25, Association for Computing Machinery, New York, NY, USA, 2025, p. 1476–1486. URL: https://doi.org/10.1145/ 3726302.3730109 . doi: 10.1145/3726302.3730109 .[38] J. Lin, X. Dai, Y. Xi, W. Liu, B. Chen, H. Zhang, Y. Liu, C. Wu, X. Li, C. Zhu, H. Guo, Y. Yu, R. Tang, W. Zhang, How can recommender systems benefit from large language models: A survey, ACM Trans. Inf. Syst. 43 (2025). URL: https://doi.org/10.1145/3678004 . doi: 10. 1145/3678004 .[39] Y. Yao, X. Zheng, Heterogeneous graph learning for code reviewers recommendation with llm’s understanding (2025) 928–932. doi: 10. 1109/CAIBDA65784.2025.11183380 .[40] Y. Zhang, F. Feng, J. Zhang, K. Bao, Q. Wang, X. He, Collm: Integrating collaborative embeddings into large language models for recommendation, IEEE Transactions on Knowledge and Data Engineering 37 (2025) 2329–2340. doi: 10.1109/TKDE.2025.3540912 .[41] B. Zheng, Y. Hou, H. Lu, Y. Chen, W. X. Zhao, M. Chen, J.-R. Wen, Adapting large language models by integrating collaborative semantics for recommendation, in: 2024 IEEE 40th International Conference on Data Engineering (ICDE), 2024, pp. 1435–1448. doi: 10.1109/ICDE60146.2024.00118 .[42] Z. Liu, H. Zhang, K. Dong, Y. Fang, Collaborative cross-modal fusion with large language model for recommendation, in: Pro-ceedings of the 33rd ACM International Conference on Information and Knowledge Management, CIKM ’24, Association for Computing Machinery, New York, NY, USA, 2024, p. 1565–1574. URL: https: //doi.org/10.1145/3627673.3679596 . doi: 10.1145/3627673.3679596 .[43] Y. Xi, W. Liu, J. Lin, X. Cai, H. Zhu, J. Zhu, B. Chen, R. Tang, W. Zhang, Y. Yu, Towards open-world recommendation with knowl-edge augmentation from large language models, in: Proceedings of the 18th ACM Conference on Recommender Systems, RecSys ’24, Association for Computing Machinery, New York, NY, USA, 2024, p. 12–22. URL: https://doi.org/10.1145/3640457.3688104 . doi: 10.1145/ 3640457.3688104 .[44] Q. Zhao, H. Qian, Z. Liu, G.-D. Zhang, L. Gu, Breaking the barrier: Utilizing large language models for industrial recommendation sys-tems through an inferential knowledge graph, in: Proceedings of the 33rd ACM International Conference on Information and Knowledge Management, CIKM ’24, Association for Computing Machinery, New York, NY, USA, 2024, p. 5086–5093. URL: https://doi.org/ 10.1145/3627673.3680022 . doi: 10.1145/3627673.3680022 .[45] J. Liao, S. Li, Z. Yang, J. Wu, Y. Yuan, X. Wang, X. He, Llara: Large language-recommendation assistant, in: Proceedings of the 47th International ACM SIGIR Conference on Research and Development in Information Retrieval, SIGIR ’24, Association for Computing Machinery, New York, NY, USA, 2024, p. 1785–1795. URL: https: //doi.org/10.1145/3626772.3657690 . doi: 10.1145/3626772.3657690 .[46] Y. Hou, J. Zhang, Z. Lin, H. Lu, R. Xie, J. McAuley, W. X. Zhao, Large language models are zero-shot rankers for recommender sys-tems, in: N. Goharian, N. Tonellotto, Y. He, A. Lipani, G. McDonald, C. Macdonald, I. Ounis (Eds.), Advances in Information Retrieval, Springer Nature Switzerland, Cham, 2024, pp. 364–381. [47] L. Sheng, A. Zhang, Y. Zhang, Y. Chen, X. Wang, T.-S. Chua, Language representations can be what recommenders need: Findings and potentials, in: Y. Yue, A. Garg, N. Peng, F. Sha, R. Yu (Eds.), International Conference on Learning Representations, volume 2025, 2025, pp. 91632–91658. URL: 
+
+> https://proceedings.iclr.cc/paper_files/paper/2025/file/ e4bab1843c8d5a69f5abfd0824593493-Paper-Conference.pdf
+
+.[48] W. Wei, X. Ren, J. Tang, Q. Wang, L. Su, S. Cheng, J. Wang, D. Yin, C. Huang, Llmrec: Large language models with graph augmentation for recommendation, in: Proceedings of the 17th ACM International Conference on Web Search and Data Mining, WSDM ’24, Association for Computing Machinery, New York, NY, USA, 2024, p. 806–815. URL: https://doi.org/10.1145/3616855.3635853 .doi: 10.1145/3616855.3635853 .[49] S. Kim, H. Kang, S. Choi, D. Kim, M. Yang, C. Park, Large language models meet collaborative filtering: An efficient all-round llm-based recommender system, in: Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discovery and Data Mining, KDD ’24, Association for Computing Machinery, New York, NY, USA, 2024, p. 1395–1406. URL: https://doi.org/10.1145/3637528.3671931 . doi: 10. 1145/3637528.3671931 .[50] J. Lin, R. Shan, C. Zhu, K. Du, B. Chen, S. Quan, R. Tang, Y. Yu, W. Zhang, Rella: Retrieval-enhanced large language models for lifelong sequential behavior comprehension in recommendation, in: Proceedings of the ACM Web Conference 2024, WWW ’24, Asso-ciation for Computing Machinery, New York, NY, USA, 2024, p. 3497–3508. URL: https://doi.org/10.1145/3589334.3645467 . doi: 10. 1145/3589334.3645467 .[51] D. Prinster, S. Stanton, A. Liu, S. Saria, Conformal validity guaran-tees exist for any data distribution (and how to find them), in: Pro-ceedings of the 41st International Conference on Machine Learning, ICML’24, JMLR.org, 2024. [52] G. Shafer, V. Vovk, A Tutorial on Conformal Prediction, volume 9, JMLR.org, 2008. [53] A. N. Angelopoulos, S. Bates, Conformal prediction: A gentle introduction, Foundations and Trends in Machine Learning 16 (2023) 494–591. URL: https: 
+
+Wang et al.: Preprint submitted to Elsevier Page 18 of 19 GenCAR: Risk-Controlled OOD Recommendation 
+
+> //doi.org/10.1561/2200000101
+
+. doi: 10.1561/2200000101 .
+
+> arXiv:https://www.emerald.com/ftmal/article-pdf/16/4/494/11155920/2200000101en.pdf
+
+.[54] A. Angelopoulos, S. Bates, A. Fisch, L. Lei, T. Schuster, Con-formal risk control, in: B. Kim, Y. Yue, S. Chaudhuri, K. Fragkiadaki, M. Khan, Y. Sun (Eds.), International Confer-ence on Learning Representations, volume 2024, 2024, pp. 55198– 55218. URL: https://proceedings.iclr.cc/paper_files/paper/2024/ file/f3549ef9b5ff520a7e41ff3cc306ab2b-Paper-Conference.pdf .[55] Y. Jin, E. J. Candes, Selection by prediction with conformal p-values, Journal of Machine Learning Research 24 (2023) 1–41. URL: 
+
+> http://jmlr.org/papers/v24/22-1176.html
+
+.[56] Y. Gui, Y. Jin, Z. Ren, Conformal alignment: Knowing when to trust foundation models with guarantees, in: A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet, J. Tomczak, C. Zhang (Eds.), Advances in Neural Information Processing Systems, volume 37, Curran Associates, Inc., 2024, pp. 73884–73919. URL: https://proceedings.neurips.cc/paper_files/paper/2024/ file/870ccde24673d3970a680bb48496ed63-Paper-Conference.pdf .doi: 10.52202/079017-2350 .[57] Y. Benjamini, D. Yekutieli, The control of the false discovery rate in multiple testing under dependency, The Annals of Statistics 29 (2001) 1165–1188. URL: http://www.jstor.org/stable/2674075 .
+
+Wang et al.: Preprint submitted to Elsevier Page 19 of 19
