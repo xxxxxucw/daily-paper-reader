@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-03</span>
+      <span class="dpr-home-dashboard-kicker">2026-09-04</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 6 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 8 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>5</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>7</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>1</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-03 10:10:40 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-04 09:21:02 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,7 +62,10 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日聚焦表格基础模型与复杂表格推理，精读2篇高分论文并速读1篇语言模型逻辑研究。最值得关注的是《Do Tabular Foundation Models Know Physics?》（9.0分）揭示表格模型对物理常识、单位与确定性的局限，以及《H2Table》（8.0分）用层级超图增强大模型复杂表格推理能力。建议普通读者后续可优先关注表格模型在物理/单位场景下的表现，并尝试用超图结构改善表格问答效果。</p>
+<p>今日共生成 8 篇推荐（精读 7 篇，速读 1 篇）</p>
+<p>精读：《Xiaomi-TabLDM: A Tabular Foundation Model Technical Report》（10.0/10）, 《Occupancy-based Quantile Risk Control》（9.0/10）</p>
+<p>速读：《Scaling Laws, Tabular Data and Actuarial Ratemaking Models》（7.0/10）</p>
+<p>这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -71,12 +74,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">5 篇</strong>
+    <strong class="dpr-home-dashboard-count">7 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Do Tabular Foundation Models Know Physics? Contamination, Units, and the Deterministic Limit">Do Tabular Foundation Models Know Physics? Contamination, Units, and the Deterministic Limit</span></li><li><span class="dpr-home-dashboard-paper-title" title="H2Table: Hierarchical Hypergraph-Enhanced Large Language Models for Complex Table Reasoning">H2Table: Hierarchical Hypergraph-Enhanced Large Language Models for Complex Table Reasoning</span></li><li><span class="dpr-home-dashboard-paper-title" title="Some Emotions Run Deeper: Layer-wise Probing and Causal Intervention in Large Language Models">Some Emotions Run Deeper: Layer-wise Probing and Causal Intervention in Large Language Models</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Xiaomi-TabLDM: A Tabular Foundation Model Technical Report">Xiaomi-TabLDM: A Tabular Foundation Model Technical Report</span></li><li><span class="dpr-home-dashboard-paper-title" title="Occupancy-based Quantile Risk Control">Occupancy-based Quantile Risk Control</span></li><li><span class="dpr-home-dashboard-paper-title" title="Guide, Not Bind: Why Defeasible Priors Fail in Augmented Lagrangian Causal Discovery">Guide, Not Bind: Why Defeasible Priors Fail in Augmented Lagrangian Causal Discovery</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>3</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>5</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -87,9 +90,9 @@
     <strong class="dpr-home-dashboard-count">1 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="When Decodability Is Not Enough: Logical Validity Representations, Behavioral Dissociation, and Causal Tests in Language Models">When Decodability Is Not Enough: Logical Validity Representations, Behavioral Dissociation, and Causal Tests in Language Models</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Scaling Laws, Tabular Data and Actuarial Ratemaking Models">Scaling Laws, Tabular Data and Actuarial Ratemaking Models</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 </div>
 
