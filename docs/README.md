@@ -51,14 +51,14 @@
       <span class="dpr-home-dashboard-kicker">2026-09-09 ~ 2026-09-18</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 21 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 22 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
-    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>8</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>13</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>2 次</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>11</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-18 12:24:02 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-18 12:36:32 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-09-09至09-18共筛读21篇论文（精读8篇、速读13篇），聚焦表格基础模型与LLM可靠性。最值得看的是满分技术报告《TabPFN-3.5》和9分的《ProbPlug》插件式不确定性网络，前者代表表格预测新范式，后者为LLM二分类提供可信置信度。普通读者可优先了解TabPFN在结构化数据上的开箱即用能力，并关注置信度校准在LLM落地中的实际价值。</p>
+<p>2026-09-09至09-18共梳理22篇论文，精读11篇、速读11篇，重点聚焦表格基础模型与LLM不确定性量化。最值得看的是满分技术报告《TabPFN-3.5》与9分的《ProbPlug》插件式不确定性网络，前者代表表格预测新范式，后者解决LLM二分类置信度可靠性问题。普通读者可优先从这两篇精读入手，再按需速读图Transformer反欺诈、表格AutoML搜索空间等应用向工作。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -78,12 +78,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">8 篇</strong>
+    <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
 <ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="TabPFN-3.5: Technical Report">TabPFN-3.5: Technical Report</span></li><li><span class="dpr-home-dashboard-paper-title" title="ProbPlug: A Plugin Uncertainty Network for Reliable Confidence in LLM Binary Classification">ProbPlug: A Plugin Uncertainty Network for Reliable Confidence in LLM Binary Classification</span></li><li><span class="dpr-home-dashboard-paper-title" title="Learning to Adapt and Calibrate: Score Distribution Alignment for Few-Shot Uncertainty Prediction in Medical VLMs">Learning to Adapt and Calibrate: Score Distribution Alignment for Few-Shot Uncertainty Prediction in Medical VLMs</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>4</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>5</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>5</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -91,12 +91,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">13 篇</strong>
+    <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Graph-Transformer Fraud Detection with Self-Supervised Pretraining and Conformal Risk Control">Graph-Transformer Fraud Detection with Self-Supervised Pretraining and Conformal Risk Control</span></li><li><span class="dpr-home-dashboard-paper-title" title="Distilling Foundation Models for Agentic What-If Reasoning:Cost, Latency, and Governance in a Hybrid LLM+SLM Architecture">Distilling Foundation Models for Agentic What-If Reasoning:Cost, Latency, and Governance in a Hybrid LLM+SLM Architecture</span></li><li><span class="dpr-home-dashboard-paper-title" title="Agentic Search Spaces for Tabular Machine Learning">Agentic Search Spaces for Tabular Machine Learning</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Graph-Transformer Fraud Detection with Self-Supervised Pretraining and Conformal Risk Control">Graph-Transformer Fraud Detection with Self-Supervised Pretraining and Conformal Risk Control</span></li><li><span class="dpr-home-dashboard-paper-title" title="Agentic Search Spaces for Tabular Machine Learning">Agentic Search Spaces for Tabular Machine Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="MetaRTL: Meta-path Attention Enhanced Relational Table Learning">MetaRTL: Meta-path Attention Enhanced Relational Table Learning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>9</strong></span><span class="dpr-home-dashboard-tag">cp <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>7</strong></span><span class="dpr-home-dashboard-tag">cp <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>2</strong></span></div>
 </section>
 </div>
 
