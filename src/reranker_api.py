@@ -208,15 +208,28 @@ class SiliconFlowReranker:
     for attempt in range(self.max_retries + 1):
       self._wait_for_rate_limit()
       started = time.perf_counter()
-      response = self.session.post(
-        self.base_url,
-        headers={
-          "Authorization": f"Bearer {self.api_key}",
-          "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=self.timeout,
-      )
+      try:
+        response = self.session.post(
+          self.base_url,
+          headers={
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+          },
+          json=payload,
+          timeout=self.timeout,
+        )
+      except requests.RequestException as exc:
+        self._last_request_at = time.perf_counter()
+        elapsed = self._last_request_at - started
+        self.call_count += 1
+        self.total_latency_seconds += elapsed
+        self.latencies_seconds.append(elapsed)
+        if attempt < self.max_retries and self._is_retryable_request_exception(exc):
+          time.sleep(self.retry_delay_seconds)
+          continue
+        raise requests.RequestException(
+          f"SiliconFlow rerank API request failed: {exc}"
+        ) from exc
       self._last_request_at = time.perf_counter()
       elapsed = self._last_request_at - started
       self.call_count += 1
@@ -269,6 +282,10 @@ class SiliconFlowReranker:
     status_code = int(getattr(response, "status_code", 0) or 0)
     body = str(text or "").lower()
     return status_code == 429 or "rpm limit" in body or "rate limit" in body
+
+  @staticmethod
+  def _is_retryable_request_exception(exc: requests.RequestException) -> bool:
+    return isinstance(exc, (requests.Timeout, requests.ConnectionError))
 
   def stats(self, model: str = "") -> Dict[str, Any]:
     price = SILICONFLOW_QWEN3_PRICE_PER_M_TOKEN.get(str(model or ""))
