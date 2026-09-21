@@ -1,0 +1,1259 @@
+Title: MaSCoD: A Multi-Agent Framework for Structural-Context-Guided Candidate Causal Graph Generation
+
+URL Source: https://arxiv.org/pdf/2609.19944v1
+
+Published Time: Fri, 18 Sep 2026 00:55:23 GMT
+
+Number of Pages: 31
+
+Markdown Content:
+# MaSCoD: A Multi-Agent Framework for Structural-Context-Guided Candidate Causal Graph Generation 
+
+Yudai Nakada ∗
+
+SCSK Corporation Tokyo, Japan 
+
+yu.nakada@scsk.jp 
+
+Yuichiro Nishiura ∗
+
+SCSK Corporation Tokyo, Japan 
+
+y.nishiura@scsk.jp 
+
+Jin Michael Splichal 
+
+SCSK Corporation Tokyo, Japan 
+
+J.Splichal@scsk.jp 
+
+Abstract 
+
+Large language models (LLMs) have been ap-plied to causal discovery, but candidate-graph generation rarely treats premature omission of potentially relevant causal relations as an explicit design objective. We propose MaS-CoD, a multi-agent framework that organizes candidate third variables and local structural patterns before direct-edge judgment. We evaluate MaSCoD on Auto-MPG, DWD, and Sachs using GPT-5.4 as the primary back-bone and GPT-4o for replication. MaSCoD exhibits a dataset- and backbone-dependent retention–selectivity profile rather than uni-form superiority. Across all six dataset– backbone settings, Full, which supplies struc-tural hypotheses before direct-edge judgment, achieved higher mean Recall and F1 than No Phase 1, which instead constructs them within the judgment procedure, while also increasing false-positive rates. Additional reference-edge retention over all evaluated baselines was ob-served on DWD with GPT-5.4 and on Sachs with GPT-4o, rather than uniformly across set-tings. Partial ablations showed that supplying both information components did not always outperform supplying only one. For GPT-5.4, stage-wise analysis showed that the Full–No Phase 1 retention gap was already present af-ter direct-edge judgment, while reconciliation introduced additional reference-edge loss for Full on Sachs. These findings support struc-tural pre-organization as an explicit design and evaluation target for omission control and mo-tivate evaluating context construction jointly with its utilization in judgment. 
+
+1 Introduction 
+
+Causal discovery is central to empirical research in epidemiology, economics, and the social sci-ences, particularly when randomized experiments are infeasible, costly, or ethically constrained. Sta-tistical approaches such as PC, GES, LiNGAM, 
+
+> ∗These authors contributed equally to this work.
+
+and NOTEARS infer candidate structures from ob-servational data under specific assumptions (Gly-mour et al., 2019; Chickering, 2002; Shimizu et al., 2006; Zheng et al., 2018). These methods do not necessarily recover the true causal graph and may be affected by latent confounding, measure-ment error, or selection bias. This matters because causal discovery often supports downstream tasks such as validating causal pathways, selecting ad-justment variables, and identifying intervention tar-gets (Zanga et al., 2022; Takayama et al., 2025).At the candidate-generation stage, false positives and false negatives can have asymmetric consequences: an included edge may be removed downstream, whereas an omitted causal relation may never be examined. We therefore treat retention of poten-tially relevant causal relations as an explicit design requirement alongside overall graph quality. Candidate-graph formation also relies on do-main knowledge concerning temporal ordering, theoretical regularities, and background mecha-nisms that may be weakly reflected in observed as-sociations. Such knowledge can be incorporated as prior constraints or used to assess estimated structures, but collecting and applying it system-atically is labor-intensive (Hasan and Gani, 2022; Takayama et al., 2025). Recent work has conse-quently explored large language models (LLMs) as scalable tools for knowledge elicitation and causal judgment. LLMs have been used to provide prior knowledge for statistical discovery, support graph estimation, and directly generate causal graphs (Ji-ralerspong et al., 2024; Takayama et al., 2025; Le et al., 2025). Most existing approaches, however, primarily target overall graph quality, efficiency, or judgment reliability rather than premature omis-sion during candidate-graph generation. Prior findings indicate that LLM-based causal judgments depend on how structural context is presented. Triplet prompts can yield more stable causal ordering than pairwise prompts, while de-1arXiv:2609.19944v1 [cs.AI] 17 Sep 2026 composed procedures have been proposed to dis-tinguish direct from indirect causation by identi-fying mediators first (Vashishtha et al., 2025; Cai et al., 2025). Motivated by these findings, we distinguish the construction of structural hypothe-ses from their utilization in direct-edge judgment. Our input-design hypothesis is that explicitly orga-nizing third-variable identities and local structural patterns before judgment can reduce reference-edge omissions relative to requiring these hypothe-ses to be constructed within the same judgment procedure. This motivates evaluating structural pre-organization as a design choice for omission control, without assuming an improvement in the LLM’s underlying reasoning ability. We propose MaSCoD, an omission-oriented multi-agent framework for structural-context-guided candidate causal graph generation. For each ordered variable pair, Phase 1 elicits and selects candidate third variables and assigns them representative Fork, Chain, or Collider patterns. Phase 2 evaluates whether a direct edge should be retained under these auxiliary structural hypotheses. Phase 3 integrates the ordered-pair judgments, resolves bidirectional edges, and attempts BIC-based post-hoc cycle reconciliation using observational data. The resulting graph is treated as a candidate structure for downstream examination rather than as a definitive estimate of the true causal graph. MaSCoD’s novelty lies not in using third variables per se, but in organizing them before direct-causality judgment under the explicit objective of omission control. We address two research questions: (RQ1) to what extent MaSCoD reduces reference-edge omis-sions relative to statistical and LLM-based base-lines, and what false-positive burden accompanies its retention performance across datasets and back-bone settings; and (RQ2) how configurations that differ in the structural hypotheses supplied before direct-edge judgment compare in reference-edge retention and false-positive inclusion, and where in the pipeline reference-edge omissions arise. Our contributions are threefold. First, we frame struc-tural pre-organization as a design problem for omission-oriented candidate causal graph genera-tion, distinguishing which auxiliary hypotheses are made explicit before direct-edge judgment from how they are subsequently used. Second, we in-stantiate this distinction in MaSCoD through third-variable and pattern organization, multi-persona judgment, and graph-level reconciliation. Third, we empirically characterize the implemented de-sign conditions through baseline comparisons, in-formation ablations, and stage-wise retention anal-ysis, examining both the retention benefits of pre-organization and the limits of those benefits. 
+
+2 Related Work 
+
+LLMs have been used to provide background knowledge and conditional-independence judg-ments for statistical causal discovery (Long et al., 2023; Cohrs et al., 2023; Takayama et al., 2025), to generate graph hypotheses directly (Jiralerspong et al., 2024; Roy et al., 2025), and in hybrid procedures that combine LLM reasoning with downstream estimation or refinement (Le et al., 2025; Shen et al., 2025). ASoT (Meier et al., 2025) further uses hierarchical decomposition and multi-agent consensus for agentic causal discov-ery. Across these approaches, recurring design strategies include enriching structural context, de-composing difficult judgments, aggregating multi-ple responses, and reconciling local decisions at the graph level. Prior work primarily emphasizes graph quality, efficiency, or reliability; prema-ture omission during candidate-graph formation is rarely treated as an explicit design objective. Two findings particularly motivate our design. Vashishtha et al. (Vashishtha et al., 2025) report that triplet-based querying can improve causal or-dering relative to pairwise prompting, while Cai et al. (Cai et al., 2025) separate mediator identifica-tion from direct- and indirect-causality judgment. These results suggest that structural context and staged reasoning can change which relations re-main plausible during judgment. However, merely presenting a candidate third variable does not en-sure that the corresponding structural alternative is explicitly considered during direct-edge judgment. By assigning each candidate a local structural role and treating it as a thought-experiment condition, MaSCoD encourages the model to evaluate the direct-edge hypothesis relative to a specified struc-tural context rather than as an isolated pairwise question. MaSCoD builds on this design princi-ple by organizing candidate third variables and lo-cal structural patterns before direct-edge judgment, followed by multi-persona aggregation and graph-level reconciliation. 23 Method 
+
+3.1 Overview 
+
+Let V = {X1, . . . , X n} denote the variable set, let di denote the natural-language description of Xi, and let D denote the observational data. MaSCoD produces an adopted directed graph G∗
+
+through three stages: structural-context construc-tion, direct-edge judgment, and structural recon-ciliation. Here, structural context refers to auxil-iary third-variable identities and their local struc-tural patterns, rather than to the entire prompt or to independently verified causal facts. Phase 1 con-structs and selects these hypotheses, while Phase 2 utilizes them through candidate-level judgment and, when needed, cross-candidate selection. This construction–utilization distinction concerns local edge judgment; Phase 3 separately reconciles the resulting graph. Phases 1 and 2 use variable names and descriptions to process all n(n − 1) ordered pairs; the observational data are used only in the BIC-based reconciliation step in Phase 3. We eval-uate (X, Y ) and (Y, X ) separately because rele-vant third variables and structural hypotheses are direction-specific, and we resolve conflicts only af-ter the two directions have been judged indepen-dently. Each LLM-based stage uses three personas with different domain specializations. Within each stage, the personas receive the same task definition and pair-specific information but contribute differ-ent interpretive perspectives; majority rules are used to consolidate their judgments. Because an ordered pair may be evaluated under multiple third-variable candidates, the effective cost exceeds the number of ordered pairs. The framework is there-fore intended primarily for small-to-medium vari-able sets. Persona definitions, prompts, and de-tailed pseudocode are provided in Appendices C–I. 
+
+3.2 Phase 1: Structural-Context Construction 
+
+For each ordered pair (X, Y ), Phase 1 constructs a candidate set CXY = {(Zj , r j )}, where Zj is a third variable and rj is one of three representa-tive local patterns: Fork (X ← Z → Y ), Chain 
+
+(X → Z → Y ), or Collider (X → Z ← Y ).These patterns provide a compact scaffold for com-paring structural alternatives and are not intended as an exhaustive causal taxonomy. The candidates are auxiliary hypotheses for Phase 2 and are never inserted directly into the adopted graph. Phase 1 follows an NGT-inspired generate-and-narrow procedure (Delbecq et al., 1975; Cantrill et al., 1996). First, each persona independently pro-poses third variables and assigns a pattern to each candidate using the variable descriptions, temporal ordering, physical regularities, and domain knowl-edge. Observed variables are preferred, but un-observed variables may be proposed when needed for explanation.The three candidate lists are then pooled, and duplicate or semantically similar can-didates are merged using embeddings of their candidate-name strings. When a deduplicated clus-ter contains different pattern assignments, the most frequent pattern among its member records is re-tained. Each persona next scores every deduplicated candidate from 1 to 10 according to its impor-tance for judging X → Y . The scores are ag-gregated and presented to the personas, which in-dependently decide whether each candidate should be passed to Phase 2. A candidate is retained when the proportion of valid Yes votes is at least 0.6; when all three persona votes are valid, this is equiv-alent to requiring at least two Yes votes. This proce-dure separates candidate generation, comparison, and acceptance so that Phase 2 receives a struc-tured set of alternatives rather than an unfiltered free-form output. 
+
+3.3 Phase 2: Direct-Edge Judgment 
+
+Phase 2 evaluates whether X → Y should be retained under the auxiliary hypotheses in CXY .The supplied third-variable pattern is treated as a thought-experiment condition rather than as an in-dependently verified causal fact. For each candi-date (Z, r ), the personas consider temporal order-ing, known mechanisms, and the expected change in Y under a hypothetical change in X. Under Fork and Chain hypotheses, they assess whether an ef-fect of X on Y would remain when Z is concep-tually held fixed; under a Collider hypothesis, they assess the relation without conditioning on Z.Candidate-level judgments use seven labels: 
+
+Fork , Fork+Direct , Chain , Chain+Direct ,
+
+Collider , Collider+Direct , and Invalid . La-bels containing +Direct retain X → Y , whereas the corresponding labels without +Direct reject the direct edge under the supplied structural hy-pothesis. Invalid rejects the candidate-pattern hypothesis itself and does not indicate support for 
+
+Y → X. When a structural pattern is specified, the available candidate-level labels are restricted 3Dataset     
+
+> Structural Context Constru ction Direct -Edge Judgement Structural Reconciliation
+> Adopte d
+> Graph Figure 3.1: Overview of the proposed candidate-graph-generation framework. The method takes variable names, natural-language variable descriptions, and observational data as input, and produces an adopted candidate graph through three stages. Phase 1 elicits and selects candidate third variables and structural patterns for each ordered variable pair. Phase 2 estimates whether a direct causal relation should be retained under the third-variable context generated in Phase 1. Phase 3 integrates the resulting ordered-pair judgments, resolves bidirectional edges, and applies post-hoc cycle removal. When cycle removal completes, the adopted output is a DAG; otherwise, the graph obtained after bidirectional-edge resolution is retained as the adopted estimate.
+
+to the two labels associated with that pattern plus 
+
+Invalid ; when the pattern must be inferred, all seven labels are available. Judgment follows a Delphi-inspired procedure with at most two rounds (Dalkey and Helmer, 1963; Linstone and Turoff, 1975). In the first round, the three personas respond independently. If at least two select the same label, that label is adopted. Otherwise, a structured summary of the first-round judgments is returned to the personas for reassessment. If no majority emerges in the sec-ond round, the candidate-level result is mapped to the absence of a direct edge. When Phase 1 retains multiple candidates, the resulting labels and summarized reasons are com-pared, and the personas select the most plausible and explainable candidate-level judgment by ma-jority vote. If only one candidate is retained, its result becomes the pair-level output directly. If 
+
+CXY is empty, a no-predefined-candidate prompt is used, requiring the model to hypothesize a rel-evant third variable and pattern within the same judgment procedure. 
+
+3.4 Phase 3: Structural Reconciliation 
+
+The final Phase 2 labels are first mapped into an intermediate directed graph: labels containing 
+
++Direct add the corresponding edge, while labels without +Direct and Invalid do not.Because op-posite directions are evaluated independently, the intermediate graph may contain both X → Y and 
+
+Y → X. For each such conflict, the three personas compare the two surviving directional hypotheses. Each persona receives the descriptions of X and 
+
+Y and the stored reason supporting each surviv-ing direction. The Phase 1 third-variable candi-dates are not presented again at this stage, and the Phase 2 final labels themselves are not included in the direction-selection prompt. Each persona is required to choose exactly one of X → Y and 
+
+Y → X. The prompt is coupled with a strict structured-output schema that permits only these two values. The direction selected by at least two of the three personas is retained, and the oppo-site direction is removed. Thus, when all three re-sponses are successfully parsed, the bidirectional conflict is always reduced to one directed edge. If directed cycles remain after bidirectional-edge res-4Dataset Vars. Obs. Pairs Ref. edges Auto-MPG 5 392 20 5DWD 6 349 30 6Sachs 11 7,466 110 19 
+
+> Table 4.1: Datasets used in the main experiments. Pairs denotes ordered non-self variable pairs, and Ref. edges denotes the number of directed edges in the adopted ref-erence graph.
+
+olution, MaSCoD applies a post-hoc BIC-based reconciliation procedure using the observational data. It enumerates acyclic candidate graphs ob-tained by removing edges sufficient to break the detected cycles, fits each candidate under a linear-Gaussian structural-equation scoring assumption, and adopts the candidate with the lowest BIC. If this procedure produces no cycle-resolution output, the graph obtained after bidirectional-edge resolu-tion is retained and may still contain directed cy-cles. 
+
+4 Experimental Setup 
+
+Datasets and reference graphs. We evaluate MaSCoD on Auto-MPG, DWD, and Sachs (Quin-lan, 1993; Mooij et al., 2016; Sachs et al., 2005), following the dataset configuration and reference graphs used by Takayama et al. Table 4.1 sum-marizes the three settings. The adopted reference graphs contain 5, 6, and 19 directed edges for Auto-MPG, DWD, and Sachs, respectively. All vari-ables are continuous and are standardized before applying the statistical baselines; the same stan-dardized observations are used for the BIC-based reconciliation in Phase 3. For the LLM-based procedures, we provide only variable names and author-written descriptions that explain variable meaning without explicitly stating target edge di-rections. The complete variable descriptions and adopted reference graphs are provided in the ap-pendix. 
+
+Baselines. We compare MaSCoD with three statistical causal-discovery methods—PC, Exact Search, and DirectLiNGAM—and two LLM-based baselines, LLM-KBCI and MAC (Spirtes et al., 1993; Silander and Myllymäki, 2006; Shimizu et al., 2011; Takayama et al., 2025; Le et al., 2025). The statistical methods are evalu-ated independently of the LLM backbone. For the LLM-based comparisons, MaSCoD, LLM-KBCI, and MAC use the same backbone within each com-parison setting. 
+
+Metrics and repeated runs. The main text re-ports F1, Recall, and false-positive rate (FPR). Re-call directly evaluates the omission-control objec-tive. We interpret it together with FPR to charac-terize the inclusion of non-reference edges, and re-port F1 as a summary of Precision and Recall. All metrics are defined relative to the adopted refer-ence graphs. Full results for normalized Hamming distance (NHD), Precision, and false-negative rate (FNR) are reported in the appendix. For an n-variable graph, NHD is computed as NHD = F P + F N n2 .
+
+For repeated experiments, each metric is computed separately for each run and then summarized by the mean and sample standard deviation. We use GPT-5.4 (gpt5.4-2026-03-05 )as the primary LLM backbone and GPT-4o (gpt-4o-2024-11-20 ) as a second backbone for replication. Both models were accessed through Azure OpenAI Service. We repeat the method comparisons and Phase 1 ablations with GPT-4o to examine whether the observed tendencies persist under a second backbone configuration. This comparison evaluates the pipeline under different backbone settings rather than changing only the judgment model while holding the constructed context fixed. Each LLM-based method and ab-lation condition is run independently three times per dataset. The statistical baselines are evaluated once under the adopted configuration because they do not involve stochastic LLM generation. For GPT-5.4, the temperature was set to 1.0 and the maximum output length to 1,024 tokens; other generation parameters were left at the service de-faults. For GPT-4o, the temperature was set to 0.2 and the maximum output length to 512 tokens; top-p
+
+was left at the service default and random seeds were not fixed. We did not perform hyperparameter search or tune generation parameters on the evaluation datasets; the settings above were fixed for each backbone throughout the corresponding experi-ments. 
+
+Phase 1 ablations. To assess the role of struc-tural pre-organization, we compare four informa-tion conditions. In FULL, Phase 2 receives both the identity of the selected third variable and its 5structural pattern. In IDENTITY ONLY, the third-variable identity is supplied but its structural pat-tern is withheld, requiring Phase 2 to infer the rele-vant Fork, Chain, or Collider relation. In PATTERN ONLY, the structural pattern is supplied while the concrete identity of the third variable is withheld, requiring the model to hypothesize a plausible vari-able consistent with that pattern. In NO PHASE 1, neither the third-variable identity nor the structural pattern is supplied; Phase 2 must hypothesize both before judging whether the direct edge should be retained. For each dataset–backbone setting, Full was evaluated in three runs, each generating its own Phase 1 outputs and executing Phase 2 using those outputs. The partial-information conditions in-stead reused the Phase 1 outputs from Full run 1. This source run was chosen because it was the first in execution order, not on the basis of its generated content or evaluation performance. Identity only was constructed by masking the structural-pattern information in these outputs, whereas Pattern only was constructed by mask-ing the third-variable identity. For each partial-information condition, Phase 2 was executed three times using the same fixed masked inputs. The Phase 1 outputs from Full runs 2 and 3 were not used in the partial-information experiments. Accordingly, Identity only and Pattern only share one source Phase 1 realization per dataset– backbone setting. Their means and sample stan-dard deviations summarize downstream repeti-tions conditional on that realization. In contrast, the Full results aggregate three runs with sepa-rately generated Phase 1 outputs. Comparisons of the partial conditions with the three-run Full mean are therefore not matched across Phase 1 realizations. The downstream prompts and judg-ment requirements therefore differ across condi-tions. Accordingly, the ablation compares im-plemented construction–utilization configurations rather than isolating the effect of context content supplied to an otherwise identical judgment proce-dure. 
+
+Stage-wise retention analysis. For the primary GPT-5.4 experiments, we additionally compare FULL and NO PHASE 1 by tracing every refer-ence edge through the direct-edge judgment and structural-reconciliation stages. A reference edge is counted as retained after Phase 2 when its pair-level label contains +DIRECT. It is counted as re-tained in the final graph only when the same di-rected edge remains in the adopted output. An edge that is retained after Phase 2 but absent from the adopted graph is counted as a loss during Phase 3 reconciliation. These proportions are computed separately for each of the three runs and then sum-marized across runs. 
+
+5 Results 
+
+We report results for the two research questions introduced in Section 1. GPT-5.4 is treated as the primary backbone, and GPT-4o is used to ex-amine whether the observed tendencies persist un-der a second LLM backbone. Unless otherwise noted, results for LLM-based methods are averages over three runs. Because Recall and FPR directly expose the trade-off between retaining reference edges and introducing spurious edges, the main-text tables report these metrics together with F1. Complete results including Precision, FNR, NHD, and sample standard deviations are provided in Ap-pendix M. 
+
+5.1 RQ1: Omission Control Relative to Existing Methods 
+
+Table 5.1 compares MaSCoD with the backbone-independent statistical baselines and the LLM-based baselines evaluated with the same backbone. MaSCoD achieved the highest reported Recall, in-cluding ties, in five of the six dataset–backbone settings. It exceeded every baseline in Recall on DWD with GPT-5.4 (0.944) and on Sachs with GPT-4o (0.684), also achieving the highest F1 in these two settings (0.708 and 0.456, respectively). The accompanying differences in FPR depended on the comparison. On DWD with GPT-5.4, MaS-CoD achieved higher Recall and lower FPR than LLM-KBCI, but higher Recall and higher FPR than MAC. On Sachs with GPT-4o, its Recall ad-vantage over the two LLM-based baselines was ac-companied by higher FPR (0.275, compared with 0.044 for LLM-KBCI and 0.033 for MAC). In the remaining four settings, at least one baseline achieved equal or higher Recall with lower FPR. Thus, a retention advantage over all baselines was observed in two settings, rather than uniformly across the evaluated settings, and its false-positive implications depended on the comparison method. 6Auto-MPG DWD Sachs Backbone Method F1 ↑ R↑ FPR ↓ F1 ↑ R↑ FPR ↓ F1 ↑ R↑ FPR ↓                                                                                 
+
+> –PC .167 .200 .400 .143 .167 .292 .444 .526 .176 DirectLiNGAM .143 .200 .533 .211 .333 .458 .364 .526 .286 Exact Search .615 .800 .267 .353 .500 .333 .385 .526 .253 GPT-5.4 MaSCoD .603 .800 .289 .708 .944 .181 .417 .526 .209 LLM-KBCI .615 .800 .267 .488 .667 .264 .582 .526 .059 MAC .687 .800 .178 .586 .556 .083 .443 .316 .022 GPT-4o MaSCoD .571 .800 .333 .586 .667 .153 .456 .684 .275 LLM-KBCI .684 .867 .222 .601 .667 .139 .395 .298 .044 MAC .605 .800 .289 .543 .556 .125 .390 .281 .033
+> Table 5.1: Comparison with statistical and LLM-based causal-discovery methods. R denotes Recall. Statistical methods are backbone-independent. LLM-based entries are three-run means. Complete metrics and dispersion estimates are reported in Appendix M.
+
+5.2 RQ2: Phase 1 and Its Information Components 
+
+We compare four Phase 1 information condi-tions: Full, Pattern only, Identity only, and No Phase 1. The partial-information conditions reuse the Phase 1 outputs from a single Full run—the first of the three—in each dataset–backbone set-ting. Across both backbones and all three datasets, Full yields higher Recall than No Phase 1, but also higher FPR. Thus, Phase 1 shifts the retention– selectivity operating point rather than uniformly improving graph quality. The partial ablations show no backbone-independent ordering between third-variable identity and structural-pattern information. Under GPT-5.4, Identity only yields higher Recall than Pattern only on all three datasets, whereas this ordering disappears or reverses under GPT-4o. Moreover, Full does not uniformly maximize F1 or Recall. These comparisons with Full are descrip-tive rather than matched-context comparisons, because the Full mean aggregates three separately generated Phase 1 realizations, whereas both par-tial conditions reuse only the first. These results indicate that the contribution of each Phase 1 information component depends on the dataset, backbone, and their combination in downstream judgment. For GPT-5.4, the stage-wise analysis further shows that the Full–No Phase 1 difference largely emerges by the direct-edge judgment stage. Under Full, reference-edge retention from Phase 2 to the final graph was 0.800 →0.800 on Auto-MPG, 0.944 →0.944 on DWD, and 0.702 →0.526 on Sachs. Under No Phase 1, the corresponding values were 0.400 →0.400, 0 →0, and 0.070 →0.070. Thus, no additional reference-edge loss occurred during Phase 3 for No Phase 1 in these experiments, whereas the Full condition on Sachs lost additional edges during structural reconciliation. Complete stage-wise results are reported in Appendix K. 
+
+6 Discussion 
+
+Omission control relative to existing meth-ods. The baseline comparisons identify settings in which MaSCoD provides additional reference-edge retention. Its clearest retention advantages over all evaluated baselines occurred on DWD with GPT-5.4 and on Sachs with GPT-4o. MaS-CoD also achieved the highest reported F1 in these settings, showing that the retention gains were not accompanied by lower F1. The false-positive implications, however, depended on the compari-son method. On DWD with GPT-5.4, MaSCoD improved both Recall and FPR relative to LLM-KBCI, whereas its advantage over MAC involved higher Recall and higher FPR. On Sachs with GPT-4o, the retention advantage over the LLM-based baselines came with higher FPR. In the other four settings, a baseline achieved equal or higher Recall with lower FPR. Thus, matching the highest Recall does not by itself establish a comparative advan-tage. The results support additional retention in specific settings, rather than a general preference for MaSCoD over existing methods. 
+
+Structural context construction and utilization. 
+
+The ablations motivate a construction–utilization perspective on omission-oriented candidate-graph generation. Phase 1 makes selected third-variable hypotheses and their structural interpretations ex-plicitly available before direct-edge judgment, whereas Phase 2 evaluates whether a direct edge 7Auto-MPG DWD Sachs Backbone Condition F1 ↑ R↑ FPR ↓ F1 ↑ R↑ FPR ↓ F1 ↑ R↑ FPR ↓                                                                        
+
+> GPT-5.4 Full .603 .800 .289 .708 .944 .181 .417 .526 .209 Pattern only .442 .533 .289 .535 .611 .167 .393 .421 .147 Identity only .615 .800 .267 .636 .833 .194 .480 .702 .253 No Phase 1 .433 .400 .156 .000 .000 .083 .117 .070 .026 GPT-4o Full .571 .800 .333 .586 .667 .153 .456 .684 .275 Pattern only .571 .800 .333 .571 .667 .167 .371 .719 .451 Identity only .546 .800 .378 .571 .667 .167 .379 .474 .245 No Phase 1 .530 .600 .222 .444 .333 .042 .426 .579 .238
+
+Table 5.2: Phase 1 ablation. Full supplies both third-variable identity and structural-pattern information. All entries are three-run means. For the GPT-4o Sachs partial-information conditions, cycle resolution timed out in all Pattern-only runs and in one Identity-only run; the post-direction-resolution Phase 3 graph was evaluated in those cases, following the pipeline fallback rule. 
+
+should be retained under those hypotheses. No Phase 1 does not eliminate structural reasoning: it instead requires the judgment procedure to con-struct both the third-variable hypothesis and its structural pattern. The design distinction is there-fore between pre-organizing structural alternatives and constructing them within the same procedure that decides whether to retain an edge. Within each backbone setting, Full achieved higher mean Recall and F1 than No Phase 1 on all three datasets, while also increasing FPR. These re-sults support treating structural pre-organization as an explicit object of design and evaluation, rather than attributing the observed candidate-graph per-formance to the backbone alone. Taken together, these findings motivate evalu-ating the construction of structural context jointly with the procedure that uses it, under the explicit objective of omission control. They do not, how-ever, identify an isolated interaction between con-text content and the judgment model. The infor-mation conditions also differ in their prompts and judgment requirements, while changing the back-bone changes both context generation and subse-quent judgment. We therefore interpret the find-ings as evidence about implemented construction– utilization configurations, not as a mechanistic ac-count of improved LLM reasoning. 
+
+Stage-wise constraints on omission control. 
+
+The stage-wise analysis distinguishes two require-ments: retaining reference edges through local judgment and preserving those edges during struc-tural reconciliation. In the implemented pipeline, Phase 3 only selects among existing directions and removes edges. If EP2 and Efinal denote the directed-edge sets after Phase 2 and in the adopted graph, respectively, then Efinal ⊆ EP2 . Conse-quently, 
+
+Rfinal ≤ RP2 ,
+
+where the retention measures are defined in Ap-pendix K. Thus, edges omitted before reconcil-iation cannot be recovered by the implemented Phase 3 procedure. The GPT-5.4 results illustrate both sources of omission. Under No Phase 1, all final reference-edge omissions were already present after Phase 2. Under Full on Sachs, structural reconciliation in-troduced additional losses after local judgment. These findings indicate that final-graph evalua-tion alone does not distinguish insufficient early retention from subsequent loss of retained refer-ence edges. They do not imply that reconcilia-tion should be omitted: the intermediate graph may contain bidirectional conflicts or directed cycles. Rather, structural consistency and reference-edge preservation should be assessed separately when evaluating an omission-oriented pipeline. The present diagnostics localize additional losses to Phase 3 as a whole, not to a particular reconcili-ation substep. 
+
+Roles of the Phase 1 information components. 
+
+The consistent Full–No Phase 1 result should not be interpreted as a monotonic benefit from sup-plying more pre-specified information. Full did not uniformly outperform the partial conditions; for example, Identity only achieved higher Recall and F1 than Full on Sachs with GPT-5.4. The rel-ative ordering of Identity only and Pattern only also differed across the evaluated backbone set-tings. These observations distinguish making a third-variable hypothesis available from specify-ing its structural interpretation in advance, with-8out establishing that either information component has a fixed role in controlling retention or selectiv-ity. The GPT-4o Sachs comparisons require addi-tional caution because cycle resolution timed out in all Pattern-only runs and in one Identity-only run, leading to different reconciliation outcomes across conditions. 
+
+Interpretation and practical scope. Taken to-gether, the results support a design-level ac-count: explicit pre-organization was associated with higher Recall and F1 relative to the imple-mented No Phase 1 condition, while the compara-tive advantage over existing methods and the order-ing of partial-information conditions varied across settings. These are descriptive findings from three runs per condition. Moreover, the backbone com-parisons also involve different generation configu-rations, so their differences cannot be attributed ex-clusively to the underlying model. The practical rationale for omission control is strongest when later processing filters existing can-didates rather than generates new ones. In that set-ting, retained non-reference edges may still be re-moved, whereas omitted reference edges are un-available to the filtering procedure. However, higher retention and F1 do not establish better downstream decisions or justify the additional in-ference cost by themselves. The study evaluates agreement with adopted reference graphs, not inde-pendently verified causal truth, and does not evalu-ate downstream review or filtering outcomes. The value of the resulting candidate graphs therefore depends on the costs of omissions, false positives, and subsequent validation. 
+
+7 Conclusion 
+
+We introduced MaSCoD, an omission-oriented framework that explicitly organizes third-variable hypotheses and local structural patterns before uti-lizing them in direct-edge judgment. Across all six dataset–backbone settings, Full achieved higher mean Recall and F1 than No Phase 1, while also increasing FPR. This con-sistent comparison with the implemented no-pre-organization condition did not translate into uni-form superiority over existing methods: a reten-tion advantage over all evaluated baselines was ob-served on DWD with GPT-5.4 and on Sachs with GPT-4o. Moreover, Full did not uniformly outper-form the partial-information conditions. The GPT-5.4 stage-wise analysis distinguished omissions already present after local judgment from additional losses during reconciliation. To-gether, these findings support structural pre-organization as an explicit design and evaluation target for omission control. They motivate eval-uating how structural hypotheses are constructed jointly with how they are used in judgment, while separately assessing whether retained edges sur-vive graph-level reconciliation. 
+
+Limitations 
+
+Interpretation of the Phase 1 ablations. The four ablation conditions differ not only in the amount of structural information supplied to Phase 2, but also in which parts of the structural hypothesis must be inferred within the downstream prompt. In FULL, both third-variable identity and structural-pattern information are supplied; in the partial conditions, one of these is withheld; and in NO PHASE 1, both must be hypothesized dur-ing Phase 2. The observed differences therefore should not be interpreted as isolated causal ef-fects of Phase 1 or of either information compo-nent. Rather, they characterize differences among the implemented design conditions, which jointly vary the supplied information and the reasoning re-quired from the model. 
+
+Evaluation scope and statistical uncertainty. 
+
+The evaluation covers only three datasets with 5, 6, and 11 variables. These benchmarks differ si-multaneously in domain, graph size, density, and structural characteristics, making it difficult to iso-late which dataset property accounts for a particu-lar retention–selectivity profile. The results there-fore should not be generalized directly to substan-tially larger graphs or to domains not represented by Auto-MPG, DWD, and Sachs. Each LLM-based method and ablation condition was evaluated over three runs per dataset. We re-port descriptive means and sample standard de-viations but do not conduct formal significance tests or estimate confidence intervals. Three repeti-tions remain limited for characterizing the stochas-tic variability of LLM-based graph generation, par-ticularly when the observed differences between conditions are small. The reported comparisons should therefore be interpreted descriptively rather than as precise estimates of expected performance differences. 9Reference-graph and reconciliation assump-tions. Performance is measured against refer-ence graphs adopted from prior work. These graphs depend on domain assumptions and evalu-ation conventions and should not be interpreted as unique or definitive representations of the underly-ing causal structures. The reported metrics there-fore measure agreement with the adopted reference graphs rather than recovery of independently veri-fied causal truth. Phase 3 additionally relies on BIC under a linear-Gaussian structural equation scoring assumption. We do not evaluate robustness to alternative sta-tistical scoring rules or violations of this assump-tion. Moreover, when cycle reconciliation does not complete, the graph after bidirectional-edge reso-lution is retained and may still contain directed cy-cles. This fallback occurred in the GPT-4o Sachs partial ablations: cycle resolution did not com-plete in all three PATTERN ONLY runs and in one of the three IDENTITY ONLY runs. The component-level Sachs results under GPT-4o should therefore be interpreted with particular caution because the adopted outputs were not produced under identical reconciliation outcomes across conditions. 
+
+Model, decoding, and persona dependence. 
+
+We evaluate two proprietary LLM backbones, GPT-5.4 and GPT-4o. Although this provides a di-rect check of whether observed tendencies persist across two models, it does not establish backbone invariance. The two backbones were also eval-uated under different generation configurations: GPT-5.4 used temperature 1.0 and a maximum out-put length of 1,024 tokens, whereas GPT-4o used temperature 0.2 and a maximum output length of 512 tokens. Consequently, differences between the two settings cannot be attributed exclusively to the backbone itself; decoding and service con-figuration may also contribute to the observed per-formance profiles. Evaluation across additional model families under more closely matched gen-eration settings is required to determine the gener-ality of the observed effects. In addition, the three personas are instanti-ated using the same underlying language model. Their judgments are therefore not statistically inde-pendent expert samples, and majority agreement should not be interpreted as independent expert consensus. The persona roles and domain special-izations were manually specified, and alternative role definitions or numbers of personas may pro-duce different outputs. 
+
+Practical utility, cost, and component attribu-tion. MaSCoD requires substantially more LLM calls than a one-shot pairwise baseline because it combines candidate generation, persona-based evaluation, candidate selection, iterative direct-edge judgment, and graph-level reconciliation. This limits its applicability when latency, mone-tary cost, energy consumption, or large-scale graph discovery is a primary concern. The present experiments evaluate the candidate graphs directly against reference graphs but do not evaluate subsequent expert review, statistical test-ing, graph pruning, or application-specific deci-sion outcomes. Consequently, higher edge reten-tion does not by itself establish that the resulting candidate graph leads to better downstream deci-sions. A retention-oriented operating point may be useful when reliable downstream filtering is avail-able, but may be undesirable when false positives are particularly costly. Finally, the ablations vary the information sup-plied from Phase 1 but do not separately iden-tify the contributions of the three-persona de-sign, the NGT-inspired candidate-organization pro-cedure, the Delphi-inspired judgment procedure, or the specific aggregation rules. The reported results therefore characterize the behavior of the implemented pipeline rather than the independent contribution of every procedural component. 
+
+Ethical Considerations 
+
+MaSCoD is intended for research-oriented candidate-graph generation rather than as asubstitute for domain expertise or interventional validation. Incorrectly retained or omitted edges could lead to misleading causal interpretations, particularly in high-stakes applications. We therefore recommend treating the adopted graph as a set of structural hypotheses for subsequent expert review and statistical or experimental validation. The experiments in this study do not involve human annotation or a newly conducted human-participant study. 
+
+References   
+
+> Ruichu Cai, Shengyin Yu, Jiahao Zhang, Wei Chen, Boyan Xu, and Keli Zhang. 2025. Dr.ECI: Infus-ing large language models with causal knowledge for decomposed reasoning in event causality identifica-tion. In Proceedings of the 31st International Con-
+
+10 ference on Computational Linguistics , pages 9346– 9375, Abu Dhabi, UAE. Association for Computa-tional Linguistics. J. A. Cantrill, B. Sibbald, and S. Buetow. 1996. The Delphi and nominal group techniques in health ser-vices research. International Journal of Pharmacy Practice , 4(2):67–74. David Maxwell Chickering. 2002. Optimal structure identification with greedy search. Journal of Ma-chine Learning Research , 3:507–554. Kai-Hendrik Cohrs, Emiliano Diaz, Vasileios Sitokon-stantinou, Gherardo Varando, and Gustau Camps-Valls. 2023. Large language models for constrained-based causal discovery. In AAAI 2024 Workshop on ”Are Large Language Models Simply Causal Par-rots?” .Norman Dalkey and Olaf Helmer. 1963. An experimen-tal application of the delphi method to the use of ex-perts. Management Science , 9(3):458–467. André L. Delbecq, Andrew H. Van de Ven, and David H. Gustafson. 1975. Group Techniques for Program Planning: A Guide to Nominal Group and Delphi Processes . Scott, Foresman, Glenview, IL. Clark Glymour, Kun Zhang, and Peter Spirtes. 2019. Review of causal discovery methods based on graphi-cal models. Frontiers in Genetics , Volume 10 - 2019. Uzma Hasan and Md Osman Gani. 2022. Kcrl: A prior knowledge based causal discovery framework with reinforcement learning. In Proceedings of the 7th Machine Learning for Healthcare Conference , vol-ume 182 of Proceedings of Machine Learning Re-search , pages 691–714. PMLR. Thomas Jiralerspong, Xiaoyin Chen, Yash More, Vedant Shah, and Yoshua Bengio. 2024. Efficient causal graph discovery using large language models. 
+
+Preprint , arXiv:2402.01207. Hao Duong Le, Xin Xia, and Zhang Chen. 2025. Multi-agent causal discovery using large language models. 
+
+Preprint , arXiv:2407.15073. Harold A. Linstone and Murray Turoff, editors. 1975. 
+
+The Delphi Method: Techniques and Applications .Addison-Wesley, Reading, MA. Stephanie Long, Alexandre Piché, Valentina Zant-edeschi, Tibor Schuster, and Alexandre Drouin. 2023. Causal discovery with language models as im-perfect experts. In ICML 2023 Workshop on Struc-tured Probabilistic Inference & Generative Model-ing .Sven Meier, Pratik Narendra Raut, Felix Mahr, Nils Thielen, Jörg Franke, and Florian Risch. 2025. Struc-tured knowledge-based causal discovery: Agentic streams of thought. Information Processing & Man-agement , 62(5):104202. Joris M. Mooij, Jonas Peters, Dominik Janzing, Jakob Zscheischler, and Bernhard Schölkopf. 2016. Dis-tinguishing cause from effect using observational data: Methods and benchmarks. Journal of Machine Learning Research , 17(32):1–102. R. Quinlan. 1993. Auto MPG. Amartya Roy, N Devharish, Shreya Ganguly, and Kri-pabandhu Ghosh. 2025. Causal-LLM: A unified one-shot framework for prompt- and data-driven causal graph discovery. In Findings of the Association for Computational Linguistics: EMNLP 2025 , pages 8259–8279, Suzhou, China. Association for Compu-tational Linguistics. Karen Sachs, Omar Perez, Dana Pe’er, Douglas A. Lauffenburger, and Garry P. Nolan. 2005. Causal protein-signaling networks derived from multipa-rameter single-cell data. Science , 308(5721):523– 529. ChengAo Shen, Zhengzhang Chen, Dongsheng Luo, Dongkuan Xu, Haifeng Chen, and Jingchao Ni. 2025. Exploring multi-modal data with tool-augmented LLM agents for precise causal discovery. In Find-ings of the Association for Computational Linguis-tics: ACL 2025 , pages 636–660, Vienna, Austria. As-sociation for Computational Linguistics. Shohei Shimizu, Patrik O. Hoyer, Aapo Hyvärinen, and Antti Kerminen. 2006. A linear non-gaussian acyclic model for causal discovery. J. Mach. Learn. Res. ,7:2003 ‒2030. Shohei Shimizu, Takanori Inazumi, Yasuhiro Sogawa, Aapo Hyvarinen, Yoshinobu Kawahara, Takashi Washio, Patrik O Hoyer, Kenneth Bollen, and Pa-trik Hoyer. 2011. Directlingam: A direct method for learning a linear non-gaussian structural equa-tion model. Journal of Machine Learning Research-JMLR , 12(Apr):1225–1248. Tomi Silander and Petri Myllymäki. 2006. A simple ap-proach for finding the globally optimal bayesian net-work structure. In Proceedings of the Twenty-Second Conference on Uncertainty in Artificial Intelligence ,UAI’06, page 445 ‒452, Arlington, Virginia, USA. AUAI Press. Peter Spirtes, Clark Glymour, and Richard Scheines. 1993. Causation, Prediction, and Search , vol-ume 81. Masayuki Takayama, Tadahisa OKUDA, Thong Pham, Tatsuyoshi Ikenoue, Shingo Fukuma, Shohei Shimizu, and Akiyoshi Sannai. 2025. Integrating large language models in causal discovery: A sta-tistical causal approach. Transactions on Machine Learning Research .Aniket Vashishtha, Abbavaram Gowtham Reddy, Abhi-nav Kumar, Saketh Bachu, Vineeth N. Balasubrama-nian, and Amit Sharma. 2025. Causal order: The key to leveraging imperfect experts in causal infer-ence. In The Thirteenth International Conference on Learning Representations .
+
+11 Alessio Zanga, Elif Ozkirimli, and Fabio Stella. 2022. A survey on causal discovery: Theory and practice. 
+
+Int. J. Approx. Reasoning , 151(C):101 ‒129. Xun Zheng, Bryon Aragam, Pradeep Ravikumar, and Eric P. Xing. 2018. Dags with no tears: continuous optimization for structure learning. In Proceedings of the 32nd International Conference on Neural In-formation Processing Systems , NIPS’18, page 9492 ‒
+
+9503, Red Hook, NY, USA. Curran Associates Inc. 
+
+Appendix A Dataset Details 
+
+LLM input. For the LLM-based procedures, the observational data were not provided directly to the model. Instead, the model received the vari-able names and the natural-language descriptions listed below. The descriptions were written to pro-vide the semantic information required to interpret each variable, including what it measures and how larger or smaller values should generally be under-stood, without explicitly stating the target causal di-rections. Nevertheless, because such semantic de-scriptions may themselves inform causal judgment, they should not be regarded as strictly causally neu-tral inputs. The wording below reproduces the descriptions used in the experiments. We retain these descrip-tions without substantive revision because chang-ing them would alter the experimental input. The observational datasets, preprocessing procedure, sample sizes, and reference-graph configuration are described in Section 4. 
+
+A.1 Auto-MPG 
+
+Auto-MPG is a benchmark dataset contain-ing vehicle specifications and fuel-efficiency measurements (Quinlan, 1993). We use the five continuous variables mpg , displacement ,
+
+horsepower , weight , and acceleration ; the discrete Cylinders variable is excluded. 
+
+A.2 DWD 
+
+The DWD dataset contains geographic, topo-graphic, and meteorological variables derived from observations published by the Deutscher Wetterdienst (Mooij et al., 2016). We use the six variables Latitude , Longitude , Altitude ,
+
+Precipitation , Sunshine , and Temperature .
+
+A.3 Sachs 
+
+The Sachs dataset contains continuous-valued mea-surements of protein phosphorylation and intracel-lular signaling (Sachs et al., 2005). We use the 11 variables raf , mek , plc , pip2 , pip3 , erk , akt , 
+
+> Weight Displacement Horsepower Acceleration Mpg
+
+Figure B.1: Reference graph adopted for Auto-MPG data. 
+
+pka , pkc , p38 , and jnk . Because most variable names are abbreviations, the descriptions identify the corresponding molecule or activity state while avoiding explicit statements of the evaluated edge directions. 
+
+Appendix B Reference Graphs 
+
+This appendix reports the reference graphs used for evaluation. For Auto-MPG, DWD, and Sachs, we follow the evaluation configuration adopted in prior work (Takayama et al., 2025). These graphs are used as benchmark reference structures and should not be interpreted as uniquely verified causal graphs for the corresponding domains. Ac-cordingly, the reported metrics quantify agreement with the adopted reference graphs. 
+
+B.1 Auto-MPG Reference Graph 
+
+The Auto-MPG reference graph contains five di-rected edges. 
+
+B.2 DWD Reference Graph 
+
+The DWD reference graph contains six directed edges. The graph is used as an evaluation refer-    
+
+> Latitude Longitude Altitude Temperature Precipitation Sunshine
+
+Figure B.2: Reference graph adopted for the DWD cli-mate data. 
+
+ence rather than as a claim that these six relations constitute a unique complete causal model of the climate system. 
+
+B.3 Sachs Reference Graph 
+
+The Sachs reference graph contains nineteen di-rected edges: 12 Variable Description 
+
+mpg Fuel efficiency (miles per gallon). A performance indicator that reflects overall driving efficiency and vehicle specifications. Larger values indicate better fuel efficiency; smaller values indicate poorer fuel efficiency. 
+
+displacement Engine displacement (cubic inches). A basic parameter representing total cylinder volume. Larger values generally indicate greater torque and fuel consumption; smaller values indicate a smaller engine and a ten-dency toward efficiency-oriented design. 
+
+horsepower Total horsepower (dynamometer rating). Represents maximum engine output. Larger values indicate higher output; smaller values indicate lower output. 
+
+weight Vehicle weight (pounds). The weight of the vehicle body including occupants and cargo in typical use. Larger values indicate a heavier vehicle; smaller values indicate a lighter vehicle and typically better maneuverability. 
+
+acceleration 0–60 mph acceleration time (seconds). A dynamic indicator of responsiveness from standstill. Larger values indicate slower acceleration; smaller values indicate quicker acceleration. 
+
+Table A.1: Variable descriptions supplied to the LLM for Auto-MPG. 
+
+Variable Description 
+
+Latitude Latitude (decimal degrees). A coordinate indicating north–south position on the Earth. Larger values indi-cate a more northerly location; smaller values indicate a more southerly location. 
+
+Longitude Longitude (decimal degrees). A coordinate indicating east–west position on the Earth. Larger values indi-cate a location farther east; smaller values indicate a location farther west. 
+
+Altitude Altitude (meters). A topographic indicator representing the elevation of the observation site. Larger values indicate higher elevation; smaller values indicate lower elevation or proximity to sea level. 
+
+Precipitation Precipitation amount (mm/day). A daily cumulative measure of rain or snow converted into water equivalent. Larger values indicate wetter conditions; smaller values indicate drier conditions. 
+
+Sunshine Sunshine duration. Indicates the effective amount of daily sunshine. Larger values indicate sunnier condi-tions and longer sunshine duration; smaller values indicate cloudier conditions and less sunshine. 
+
+Temperature Mean air temperature ( ◦C/day). Represents the 24-hour average temperature at the observation site. Larger values indicate warmer conditions; smaller values indicate colder conditions. 
+
+Table A.2: Variable descriptions supplied to the LLM for DWD.    
+
+> pip3 plc pip2 pkc raf pka mek p38 jnk erk akt
+
+Figure B.3: Reference graph adopted for the Sachs pro-tein data. 
+
+As with DWD, this graph is treated as an adopted evaluation reference rather than as auniquely established biological causal network. 
+
+B.4 Evaluation Interpretation 
+
+All Precision, Recall, F1, FPR, FNR, and NHD values in this paper are computed relative to the reference graphs above. The complete numerical results are reported in Appendix M. Thus, state-ments about retained, omitted, or non-reference edges refer to agreement with these adopted refer-ence structures rather than to independently veri-fied causal truth. 
+
+Appendix C Persona Specialization Definitions 
+
+We use three manually specified personas for each dataset to introduce different domain-relevant per-spectives into candidate generation and causal judgment. Within each stage, the personas receive the same task definition and pair-specific informa-tion; only their role framing and specialization dif-fer. No persona is given the reference graph or the correct label for any variable pair. The persona mechanism is therefore intended to expose differ-ent considerations within the prompt, rather than to encode the evaluated causal structure. All personas are instantiated using the same un-derlying language model. Their outputs should consequently not be interpreted as statistically in-dependent expert judgments, and majority agree-ment does not constitute independent human-expert consensus. The number of personas and their specializations were not optimized; the con-figurations in Tables C.1, C.2, and C.3 were fixed 13 Variable Description                 
+
+> raf RAF kinase activity. Refers to a family of serine/threonine kinases upstream in the MAPK cascade. Larger values indicate higher activity; smaller values indicate lower activity.
+> mek MEK phosphorylation level. Represents the state of a dual-specificity kinase in the middle of the MAPK cascade. Larger values indicate greater phosphorylation; smaller values indicate a state closer to non-phosphorylated.
+> plc Phospholipase C activity. An indicator of membrane-associated enzymes that hydrolyze PIP2. Larger values indicate higher activity; smaller values indicate lower activity.
+> pip2 PIP2 abundance. Represents the amount of phosphoinositide in the inner leaflet of the cell membrane. Larger values indicate a larger pool; smaller values indicate a smaller pool.
+> pip3 PIP3 abundance. Represents the amount of phosphoinositide generated by PI3K. Larger values indicate greater abundance; smaller values indicate lower abundance.
+> erk ERK phosphorylation level. Represents the state of a downstream kinase in the MAPK cascade. Larger values indicate greater phosphorylation; smaller values indicate lower activity.
+> akt AKT kinase activity. Represents the output of a PIP3-dependent serine/threonine kinase. Larger values indicate higher activity; smaller values indicate lower activity.
+> pka PKA activity. Represents the output of a cAMP-dependent serine/threonine kinase. Larger values indicate higher activity; smaller values indicate lower activity.
+> pkc PKC activity. An indicator of a family of serine/threonine kinases responsive to DAG and Ca 2+ .Larger values indicate higher activity; smaller values indicate lower activity.
+> p38 p38 MAPK phosphorylation level. Represents the state of a stress-responsive MAP kinase. Larger values indicate greater phosphorylation; smaller values indicate lower activity.
+> jnk JNK kinase activity. Represents the output of a stress-responsive MAP kinase. Larger values indicate higher activity; smaller values indicate lower activity.
+
+Table A.3: Variable descriptions supplied to the LLM for Sachs. 
+
+throughout the experiments. The tables reproduce the persona specifications used in the prompts. 
+
+Appendix D Overall Workflow Pseudocode 
+
+This appendix presents the overall workflow of the proposed method in algorithmic form. In the main text, the method is described as a staged proce-dure consisting of Phase 1 through Phase 3. How-ever, from the textual description alone, it may not be immediately clear at which unit the inputs are processed and how the output of each phase is passed to the next phase. This appendix there-fore makes explicit the overall dependency struc-ture from the input variable set, natural-language descriptions, observational data, and persona set to the final adopted graph. The proposed method consists of four major steps. First, for each ordered variable pair, Phase 1 selects candidate third variables and structural pat-terns. Second, conditioned on the candidate set ob-tained in Phase 1, Phase 2 determines whether a direct effect remains for the ordered pair. Third, when both directions survive for the same un-ordered variable pair, Phase 3 performs a binary comparison between the two directions. Each of the three personas must select either X → Y or 
+
+Y → X, and the direction receiving at least two votes is retained. Finally, if directed cycles remain after bidirectional-edge resolution, a BIC-based post-hoc cycle-removal procedure is applied using the observational data, yielding the final adopted graph. The key distinction is that Phases 1 and 2 are exe-cuted at the level of ordered variable pairs, whereas Phase 3 and the subsequent cycle-removal step op-erate on the graph obtained by aggregating the Phase 2 outputs. In other words, the first part of the procedure accumulates local judgments, and the later part reconciles those judgments into a glob-ally coherent graph. Making this difference in pro-cessing units explicit is important for understand-ing the proposed method. The pseudocode in this appendix is not intended to restate the full internal procedure of each phase. The details of candidate generation and aggrega-tion in Phase 1 are provided in Appendix F, the de-tailed judgment procedure in Phase 2 is provided in Appendix G, and the Phase 3 procedures, in-cluding bidirectional-edge resolution and cycle re-moval, are provided in Appendix I. The role of this appendix is to connect these component algo-rithms at a higher level and to clarify the execution order and data flow of the full method. As shown in Algorithm D.1, the proposed method first performs local judgments for all or-dered variable pairs and then integrates those judg-ments into an intermediate graph. It then pro-cesses two types of structural inconsistency in se-14 Role Specialty description Primary perspective Statistician Classical regression, causal inference, and diagnosis of multicollinearity and confounding. Organizing variable dependencies, assessing possible confounding, and interpreting statistical relationships. Automotive engineer Powertrain dynamics, combustion efficiency, drivetrain design, and vehicle integration. Vehicle mechanisms, physical laws, and mechanistic consistency among performance indicators. Machine learning engineer Feature engineering, leakage detection, reproducible pipelines, and model monitoring. Separation of variable roles, feature redundancy, and predictive interpretability. 
+
+Table C.1: Persona configurations used for Auto-MPG.      
+
+> Role Specialty description Primary perspective Lead climatologist Observation quality control, climate variability, and extreme events. Meaning of meteorological observations, physical consistency, and climatological interpretation. Geospatial analyst Spatial referencing, coordinate-system consistency, terrain-aware interpolation, and coverage diagnostics. Interpretation of geographic attributes such as latitude, longitude, and altitude, and the influence of spatial configuration. Causal statistics lead Time-series decomposition, generalized additive models, and causal sensitivity analysis for climate factors. Organizing structural dependence, assessing possible confounding, and interpreting statistical models.
+
+Table C.2: Persona configurations used for DWD. 
+
+quence: bidirectional edges and directed cycles. Bidirectional-edge resolution addresses conflicts that arise when opposite local judgments both sur-vive for the same unordered pair. For each conflict, three personas independently make a binary choice between the two directions, and the direction re-ceiving at least two valid votes is retained. Cycle removal addresses cases in which the graph still vi-olates the DAG constraint after bidirectional-edge resolution. Because these two inconsistencies have different roles, they are handled in separate stages. The final cycle-removal step is not applied to ev-ery pairwise judgment. It is invoked only when directed cycles remain after Phase 3. This distinc-tion is important because the core of the proposed method lies in LLM-based local judgment, while the BIC-based step is a minimal statistical recon-ciliation procedure used only when necessary to obtain a final adopted graph. The phrase “map all pairwise labels into directed edge candidates” in Algorithm D.1 summarizes the conversion from Phase 2 labels to graph edges. In the implementation, labels containing Direct are mapped to the presence of the corresponding di-rected edge, whereas labels without Direct and the Invalid label are mapped to the absence of that edge. The intermediate graph is then con-structed by aggregating these edge-level decisions over all ordered pairs. The purpose of this algorithm is to clarify the overall execution order of the proposed method. It does not expand the prompt content, majority-vote rules, candidate-scoring procedure, or BIC com-putation used in each component. Those details are separated into the corresponding appendices so that readers can first understand the global work-flow and then inspect the implementation details of each phase as needed. 
+
+Software environment. The experi-ments were implemented in Python using 
+
+causal-learn 0.1.3.6, NumPy 1.26.4, pan-das 2.3.3, scikit-learn 1.7.1, and SciPy 1.16.1. Semantic deduplication used 
+
+sentence-transformers/all-MiniLM-L6-v2 
+
+with the community_detection procedure and the settings described in Appendix F. 
+
+Appendix E Phase 1 Candidate-Generation Prompt 
+
+This appendix reproduces the prompt used to gen-erate candidate third variables in Phase 1. The experiments used the original Japanese prompt shown below. The English version is provided only for readability and was not used as a sepa-rate experimental condition. For each ordered vari-able pair (X, Y ), the prompt asks each persona to propose third variables Z and assign each candi-date a Chain, Fork, or Collider pattern. This stage 15 Role Specialty description Primary perspective Systems biologist Graphical causal models, biochemical network inference, and perturbation analysis. Overall network structure, pathway dependencies, and consistency of structural hypotheses. Molecular signaling engineer Kinase cascades, phosphoproteomics, and feedback control in T-cell signaling assays. Local mechanisms, molecular reactions, and ordering relations along signaling pathways. Experimental scientist Flow cytometry, multiplex assays, and quality control for repeated experiments. Meaning of measured quantities, experimental conditions, and interpretation of observations. 
+
+Table C.3: Persona configurations used for Sachs. 
+
+Algorithm 1 Overall Workflow of the Proposed Method 1: Input: variable set V = {X1, . . . , X n}, natural-language descriptions for all variables in V , observational data D, and persona set P = {p1, p 2, p 3}.2: Output: adopted directed graph G∗, which is acyclic if no directed cycle remains after bidirectional-edge resolution or if post-hoc cycle removal completes. 3: Enumerate all ordered variable pairs (X, Y ) such that X, Y ∈ V and X̸ = Y .4: Initialize L ← ∅ .5: for all ordered pairs (X, Y ) do 
+
+6: Run Phase 1 for (X, Y ), using the variable descriptions and persona set P , and obtain the selected candidate set CXY .7: Run Phase 2 for (X, Y ), conditioned on CXY , and obtain the final pairwise label ℓXY .8: Add ℓXY to L.9: end for 
+
+10: Map all pairwise labels in L into directed edge candidates and construct an intermediate directed graph G.11: Specifically, if ℓXY is mapped to the presence of a direct effect from X to Y , add X → Y to G; otherwise, do not add 
+
+X → Y .12: if G contains both X → Y and Y → X for any unordered variable pair then 
+
+13: Run Phase 3 bidirectional-edge resolution. 14: Update G by retaining the selected direction according to the Phase 3 decision rule. 15: end if 
+
+16: Store the graph obtained after bidirectional-edge resolution as Gbi .17: if Gbi contains one or more directed cycles then 
+
+18: Attempt post-hoc cycle removal based on BIC using observational data D.19: if cycle removal completes and produces an acyclic output then 
+
+20: Update G to the selected acyclic graph. 21: else 
+
+22: Set G ← Gbi .23: end if 
+
+24: else 
+
+25: Set G ← Gbi .26: end if 
+
+27: G∗ ← G.28: return G∗.
+
+generates auxiliary structural hypotheses; it does not determine whether the direct edge X → Y
+
+is retained. Candidate merging, scoring, and final Phase 1 selection are described in Appendix F. 
+
+Prompt E.1: Original Japanese prompt. 
+
+【タスク】 
+
+変数ペア X → Y の関係を理解するために 考慮すべき第三要因 Z を列挙してください。 
+
+【第三要因の構造】 
+
+第三要因は次の 3 つの構造を意識して挙げ てください。 
+
+1. 媒介（ chain ）
+
+X が Z を経由して Y に影響する。 例：気温 → 需要 → 売上 
+
+2. 共通原因（ fork ）
+
+Z が X と Y の両方に影響する。 例：景気 → 消費と株価 
+
+3. 共通結果（ collider ）
+
+X と Y が Z に影響する。 例：雨量と交通量 → 渋滞 
+
+【候補変数の条件】 
+
+各候補 Z について以下を満たしてください。 
+
+• X–Z および Z–Y の関係が、ドメイン 知識・物理法則・時間順序と整合する かを確認する。 
+
+• 整合する理由を 1 文で説明し、 法則名・ メカニズム・式のいずれかを最低 1 つ挙げる。 
+
+• 事前推定が提示される場合は参考にし てよい。ただし可能性ベースの情報の ため、矛盾の可能性だけで機械的に除 外しない。 
+
+• 観測変数以外（未観測変数）も提示可 能。 ただし、 同じ役割の観測変数が VARS 
+
+にある場合は観測変数を優先する。 
+
+16 • Z は X と Y の両方と因果的または機 構的な関係を持つ可能性があるものに 限定する。 
+
+【対象変数】 
+
+<PAIR><X> → <Y></PAIR> <VARS> < 変数集合の説明文（ JSON 形式） ></VARS> 
+
+【出力形式】 
+
+JSON 配列のみを出力してください。 
+
+[{"var": "...", "pattern": "chain|fork|collider", "reason": "..." }]
+
+Prompt E.2: English translation. 
+
+[Task] 
+
+List candidate third variables Z that should be considered when interpreting the relation X →
+
+Y .
+
+[Third-variable structures] 
+
+Consider the following three structural patterns when proposing third variables. 1. Chain 
+
+X affects Y through Z.Example: temperature → demand → sales. 2. Fork 
+
+Z affects both X and Y .Example: economic conditions → con-sumption and stock prices. 3. Collider 
+
+X and Y both affect Z.Example: rainfall and traffic volume →
+
+congestion. 
+
+[Conditions for candidate variables] 
+
+Each proposed candidate Z must satisfy the fol-lowing conditions. • Check whether the X–Z and Z–Y rela-tions are consistent with domain knowl-edge, physical laws, and temporal ordering. • Explain the reason for this consistency in one sentence and mention at least one rele-vant law, mechanism, or equation. • If prior estimates are provided, they may be used as supporting information. However, because they represent possibilities rather than established facts, do not mechanically exclude a candidate solely because of a pos-sible inconsistency. • Variables not included in the observed vari-able set may also be proposed. However, when an observed variable in VARS can play the same role, prioritize the observed vari-able. • Restrict Z to variables that may have a causal or mechanistic relation with both X
+
+and Y .
+
+[Target variables] 
+
+<PAIR> <X> -> <Y> </PAIR> <VARS> <Variable descriptions in JSON format> </VARS> 
+
+[Output format] 
+
+Output only a JSON array. 
+
+[{"var": "...", "pattern": "chain|fork|collider", "reason": "..." }]
+
+The generated candidates are not passed directly to Phase 2. They are first pooled across personas, semantically deduplicated, assigned a single struc-tural pattern, scored, and subjected to a binary ac-ceptance vote as described in Appendix F. 
+
+Appendix F Phase 1 Candidate Aggregation and Selection 
+
+Phase 1 converts the third-variable hypotheses gen-erated for each ordered pair (X, Y ) into a consoli-dated candidate set 
+
+CXY = {(zm, r m)}MXY  
+
+> m=1
+
+,
+
+where zm denotes a selected third-variable can-didate and rm ∈ { CHAIN , FORK , COLLIDER } de-notes the structural pattern assigned to that candi-date. The candidates in CXY are auxiliary struc-tural hypotheses for Phase 2 and are not inserted directly into the final graph. 
+
+Candidate elicitation and refinement. For each ordered pair, the three persona processes first gen-erate third-variable candidates using the prompt in Appendix E. The initial candidate-generation calls do not receive the other personas’ candidate lists. The implementation retains at most 12 initially gen-erated candidates per persona. After initial elicitation, the procedure performs reflection, cross-persona question answering, and a self-check before candidate consolidation. The implementation may either explicitly regenerate re-vised candidate opinions or synthesize them from 17 the self-check output, depending on the configured execution path. The initial and revised or synthe-sized candidate records are then pooled for seman-tic deduplication. These intermediate exchanges are used to refine the candidate pool; they do not themselves determine whether a candidate is re-tained in CXY .
+
+Semantic deduplication and pattern con-solidation. Semantic deduplication is per-formed on the candidate-name strings only. Each candidate name is embedded using 
+
+sentence-transformers/all-MiniLM-L6-v2 .The resulting embeddings are clustered using the 
+
+community_detection procedure from Sen-tence Transformers with a cosine-similarity threshold of 
+
+τdedup = 0 .86 
+
+and min_community_size =1. Natural-language candidate descriptions and reasons are not in-cluded in the embedding used for this deduplica-tion step. Within each resulting cluster, the shortest candidate-name string is used as the representa-tive form. If multiple strings have the same mini-mum length, the candidate that appears earlier in the input record order is selected. Each cluster is assigned a single structural pattern by counting the CHAIN, FORK, and COLLIDER labels among its member records and retaining the most fre-quent pattern. The implementation applies no sep-arate semantic tie-breaking procedure when mul-tiple patterns have the same count; the first maxi-mum returned under the member-record ordering is used. Thus, this pattern assignment should be interpreted as consolidation of the generated hy-potheses rather than as a determination of the true structural role of the third variable. 
+
+Candidate scoring and narrowing. After dedu-plication, each persona scores candidate impor-tance for interpreting the direct relation X → Y .For candidate z, let 
+
+sp,z ∈ { 1, . . . , 10 }
+
+denote the valid score retained for persona p. Al-though the scoring prompt contains a textual 0-point category, the implementation validates ac-cepted scores on the interval 1–10 ; invalid or out-of-range score items are subjected to a repair pro-cedure before aggregation. Each persona retains at most 10 scored candi-dates. If the same candidate identifier occurs more than once in a persona’s response, only that per-sona’s highest valid score for the candidate is re-tained. The aggregate score is then 
+
+Sz = ∑   
+
+> p:zscored by p
+
+sp,z .
+
+A candidate omitted from a persona’s retained score list contributes no score from that persona. Candidates are ranked by Sz , and at most the top 10 candidates are passed to the final acceptance procedure. The aggregate score is therefore used for prioritization rather than as a direct acceptance threshold. The implementation also summarizes the scor-ing reasons. When the score pattern indicates re-maining disagreement, additional reflection and cross-persona question answering may be per-formed; otherwise, these follow-up exchanges are skipped. A final self-check is conducted before the acceptance vote. 
+
+Final candidate acceptance. For each candidate entering the final vote, each persona is asked to de-cide whether the candidate should be considered in Phase 2 using a binary Yes /No judgment. The voting context includes the consolidated candidate and pattern, its description, the scoring informa-tion and summarized reasons, and any available follow-up and self-check information. Invalid Yes/No records are excluded, and dupli-cate votes for the same candidate from the same persona are reduced to the first valid vote. For can-didate z, the implementation computes YesRate (z) = NYes (z)
+
+NYes (z) + NNo (z) ,
+
+using the valid votes obtained for that candidate. The candidate is retained when YesRate (z) ≥ 0.6.
+
+When all three persona votes are valid, this cri-terion is equivalent to requiring at least two Yes 
+
+votes. If fewer than three valid votes are available, the denominator contains only the valid Yes/No votes. The resulting Phase 1 output is 
+
+CXY = {(z, r z ) | YesRate (z) ≥ 0.6} .
+
+Accordingly, Phase 1 does not establish whether a proposed third variable is causally true. Rather, 18 Algorithm 2 Phase 1 candidate aggregation and se-lection                                                                                                    
+
+> Require: Ordered variable pair (X, Y );variable descrip-tions d; persona set P={p1, p 2, p 3}
+> Ensure: Selected candidate set CXY
+> 1: Initialize raw candidate records RXY ← ∅
+> 2: for all p∈ P do
+> 3: Lp←GENERATECANDIDATES (X, Y, d, p )▷
+> Appendix E 4: Retain at most 12 initial candidates 5: end for
+> 6: Perform reflection, cross-persona Q&A, and self-check 7: Obtain revised or synthesized candidate records 8: Pool initial and revised records into RXY
+> 9: Embed only the candidate-name strings in RXY using
+> all-MiniLM-L6-v2
+> 10: MXY ←COMMUNITYDETECTION (RXY , τ = 0 .86)
+> 11: for all clusters m∈ M XY do
+> 12: Select the shortest member name as zm
+> 13: Break equal-length ties by input order 14: Set rmto the most frequent member-record pattern 15: end for
+> 16: for all p∈ P do
+> 17: Score at most 10 consolidated candidates on 1–10
+> 18: For duplicate candidate IDs, retain the highest score 19: end for
+> 20: for all consolidated candidates zdo
+> 21: Sz←∑
+> p:zscored by psp,z
+> 22: end for
+> 23: Retain at most the 10 candidates with largest Szas the voting set VXY
+> 24: Perform follow-up reflection/Q&A when required 25: Perform the final self-check 26: Initialize CXY ← ∅
+> 27: for all z∈ V XY do
+> 28: for all p∈ P do
+> 29: Collect a valid ap,z ∈ { Yes ,No }, if available 30: end for
+> 31: qz←NYes (z)/ (NYes (z) + NNo (z))
+> 32: if qz≥0.6then
+> 33: CXY ←CXY ∪ { (z, r z)}
+> 34: end if
+> 35: end for
+> 36: return CXY
+
+it converts open-ended candidate generation into a consolidated set of structural hypotheses to be ex-amined during the Phase 2 thought experiment. 
+
+Appendix G Full Phase 2 Thought-Experiment Prompt 
+
+Phase 2 evaluates whether a direct edge X → Y
+
+should remain after considering the structural con-text produced in Phase 1. For each retained third-variable candidate Z, the method evaluates the or-dered pair under the structural pattern assigned to 
+
+Z. When multiple candidate-level judgments are obtained, they are subsequently integrated into one pair-level judgment. The purpose of Phase 2 is not to establish that the supplied third-variable hypothesis is itself true. Rather, Z and its structural pattern define an auxil-iary counterfactual condition under which the per-sistence of a direct X → Y effect is examined. The prompt therefore treats the Phase 1 output as a hypothesis that may be rejected when it conflicts with temporal ordering, established mechanisms, or domain knowledge. The experiments used Japanese prompts. En-glish translations are provided for readability. Pattern-specific sections for CHAIN, FORK, and COLLIDER, together with the corresponding com-parison conditions, are given in Appendix H. 
+
+G.1 Phase 2 Workflow 
+
+Let 
+
+CXY = {(zc, r c)}MXY 
+
+> c=1
+
+be the candidate set produced by Phase 1. For each candidate c, Phase 2 performs a candidate-level direct-causality judgment and obtains a label 
+
+jc together with a reason. The possible labels are FORK, FORK+DIRECT, CHAIN, CHAIN+DIRECT, COLLIDER, COLLIDER+DIRECT, and INVALID. When a structural pattern is specified, the avail-able labels are restricted to the two labels associ-ated with that pattern plus INVALID. For example, a CHAIN candidate permits CHAIN, CHAIN+DIRECT, and INVALID. When no candidate is predefined, all structural alternatives are available and the model must first hypothesize a third variable and its struc-tural pattern. Labels containing DIRECT indicate that a direct 
+
+X → Y path remains after considering the struc-tural alternative. Labels without DIRECT indicate that the corresponding structural pattern explains the relation without retaining the direct edge. IN-VALID indicates that the direction under evaluation is not supported under the supplied or hypothe-sized structural context. It does not by itself consti-tute evidence for Y → X.
+
+G.2 Candidate-Level Direct-Causality Judgment 
+
+For each candidate Z, the prompt asks whether a causal influence from X to Y remains after the structural role of Z is taken into account. The judg-ment is based on a conceptual intervention on X,rather than requiring X to be directly manipula-ble in a physical experiment. The intervention may therefore correspond to a change in design, condi-tion, policy, environment, composition, or another 19 Algorithm 3 Phase 2 direct-effect judgment 
+
+Require: Ordered pair (X, Y ); Phase 1 candidate set CXY ;variable descriptions d; persona set P = {p1, p 2, p 3}
+
+Ensure: Final Phase 2 label ℓXY 
+
+1: Initialize candidate-level judgments JXY ← ∅ 
+
+2: if CXY = ∅ then 
+
+3: Run the no-predefined-candidate judgment 4: Obtain (j, ρ )
+
+5: return j
+
+6: end if 
+
+7: for all (zc, r c) ∈ CXY do 
+
+8: Run candidate-level judgment for (X, Y, z c, r c)
+
+9: Obtain label jc and reason summary ρc
+
+10: JXY ← JXY ∪ { (zc, j c, ρ c)}
+
+11: end for 
+
+12: if |JXY | = 1 then 
+
+13: return the single candidate-level label 14: else 
+
+15: ℓXY ← SELECTACROSSCANDIDATES (X, Y, J XY , P)
+
+16: return ℓXY 
+
+17: end if 
+
+counterfactual modification that changes the state represented by X.The prompt first requires a plausible mechanism specific to X → Y to be considered. A variable is not rejected merely because it is difficult to manip-ulate directly or appears to be a measured attribute. INVALID is reserved for cases in which X → Y is clearly inconsistent with temporal ordering, physi-cal or domain constraints, or can be rationally ex-plained only in the reverse direction. A mechanism supporting Y → X may not be reused as evidence for X → Y .The treatment of Z depends on its structural pat-tern. For FORK and CHAIN, the thought experi-ment considers whether an effect of changing X
+
+on Y remains after conceptually holding Z fixed. For COLLIDER, the judgment is instead made with-out conditioning on Z, because conditioning on a collider may induce a spurious association. The exact pattern-specific instructions are given in Ap-pendix H. A DIRECT label is selected only when the re-maining change in Y can be supported by a mech-anism specific to X → Y , rather than merely by a path that implicitly changes Z or by another indi-rect explanation. 
+
+G.3 Common Thought-Experiment Prompt 
+
+The following presents the common content of the Japanese prompt. The pattern-dependent blocks are expanded in Appendix H. 
+
+Prompt G.1: Original Japanese prompt skele-ton. 
+
+あなたは {expertise} を専門とする {role} 
+
+です。あなたの専門分野の視点から、与え られた事象間の因果関係の有無についてタ スクを実施してください。 
+
+【タスク】 
+
+X → Y の因果関係を評価し、 第三変数 Z の可能性も考慮したうえで、 X から Y への直 接効果（ direct effect ）の有無を判定してくだ さい。 直接効果とは、 Z を経由しない X → Y の因果経路による影響を指します。 
+
+Z は補助的な仮説として扱い、既知の因果 メカニズム （法則や関係式など） 、一般知識・ ドメイン知識、または時間順序と明確に矛 盾する場合は、その仮定に依存しすぎない でください。 なお、 Y → X のメカニズムを X → Y の根 拠として用いてはいけません。 まず X → Y の因果メカニズムを想定し、 その想定が物理法則・時間順序・ドメイン知識 と明確に矛盾する、または実質的に Y → X
+
+の逆向きでしか成立しない場合に Invalid 
+
+を検討してください。 X が直接操作しにくい 属性・指標であるという理由だけで Invalid 
+
+としてはいけません。 
+
+【対象変数】 
+
+X: {X} （{X_desc} ）
+
+Y : {Y} （{Y_desc} ）
+
+Z: {Z} 
+
+【Z の役割】 
+
+<Appendix H の pattern-specific block> 
+
+【変数操作の定義】 
+
+<Appendix H の pattern-specific block> 
+
+【思考実験】 
+
+<Appendix H の pattern-specific block> 
+
+【判定ラベルの範囲】 
+
+<Appendix H の pattern-specific label set> 
+
+【判断基準】 
+
+<Appendix H の pattern-specific block> 
+
+【出力形式】 
+
+以下の JSON 形式で出力してください。 JSON 
+
+以外の文字列は出力しないでください。 
+
+{"label": "<allowed judgment label>", "reason": "<judgment reason>" }
+
+Prompt G.2: English translation. 
+
+You are a {role} specializing in {expertise} .From the perspective of your specialty, judge the causal relation among the given variables. 
+
+[Task] 
+
+20 Evaluate the causal relation X → Y and deter-mine whether a direct effect from X to Y remains after considering the third-variable hypothesis Z.A direct effect refers here to a causal pathway 
+
+X → Y that does not operate through Z.Treat Z as an auxiliary hypothesis. If the assumed role of Z clearly conflicts with known mecha-nisms, general or domain knowledge, or temporal ordering, do not rely on that hypothesis mechani-cally. Do not use a mechanism supporting Y → X as evidence for X → Y .First consider a plausible mechanism supporting 
+
+X → Y . Consider INVALID when this mech-anism is clearly inconsistent with physical con-straints, temporal ordering, or domain knowledge, or when it can reasonably hold only in the reverse direction. Do not select INVALID solely because 
+
+X is difficult to manipulate directly or is repre-sented as an attribute or index. 
+
+[Target variables] 
+
+X: {X} ({X_desc} )
+
+Y : {Y} ({Y_desc} )
+
+Z: {Z} 
+
+[Role of Z]
+
+<pattern-specific block from Appendix H> 
+
+[Definition of conceptual intervention] 
+
+<pattern-specific block from Appendix H> 
+
+[Thought experiment] 
+
+<pattern-specific block from Appendix H> 
+
+[Available judgment labels] 
+
+<pattern-specific label set from Appendix H> 
+
+[Decision criteria] 
+
+<pattern-specific block from Appendix H> 
+
+[Output format] 
+
+Output only a JSON object. 
+
+{"label": "<allowed judgment label>", "reason": "<judgment reason>" }
+
+G.4 Final Selection Across Third Variables 
+
+When Phase 1 supplies multiple third-variable can-didates, Phase 2 produces multiple candidate-level judgments for the same ordered pair. The method therefore performs a second comparison in which each persona is shown the candidate identifier, candidate-level label, and a summarized reason for each Z.The task at this stage is not to generate another structural hypothesis. Instead, the persona selects the candidate-level judgment that best explains whether a direct X → Y pathway remains. The se-lection emphasizes consistency with the X → Y -specific mechanism, the counterfactual interven-tion, temporal ordering, and the structural role of 
+
+Z.
+
+Prompt G.3: Original Japanese cross-candidate selection template. 
+
+あなたは {expertise} を専門とする {role} 
+
+です。 
+
+【タスク】 
+
+X → Y への直接効果が成り立つのかを判 定するため、提示された Z 候補の中から、 
+
+X → Y 固有の機序と直接経路の有無を最 も適切に説明しているものを 1 つ選んでく ださい。 単に保守的・簡潔という理由ではなく、思 考実験による X から Y への影響を最も適 切に評価している候補を優先してください。 
+
+Y → X のメカニズムを根拠にしている候 補は選択しないでください。 
+
+【選択基準】 
+
+• X → Y 固有の因果メカニズムで説明 されているか。 
+
+• Z を考慮した後にも残る X → Y の直 接経路が理論的に支持されているか。 
+
+• Z が補助仮説であることを踏まえ、 Z
+
+だけでは説明できない経路を検討して いるか。 
+
+• candidate-level judgment の理由が論理 的に一貫しているか。 
+
+【対象変数】 
+
+X: {X} （{X_desc} ）
+
+Y : {Y} （{Y_desc} ）
+
+【Z 候補】 
+
+<candidate ID, candidate name, label, structural diagram, and summarized reason for each candidate> 
+
+【出力形式】 
+
+{"selected_z": "<candidate ID>", "label": "<label attached to the selected candidate>", "reason": "<selection reason>" }
+
+JSON 以 外 の 文 字 列 は 出 力 し な い で く だ さい。 
+
+21 Prompt G.4: English translation.                    
+
+> You are a {role} specializing in {expertise} .Select one of the presented third-variable candi-dates that most appropriately explains whether a direct effect X→Yremains. Do not prefer a candidate merely because it pro-vides a simpler or more conservative explanation. Prefer the judgment that most appropriately eval-uates the effect of a counterfactual change in X
+> on Y. Do not select a candidate whose justifica-tion relies on a mechanism supporting Y→X.Evaluate the candidates according to whether the explanation identifies a mechanism specific to
+> X→Y, whether a direct path remains af-ter accounting for Z, whether alternative path-ways not explained by Zhave been considered, and whether the candidate-level reasoning is in-ternally consistent. Output only:
+> {"selected_z": "<candidate ID>", "label": "<label attached to the selected candidate>", "reason": "<selection reason>" }
+
+The selected label becomes the Phase 2 output 
+
+ℓXY . Only labels containing DIRECT are subse-quently mapped to the presence of the directed edge X → Y ; all other labels are mapped to its absence. 
+
+Appendix H Pattern-Specific Differences in Phase 2 
+
+Appendix G presents the common structure of the Phase 2 direct-causality judgment. This appendix specifies the condition-dependent blocks inserted into that structure. The experiments used the cor-responding Japanese prompt text; the descriptions below are English translations for readability. Three input conditions are distinguished. In the full condition, both the third-variable candidate Z
+
+and its structural pattern are supplied by Phase 1. In the no-predefined-candidate condition, neither 
+
+Z nor its pattern is specified in advance. In the candidate-specified, pattern-unspecified condition, 
+
+Z is provided but its structural pattern is not. The latter condition is used only in the corresponding comparison experiment. Across these conditions, a label containing DI-RECT indicates that a direct X → Y pathway is judged to remain after the relevant structural alter-native has been considered. A label without DI-RECT indicates that the relation can be explained without retaining that direct pathway. INVALID is reserved for cases in which X → Y is strongly contradicted by temporal ordering, physical or do-main constraints, or is reasonably explainable only in the reverse direction. 
+
+H.1 Common Intervention and Directionality Rules 
+
+The implemented prompt defines manipulation of 
+
+X conceptually rather than restricting it to physi-cally executable interventions. Depending on the variable, the hypothetical intervention may cor-respond to a design change, condition change, component replacement, policy or environmental change, relocation, or replacement of the compari-son object. Thus, an attribute, index, or measured quantity is not rejected solely because its numeri-cal value cannot be directly manipulated. Before selecting a label, the persona is asked to identify a plausible mechanism specific to X → Y
+
+and check its consistency with temporal ordering, physical or engineering principles, and domain knowledge. A mechanism supporting Y → X
+
+must not be reused as evidence for X → Y .The supplied Z remains an auxiliary hypothesis. If its assigned role clearly conflicts with domain knowledge or temporal ordering, the persona may evaluate X → Y without relying on that hypoth-esis. However, retaining a DIRECT label requires an independent mechanism supporting X → Y ,rather than merely rejecting the supplied Z.
+
+H.2 Pattern-Specific Blocks in the Full Condition 
+
+When Phase 1 supplies both Z and its structural pattern, the thought experiment is specialized as follows. 
+
+Chain. Z is treated as a mediator candidate, 
+
+X → Z → Y. 
+
+The persona first specifies a conceptual interven-tion on X, then considers a counterfactual situa-tion in which Z is externally held fixed so that the mediated pathway through Z is blocked. If chang-ing X could still change Y , the persona must fur-ther consider whether that change can be explained by another indirect pathway. CHAIN+DIRECT is se-lected only when a mechanism specific to X → Y ,22 not explained by the mediated or another indirect pathway, can be identified. Otherwise, when the effect disappears after fixing Z, CHAIN is selected. The available labels are 
+
+{CHAIN , CHAIN+DIRECT , INVALID }.
+
+Fork. Z is treated as a common-cause candidate, 
+
+X ← Z → Y. 
+
+The persona considers a counterfactual situation in which Z is externally held fixed, thereby block-ing variation attributable to the hypothesized con-founding path. If changing X could still change 
+
+Y , the persona examines whether the remaining change can instead be explained by another indi-rect pathway. FORK+DIRECT is selected only when a mechanism specific to X → Y remains after this assessment. If fixing Z makes an effect of X on Y
+
+implausible, FORK is selected. The available labels are 
+
+{FORK , FORK+DIRECT , INVALID }.
+
+Collider. Z is treated as a collider candidate, 
+
+X → Z ← Y. 
+
+Unlike the Chain and Fork cases, the persona is in-structed not to condition on Z, because stratifying, selecting, or fixing a collider may induce a spuri-ous association between X and Y . The thought ex-periment therefore asks whether a conceptual inter-vention on X could change Y without conditioning on Z. COLLIDER+DIRECT is selected only when such a change can be supported by a mechanism specific to X → Y that is not explained by an-other indirect pathway. If an apparent X–Y rela-tion arises only after conditioning on Z, it is not treated as evidence for a direct effect. The avail-able labels are 
+
+{COLLIDER , COLLIDER+DIRECT , INVALID }.
+
+Table H.1 summarizes the operative differences. 
+
+H.3 No-Predefined-Candidate Condition 
+
+When no third-variable candidate is supplied, the persona must first hypothesize one plausible Z rel-evant to the ordered pair (X, Y ). It then assigns that candidate one of the three structural roles: FORK , CHAIN , COLLIDER .
+
+The persona then performs the corresponding thought experiment: Z is held fixed for a Fork or Chain hypothesis and is not conditioned on for a Collider hypothesis. As in the full condition, the persona must distinguish a mechanism specific to 
+
+X → Y from an effect that depends on changing 
+
+Z or can be explained through an indirect pathway. Because neither Z nor its structural pattern is given in advance, all seven labels are available: 
+
+{FORK , FORK+DIRECT , CHAIN ,
+
+CHAIN+DIRECT , COLLIDER ,
+
+COLLIDER+DIRECT , INVALID }.
+
+The implemented output additionally records the third variable and structural pattern hypothe-sized by the persona: 
+
+> {"assumed_z": "<hypothesized third variable>", "assumed_pattern": "Fork|Chain| Collider", "label": "<allowed judgment label >", "reason": "<judgment reason>" }
+
+For a label containing DIRECT, the prompt re-quires the persona to identify an X → Y -specific mechanism that remains after the hypoth-esized structural alternative has been considered and that is consistent with temporal and domain constraints. 
+
+H.4 Candidate-Specified, Pattern-Unspecified Condition 
+
+In this comparison condition, the identity of Z is supplied, but its structural role is withheld. The persona therefore does not generate a new third-variable candidate. Instead, it first determines whether the supplied Z is most plausibly inter-preted as 
+
+X ← Z → Y, X → Z → Y, 
+
+or X → Z ← Y. 
+
+After selecting the structural hypothesis, the per-sona performs the corresponding thought experi-ment. For a Fork hypothesis, Z is held fixed to block the hypothesized confounding path. For a Chain hypothesis, Z is held fixed to block the hy-pothesized mediated path. For a Collider hypothe-sis, the judgment is made without conditioning on 
+
+Z.23 Pattern Structural hypothesis Treatment of Z Labels Chain X → Z → Y Hold Z fixed Chain / Chain+Direct / Invalid Fork X ← Z → Y Hold Z fixed Fork / Fork+Direct / Invalid Collider X → Z ← Y Do not condition on Z Collider / Collider+Direct / Invalid 
+
+Table H.1: Pattern-specific conditions used in the Phase 2 thought experiment. 
+
+All seven judgment labels remain available: {FORK, FORK+DIRECT, CHAIN, CHAIN+DIRECT, COLLIDER, COLLIDER+DIRECT, INVALID}. The output contains the selected label and its jus-tification: 
+
+> {"label": "<allowed judgment label >", "reason": "<selected structural hypothesis and X->Y-specific justification>" }
+
+The prompt requires the reason to state which structural hypothesis was adopted for the supplied 
+
+Z, even though that hypothesis is not returned as a separate JSON field. 
+
+H.5 Use in Subsequent Phase 2 Judgments 
+
+The blocks above define the structural semantics used in the initial candidate-level judgment. The same pattern interpretation and label-specific de-cision criteria are reused in the subsequent re-view and final-decision prompts, with shortened descriptions where appropriate. Thus, the later ex-changes may revise a judgment, but they do not change the meaning of Chain, Fork, Collider, or their corresponding DIRECT labels. 
+
+Appendix I Phase 3 Bidirectional-Edge Resolution and Cycle Removal 
+
+Phase 3 reconciles the directed-edge candidates ob-tained from independent ordered-pair judgments in Phase 2. Because (X, Y ) and (Y, X ) are evalu-ated separately, the intermediate graph may con-tain both opposing edges for the same unordered pair and may also contain directed cycles. Phase 3 therefore applies two graph-level cor-rections. First, bidirectional conflicts are resolved through a constrained LLM-based binary compar-ison. Second, if directed cycles remain, candidate acyclic graphs are compared using a BIC-based 
+
+Algorithm 4 Structural reconciliation in Phase 3                                                           
+
+> Require: Intermediate directed graph G; variable descrip-tions d;stored-reason map rfor the surviving di-rected edges; observational data D; persona set P=
+> {p1, p 2, p 3}
+> Ensure: Adopted directed graph G∗
+> 1: G′←G
+> 2: if G′contains a bidirectional pair then
+> 3: G′←RESOLVEBIDIRECTIONALEDGES (G′,d, r, P)
+> 4: end if
+> 5: Gbi ←G′
+> 6: if Gbi contains a directed cycle then
+> 7: Attempt BIC-based cycle removal using D
+> 8: if an acyclic output is successfully produced then
+> 9: Set G′to the selected acyclic graph 10: else
+> 11: G′←Gbi
+> 12: end if
+> 13: else
+> 14: G′←Gbi
+> 15: end if
+> 16: G∗←G′
+> 17: return G∗
+
+procedure with the observational data. The lat-ter step is mechanical and does not involve further LLM judgment. If cycle removal completes and produces an acyclic graph, that graph is adopted. Otherwise, the graph obtained after bidirectional-edge resolu-tion is retained as the adopted estimate. Accord-ingly, the fallback output is not necessarily a DAG. 
+
+I.1 Overall Phase 3 Workflow 
+
+Let G denote the intermediate directed graph ob-tained by mapping the Phase 2 labels to edges. La-bels containing DIRECT are mapped to the presence of X → Y ; labels without DIRECT and INVALID are mapped to its absence. 
+
+I.2 Bidirectional-Edge Resolution 
+
+Suppose both 
+
+X → Y and Y → X
+
+survive the Phase 2 mapping. For this unordered pair, each of the three personas is asked to compare the two surviving directional hypotheses. Each persona receives the natural-language de-scriptions of X and Y , the stored reason support-ing X → Y , and the stored reason supporting 24 Algorithm 5 Bidirectional-edge resolution 
+
+Require: Directed graph G; variable descriptions d; stored reasons rXY and rY X ; persona set P = {p1, p 2, p 3}
+
+Ensure: Updated graph G′
+
+1: G′ ← G
+
+2: for all unordered pairs {X, Y } such that X → Y ∈ G′
+
+and Y → X ∈ G′ do 
+
+3: for all p ∈ P do 
+
+4: Present the descriptions of X and Y
+
+5: Present rXY and rY X 
+
+6: Ask p to select exactly one direction 7: Record the selected direction vp
+
+8: end for 
+
+9: cXY ← ∑ 
+
+> p∈P
+
+1[vp = X → Y ]
+
+10: cY X ← ∑ 
+
+> p∈P
+
+1[vp = Y → X]
+
+11: if cXY ≥ 2 then 
+
+12: Remove Y → X from G′
+
+13: else if cY X ≥ 2 then 
+
+14: Remove X → Y from G′
+
+15: else 
+
+16: Leave both directions unchanged 17: end if 
+
+18: end for 
+
+19: return G′
+
+Y → X. The Phase 1 third-variable candidates are not regenerated or presented again, and the Phase 2 final labels themselves are not included in the cur-rent direction-selection prompt. The task is explicitly binary. Each persona must select exactly one of X → Y and Y → X. The comparison is based on temporal ordering, known causal mechanisms, general knowledge, and do-main knowledge. A mechanism supporting the re-verse direction may not be reused as evidence for the selected direction. With three valid binary responses, one direction necessarily receives at least two votes and the oppo-site direction is removed. A response that cannot be parsed as one of the two permitted directions does not contribute a directional vote; if neither di-rection receives two votes, the bidirectional pair is left unchanged by this step. 
+
+I.2.1 Bidirectional-Edge Resolution Prompt 
+
+The experiments used the Japanese prompt below. The English version is provided only as a transla-tion. 
+
+Prompt I.1: Original Japanese prompt. Per-sona system message 
+
+あなたは {expertise} を専門とする {role} 
+
+です。因果の方向を二択で判定してくだ さい。 
+
+Direction-selection system message 
+
+変数 X と Y の間で、以下の候補方向のうち どちらがより妥当かを評価してください。 
+
+• X → Y
+
+• Y → X
+
+判定の際は以下を考慮してください。 
+
+• 時間順序との整合性 
+
+• 既知の因果メカニズム（法則や関係式 など） 
+
+• 一般知識・ドメイン知識との整合性 
+
+Y → X のメカニズムを X → Y の根拠とし て流用してはいけません。 両方向それぞれのメカニズムを想定した上 で、より妥当と考えられる方向を必ずどち らか一方選択してください。 「判断できない」 「どちらでもない」という回答は認められま せん。 出力は JSON 形式のみとし、それ以外の文 字列は含めないでください。 
+
+User message 
+
+【対象変数】 
+
+X: {X} : {X_desc} 
+
+Y : {Y} : {Y_desc} 
+
+【候補 1】{X} → {Y} 
+
+根拠 : {forward_reason} 
+
+【候補 2】{Y} → {X} 
+
+根拠 : {backward_reason} 
+
+上記の情報に基づき、より妥当な方向を必 ず 1 つ選択し、以下の JSON 形式で出力し てください。 
+
+{"direction": "X->Y" または "Y->X", "reason": " 選択理由（日本語 30--120 
+
+字）。 反事実操作と時間順序との整 合を具体的に述べるこ と。 選択した方向に固有のメカニ ズム （定性的な機構の説明でも 可）を 1つ挙げること "}
+
+Prompt I.2: English translation. Persona sys-tem message 
+
+You are a {role} specializing in {expertise} .Judge the causal direction as a binary choice. 
+
+Direction-selection system message 
+
+Evaluate which of the following candidate direc-tions between X and Y is more plausible: • X → Y
+
+• Y → X
+
+25 Consider temporal ordering, known causal mech-anisms including laws or functional relations, and general and domain knowledge. Do not reuse a mechanism supporting Y → X    
+
+> as evidence for X→Y.After considering the mechanisms for both direc-tions, select exactly one of the two directions. Re-sponses such as “cannot determine” or “neither direction” are not permitted. Output only JSON.
+
+User message            
+
+> [Target variables]
+> X:{X} :{X_desc}
+> Y:{Y} :{Y_desc}
+> [Candidate 1]
+> {X} →{Y}
+> Reason: {forward_reason}
+> [Candidate 2]
+> {Y} →{X}
+> Reason: {backward_reason}
+> Select exactly one direction and output:
+> {"direction": "X->Y" or "Y->X", "reason": "State the reason in 30--120 Japanese characters. Describe consistency with a counterfactual intervention and temporal ordering, and identify one mechanism specific to the selected direction." }
+
+I.3 Cycle Removal 
+
+Bidirectional-edge resolution removes the oppo-site edge whenever one direction receives at least two valid votes. If neither direction reaches this threshold, the bidirectional pair is left unchanged. Consequently, the graph entering cycle removal may contain residual bidirectional pairs as well as other directed cycles. If one or more directed cy-cles remain, the method attempts a post-hoc BIC-based graph-selection procedure using the observa-tional data. The procedure constructs candidate graphs by removing edges from the cyclic graph until acyclic candidates are obtained. Only acyclic candidates are scored. Among the candidate DAGs produced by this search, the graph with the lowest BIC is se-lected. This step does not introduce new edges and does not use LLM judgments. It only selects among subgraphs of the graph obtained after bidirectional-edge resolution. 
+
+Algorithm 6 Post-hoc cycle removal by BIC mini-mization                        
+
+> Require: Graph Gbi after bidirectional-edge resolution; ob-servational data D
+> Ensure: Selected acyclic graph G†, if the procedure com-pletes 1: Detect directed cycles in Gbi
+> 2: Enumerate candidate graphs obtained by removing edge combinations sufficient to break the detected cycles 3: Discard candidate graphs that remain cyclic 4: Let GDAG denote the resulting set of acyclic candidates 5: for all H∈ G DAG do
+> 6: Compute BIC (H;D)
+> 7: end for
+> 8: G†←arg min H∈G DAG BIC (H;D)
+> 9: return G†
+
+I.3.1 Cycle-Removal Algorithm I.3.2 BIC Computation 
+
+For a candidate graph H, the scoring rule used in this study is BIC (H; D) = N log 
+
+( RSS (H; D)
+
+N
+
+)
+
++ kH log N, 
+
+where N is the number of observations, RSS (H; D) is the total residual sum of squares across the variables under the candidate structure, and kH is the number of directed edges in H under the scoring convention used here. Lower values are preferred. The same standardized observational data used for the statistical baselines are used in this reconcil-iation step. The BIC criterion is used as a common mechanical ranking rule among candidate acyclic subgraphs; it should not be interpreted as an as-sumption that every dataset exactly follows a linear-Gaussian data-generating process. 
+
+I.4 Role of Phase 3 
+
+Phase 3 is a structural reconciliation stage rather than an additional knowledge-generation stage. Bidirectional-edge resolution compares two al-ready surviving directional hypotheses through a constrained binary vote. Cycle removal subse-quently uses observational data only when the re-sulting graph remains cyclic. Thus, the two corrections serve different pur-poses: the first resolves directional conflicts among local LLM judgments, whereas the second at-tempts to satisfy the global DAG constraint by se-lecting among edge-deleted subgraphs. When the latter procedure does not produce an acyclic out-put, the graph after bidirectional-edge resolution is retained as the adopted estimate. 26 Appendix J Formal Definitions of Evaluation Metrics 
+
+This appendix provides the formal definitions of the evaluation metrics used in this study. We evalu-ate each estimated graph by comparing its directed edge set with the directed edge set of the adopted reference graph. Let V be the set of variables and let |V | = n.Let E∗ ⊆ V × V denote the directed edge set of the reference graph, and let ˆE ⊆ V × V denote the directed edge set estimated by a method. Self-loops are not allowed in either graph. For edge-level classification metrics, we define the universe of possible directed non-self-loop edges as 
+
+U = {(X, Y ) ∈ V × V : X̸ = Y }.
+
+The confusion-count terms are defined as 
+
+T P = | ˆE ∩ E∗|,F P = | ˆE \ E∗|,F N = |E∗ \ ˆE|,T N = |U \ ( ˆE ∪ E∗)|.
+
+A predicted edge X → Y is counted as a true positive only when the same directed edge is present in the reference graph. If the reference graph contains X → Y but the estimated graph in-stead contains Y → X, the mismatch contributes one false negative for X → Y and one false posi-tive for Y → X.Precision is defined as Precision = T P T P + F P .
+
+Recall is defined as Recall = T P T P + F N .
+
+F1 is the harmonic mean of Precision and Re-call: F1 = 2 Precision Recall Precision + Recall .
+
+The false-positive rate is defined as FPR = F P F P + T N ,
+
+and the false-negative rate as FNR = F N F N + T P .
+
+Because Recall = T P T P + F N ,
+
+FNR and Recall satisfy FNR = 1 − Recall ,
+
+provided that T P + F N > 0.Normalized Hamming distance is computed at the adjacency-matrix level. Let A∗ and ˆA denote the n × n adjacency matrices of the reference and estimated graphs, respectively. Then NHD = 1
+
+n2
+
+> n
+
+∑
+
+> i=1
+> n
+
+∑
+
+> j=1
+
+1
+
+{ ˆAij ̸ = A∗
+
+> ij
+
+}
+
+.
+
+Because self-loops are excluded from both graphs, the diagonal entries of both adjacency ma-trices are zero and do not contribute to the numer-ator. Equivalently, NHD = F P + F N n2 .
+
+Thus, the edge-level classification metrics are defined over the non-self-loop directed-edge uni-verse U , whereas NHD is the adjacency-matrix Hamming distance normalized by n2.When a denominator is zero, the corresponding metric is undefined in principle. In the reported experiments, each adopted reference graph con-tains at least one directed edge. If a method out-puts no predicted edges, Precision is set to zero for reporting purposes, and F1 is set to zero when Precision + Recall = 0 .For methods or conditions evaluated over mul-tiple runs, each metric is computed separately for each run and then summarized by the mean and sample standard deviation. 
+
+Appendix K Stage-wise Retention of Reference Edges 
+
+This appendix reports stage-wise reference-edge retention for the GPT-5.4 FULL and NO PHASE 1 conditions. Unlike a selected-run illustration, the analysis uses the same three independent runs per dataset as the main experiments and summarizes the results by the mean and sample standard devia-tion. For each run, we first measure the proportion of reference edges that survive the Phase 2 direct-edge judgment. A reference edge X → Y is 27 counted as retained after Phase 2 when its final pair-level label contains +Direct . We denote this quan-tity by 
+
+RP2 = |E∗
+
+> P2
+
+||E∗| ,
+
+where E∗ 
+
+> P2
+
+denotes the set of reference edges re-tained after Phase 2. Final retention is the Recall of the adopted graph, 
+
+Rfinal = T P T P + F N .
+
+We define the additional reference-edge loss in-troduced during Phase 3 structural reconciliation as 
+
+LP3 = RP2 − Rfinal .
+
+The loss term includes any reference edge that survives the Phase 2 mapping but is absent from the adopted graph after bidirectional-edge resolu-tion and, when applicable, cycle reconciliation. It therefore localizes the loss to Phase 3 as a whole rather than attributing it to a particular reconcilia-tion substep. Under NO PHASE 1, Phase 2 retention and fi-nal Recall are identical on all three datasets. Thus, no additional reference-edge loss is introduced dur-ing Phase 3 in these runs; the final omissions are already determined by the direct-edge judgments made in Phase 2. The FULL condition shows the same pattern on Auto-MPG and DWD, where Phase 3 introduces no additional reference-edge loss. Sachs differs substantially. The Full condition retains 70 .2%of the reference edges after Phase 2 but 52 .6% in the adopted graph, corresponding to an additional mean loss of 17 .5 percentage points during Phase 3 reconciliation. These results localize the main Full–No Phase 1 difference primarily to the direct-edge judgment stage. At the same time, the Sachs Full result shows that graph-level reconciliation can intro-duce a non-negligible additional source of omis-sion when the intermediate graph requires greater structural reconciliation. 
+
+Appendix L Execution Cost Details 
+
+MaSCoD uses staged processing and multiple persona-based judgments, resulting in substan-tially more LLM calls than a one-shot pairwise procedure. Table L.1 summarizes the execution cost of the primary GPT-5.4 FULL experiments. For each dataset, we report the total number of logged LLM calls, processed tokens, and cumula-tive LLM-call time, summarized by the mean and sample standard deviation over the same three runs used in the main evaluation. The time measure is the sum of recorded LLM-call durations rather than end-to-end wall-clock runtime. Token counts are obtained from the us-age information recorded for the LLM calls. The measured cost increases substantially with the size of the evaluated variable set. From Auto-MPG to Sachs, the number of ordered pairs in-creases from 20 to 110, while the mean number of LLM calls increases from approximately 1.26k to 8.37k and mean token usage from approximately 3.37M to 26.37M. These measurements should be interpreted descriptively rather than as an empiri-cal complexity analysis, because call and token us-age also depend on the number of third-variable candidates retained for each pair and on the itera-tive judgment steps invoked during processing. MaSCoD is therefore considerably more inference-intensive than one-shot pairwise prompting. Its current implementation targets the small-to-medium exploratory candidate-graph settings evaluated in this study rather than computational efficiency as a primary objective. 
+
+Compute reporting. GPT-5.4 and GPT-4o were accessed as hosted models through Azure Ope-nAI Service. Their parameter counts and server-side hardware configurations are not disclosed to us, so GPU-hour estimates are not available. We therefore report observable API-level quantities, including model identifiers, generation settings, re-quest counts, token usage, and cumulative LLM-call time where recorded. 
+
+Appendix M Complete Evaluation Results 
+
+This appendix reports the complete evaluation met-rics underlying the main-text results. For LLM-based methods and ablation conditions, we report the mean and sample standard deviation over three evaluations. The repetition protocol differs for the partial-information conditions: all three Identity-only evaluations and all three Pattern-only evalu-ations reuse masked versions of the Phase 1 out-puts from Full run 1. Their dispersion estimates therefore characterize downstream variability con-28 Dataset Condition Phase 2 retention Final Recall Phase 3 loss Auto-MPG Full 0.800 ± 0.000 0.800 ± 0.000 0.000 ± 0.000                                                
+
+> No Phase 1 0.400 ±0.000 0.400 ±0.000 0.000 ±0.000
+> DWD Full 0.944 ±0.096 0.944 ±0.096 0.000 ±0.000
+> No Phase 1 0.000 ±0.000 0.000 ±0.000 0.000 ±0.000
+> Sachs Full 0.702 ±0.080 0.526 ±0.053 0.175 ±0.061
+> No Phase 1 0.070 ±0.030 0.070 ±0.030 0.000 ±0.000
+
+Table K.1: Stage-wise retention of reference edges under GPT-5.4. Phase 2 retention is the proportion of reference edges whose pair-level Phase 2 label contains +Direct . Final Recall is measured on the adopted graph. Phase 3 loss is computed separately for each run as the difference between Phase 2 retention and final Recall, and the table reports the mean and sample standard deviation over three runs.                                   
+
+> Dataset Pairs LLM calls Tokens (M) Cumulative LLM time (s) Auto-MPG 20 1264 ±47 3.367 ±0.112 10736 ±789
+> DWD 30 1863 ±50 5.175 ±0.146 18883 ±1815
+> Sachs 110 8373 ±43 26 .369 ±0.019 88166 ±2169
+
+Table L.1: Execution cost of the GPT-5.4 FULL condition. LLM calls, processed tokens, and cumulative LLM-call time are reported as mean ± sample standard deviation over three runs. Pairs denotes ordered non-self variable pairs. 
+
+ditional on this fixed source context and do not in-clude variability across regenerated Phase 1 con-texts. Statistical baselines were evaluated once and are therefore reported without dispersion esti-mates. NHD follows the adjacency-matrix defini-tion given in Section 4. 
+
+M.1 Complete Results for RQ1 
+
+Tables M.1–M.3 report Precision, Recall, F1, FPR, FNR, and NHD for the methods compared in RQ1. 
+
+M.2 Complete Results for RQ2 
+
+Tables M.4 and M.5 report the complete Phase 1 ablation results for GPT-5.4 and GPT-4o, respec-tively. 29 Backbone Method Precision Recall F1 FPR FNR NHD – PC 0.143 0.200 0.167 0.400 0.800 0.400 – DirectLiNGAM 0.111 0.200 0.143 0.533 0.800 0.480 – Exact Search 0.500 0.800 0.615 0.267 0.200 0.200 GPT-5.4 MaSCoD 0.487 ± 0.073 0.800 ± 0.000 0.603 ± 0.055 0.289 ± 0.077 0.200 ± 0.000 0.213 ± 0.046 
+
+GPT-5.4 LLM-KBCI 0.500 ± 0.000 0.800 ± 0.000 0.615 ± 0.000 0.267 ± 0.000 0.200 ± 0.000 0.200 ± 0.000 
+
+GPT-5.4 MAC 0.603 ± 0.055 0.800 ± 0.000 0.687 ± 0.035 0.178 ± 0.038 0.200 ± 0.000 0.147 ± 0.023 
+
+GPT-4o MaSCoD 0.444 ± 0.000 0.800 ± 0.000 0.571 ± 0.000 0.333 ± 0.000 0.200 ± 0.000 0.240 ± 0.000 
+
+GPT-4o LLM-KBCI 0.566 ± 0.063 0.867 ± 0.116 0.684 ± 0.078 0.222 ± 0.038 0.133 ± 0.116 0.160 ± 0.040 
+
+GPT-4o MAC 0.490 ± 0.086 0.800 ± 0.000 0.605 ± 0.067 0.289 ± 0.102 0.200 ± 0.000 0.213 ± 0.061 
+
+Table M.1: Complete RQ1 results on Auto-MPG. LLM-based values are mean ± sample standard deviation over three runs. 
+
+Backbone Method Precision Recall F1 FPR FNR NHD – PC 0.125 0.167 0.143 0.292 0.833 0.333 – DirectLiNGAM 0.154 0.333 0.211 0.458 0.667 0.417 – Exact Search 0.273 0.500 0.353 0.333 0.500 0.306 GPT-5.4 MaSCoD 0.567 ± 0.029 0.944 ± 0.096 0.708 ± 0.042 0.181 ± 0.024 0.056 ± 0.096 0.130 ± 0.016 
+
+GPT-5.4 LLM-KBCI 0.387 ± 0.077 0.667 ± 0.167 0.488 ± 0.099 0.264 ± 0.048 0.333 ± 0.167 0.232 ± 0.042 
+
+GPT-5.4 MAC 0.622 ± 0.038 0.556 ± 0.096 0.586 ± 0.070 0.083 ± 0.000 0.444 ± 0.096 0.130 ± 0.016 
+
+GPT-4o MaSCoD 0.524 ± 0.041 0.667 ± 0.000 0.586 ± 0.025 0.153 ± 0.024 0.333 ± 0.000 0.157 ± 0.016 
+
+GPT-4o LLM-KBCI 0.548 ± 0.041 0.667 ± 0.000 0.601 ± 0.025 0.139 ± 0.024 0.333 ± 0.000 0.148 ± 0.016 
+
+GPT-4o MAC 0.532 ± 0.122 0.556 ± 0.096 0.543 ± 0.109 0.125 ± 0.042 0.444 ± 0.096 0.157 ± 0.042 
+
+Table M.2: Complete RQ1 results on DWD. LLM-based values are mean ± sample standard deviation over three runs. 
+
+Backbone Method Precision Recall F1 FPR FNR NHD – PC 0.385 0.526 0.444 0.176 0.474 0.207 – DirectLiNGAM 0.278 0.526 0.364 0.286 0.474 0.289 – Exact Search 0.303 0.526 0.385 0.253 0.474 0.265 GPT-5.4 MaSCoD 0.348 ± 0.039 0.526 ± 0.053 0.417 ± 0.032 0.209 ± 0.044 0.474 ± 0.053 0.231 ± 0.030 
+
+GPT-5.4 LLM-KBCI 0.657 ± 0.042 0.526 ± 0.053 0.582 ± 0.017 0.059 ± 0.017 0.474 ± 0.053 0.118 ± 0.005 
+
+GPT-5.4 MAC 0.747 ± 0.032 0.316 ± 0.053 0.443 ± 0.058 0.022 ± 0.000 0.684 ± 0.053 0.124 ± 0.008 
+
+GPT-4o MaSCoD 0.344 ± 0.031 0.684 ± 0.105 0.456 ± 0.033 0.275 ± 0.058 0.316 ± 0.105 0.256 ± 0.033 
+
+GPT-4o LLM-KBCI 0.590 ± 0.041 0.298 ± 0.030 0.395 ± 0.022 0.044 ± 0.011 0.702 ± 0.030 0.143 ± 0.005 
+
+GPT-4o MAC 0.645 ± 0.081 0.281 ± 0.030 0.390 ± 0.036 0.033 ± 0.011 0.719 ± 0.030 0.138 ± 0.010 
+
+Table M.3: Complete RQ1 results on Sachs. LLM-based values are mean ± sample standard deviation over three runs. 
+
+Dataset Condition Precision Recall F1 FPR FNR NHD Auto-MPG Full 0.487 ± 0.073 0.800 ± 0.000 0.603 ± 0.055 0.289 ± 0.077 0.200 ± 0.000 0.213 ± 0.046 
+
+Pattern only 0.379 ± 0.048 0.533 ± 0.116 0.442 ± 0.070 0.289 ± 0.038 0.467 ± 0.116 0.267 ± 0.023 
+
+Identity only 0.500 ± 0.000 0.800 ± 0.000 0.615 ± 0.000 0.267 ± 0.000 0.200 ± 0.000 0.200 ± 0.000 
+
+No Phase 1 0.489 ± 0.154 0.400 ± 0.000 0.433 ± 0.058 0.156 ± 0.077 0.600 ± 0.000 0.213 ± 0.046 
+
+DWD Full 0.567 ± 0.029 0.944 ± 0.096 0.708 ± 0.042 0.181 ± 0.024 0.056 ± 0.096 0.130 ± 0.016 
+
+Pattern only 0.476 ± 0.041 0.611 ± 0.096 0.535 ± 0.063 0.167 ± 0.000 0.389 ± 0.096 0.176 ± 0.016 
+
+Identity only 0.515 ± 0.079 0.833 ± 0.167 0.636 ± 0.109 0.194 ± 0.024 0.167 ± 0.167 0.157 ± 0.042 
+
+No Phase 1 0.000 ± 0.000 0.000 ± 0.000 0.000 ± 0.000 0.083 ± 0.000 1.000 ± 0.000 0.222 ± 0.000 
+
+Sachs Full 0.348 ± 0.039 0.526 ± 0.053 0.417 ± 0.032 0.209 ± 0.044 0.474 ± 0.053 0.231 ± 0.030 
+
+Pattern only 0.378 ± 0.038 0.421 ± 0.105 0.393 ± 0.054 0.147 ± 0.042 0.579 ± 0.105 0.201 ± 0.021 
+
+Identity only 0.366 ± 0.021 0.702 ± 0.110 0.480 ± 0.044 0.253 ± 0.019 0.298 ± 0.110 0.237 ± 0.005 
+
+No Phase 1 0.361 ± 0.127 0.070 ± 0.030 0.117 ± 0.049 0.026 ± 0.006 0.930 ± 0.030 0.165 ± 0.008 
+
+Table M.4: Complete Phase 1 ablation results with GPT-5.4. All values are mean ± sample standard deviation over three runs. 
+
+30 Dataset Condition Precision Recall F1 FPR FNR NHD Auto-MPG Full 0.444 ± 0.000 0.800 ± 0.000 0.571 ± 0.000 0.333 ± 0.000 0.200 ± 0.000 0.240 ± 0.000 
+
+Pattern only 0.444 ± 0.000 0.800 ± 0.000 0.571 ± 0.000 0.333 ± 0.000 0.200 ± 0.000 0.240 ± 0.000 
+
+Identity only 0.415 ± 0.026 0.800 ± 0.000 0.546 ± 0.022 0.378 ± 0.038 0.200 ± 0.000 0.267 ± 0.023 
+
+No Phase 1 0.476 ± 0.041 0.600 ± 0.000 0.530 ± 0.026 0.222 ± 0.038 0.400 ± 0.000 0.213 ± 0.023 
+
+DWD Full 0.524 ± 0.041 0.667 ± 0.000 0.586 ± 0.025 0.153 ± 0.024 0.333 ± 0.000 0.157 ± 0.016 
+
+Pattern only 0.500 ± 0.000 0.667 ± 0.000 0.571 ± 0.000 0.167 ± 0.000 0.333 ± 0.000 0.167 ± 0.000 
+
+Identity only 0.500 ± 0.000 0.667 ± 0.000 0.571 ± 0.000 0.167 ± 0.000 0.333 ± 0.000 0.167 ± 0.000 
+
+No Phase 1 0.667 ± 0.000 0.333 ± 0.000 0.444 ± 0.000 0.042 ± 0.000 0.667 ± 0.000 0.139 ± 0.000 
+
+Sachs Full 0.344 ± 0.031 0.684 ± 0.105 0.456 ± 0.033 0.275 ± 0.058 0.316 ± 0.105 0.256 ± 0.033 
+
+Pattern only 0.250 ± 0.008 0.719 ± 0.030 0.371 ± 0.013 0.451 ± 0.000 0.281 ± 0.030 0.383 ± 0.005 
+
+Identity only 0.332 ± 0.134 0.474 ± 0.053 0.379 ± 0.109 0.245 ± 0.178 0.526 ± 0.053 0.267 ± 0.134 
+
+No Phase 1 0.338 ± 0.027 0.579 ± 0.053 0.426 ± 0.030 0.238 ± 0.028 0.421 ± 0.053 0.245 ± 0.019 
+
+Table M.5: Complete Phase 1 ablation results with GPT-4o. All values are mean ± sample standard deviation over three runs. For Sachs, cycle reconciliation timed out in all Pattern-only runs and in one Identity-only run; in those cases, the graph after bidirectional-edge resolution was evaluated. 
+
+31
