@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-21</span>
+      <span class="dpr-home-dashboard-kicker">2026-09-22</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 21 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 14 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>12</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>5</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-21 10:43:05 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-22 09:44:35 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-09-21 日报完成：共筛出 21 篇因果推断与结构化数据论文，精读 9 篇、速读 12 篇。最值得看的是双稳健 DML 的协变量选择（9.0）与 LimiX-2 通用结构化数据网络（9.0），速读中多智能体因果图生成和流行病因果图识别（均 8.0）也值得关注。普通读者可先读这两篇精读，再按需跟进因果图方向的速读论文。</p>
+<p>今日精读9篇、速读5篇，共筛选14篇，重点聚焦大模型与因果推理、结构化数据智能两大方向。最值得看的是两篇9分精读《Contextual Causality with Large Language Models: A Survey》和《Causilo Technical Report》，前者梳理大模型语境因果，后者给出技术落地报告。普通读者可先从因果调查综述入手建立框架，再挑结构化数据相关的LimiX-2速读了解应用动向。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -81,9 +81,9 @@
     <strong class="dpr-home-dashboard-count">9 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Covariate Selection for Doubly Robust Double/debiased Machine Learning Estimators for Causal Inference">Covariate Selection for Doubly Robust Double/debiased Machine Learning Estimators for Causal Inference</span></li><li><span class="dpr-home-dashboard-paper-title" title="LimiX-2: A Contextual Mechanism Network Towards General Structured-Data Intelligence">LimiX-2: A Contextual Mechanism Network Towards General Structured-Data Intelligence</span></li><li><span class="dpr-home-dashboard-paper-title" title="Statistical Inference for Bivariate Functional Causal Discovery">Statistical Inference for Bivariate Functional Causal Discovery</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Contextual Causality with Large Language Models: A Survey">Contextual Causality with Large Language Models: A Survey</span></li><li><span class="dpr-home-dashboard-paper-title" title="Causilo Technical Report">Causilo Technical Report</span></li><li><span class="dpr-home-dashboard-paper-title" title="Conformal Robustness in Prediction-Driven Decision-Making">Conformal Robustness in Prediction-Driven Decision-Making</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>8</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>4</strong></span><span class="dpr-home-dashboard-tag">cp <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -91,12 +91,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">12 篇</strong>
+    <strong class="dpr-home-dashboard-count">5 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="MaSCoD: A Multi-Agent Framework for Structural-Context-Guided Candidate Causal Graph Generation">MaSCoD: A Multi-Agent Framework for Structural-Context-Guided Candidate Causal Graph Generation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Epidemiological Causal Graph Identification: Challenges, Identifiability and Algorithms">Epidemiological Causal Graph Identification: Challenges, Identifiability and Algorithms</span></li><li><span class="dpr-home-dashboard-paper-title" title="Agentic Search Spaces for Tabular Machine Learning">Agentic Search Spaces for Tabular Machine Learning</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="LimiX-2: A Contextual Mechanism Network Towards General Structured-Data Intelligence">LimiX-2: A Contextual Mechanism Network Towards General Structured-Data Intelligence</span></li><li><span class="dpr-home-dashboard-paper-title" title="PACE: Plug-and-Play Contextual Embedding for Feature Screening with Pretrained Tabular Foundation Models">PACE: Plug-and-Play Contextual Embedding for Feature Screening with Pretrained Tabular Foundation Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="ABSOL: Aggregated Bayesian Subsampling Orchestrated with LLMs">ABSOL: Aggregated Bayesian Subsampling Orchestrated with LLMs</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>8</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>4</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
 </section>
 </div>
 

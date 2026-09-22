@@ -1,0 +1,648 @@
+Title: SupportCal: Label-Free Calibration of Post-Trained LLMs via Reference Support and Corroboration
+
+URL Source: https://arxiv.org/pdf/2609.24303v1
+
+Published Time: Tue, 22 Sep 2026 03:08:49 GMT
+
+Number of Pages: 14
+
+Markdown Content:
+# SupportCal: Label-Free Calibration of Post-Trained LLMs via Reference Support and Corroboration 
+
+Linhan Luo 1 Lequan Lin 1 Dai Shi 2
+
+Feng Chen 3 José Miguel Hernández-Lobato 2 Junbin Gao 1
+
+## Abstract 
+
+Post-training often improves task performance but can degrade confidence calibra-tion, leaving post-trained language models (PoLMs) more overconfident than their corresponding pretrained language models (PLMs). Because task-specific labeled calibration data can be costly or unavailable, the corresponding pretrained PLM provides a natural label-free reference for post-hoc calibration. Prior agreement-gated PLM-referenced calibration fits a scalar temperature using only examples on which the PoLM and its PLM reference agree, excluding disagreement examples because direct alignment can drive the fitted temperature excessively high and in-duce under-confidence. We revisit this binary treatment. A controlled reintroduc-tion diagnostic reveals a non-monotonic aggregate effect: admitting a moderate fraction of disagreement examples can improve calibration, whereas the benefit diminishes as unit-weight inclusion approaches the full disagreement set. We in-troduce S UPPORT CAL , a label-free post-hoc method that retains agreement exam-ples at unit weight and assigns disagreement examples continuous weights based on the own-base PLM’s relative support and corroboration from pretrained ref-erences selected from a size-compatible candidate pool. We further characterize when the resulting weighted objective admits a finite optimal temperature. Across MedMCQA and MathQA, S UPPORT CAL yields lower ECE than the agreement-only baseline for nearly all evaluated target-model configurations; supplementary TweetEval Sentiment results show the same pattern on a fixed-label classification task. 
+
+## 1 Introduction 
+
+A reliable model should not only answer correctly but also report confidence that matches its empir-ical frequency of correctness (Guo et al. 2017). Post-training, including instruction tuning and re-inforcement learning from human feedback, can improve downstream performance and instruction-following utility while degrading confidence calibration relative to the corresponding pretrained lan-guage model (PLM) (Ouyang et al. 2022; Zhu et al. 2023). We refer to that pretrained counterpart as the target’s own-base PLM ; for example, an instruction-tuned Llama-3-8B target is paired with the corresponding pretrained Llama-3-8B checkpoint. Across the representative pairs in Figure 1 and in prior studies, own-base PLMs often remain better calibrated than their post-trained models (Luo et al. 2025; Tan et al. 2026). Because task-specific labeled calibration data can be costly or unavail-able, this better-calibrated model provides a natural label-free reference for post-hoc calibration. Prior agreement-gated PLM-referenced calibration fits a single post-hoc temperature by KL align-ment to a PLM reference (Luo et al. 2025). On disagreement examples, however, the reference PLM’s highest-probability option differs from the PoLM’s prediction. Directly aligning these dis-tributions can drive the fitted temperature excessively high and induce under-confidence. Prior work       
+
+> 1The University of Sydney 2University of Cambridge 3The University of Adelaide Correspondence: lluo2926@uni.sydney.edu.au arXiv:2609.24303v1 [cs.LG] 21 Sep 2026
+
+therefore assigns zero weight to every disagreement example and fits the temperature using agree-ment examples only. This safeguard addresses a genuine failure mode, but it also discards the entire disagreement region. This raises a natural question: Must every disagreement example be discarded? Disagreement is common in our evaluation, and the controlled diagnostic in Section 3 reveals a non-monotonic ag-gregate effect: admitting a moderate fraction of disagreement examples can improve calibration, whereas the benefit diminishes as unit-weight inclusion approaches the full disagreement set. This pattern shows that binary exclusion is too coarse and motivates controlling how strongly each dis-agreement example influences temperature fitting. We introduce S UPPORT CAL , an agreement-preserving continuous weighting method. Agreement examples retain unit weight. Disagreement examples receive graded label-free weights that combine the own-base PLM’s relative support for the PoLM prediction with corroboration from pretrained references selected from a size-compatible candidate pool. A single temperature is then fitted by weighted KL alignment to the target’s own-base PLM, which remains the sole KL teacher. 
+
+Contributions. (1) Diagnosis. A controlled disagreement-reintroduction experiment reveals a non-monotonic aggregate effect: moderate reintroduction can improve calibration, whereas the benefit diminishes as unit-weight inclusion approaches the full disagreement set. (2) Method and analy-sis. SUPPORT CAL preserves agreement examples at unit weight and assigns disagreement examples graded weights using own-base relative support and cross-reference corroboration. A boundary characterization gives the condition under which the weighted KL objective has a finite optimal temperature. (3) Empirical validation. Across MedMCQA and MathQA, S UPPORT CAL yields lower mean ECE than the agreement-only baseline for nearly all evaluated target-model configu-rations. Supplementary TweetEval Sentiment results (Appendix B) show the same pattern beyond multiple-choice question answering. 
+
+## 2 Background and Related Work 
+
+2.1 Calibration preliminaries 
+
+Consider a K-class prediction problem, including multiple-choice question answering and fixed-label classification. For example n, let yn ∈ { 1, . . . , K } be the ground-truth label and zn =(zn, 1, . . . , z n,K ) be the model logits. We define pn = softmax( zn), prediction ˆyn = arg max k pn,k ,and confidence γn = max k pn,k .Post-hoc temperature scaling with τ > 0 gives qn(τ ) = softmax( zn/τ ) and calibrated confidence 
+
+γn(τ ) = max k qn,k (τ ). Because division by a positive scalar preserves the ordering of the logits, temperature scaling does not change ˆyn. At the population level, a model is perfectly calibrated when 
+
+Pr( ˆY = Y | Γ = γ) = γ
+
+for every confidence level γ in the support of Γ (Guo et al. 2017). We measure empirical miscalibration using Expected Calibration Error (ECE) (Naeini et al. 2015; Guo et al. 2017). Let {B b}Bb=1 be B = 10 equal-width confidence bins. Then 
+
+ECE = 
+
+> B
+
+X
+
+> b=1
+
+|B b|
+
+N |acc( Bb) − conf( Bb)| , (1) where acc( Bb) and conf( Bb) are the empirical accuracy and mean confidence in bin b, respectively. We report ECE in percentage points (pp) and use the same ten-bin protocol for all methods. 
+
+2.2 LLM confidence estimation and calibration 
+
+Work on LLM confidence spans confidence elicitation, uncertainty estimation, and calibration (Geng et al. 2024). Calibration can change substantially across the training pipeline: Zhu et al. (2023) find that alignment training often increases overconfidence even when task performance improves. Earlier work shows that pretrained Transformer encoders can be reasonably calibrated in-domain (Desai and Durrett 2020), while large language models can contain useful self-assessment signals about their own correctness (Kadavath et al. 2022). More recent PLM-referenced studies further 2Figure 1: Reliability diagrams on MedMCQA for representative own-base PLM/PoLM pairs. Base PLMs are generally better calibrated than their post-trained counterparts. ECE annotations use the 
+
+[0 , 1] scale (e.g., 0.038 = 3 .8 pp). observe that corresponding base models often remain better calibrated than their post-trained coun-terparts (Luo et al. 2025; Tan et al. 2026). Together, these results motivate using pretrained-model information as an external calibration signal rather than relying exclusively on the PoLM’s own confidence. Existing approaches obtain or improve confidence through several mechanisms. Supervised post-hoc methods , such as temperature scaling, fit a calibration map using correctness-labeled data (Guo et al. 2017). Direct self-assessment methods elicit P (True) or verbalized confidence from the model (Kadavath et al. 2022; Lin et al. 2022; Tian et al. 2023; Xiong et al. 2024). Sampling-based methods 
+
+estimate uncertainty from consistency across multiple generations or from entropy over semantically equivalent answers (Kuhn et al. 2023; Farquhar et al. 2024). These methods can capture uncertainty in free-form generation but require multiple inference calls. Prompt-ensemble methods , such as CAPE, instead aggregate predictions across answer-option permutations or related prompt variants (Jiang et al. 2023b). Finally, training-based methods teach models to express calibrated confidence through supervised fine-tuning or reinforcement learning (Kapoor et al. 2024; Xu et al. 2024). Recent methods also exploit signals outside the PoLM’s original confidence. BaseCal uses the corresponding base model either to re-evaluate PoLM generations or to train a lightweight hidden-state projection without correctness labels (Tan et al. 2026). CaliDist instead constructs an instance-specific robustness signal from prediction changes under semantic distractors and fits a task-specific scaling map on a held-out labeled validation set (Jawad and Caragea 2026). Our setting instead uses pretrained references to construct sample weights for a single post-hoc temperature fitted against the target’s own-base PLM. 
+
+2.3 Closest prior work: PLM-referenced calibration 
+
+DACA (Luo et al. 2025) is the closest prior work to our setting. It performs label-free temperature fitting by aligning a PoLM to a PLM reference while excluding disagreement examples from the objective to avoid disagreement-induced over-softening. SUPPORT CAL instead treats disagreement as a graded weighting problem. Rather than discarding all disagreement examples, it assigns each example a continuous calibration weight according to two complementary signals: the own-base PLM’s relative support for the PoLM prediction and cor-roborating support from selected pretrained references. Agreement examples remain fully weighted, while disagreement examples contribute in proportion to the strength of this combined support. This design allows information from disagreement examples to be recovered without treating all of them as equally reliable. The resulting weights are used in a weighted KL objective to fit a single scalar temperature against the target’s own-base PLM. 3Figure 2: Controlled disagreement reintroduction on MedMCQA and MathQA. The gray curve assigns unit weight to reintroduced disagreement examples, whereas the green curve applies S UP -
+
+> PORT
+
+CAL weights. Each point averages over target models and five data-split seeds; lower ECE is better. 
+
+## 3 Motivating Diagnosis: Reintroducing Disagreement 
+
+An agreement-only objective excludes all calibration examples on which the target PoLM and its own-base PLM predict different options. We examine the aggregate effect of this binary treatment by progressively reintroducing disagreement examples during temperature fitting. Disagreement is substantial in the broader diagnostic model pool: the median own-base PLM/PoLM disagreement rate is 28.9% on MedMCQA and 46.7% on MathQA. Per-target disagreement rates for this broader pool are reported in Appendix A. Figure 2 reveals a non-monotonic effect under unit-weight inclusion. On both datasets, ECE initially decreases, reaches its best region at a moderate inclusion fraction (roughly 0.4–0.6), and then rises as full inclusion is approached. The non-monotonic trend motivates sample-specific weighting within the disagreement region. When the same examples are scaled by S UPPORT CAL weights, ECE continues to improve through the full-inclusion endpoint. The diagnostic therefore motivates preserving agreement examples while assigning sample-specific influence within the disagreement region. 
+
+## 4 SUPPORT CAL 
+
+SUPPORT CAL preserves agreement examples and assigns support-aware weights to disagreement examples before fitting a single temperature. Figure 3 summarizes the overall pipeline; the following subsections define each component. 
+
+4.1 Relative support on disagreement examples 
+
+Using the notation of Section 2.1, the target PoLM produces logits zn and prediction ˆyn for cal-ibration example n = 1, . . . , N . Its own-base PLM, the corresponding pretrained checkpoint from which the PoLM is derived, produces distribution p(o) 
+
+> n
+
+= softmax( v(o) 
+
+> n
+
+) and prediction 
+
+ˆy(o) 
+
+> n
+
+= arg max k p(o)
+
+> n,k
+
+. All model distributions are evaluated over the same K answer options. We partition the calibration split into the agreement and disagreement regions 
+
+A = {n : ˆ y(o) 
+
+> n
+
+= ˆ yn}, D = {n : ˆ y(o)
+
+> n
+
+̸ = ˆ yn}.
+
+SUPPORT CAL retains unit weight on A and constructs continuous, label-free weights for examples in D.4Figure 3: Overview of S UPPORT CAL . Agreement examples retain unit weight; disagreement examples are weighted by own-base relative support and cross-reference corroboration before fitting a single temperature against the own-base PLM. For any pretrained reference r with distribution p(r) 
+
+> n
+
+= softmax( v(r) 
+
+> n
+
+), we define its relative support 
+
+for the PoLM prediction as 
+
+u(r) 
+
+> n
+
+= p(r)
+
+> n, ˆyn
+
+max k p(r)
+
+> n,k
+
+∈ (0 , 1] . (2) This ratio measures how strongly reference r supports the PoLM-selected option relative to its own most likely option. On a disagreement example, a small own-base score u(o) 
+
+> n
+
+indicates a sharp con-tradiction: the own-base PLM assigns substantially less probability to the PoLM-selected option than to its own preferred option. Down-weighting such examples limits the strong alignment pres-sure that could otherwise drive the fitted temperature upward and over-soften the PoLM distribution. 
+
+Motivation for cross-reference corroboration. A large u(o) 
+
+> n
+
+, however, is not always equally in-formative. It may reflect a genuine near-tie, where the own-base PLM still provides substantial sup-port for the PoLM-selected option, but it can also arise from a diffuse or weak own-base distribution. We therefore use additional pretrained references as a corroboration signal: a disagreement exam-ple receives stronger influence when support for the PoLM-selected option is reproduced across the selected references, and is attenuated when that support is not corroborated. Appendix D provides representative comparisons illustrating the benefit of this additional signal. 
+
+4.2 Cross-reference corroboration and selection 
+
+For each target, let R denote the candidate pool of pretrained references from the same predefined parameter-size bucket, excluding the target’s own-base PLM. For a fixed M , we consider every eligible combination S ⊆ R with |S| = M .For a candidate combination S, we first define its sample-level corroboration as the mean relative support across the references in S:
+
+cn(S) = 1
+
+M
+
+X
+
+> r∈S
+
+u(r) 
+
+> n
+
+. (3) 5We then score the combination by its average corroborating support over the own-base disagreement region: 
+
+DS( S) = 1
+
+|D|
+
+X
+
+> n∈D
+
+cn(S). (4) For the fixed M , we enumerate all eligible size-M combinations and select 
+
+S⋆ ∈ arg max 
+
+> S⊆R
+> |S|=M
+
+DS( S). (5) The selected combination therefore consists of the extra pretrained references that collectively pro-vide the strongest average support for the PoLM prediction over the calibration disagreement region. All combination scores are computed using only model outputs from the unlabeled calibration split. Finally, we write c⋆n = cn(S⋆) for the sample-level corroboration supplied by the selected reference combination. 
+
+4.3 Support-aware weighting and temperature fitting 
+
+The final sample weight is 
+
+wn =
+
+(1, n ∈ A, u(o) 
+
+> n
+
+c⋆n, n ∈ D. (6) The multiplicative form acts as a soft conjunction: a disagreement example receives a large weight only when both the own-base PLM and the selected references provide strong relative support for the PoLM prediction. Agreement examples retain full influence. SUPPORT CAL fits a single scalar temperature using the weighted KL objective 
+
+ˆτ = arg min 
+
+> τ > 0
+
+P 
+
+> n
+
+wnDKL 
+
+
+
+p(o) 
+
+> n
+
+softmax( zn/τ )
+
+P 
+
+> n
+
+wn
+
+. (7) Cross-reference corroboration determines how strongly each example influences the fit, while the own-base distribution defines the calibration target. 
+
+4.4 Finite-temperature characterization 
+
+Let β = 1 /τ , qn,β = softmax( βz n), and 
+
+ℓn(β) = DKL 
+
+
+
+p(o) 
+
+> n
+
+qn,β 
+
+
+
+, L(β) = 1
+
+W
+
+X
+
+> n
+
+wnℓn(β), W = X
+
+> n
+
+wn.
+
+Define the unweighted logit mean ¯zn = 1
+
+> K
+
+P 
+
+> k
+
+zn,k , the per-example boundary margin 
+
+mn = Ep(o)
+
+> n
+
+[zn] − ¯zn,
+
+and the weighted boundary margin 
+
+Mw = 1
+
+W
+
+X
+
+> n
+
+wnmn.
+
+Because finite-logit softmax distributions assign positive probability to every class, Eq. (6) gives 
+
+wn > 0 for every example and hence W > 0 for any nonempty calibration split. If at least one target-logit vector zn is nonconstant, as in all evaluated configurations, then L(β) is strictly convex on [0 , ∞).
+
+Proposition 1 (finite-temperature characterization). Under the condition above, 
+
+L′(0) = −Mw.
+
+Consequently, the original temperature objective admits a unique finite minimizer if and only if 
+
+Mw > 0. When Mw > 0, there is a unique β⋆ ∈ (0 , ∞), equivalently a unique finite temperature 6τ ⋆ = 1 /β ⋆. When Mw ≤ 0, the continuous extension is minimized at β⋆ = 0 , corresponding to 
+
+τ → ∞ in the original temperature domain. The proof is given in Appendix E. 
+
+Sample-level interpretation. Since ℓ′
+
+> n
+
+(0) = −mn, examples with mn < 0 contribute toward the 
+
+β = 0 boundary, whereas examples with mn > 0 contribute in the finite-temperature direction. The margin mn therefore gives each example’s signed contribution to the boundary behavior, and SUPPORT CAL controls this contribution through wn. Empirically, negative-margin disagreement examples receive lower mean and median weights than positive-margin examples across all three datasets (Appendix E). 
+
+## 5 Experiments 
+
+5.1 Datasets, models, and protocol 
+
+We evaluate S UPPORT CAL primarily on two multiple-choice question-answering benchmarks. 
+
+MedMCQA (Pal et al. 2022) contains medical entrance-exam questions; we evaluate 12 post-trained target models spanning the Gemma 3, Llama 3, Mistral, Qwen2.5, Qwen3, and Yi-1.5 families (Gemma Team 2025; Grattafiori et al. 2024; Jiang et al. 2023a; Yang et al. 2024a, 2025; Young et al. 2024). We report S UPPORT CAL with M ∈ { 2, 4}. MathQA (Amini et al. 2019) contains math word problems; we evaluate seven target models from the Gemma 3, Llama 3, Qwen2.5, and Yi-1.5 families, including Qwen2.5-Math (Yang et al. 2024b), and report M ∈ { 1, 2}.Every target is a post-trained model paired with its corresponding pretrained base checkpoint. For each target, the candidate reference pool R contains pretrained models from the same predefined parameter-size bucket, excluding the target’s own-base PLM. For each fixed M , we enumerate all el-igible size-M combinations in R and select the combination with the highest Disagreement-Support score. The exact bucket membership is given in Appendix C. Supplementary evaluation on TweetEval Sentiment (Barbieri et al. 2020), a non-QA fixed-label classification task, is reported in Appendix B. For each target model and each of five random seeds, we split examples 30%/70% into a calibration split and an evaluation split. The calibration split is used for relative-support computation, reference-combination selection, and temperature fitting; the evaluation split is used only to report calibration metrics. A single scalar temperature is fitted per seed and applied to the corresponding evaluation split. We report mean ECE and standard error across the five seeds separately for each target model. 
+
+5.2 Metrics and baselines 
+
+We report Expected Calibration Error (ECE; Section 2.1) using the same ten-bin protocol for all methods. The comparison includes the following methods. Vanilla uses the uncalibrated PoLM confidence. CAPE (Jiang et al. 2023b) is a label-free prompt-ensemble baseline; in our imple-mentation, predictions are aggregated across cyclic permutations of the answer-option ordering. 
+
+Elicitation (Xiong et al. 2024) prompts the PoLM to generate a predicted answer and verbalized confidence in a structured response. Elicitation-Ensemble uses the same elicitation procedure; in our implementation, five generations are sampled and their parsed confidence estimates are aggre-gated. DACA (Luo et al. 2025) is the agreement-only PLM-referenced baseline, instantiated here using each target’s own-base PLM. SUPPORT CAL (ours) assigns continuous support-aware weights and is reported at both tested reference-combination sizes M .
+
+## 6 Results 
+
+Consistent gains over agreement-only calibration. On MedMCQA (Table 1), S UPPORT CAL 
+
+yields lower mean ECE than DACA on all 12 target models at both tested values of M . The macro-average ECE decreases from 6.65 pp for DACA to 5.07 pp for M = 2 and 5.11 pp for M = 4 ,corresponding to reductions of 1.59 and 1.54 pp. On MathQA (Table 2), M = 1 yields lower mean ECE than DACA on all seven target models, while 
+
+M = 2 does so on six of seven. The macro-average ECE decreases from 7.79 pp to 5.70 and 5.71 pp, respectively. The only reversal is a 0.03-pp difference on Qwen2.5-14B at M = 2 .7Table 1: MedMCQA ECE (pp; mean ± SE over five seeds). Bold and underline denote the best and second-best methods per target, respectively, based on unrounded values. The final row reports the model-level macro-average. 
+
+Target PoLM Vanilla CAPE Elicit. Elic.-Ens. DACA SUPPORT CAL (2) S UPPORT CAL (4) Gemma3-12B 37 .965 ±0.053 21 .310 ±0.133 42 .925 ±0.133 35 .133 ±0.158 5.352 ±0.057 4.522 ±0.087 4.556 ±0.095 
+
+Gemma3-27B 30 .085 ±0.044 13 .691 ±0.205 32 .856 ±0.140 27 .682 ±0.139 3.901 ±0.255 3.082 ±0.103 3.051 ±0.107 
+
+Gemma3-4B 50 .407 ±0.156 28 .622 ±0.122 53 .553 ±0.297 43 .355 ±0.339 9.238 ±0.784 2.883 ±0.249 2.997 ±0.224 
+
+Llama-3-8B 23 .146 ±0.142 12 .948 ±0.108 28 .483 ±0.147 19 .736 ±0.135 2.988 ±0.087 2.783 ±0.098 2.728 ±0.124 
+
+Mistral-7B-Instruct 37 .212 ±0.062 20 .671 ±0.043 52 .873 ±0.239 42 .229 ±0.281 6.161 ±0.188 5.049 ±0.130 5.096 ±0.132 
+
+Qwen2.5-14B 27 .337 ±0.119 17 .180 ±0.236 26 .104 ±0.107 21 .849 ±0.052 6.352 ±0.261 5.016 ±0.437 5.205 ±0.425 
+
+Qwen2.5-32B 20 .637 ±0.049 12 .545 ±0.116 25 .448 ±0.128 21 .091 ±0.178 3.624 ±0.119 3.384 ±0.155 3.409 ±0.146 
+
+Qwen2.5-7B 32 .421 ±0.064 22 .766 ±0.092 32 .916 ±0.088 27 .880 ±0.083 6.506 ±0.079 6.019 ±0.075 6.033 ±0.066 
+
+Qwen3-8B 27 .053 ±0.127 15 .458 ±0.163 33 .424 ±0.292 27 .050 ±0.285 6.308 ±0.346 4.583 ±0.198 4.588 ±0.198 
+
+Yi-1.5-34B 24 .879 ±0.084 4.626 ±0.324 28 .171 ±0.116 20 .323 ±0.130 12 .845 ±0.550 10 .309 ±0.379 10 .389 ±0.372 
+
+Yi-1.5-6B 38 .327 ±0.183 24 .587 ±0.258 52 .420 ±0.195 29 .660 ±0.252 13 .834 ±0.343 10 .883 ±0.129 10 .945 ±0.117 
+
+Yi-1.5-9B 33 .667 ±0.062 21 .154 ±0.237 49 .905 ±0.144 39 .825 ±0.207 2.736 ±0.143 2.278 ±0.228 2.312 ±0.260 
+
+Macro avg. 31.928 17.963 38.257 29.651 6.654 5.066 5.109 
+
+Table 2: MathQA ECE (pp; mean ± SE over five seeds). Same conventions as Table 1. 
+
+Target PoLM Vanilla CAPE Elicit. Elic.-Ens. DACA SUPPORT CAL (1) S UPPORT CAL (2) Gemma3-12B 37 .034 ±0.195 12 .704 ±0.180 67 .366 ±0.189 53 .653 ±0.136 3.073 ±0.279 0.899 ±0.067 0.928 ±0.085 
+
+Llama-3-8B 29 .188 ±0.157 1.834 ±0.192 50 .397 ±0.214 39 .033 ±0.249 6.566 ±0.182 6.128 ±0.134 6.137 ±0.134 
+
+Qwen2.5-14B 24 .527 ±0.161 7.667 ±0.187 42 .116 ±0.189 34 .357 ±0.203 6.104 ±0.450 6.075 ±0.437 6.136 ±0.435 
+
+Qwen2.5-32B 15 .611 ±0.113 2.118 ±0.217 36 .599 ±0.251 30 .307 ±0.321 7.486 ±0.249 7.395 ±0.244 7.437 ±0.248 
+
+Qwen2.5-7B 27 .715 ±0.212 10 .858 ±0.053 49 .017 ±0.212 40 .547 ±0.223 4.044 ±0.123 3.378 ±0.212 3.359 ±0.216 
+
+Qwen2.5-Math-7B 13 .097 ±0.204 2.589 ±0.039 60 .188 ±0.138 44 .426 ±0.199 7.441 ±0.528 4.744 ±0.518 4.639 ±0.509 
+
+Yi-1.5-9B 37 .297 ±0.187 14 .919 ±0.139 60 .013 ±0.184 46 .607 ±0.183 19 .814 ±0.511 11 .255 ±0.817 11 .359 ±0.812 
+
+Macro avg. 26.353 7.527 52.242 41.276 7.790 5.696 5.714 
+
+Supplementary TweetEval Sentiment results show the same model-level consistency: both tested values of M yield lower mean ECE than DACA on all six targets, reducing the macro-average from 16.59 pp to 15.06 and 15.16 pp (Appendix B). 
+
+Limited sensitivity to M . Performance changes little across the two tested reference-combination sizes. The maximum absolute per-model ECE difference between the two S UPPORT CAL config-urations is 0.19 pp on MedMCQA and 0.10 pp on MathQA. The corresponding macro-average differences are 0.04 and 0.02 pp. 
+
+Comparison with other label-free baselines. SUPPORT CAL achieves the lowest macro-average ECE on both main datasets and is either the best or second-best method for every target model. While CAPE performs strongly on a subset of MathQA targets, S UPPORT CAL shows more consistent performance across datasets and model families. 
+
+## 7 Limitations and Scope 
+
+SUPPORT CAL uses additional pretrained references on the unlabeled calibration split, which intro-duces a one-time calibration-time overhead. This overhead consists only of forward inference to obtain reference distributions; it does not require additional model training or parameter updates. Once the temperature is fitted, deployment remains identical to ordinary temperature scaling. Our current evaluation focuses on fixed-label tasks with a finite output space, including multiple-choice question answering and fixed-label sentiment classification. The present formulation also assumes access to a corresponding own-base PLM together with a compatible pool of pretrained references. Extending the framework to settings without a natural own-base reference, or to free-form generation tasks that require a different notion of shared prediction support, is left for future work. 88 Conclusion 
+
+We introduced S UPPORT CAL , a label-free calibration method that preserves agreement examples while assigning support-aware weights within the disagreement region. Motivated by the non-monotonic effect observed under controlled disagreement reintroduction, S UPPORT CAL combines the own-base PLM’s relative support with corroboration from selected pretrained references and uses the resulting weights to fit a single scalar temperature. Across MedMCQA and MathQA, S UPPORT -CAL yields lower macro-average ECE than agreement-only calibration, with the same overall trend on supplementary TweetEval Sentiment. Our boundary characterization further links the weighted objective to whether the optimal temperature remains finite. Overall, the results show that disagree-ment need not be discarded wholesale: it can be incorporated selectively through label-free support signals while retaining the simplicity and deployment cost of scalar temperature scaling. 
+
+## References 
+
+Aida Amini, Saadia Gabriel, Shanchuan Lin, Rik Koncel-Kedziorski, Yejin Choi, and Hannaneh Hajishirzi. Mathqa: Towards interpretable math word problem solving with operation-based for-malisms. In Proceedings of NAACL-HLT , pages 2357–2367, 2019. Francesco Barbieri, Jose Camacho-Collados, Luis Espinosa Anke, and Leonardo Neves. Tweete-val: Unified benchmark and comparative evaluation for tweet classification. In Findings of the Association for Computational Linguistics: EMNLP 2020 , pages 1644–1650, 2020. DeepSeek-AI. DeepSeek-V2: A strong, economical, and efficient mixture-of-experts language model. arXiv preprint arXiv:2405.04434 , 2024. Shrey Desai and Greg Durrett. Calibration of pre-trained transformers. In Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing (EMNLP) , pages 295–302, 2020. Sebastian Farquhar, Jannik Kossen, Lorenz Kuhn, and Yarin Gal. Detecting hallucinations in large language models using semantic entropy. Nature , 630(8017):625–630, 2024. doi: 10.1038/s41586-024-07421-0. Gemma Team. Gemma 3 technical report. arXiv preprint arXiv:2503.19786 , 2025. Jiahui Geng, Fengyu Cai, Yuxia Wang, Heinz Koeppl, Preslav Nakov, and Iryna Gurevych. A survey of confidence estimation and calibration in large language models. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies , pages 6577–6595, 2024. doi: 10.18653/v1/2024.naacl-long.366. Aaron Grattafiori et al. The llama 3 herd of models. arXiv preprint arXiv:2407.21783 , 2024. Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger. On calibration of modern neural networks. In Proceedings of the 34th International Conference on Machine Learning (ICML) ,2017. Mohammad Anas Jawad and Cornelia Caragea. CaliDist: Calibrating large language models via behavioral robustness to distraction. In Proceedings of the 43rd International Conference on Machine Learning , volume 306 of Proceedings of Machine Learning Research . PMLR, 2026. Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chap-lot, Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El Sayed. Mistral 7b. arXiv preprint arXiv:2310.06825 ,2023a. Mingjian Jiang, Yangjun Ruan, Sicong Huang, Saifei Liao, Silviu Pitis, Roger Grosse, and Jimmy Ba. Calibrating language models via augmented prompt ensembles. In Workshop on Challenges in Deployable Generative AI, International Conference on Machine Learning (ICML) , 2023b. 9Saurav Kadavath, Tom Conerly, Amanda Askell, Tom Henighan, Dawn Drain, Ethan Perez, Nicholas Schiefer, Zac Hatfield-Dodds, Nova DasSarma, Eli Tran-Johnson, et al. Language mod-els (mostly) know what they know. arXiv preprint arXiv:2207.05221 , 2022. Sanyam Kapoor, Nate Gruver, Manley Roberts, Arka Pal, Samuel Dooley, Micah Goldblum, and Andrew Wilson. Calibration-tuning: Teaching large language models to know what they don’t know. In Proceedings of the 1st Workshop on Uncertainty-Aware NLP , pages 1–14, 2024. doi: 10.18653/v1/2024.uncertainlp-1.1. Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. Semantic uncertainty: Linguistic invariances for uncertainty estimation in natural language generation. In International Conference on Learning Representations , 2023. Stephanie Lin, Jacob Hilton, and Owain Evans. Teaching models to express their uncertainty in words. Transactions on Machine Learning Research , 2022. Beier Luo, Shuoyuan Wang, Sharon Li, and Hongxin Wei. Your pre-trained llm is secretly an unsupervised confidence calibrator. In Advances in Neural Information Processing Systems 38 ,pages 181424–181453, 2025. doi: 10.52202/085713-5458. Mistral AI. Mistral-7b-v0.3. https://huggingface.co/mistralai/Mistral-7B-v0.3 , 2024. Model weights and card release. Mahdi Pakdaman Naeini, Gregory F. Cooper, and Milos Hauskrecht. Obtaining well calibrated probabilities using bayesian binning. In Proceedings of the Twenty-Ninth AAAI Conference on Artificial Intelligence , 2015. Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kel-ton, Luke Miller, Maddie Simens, Amanda Askell, Peter Welinder, Paul Christiano, Jan Leike, and Ryan Lowe. Training language models to follow instructions with human feedback. In Ad-vances in Neural Information Processing Systems (NeurIPS) , 2022. Ankit Pal, Logesh Kumar Umapathi, and Malaikannan Sankarasubbu. Medmcqa: A large-scale multi-subject multi-choice dataset for medical domain question answering. In Conference on Health, Inference, and Learning (CHIL) , 2022. Hexiang Tan, Wanli Yang, Junwei Zhang, Xin Chen, Rui Tang, Du Su, Jingang Wang, Yuanzhuo Wang, Fei Sun, and Xueqi Cheng. BaseCal: Unsupervised confidence calibration via base model signals. In Proceedings of the 64th Annual Meeting of the Association for Computational Lin-guistics (Volume 1: Long Papers) , pages 5172–5187. Association for Computational Linguistics, 2026. doi: 10.18653/v1/2026.acl-long.234. Katherine Tian, Eric Mitchell, Allan Zhou, Archit Sharma, Rafael Rafailov, Huaxiu Yao, Chelsea Finn, and Christopher Manning. Just ask for calibration: Strategies for eliciting calibrated confi-dence scores from language models fine-tuned with human feedback. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , pages 5433–5442, 2023. doi: 10.18653/v1/2023.emnlp-main.330. Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie Fu, Junxian He, and Bryan Hooi. Can llms ex-press their uncertainty? an empirical evaluation of confidence elicitation in llms. In International Conference on Learning Representations (ICLR) , 2024. Tianyang Xu, Shujin Wu, Shizhe Diao, Xiaoze Liu, Xingyao Wang, Yangyi Chen, and Jing Gao. Sayself: Teaching llms to express confidence with self-reflective rationales. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing (EMNLP) , pages 5985–5998, 2024. An Yang et al. Qwen2.5 technical report. arXiv preprint arXiv:2412.15115 , 2024a. An Yang et al. Qwen2.5-math technical report: Toward mathematical expert model via self-improvement. arXiv preprint arXiv:2409.12122 , 2024b. An Yang et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. 10 Alex Young, Bei Chen, Chao Li, et al. Yi: Open foundation models by 01.ai. arXiv preprint arXiv:2403.04652 , 2024. Chiwei Zhu, Benfeng Xu, Quan Wang, Yongdong Zhang, and Zhendong Mao. On the calibra-tion of large language models and alignment. In Findings of the Association for Computational Linguistics: EMNLP 2023 , pages 9778–9795, 2023. 
+
+## A Own-base disagreement rate by target model 
+
+> (a) MedMCQA, median 28.9%.
+> (b) MathQA, median 46.7%.
+
+Figure 4: Own-base PLM/PoLM disagreement rates across the broader diagnostic target pool. 
+
+## B TweetEval Sentiment: supplementary validation 
+
+We additionally evaluate S UPPORT CAL on TweetEval Sentiment (Barbieri et al. 2020), a three-class non-QA classification task, using six target PoLMs under the same protocol as the main experiments. Table 3 reports per-model ECE against DACA for M ∈ { 2, 4}.Table 3: TweetEval Sentiment: mean ECE ± SE over five seeds. Bold and underline denote the best and second-best values among the methods shown; lower is better.                                                              
+
+> Target PoLM DACA SUPPORT CAL (M= 2 )SUPPORT CAL (M= 4 )Llama-3-8B 13 .7598 ±0.3353 11 .4970 ±0.3579 11 .4871 ±0.3665
+> Llama-3.1-8B 15 .5236 ±0.5474 15 .1181 ±0.1213 15 .1251 ±0.1222
+> Qwen2.5-7B 17 .7535 ±0.4926 16 .4443 ±0.2955 16 .4889 ±0.2881
+> Qwen2.5-14B 21 .6643 ±0.1817 19 .6526 ±0.3147 20 .0094 ±0.3145
+> Qwen2.5-32B 14 .9633 ±0.4463 14 .0326 ±0.3799 14 .2642 ±0.3669
+> Qwen3-8B 15 .8799 ±0.4372 13 .6205 ±0.4459 13 .6063 ±0.4531
+
+## C Additional setup details 
+
+Size-compatible reference pools. The model names below denote pretrained/base checkpoints. The small bucket contains Llama-3-8B, Llama-3.1-8B, Qwen2.5-7B, Qwen3-8B, Gemma3-4B, Yi-1.5-6B, Yi-1.5-9B, Mistral-7B-v0.3 (Mistral AI 2024), and DeepSeek-V2-Lite (DeepSeek-AI 2024). The medium bucket contains Qwen2.5-14B, Qwen2.5-32B, Gemma3-12B, Gemma3-27B, and Yi-1.5-34B. For each dataset and target model, the candidate pool R contains the available same-bucket pretrained references, excluding the target’s own-base PLM. For each fixed M , we enumerate every eligible S ⊆ R with |S| = M and select the combination with the largest Disagreement-Support score (Eq. 5). Tested combination sizes. MedMCQA uses M ∈ { 2, 4}, MathQA uses M ∈ { 1, 2},and TweetEval Sentiment uses M ∈ { 2, 4}.11 D Why Own-base Relative Support Alone Is Insufficient 
+
+The own-base relative-support score provides an informative sample-level signal, while cross-reference corroboration supplies complementary evidence. Tables 4 and 5 report representative targets where relative-only weighting is less effective than the full S UPPORT CAL construction. The MedMCQA comparison includes DeepSeek-V2-Lite from the broader diagnostic target pool in Ap-pendix A. Table 4: Representative MedMCQA relative-support ablation. Mean ECE ± SE over five seeds; lower is better. 
+
+Target PoLM DACA Relative-only SUPPORT CAL (M = 2 ) SUPPORT CAL (M = 4 )DeepSeek-V2-Lite 1.5632 ± 0.2065 3.0482 ± 0.2445 1.5589 ± 0.2522 1.4886 ± 0.2678 
+
+Yi-1.5-9B 2.7360 ± 0.1426 3.7620 ± 0.3241 2.2775 ± 0.2282 2.3115 ± 0.2597 
+
+Table 5: Representative MathQA relative-support ablation. Mean ECE ± SE over five seeds; lower is better. 
+
+Target PoLM DACA Relative-only SUPPORT CAL (M = 1 ) SUPPORT CAL (M = 2 )Llama-3-8B 6.5657 ± 0.1818 6.9351 ± 0.1898 6.1277 ± 0.1337 6.1368 ± 0.1343 
+
+Qwen2.5-14B 6.1044 ± 0.4504 8.4290 ± 0.1791 6.0750 ± 0.4377 6.1363 ± 0.4349 
+
+Qwen2.5-32B 7.4862 ± 0.2489 9.2408 ± 0.3519 7.3953 ± 0.2435 7.4374 ± 0.2489 
+
+## E Boundary characterization and empirical weight–margin relation 
+
+This appendix proves Proposition 1 (Section 4.4). It then reports an empirical check of how S UP -
+
+> PORT
+
+CAL weights vary with the boundary margin identified by the derivation. 
+
+E.1 Weighted KL objective in inverse-temperature coordinates 
+
+Starting from the temperature-fitting objective (Eq. 7), whose original domain is τ > 0, substitute 
+
+β = 1 /τ and extend the domain to β ∈ [0 , ∞): for β > 0 this is equivalent to τ = 1 /β > 0, while the boundary point β = 0 is not itself in the original domain and corresponds to the limit τ → ∞ .Write qn,β = softmax( βz n). Writing W = P 
+
+> n
+
+wn, the weights in Eq. (6) are strictly positive for any nonempty calibration split: agreement examples have wn = 1 , and disagreement examples have u(o) 
+
+> n
+
+> 0 and c⋆n > 0 because finite-logit softmax distributions assign positive probability to every class. Thus W > 0, and the objective becomes L(β) = 1
+
+> W
+
+P 
+
+> n
+
+wnℓn(β) with ℓn(β) = 
+
+DKL (p(o) 
+
+> n
+
+∥ qn,β ). Expanding the KL divergence, 
+
+ℓn(β) = Cn + log 
+
+> K
+
+X
+
+> k=1
+
+eβz n,k − β Ep(o)
+
+> n
+
+[zn], (8) where Cn = P 
+
+> k
+
+p(o) 
+
+> n,k
+
+log p(o) 
+
+> n,k
+
+is the (negative) entropy of p(o) 
+
+> n
+
+and does not depend on β, and 
+
+Ep(o)
+
+> n
+
+[zn] = P 
+
+> k
+
+p(o)
+
+> n,k
+
+zn,k .
+
+E.2 First derivative 
+
+Differentiating the log-sum-exp term in Eq. (8), ddβ log P 
+
+> k
+
+eβz n,k = P 
+
+> k
+
+zn,k qn,β,k = Eqn,β [zn],so 
+
+ℓ′
+
+> n
+
+(β) = Eqn,β [zn] − Ep(o)
+
+> n
+
+[zn], (9) 
+
+L′(β) = 1
+
+W
+
+X
+
+> n
+
+wn ℓ′
+
+> n
+
+(β).
+
+The derivative compares the average target-PoLM logit under the current scaled distribution qn,β 
+
+against the same average under the own-base reference p(o) 
+
+> n
+
+.12 E.3 Second derivative and convexity 
+
+Since ddβ qn,β,k = qn,β,k 
+
+ zn,k − Eqn,β [zn], differentiating Eq. (9) gives 
+
+ℓ′′ 
+
+> n
+
+(β) = Var qn,β (zn) ≥ 0, (10) 
+
+L′′ (β) = 1
+
+W
+
+X
+
+> n
+
+wn Var qn,β (zn) ≥ 0,
+
+Since wn > 0 for all n, Eq. (10) shows that L is convex on [0 , ∞). For every finite β, qn,β has full support. Consequently, 
+
+Var qn,β (zn) > 0
+
+whenever zn is nonconstant. If at least one calibration example has a nonconstant target-logit vector, its positive weight therefore gives L′′ (β) > 0 for every finite β, and L is strictly convex on [0 , ∞).
+
+E.4 Boundary at β = 0 
+
+At β = 0 , the scaled distribution is uniform, qn, 0,k = 1 /K , so Eqn, 0 [zn] = ¯ zn := K−1 PKk=1 zn,k .Define the per-example boundary margin 
+
+mn := Ep(o)
+
+> n
+
+[zn] − ¯zn. (11) Substituting into Eq. (9) gives ℓ′
+
+> n
+
+(0) = −mn, so mn captures the signed per-example contribution to the objective’s boundary derivative. Define the weighted boundary margin Mw := W −1 P 
+
+> n
+
+wnmn. Averaging the per-example deriva-tives then gives 
+
+L′(0) = 1
+
+W
+
+X
+
+> n
+
+wnℓ′
+
+> n
+
+(0) = − 1
+
+W
+
+X
+
+> n
+
+wnmn = −Mw. (12) 
+
+E.5 Finite versus infinite temperature 
+
+In our setting, every own-base distribution p(o) 
+
+> n
+
+has full support because it is a finite-logit softmax output. The evaluated model outputs are nondegenerate, so at least one positive-weight calibration example has nonconstant target logits. Together with W > 0, Section E.3 gives strict convexity on 
+
+[0 , ∞) and a strictly increasing derivative L′.
+
+Case Mw ≤ 0. Eq. (12) gives L′(0) ≥ 0. Since convexity makes L′ nondecreasing, L′(β) ≥ 0 for all β ≥ 0; hence L is minimized on the extended domain at β⋆ = 0 . Because β = 0 lies outside the original domain τ > 0 (Section E.1), the original objective has no finite minimizing temperature and its infimum is approached only as τ → ∞ .
+
+Case Mw > 0. Eq. (12) gives L′(0) < 0. As β → ∞ , qn,β concentrates on the maximizers of zn, so 
+
+lim β→∞ ℓ′
+
+> n
+
+(β) = max k zn,k − Ep(o)
+
+> n
+
+[zn]. Because p(o) 
+
+> n
+
+has full support, this limit is positive for any nonconstant zn: Ep(o)
+
+> n
+
+[zn] < max k zn,k . The positive-weight nonconstant example therefore makes 
+
+lim β→∞ L′(β) > 0. Continuity and strict monotonicity of L′ give exactly one zero, at β⋆ ∈ (0 , ∞),and strict convexity makes it the unique global minimizer. Equivalently, τ ⋆ = 1 /β ⋆ is finite and unique. The boundary condition is therefore determined by Mw: Mw > 0 yields a unique finite-temperature optimum, while Mw ≤ 0 places the optimum at the τ → ∞ boundary. S UPPORT CAL controls each disagreement example’s contribution through its weight. 13 E.6 Empirical weight–margin relationship 
+
+Figure 5: Mean S UPPORT CAL sample weight by mn percentile bin, on the disagreement region of MedMCQA, MathQA, and TweetEval Sentiment. The shaded band marks the lowest-mn decile. Figure 5 shows a broad association between the boundary margin and the disagreement weight assigned by S UPPORT CAL . Samples in the lowest mn percentiles receive the smallest average weights, and the mean weight generally increases with mn. The sign-based summary in Table 6 shows the same pattern more directly: across all three datasets, disagreement examples with mn < 0
+
+receive lower mean and median weights than those with mn > 0. This pattern is consistent with the weighting rule attenuating examples that exert pressure toward the β = 0 (τ → ∞ ) boundary identified by the analysis above. Table 6: SUPPORT CAL disagreement weights by boundary-margin sign (mean / median).             
+
+> Dataset mn<0mn>0
+> MathQA 0.187 / 0.120 0.316 / 0.249 MedMCQA 0.244 / 0.199 0.372 / 0.338 TweetEval Sentiment 0.340 / 0.294 0.431 / 0.404
+
+14
