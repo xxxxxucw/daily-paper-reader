@@ -1,0 +1,1141 @@
+Title: Shrinkage Bayesian Causal Forest with Instrumental Variable
+
+URL Source: https://arxiv.org/pdf/2609.18903v1
+
+Published Time: Thu, 17 Sep 2026 01:39:24 GMT
+
+Number of Pages: 31
+
+Markdown Content:
+# Shrinkage Bayesian Causal Forest with Instrumental Variable 
+
+Lennard Maßmann ∗
+
+University of Duisburg-Essen Faculty of Business Administration and Economics Universitätsstraße 12, 45117 Essen, Germany 
+
+lennard.massmann@uni-due.de 
+
+Jens Klenke 
+
+University of Duisburg-Essen Faculty of Business Administration and Economics Universitätsstraße 12, 45117 Essen, Germany 
+
+jens.klenke@vwl.uni-due.de 
+
+Abstract 
+
+Discovering interpretable subgroups whose complier effects deviate from the av-erage is a central goal of instrumental variable analysis under imperfect compli-ance, yet existing tree-based methods degrade when most covariates are irrele-vant to the effect. We propose Shrinkage Bayesian Causal Forest with Instru-mental Variable (SBCF-IV) for discovering and estimating subgroups with het-erogeneous Complier Average Causal Effects (CACE) in sparse high-dimensional settings. SBCF-IV places a sparsity-inducing Dirichlet prior on the splitting prob-abilities of the Bayesian Additive Regression Trees that estimate the conditional intention-to-treat and the complier share, concentrating posterior mass on the few covariates that moderate the complier effect and thereby regularizing effect esti-mation. The posterior split frequencies additionally enter a downstream CART as variable-level costs that steer the partition toward relevant moderators, providing an interpretable division of the covariate space. Monte Carlo experiments show that, as the share of irrelevant covariates grows, SBCF-IV recovers the true par-tition more reliably than its non-sparse predecessor BCF-IV at the tree and unit level, and retains nominal coverage where BCF-IV’s intervals deteriorate. We apply the method to the Oregon Health Insurance Experiment and the 401(k) eli-gibility data. 
+
+Keywords: Heterogeneous treatment effects, instrumental variables, Bayesian shrinkage, subgroup discovery 
+
+JEL classification: C11, C14, C21, C26 
+
+1 Introduction 
+
+The heterogeneous treatment effect (HTE) literature has expanded along two complementary dimen-sions: estimating the conditional average treatment effect (CATE) and discovering interpretable sub-groups whose effects deviate from the population average (Lipkovich et al. 2017, Künzel et al. 2019, Dwivedi et al. 2020). For CATE estimation, nonparametric machine learning methods have be-
+
+> ∗Ruhr Graduate School in Economics (RGS Econ), Research Academy Ruhr, Universitätsstr. 150, 44801 Bochum, Ger-many Preprint. arXiv:2609.18903v1 [econ.EM] 16 Sep 2026
+
+come standard, including the causal forest (Athey et al. 2019), Bayesian Additive Regression Trees (BART) (Hill 2011), Bayesian Causal Forest (BCF) (Hahn et al. 2020, Caron et al. 2022), and dou-bly robust meta-learners (Kennedy 2023, Semenova & Chernozhukov 2021). In parallel, a growing strand of work has focused on the data-driven discovery of interpretable subgroups, with decision-tree-based methods (Athey & Imbens 2016, Bargagli-Stoffi & Gnecco 2020, Bargagli-Stoffi et al. 2022, Lee et al. 2021) being particularly prominent due to their interpretability. Ensemble-based extensions such as the causal rule ensemble (Bargagli-Stoffi et al. 2024) and causal distillation trees (Huang et al. 2025) address the shortcomings of unstable single-tree methods by aggregating de-cision rules across many trees, yielding more stable and expressive subgroup representations when estimating CATE. A limitation of recent work on HTE is that the identification for CATE rests on the assumption of regular assignment mechanisms, which is rarely defensible in observational studies with unob-served heterogeneity in treatment uptake. When a valid instrument is available, a relevant target estimand becomes the Complier Average Causal Effect (CACE), or Local Average Treatment Ef-fect (LATE), nonparametrically identified for the subpopulation of compliers under the standard Instrumental Variables (IV) assumptions (Imbens & Angrist 1994, Angrist et al. 1996). The inter-pretation of complier effects has been the subject of ongoing debate: because compliance status is a counterfactual quantity that is never directly observed, critics have argued that the CACE pertains to an unidentified subgroup and is therefore of limited policy relevance (Deaton 2010, Swanson & Hernán 2014). In contrast, the LATE is often the most one can learn nonparametrically in the presence of unmeasured confounding without imposing restrictive effect homogeneity assumptions, and it remains informative about the underlying causal structure. Crucially, when covariates ex-plain a substantial share of the variation in compliance, complier effects effectively coincide with conditional effects in identifiable subgroups, and the concerns about an unknown target population largely dissolve (Kennedy et al. 2020). This observation provides direct motivation for studying the conditional Complier Average Causal Effect (cCACE). The cCACE is the CACE as a function of observed characteristics. Characterizing how complier effects vary along interpretable covariate pro-files transforms the CACE from a property of an unobserved subgroup into a set of policy-relevant statements about identifiable populations. Several methods have been developed to recover hetero-geneous IV effects, each targeting a distinct inferential object. Forest-based estimators such as the instrumental variable forest of Wang et al. (2022) and the instrumental forest within the generalized random forest (GRF) framework (Athey et al. 2019) target a unit-level conditional IV function, de-livering pointwise-consistent estimates with valid asymptotic inference but no explicit partition of the covariate space. The drivers of heterogeneity are recovered post hoc through variable importance scores or best linear projections. Partition-based procedures like the IV tree of Wang et al. (2022) and the matching procedure of Johnson et al. (2022) return an interpretable partition over which subgroup-level effects can be read off directly, paired with closed-testing inference. We propose Shrinkage Bayesian Causal Forest with Instrumental Variable (SBCF-IV), a general-ization of Bayesian Instrumental Variable Causal Forest (BCF-IV) tailored to settings in which the share of covariates that drive effect heterogeneity is small relative to P . The BCF-IV algorithm of Bargagli-Stoffi et al. (2022) combines a Bayesian Additive Regression Trees (BART)-based (Chip-man et al. 2010) sum-of-trees estimator for the conditional Intention-To-Treat (cITT) with a shallow Classification and Regression Trees (CART) post-processing step (Breiman et al. 1984), yielding in-terpretable subgroup-level estimates of cCACE within a two-step procedure based on stratification and IV estimation. By doing so, it reconciles the predictive accuracy of ensemble methods (Athey et al. 2019, Hartford et al. 2017) with the interpretability of single-tree approaches (Athey & Imbens 2016, Bargagli-Stoffi & Gnecco 2020, Johnson et al. 2022). However, BCF-IV inherits BART’s uniform split-variable prior and therefore performs no targeted feature selection: when the covariate vector contains many irrelevant variables, as is typical in modern administrative or biomedical data, both the ensemble and the downstream CART can spread splits across spurious moderators, weak-ening the discovered subgroups. Our contribution is twofold. First, we diagnose the failure mode of BCF-IV in high dimensions. BCF-IV increasingly splits on spurious moderator variables as the share of irrelevant covariates grows, which degrades subgroup recovery and effect estimation. We address this by estimating the cITT with the Shrinkage Bayesian Causal Forest (SBCF) of Caron et al. (2022), whose sparsity-inducing Dirichlet prior, in the spirit of SoftBART (Linero & Yang 2018, Linero 2018), concentrates posterior mass on the few covariates that moderate the effect. The resulting estimation gains in our setting are attributable to this prior. Second, we feed the poste-rior split frequencies into the subgroup-discovery CART as variable-level costs, a component that 2steers the partition toward ensemble-relevant covariates and is most beneficial when the ensemble is not already sparse. Throughout, our scope follows that of Bargagli-Stoffi et al. (2022): a binary randomized instrument, a binary treatment, and standard IV identification assumptions. Section 4 accordingly benchmarks SBCF-IV against BCF-IV as the direct ancestor and natural comparator under this setting, with a supplementary comparison to the instrumental forest of Athey et al. (2019) and a cost-weighting ablation in Appendix E.5. The paper proceeds as follows. Section 2 sets up the potential outcomes framework and iden-tifying assumptions for the cCACE under an irregular assignment mechanism. Section 3 intro-duces SBCF-IV. Section 4 reports Monte Carlo evidence on its performance relative to BCF-IV in high-dimensional settings based on tree-level and unit-level performance criteria. Section 5 applies SBCF-IV to two empirical studies: the Oregon Health Insurance Experiment (OHIE) (Finkelstein et al. 2012, Johnson et al. 2022) and the 401(k) retirement plans dataset (Poterba et al. 1992, 1995, Chernozhukov et al. 2018). Section 6 concludes. 
+
+2 Potential outcomes and irregular assignment 
+
+We follow Bargagli-Stoffi & Gnecco (2020) and Bargagli-Stoffi et al. (2022) and adopt Rubin’s causal model, working within the irregular assignment framework of Imbens & Rubin (2015). For 
+
+N units indexed i = 1 , . . . , N , let Yi ∈ R denote the observed outcome, Zi ∈ { 0, 1} a binary instrument (assignment), Wi ∈ { 0, 1} the actual treatment received, and Xi ∈ RP the i-th row of an 
+
+N ×P matrix X of pre-treatment covariates. Each unit is endowed with potential outcomes Yi(Zi =
+
+z, W i = w) and potential treatments Wi(z) for z, w ∈ { 0, 1}, related to observed quantities by the consistency relations Yi = Yi(Zi, W i) and Wi = Wi(Zi). The instrument Zi is unconfounded but the receipt Wi may be confounded. This is the canonical IV setting, and our inferential target is the cCACE in Definition 2.2, based on the latent subpopulation of compliers. 
+
+Definition 2.1 (Compliance subgroups) . Each unit belongs to one of four latent compliance sub-groups, defined by the joint values of its potential treatments: 
+
+Gi =
+
+
+
+C, Wi(0) = 0 , W i(1) = 1 (compliers) 
+
+D, Wi(0) = 1 , W i(1) = 0 (defiers) 
+
+AT, Wi(0) = 1 , W i(1) = 1 (always-takers) 
+
+N T, Wi(0) = 0 , W i(1) = 0 (never-takers) ,
+
+with conditional subgroup proportions πG(x) = Pr( Gi = G | Xi = x) for G ∈ { C, D, AT, N T }.
+
+Definition 2.2 (Conditional CACE) . The conditional Complier Average Causal Effect is the esti-mand 
+
+τ CACE (x) := EYi(1 , W i(1)) − Yi(0 , W i(0)) Gi = C, X i = x,
+
+which, under the exclusion restriction in Assumption 2.1(d), reduces to E[Yi(1) − Yi(0) | Gi =
+
+C, X i = x].Definition 2.2 fixes the target as a property of the latent complier subpopulation and it is not, by itself, an object computable from the observed distribution of (Yi, W i, Z i, X i). Identification proceeds through the conditional Intention-to-Treat (ITT) effect and the conditional complier share, both of which admit clean expressions in terms of observed conditional means. 
+
+Definition 2.3 (Conditional ITT and complier share) . The conditional ITT effect and the conditional complier share are ITT Y (x) := E[Yi | Zi = 1 , X i = x] − E[Yi | Zi = 0 , X i = x],πC (x) := Pr( Gi = C | Xi = x).
+
+By a mixture argument over the compliance subgroups of Definition 2.1, ITT Y (x) = πC (x) ITT Y,C (x) + πD (x) ITT Y,D (x) + πAT (x) ITT Y,AT (x) + πN T (x) ITT Y,N T (x),
+
+where ITT Y,G (x) denotes the conditional ITT among units of compliance types G in Definition 2.1. Definition 2.3 makes explicit that ITT Y (x) is a covariate-weighted mixture and isolating 
+
+τ CACE (x) = ITT Y,C (x) requires assumptions that neutralize the contributions of defiers, always-takers, and never-takers. The classical Angrist et al. (1996) conditions for IV estimation deliver point identification. 3Assumption 2.1 (IV identification under irregular assignment) .
+
+(a) Stable Unit Treatment Value Assumption (SUTVA) / consistency: Yi = Yi(Zi, W i) and 
+
+Wi = Wi(Zi), with no interference between units and no hidden treatment variants. (b) Relevance: πC (x) > 0 almost surely. (c) Unconfounded instrument: Zi ⊥⊥  {Yi(z, w )}z,w ∈{ 0,1}2 , W i(0) , W i(1)  Xi.(d) Exclusion restriction: Yi(z, w ) = Yi(w) for all z, w ∈ { 0, 1}.(e) Monotonicity: Wi(1) ≥ Wi(0) .Assumption 2.1(a) ensures consistency and rules out interference and hidden treatment variants. Relevance (b), together with monotonicity (e), guarantees πC (x) > 0 almost surely so that the identification ratio below is well-defined. Monotonicity also rules out defiers ( πD (x) = 0 ), which must be defended on substantive grounds or enforced through a one-sided non-compliance design. The exclusion restriction (d) confines the effect of Zi on Yi to the channel through Wi. Under Assumption 2.1, the complier estimand of Definition 2.2 is identified from the observed distribution. 
+
+Proposition 2.1 (Identification of τ CACE (x)). Under Assumption 2.1, 
+
+τ CACE (x) = ITT Y (x)
+
+πC (x) = E[Yi | Zi = 1 , X i = x] − E[Yi | Zi = 0 , X i = x]
+
+E[Wi | Zi = 1 , X i = x] − E[Wi | Zi = 0 , X i = x] .
+
+The proof, adapting Angrist et al. (1996) to the conditional target as in Bargagli-Stoffi et al. (2022), is given in Appendix A. 
+
+Given a partition {Xj }j of the covariate space, Proposition 2.1 motivates a sample-moment estimator targeting the subgroup-averaged complier effect 
+
+τ CACE  
+
+> Xj
+
+:= EYi(W = 1) − Yi(W = 0) Gi = C, X i ∈ Xj
+
+, (1) obtained by replacing population conditional means in Proposition 2.1 with subgroup sample ana-logues. 
+
+Definition 2.4 (Subgroup-wise 2SLS estimator) . For Xi = x ∈ Xj , with Nz,j = P  
+
+> l:Xl∈Xj
+
+1{Zl =
+
+z} the count of Xj -units assigned to Zl = z ∈ { 0, 1},
+
+bτ CACE (x) := bτ 2SLS  
+
+> Xj
+
+=1
+
+N1,j 
+
+P  
+
+> l:Xl∈Xj
+
+YlZl − 1
+
+N0,j 
+
+P  
+
+> l:Xl∈Xj
+
+Yl(1 − Zl)1
+
+N1,j 
+
+P  
+
+> l:Xl∈Xj
+
+WlZl − 1
+
+N0,j 
+
+P  
+
+> l:Xl∈Xj
+
+Wl(1 − Zl)
+
+targets τ CACE  
+
+> Xj
+
+.Equivalently, bτ 2SLS  
+
+> Xj
+
+is the Two-Stage Least Squares estimator on the subgroup-restricted simultane-ous system 
+
+Yi, Xj = κXj + τ CACE  
+
+> Xj
+
+Wi, Xj + εi, Xj , Wi, Xj = π0,Xj + πC, Xj Zi, Xj + νi, Xj , (2) with intercepts κXj and π0,Xj , error terms εi, Xj and νi, Xj , while E[εi, Xj ] = E[νi, Xj ] = 0 and 
+
+E[Zi, Xj νi, Xj ] = 0 . Under Assumption 2.1 and a sufficient number of i.i.d. observations within each 
+
+Xj , bτ 2SLS  
+
+> Xj
+
+is consistent and asymptotically normal for τ CACE  
+
+> Xj
+
+, with the reduced form and formal asymptotic results collected in Appendix B. Definition 2.4 presumes that the partition {Xj }j is known. The contribution of BCF-IV (Bargagli-Stoffi et al. 2022) is to discover this partition from the data through (i) an honest split of the sample into disjoint discovery and inference subsets Idisc and Iinf ; (ii) interpretable discovery of heterogene-ity on Idisc ; and (iii) inference for τ CACE  
+
+> Xj
+
+on Iinf . Our SBCF-IV algorithm in Algorithm 1 inherits this three-step structure of Bargagli-Stoffi et al. (2022) with adaptations for a high-dimensional covariate setup described in the next section. 43 Shrinkage Bayesian Causal Forest with Instrumental Variable 
+
+We propose SBCF-IV, an extension of BCF-IV (Bargagli-Stoffi et al. 2022) to settings with many ir-relevant covariates. The overall structure of honest sample splitting, data-driven discovery of hetero-geneous subgroups on Idisc , and Two-Stage Least Squares (2SLS) inference on Iinf is preserved. Our adaptations concern the discovery step where we replace BCF with the sparsity-inducing Shrinkage BCF (SBCF) of Caron et al. (2022) and feed its posterior variable-selection frequencies into the subgroup-finding tree as variable-level costs. Algorithm 1 summarizes the full procedure. Working on Idisc , we separately model the numerator and denominator of the identification ratio in Proposition 2.1. Following Hahn et al. (2020), we adopt the semi-parametric specification 2
+
+E[Yi | Zi = z, X i = x] = μ e(x), x  + ITT Y (x) z, (3) where e(x) = Pr( Zi = 1 | Xi = x) is the instrument’s propensity score, included as a covari-ate in the control function μ(e(x), x ) to mitigate regularization-induced confounding and targeted selection. Independent BART priors are placed on μ(e(x), x ) and ITT Y (x), with depth-penalty pa-rameters (η, β ) = (0 .25 , 3) on ITT Y (x) favoring shallow trees and hence simpler heterogeneity patterns. The compliance component is modeled analogously via 
+
+E[Wi | Zi = z, X i = x] = δ(z, x ), (4) with a BART probit prior on δ(z, x ) (Hill 2011). Combining estimates yields a pointwise complier-share estimate bπ SBCF  
+
+> C
+
+(x) = bδ(1 , x ) − bδ(0 , x ) and a pointwise complier-effect estimate bτ SBCF (x) = 
+
+dITT SBCF  
+
+> Y
+
+(x)/bπ SBCF  
+
+> C
+
+(x). We emphasize that bτ SBCF (x) is a posterior estimate on Idisc used solely as a heterogeneity signal for the tree-fitting step, while we conduct final inference for the subgroup target 
+
+τ CACE  
+
+> Xj
+
+with bτ 2SLS  
+
+> Xj
+
+from Definition 2.4 on Iinf .SBCF-IV departs from BCF-IV in the prior on the split-variable selection probabilities s =(s1, . . . , s P ). BCF uses a uniform sj = 1 /P . Instead, SBCF imposes a sparsity-inducing Dirichlet prior, 
+
+s ∼ Dirichlet   αP , . . . , αP
+
+ , αα + ρ ∼ Beta (a, b ), (5) with defaults (a, b, ρ ) = (0 .5, 1, P ) (Caron et al. 2022). Small α concentrates mass on few co-variates, and the hyperprior on α/ (α + ρ) lets the data determine the degree of sparsity, with the preference for sparsity strengthening as P grows. We place separate Dirichlet priors on the split probabilities sμ and sITT Y of the two components of (3), using ρμ = P + 1 (to accommodate the propensity score as an extra covariate in μ) and ρITT Y = P/ 2 (to further concentrate mass on few active splits in the treatment effect component). The same sparsity-inducing prior in (5) is applied in the SoftBART probit model used for δ(z, x ) in (4), with ρδ = P + 1 . Appendix D provides more information on the full sparsity-inducing prior specifications. We fit a shallow CART (Breiman et al. 1984) to the pointwise estimates bτ SBCF (Xi) to recover an interpretable partition {Xj }j . The pos-terior split frequencies bsITT Y indicate which covariates drive heterogeneity and we pass these split frequencies to rpart (Therneau & Atkinson 2026) through the cost argument, setting variable-level costs to 
+
+cpsp = max {bsITT Y }
+
+bsITT Y
+
+. (6) Because rpart divides split-improvement by the candidate variable’s cost, (6) upweights covari-ates with a higher posterior inclusion probability at each split, in a manner analogous to variable-importance weighting in random forests (Breiman 2001). The cost vector cpsp is defined via bsITT Y ,the posterior split frequencies of the cITT component, mirroring the ITT-anchored discovery step of BCF-IV (Bargagli-Stoffi et al. 2022). Posterior split frequencies can be exactly zero for covariates the ensemble never selects given finitely many draws. Therefore, we floor bsITT Y at a small εc > 0
+
+before inversion in (6), capping the cost of a never-selected covariate at max {bsITT Y }/ε c. Equation (6) is thus always well-defined and assigns such covariates a large but finite penalty. The choice of bsITT Y for the cost vector is justified by a coherence property of the two-step procedure: within a leaf, the discovery average and the 2SLS estimand differ only by the within-leaf covariance be-tween the complier share and the complier effect, a leaf-level instance of the compliance-weighting of instrumental variable estimands (Angrist & Imbens 1995, Abadie 2003, Frölich 2007). When 
+
+> 2Background on CART, BART, BCF, and SBCF is collected in Appendix C.
+
+5Algorithm 1 Shrinkage Bayesian Causal Forest with Instrumental Variable (SBCF-IV) 
+
+Require: N units {(Xi, Z i, W i, Y i)}Ni=1 .
+
+Ensure: Tree-structured partition of the covariate space with node-level CACE estimates. 
+
+Step 1: Honest splitting.  
+
+> 1:
+
+Randomly partition the sample into Idisc and Iinf (defaults to half-size splits). 
+
+Step 2: Discovery (on Idisc ).  
+
+> 2:
+
+Estimate dITT SBCF  
+
+> Y
+
+(x) via SBCF under the sparsity prior (5); save posterior split frequencies 
+
+bsITT Y . 
+
+> 3:
+
+Estimate bπ SBCF  
+
+> C
+
+(x) via a SoftBART probit with similar sparsity prior.  
+
+> 4:
+
+Form the pointwise heterogeneity signal bτ SBCF (x) = dITT SBCF  
+
+> Y
+
+(x)/bπ SBCF  
+
+> C
+
+(x). 
+
+> 5:
+
+Fit a shallow CART to {(bτ SBCF (x), X i)} with variable-level costs cpsp as in (6); the resulting partition is {Xj }j .
+
+Step 3: Inference (on Iinf ).  
+
+> 6:
+
+For every node Xj , compute bτ 2SLS  
+
+> Xj
+
+via (2), targeting τ CACE  
+
+> Xj
+
+. 
+
+> 7:
+
+Run first-stage weak-instrument tests and adjust leaf-level p-values for the familywise error rate.  
+
+> 8:
+
+return The pruned tree with node-level CACE estimates and adjusted inference. within-leaf variation of πC (x) is small, heterogeneity in τ CACE (x) is inherited almost entirely from ITT Y (x) and bsITT Y is the natural cost weight (see Corollary A.1 in Appendix A). Aggregating bsITT Y
+
+with the compliance component’s split frequencies, for regimes with substantial denominator-driven heterogeneity, is an extension left to future work. Inference on the discovered partition follows BCF-IV without modification. For each node Xj of the tree learned on Idisc , we compute bτ 2SLS  
+
+> Xj
+
+on Iinf via the simultaneous system in (2). Consistency and asymptotic normality under subgroup-level moment conditions are collected in Appendix B. To guard against spurious heterogeneity, nodes flagged by a first-stage F -test for weak instruments are discarded, and p-values across leaves are adjusted for the familywise error rate using Holm-corrections for adjusted p-values (Holm 1979, Bargagli-Stoffi et al. 2022). 
+
+4 Simulation study 
+
+We combine the design of Bargagli-Stoffi et al. (2022) with the high-dimensional setup of Caron et al. (2022) to assess SBCF-IV and BCF-IV in settings with many irrelevant covariates. Ap-pendix E.1 presents a detailed description of the complete simulation design. For each of N = 1 ,000 
+
+units, we generate a binary instrument Zi ∼ Bernoulli (0 .5) , a covariate vector Xi ∈ RP with 
+
+P ∈ { 10 , 50 , 100 } (half binary, half continuous), and potential outcomes and treatments according to 
+
+Wi(0) = 0 , Wi(1) ∼ Bernoulli (πcomp = 0 .75) ,Yi(0) = μ(Xi) + ϵi, Yi(1) = Yi(0) + Wi(1) τ CACE (Xi), (7) with observed values Wi = ZiWi(1) and Yi defined analogously under SUTVA. The Gaussian error term reads ϵi ∼ N (0 , 1) . Three features of (7) are central to the estimand of interest. First, 
+
+Wi(0) = 0 imposes one-sided non-compliance, ruling out defiers and always-takers by design and making monotonicity (Assumption 2.1(e)) hold exactly. Second, we choose the compliance rate 
+
+πcomp = 0 .75 to control the strength of the instrument. Third, heterogeneity in the conditional CACE is confined to the first two binary covariates, 
+
+τ CACE (Xi) = 
+
+
+
+k, Xi ∈ l1 = {Xi, 1 = 0 , X i, 2 = 0 },
+
+−k, Xi ∈ l2 = {Xi, 1 = 1 , X i, 2 = 1 },
+
+0, otherwise ,
+
+(8) 6with effect size k ∈ { 0, 0.2, 0.4, . . . , 2}.3 The remaining covariates, including all continuous ones, are irrelevant for τ CACE (x), so the true sparsity level in the treatment effect component grows with 
+
+P . This isolates the setting SBCF-IV is designed for: relevance concentrated on two covariates while P − 2 noise variables compete for splits. The control function μ(Xi) is adopted from Caron et al. (2022) and depends only on three continuous covariates through a nonlinear combination of sine, quadratic, and absolute-value terms. Its explicit form is given in Appendix E.1. We evaluate SBCF-IV along three complementary dimensions: tree-level subgroup detection, unit-level classification, and unit-level estimation precision with uncertainty quantification. Tree-level recovery is captured by the Detection Rate (DR) and False Detection Rate (FDR), which record whether the true heterogeneity regions l1, l 2 are recovered. Unit-level classification is assessed on 
+
+Iinf via Recall, Precision, False Positive Rate (FPR), and F -score, translating structural detection into how reliably individual observations are sorted into statistically significant leaves. Estimation precision is then quantified by the per-unit bias, MSE, and 95% coverage of the resulting conditional CACE estimates. Formal definitions and further discussions are deferred to Appendix E.2. Figure 1 shows that SBCF-IV dominates BCF-IV on both tree-level criteria across all three covariate dimensions. For detection, SBCF-IV’s DR rises steeply once k ≥ 0.8 and saturates near one for 
+
+k ≥ 1.4, essentially uniformly in P : adding irrelevant covariates does not meaningfully degrade the algorithm’s ability to recover l1 and l2 as leaves. BCF-IV, by contrast, only begins to detect the true subgroups for k ≥ 1 in the low-dimensional case ( P = 10 ), and its DR flattens near 0.3 at 
+
+k = 2 . For P ∈ { 50 , 100 }, BCF-IV’s DR stays close to zero throughout the grid, indicating that the uniform split-variable prior fails to concentrate on the two binary covariates that drive heterogeneity once they are buried among many noise variables. The ordering on FDR is equally clear. SBCF-IV maintains an FDR near zero across the entire (k, P ) grid, so its detection gains do not come at the cost of spurious discoveries. BCF-IV, by contrast, exhibits an FDR that rises with k and is largest at P = 10 , reaching roughly 0.75 at k = 2 with P = 10 and remaining above 0.25 
+
+for larger P . Most of BCF-IV’s rare "discoveries" in high-dimensional settings are false positives. The two panels indicate that the sparsity-inducing prior improves both detection and false-discovery control, recovering true heterogeneity where BCF-IV misses it while controlling spurious leaves where BCF-IV generates them. Figure 1: Tree-level subgroup detection across effect size k and covariate dimension P .                                                  
+
+> P= 10 P= 50 P= 100
+> DR  FDR
+> 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.00 0.25 0.50 0.75 1.00 0.00 0.25 0.50 0.75 1.00 Effect Size ( k)Model BCF-IV SBCF-IV
+> Notes: The top row reports the Detection Rate (DR), defined in (22) as the average share of true heterogeneity subgroups
+> l1, l 2recovered as leaves of the discovered tree. The bottom row reports the False Detection Rate (FDR), defined in (23) as the share of replications in which at least one spurious leaf is flagged as significant at level α= 0 .05 . Results are averaged over M= 500 Monte Carlo replications with N= 1 ,000 , and compare SBCF-IV (orange) with BCF-IV (gray). Full results in Table 2 of Appendix E.4.
+> 3We use l1, l 2to denote the true heterogeneity subgroups in the data-generating process (DGP), distinct from the discov-ered subgroups {Xj}jproduced by the CART step of SBCF-IV. A successful run recovers l1and l2as leaves of the tree, i.e., Xj=ljfor j∈ { 1,2}up to labeling.
+
+7Figure 2 confirms that SBCF-IV’s tree-level advantages in Figure 1 translate directly into sharper unit-level sorting. Here, we report Precision and the F -score. The full set of classification metrics is reported in Figure 3 of Appendix E. Precision follows the same pattern across both algorithms: for k ≥ 1, SBCF-IV’s Precision rises steeply and saturates near one by k = 1 .4 across all three values of P , meaning that nearly every unit assigned to a significant leaf is in a truly heterogeneous subgroup. BCF-IV reaches roughly Precision = 0 .4 at k = 2 under P = 10 and stays close to zero for P ∈ { 50 , 100 }. In the high-dimensional regime, nearly all of BCF-IV’s unit-level positive classifications are misclassifications, which is a consequence of FDR results in Figure 1. The F -score mirrors this ranking and is the more informative single summary since it penalizes both missed heterogeneity and spurious flags. SBCF-IV’s F -score converges to one for k ≥ 1.4 uniformly in P ,indicating that the algorithm both identifies the correct units and avoids misclassification. BCF-IV’s 
+
+F -score remains below 0.4 throughout the (k, P ) grid and flatlines near zero once P ≥ 50 .Figure 2: Unit-level classification performance across effect size k and covariate dimension P .                                                           
+
+> P= 10 P= 50 P= 100
+> 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.00 0.25 0.50 0.75 1.00 Effect Size ( k)Precision
+> P= 10 P= 50 P= 100
+> 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.00 0.25 0.50 0.75 1.00 Effect Size ( k)
+> F -Score Model BCF-IV SBCF-IV
+> Notes: The top row reports Precision and the bottom row the F-score, both defined in (24) and computed over all units in Iinf with significance evaluated at α= 0 .05 using Holm-adjusted p-values. Results are averaged over MMonte Carlo replications with N= 1 ,000 , and compare SBCF-IV (orange) with BCF-IV (gray). We report full results in Table 3 of Appendix E.4.
+
+Table 1 reports estimation precision and uncertainty quantification for bτ CACE (x) and k ∈ { 0, 1, 2},while qualitatively similar results for the full k-range are deferred to Appendix E.4. We summarize three emerging patterns. First, point estimation accuracy diverges with effect size. For k ≥ 1,SBCF-IV consistently delivers lower MSE and absolute bias than BCF-IV, with the gap widening as k grows: SBCF-IV’s MSE is about a quarter of BCF-IV’s at (k, P ) = (2 , 10) and about a tenth at (k, P ) = (2 , 100) . BCF-IV’s MSE grows with P , while SBCF-IV’s remains flat, confirming that the dimension-invariance seen in Figures 1 and 2 extends to point estimation accuracy. Second, BCF-IV’s absolute bias grows from 0.29 at (k, P ) = (0 , 10) to 1.5 at (k, P ) = (2 , 100) because its uniform split-variable prior dilutes the estimated effect across noise covariates. SBCF-IV’s absolute bias stays below 0.5 throughout the grid. Third, uncertainty quantification degrades with increasing 
+
+k and P for BCF-IV. SBCF-IV maintains coverage near the nominal 0.95 level across the entire 
+
+(k, P ) grid, so its confidence intervals remain well-calibrated even when the true effect is large or the covariate space is high-dimensional. BCF-IV’s coverage, by contrast, drops with k. Taken together, the three simulation dimensions indicate that the sparsity prior improves discovery, classification, point estimation, and inference simultaneously, with SBCF-IV delivering near-nominal coverage at comparable interval width. 8Table 1: Estimation precision and uncertainty quantification for bτ CACE (x).                                                                                                      
+
+> BCF-IV SBCF-IV
+> PkMSE Bias Abs. Bias Coverage Width MSE Bias Abs. Bias Coverage Width 00.188 (0.163) -0.004 (0.225) 0.286 (0.140) 0.948 (0.176) 1.434 (0.219) 0.191 (0.161) -0.004 (0.222) 0.314 (0.131) 0.957 (0.131) 1.600 (0.176) 10.473 (0.333) 0.000 (0.286) 0.569 (0.240) 0.695 (0.337) 1.600 (0.210) 0.298 (0.327) -0.002 (0.308) 0.426 (0.256) 0.899 (0.235) 1.794 (0.160) 10 20.931 (0.729) 0.014 (0.446) 0.811 (0.354) 0.478 (0.335) 1.697 (0.174) 0.214 (0.211) 0.012 (0.337) 0.368 (0.199) 0.953 (0.149) 1.840 (0.141) 00.205 (0.244) -0.003 (0.223) 0.273 (0.145) 0.953 (0.178) 1.399 (0.244) 0.214 (0.151) -0.003 (0.222) 0.358 (0.140) 0.960 (0.111) 1.769 (0.143) 10.785 (0.472) 0.012 (0.241) 0.744 (0.288) 0.454 (0.404) 1.495 (0.232) 0.213 (0.232) -0.003 (0.309) 0.362 (0.203) 0.949 (0.151) 1.830 (0.140) 50 22.088 (1.446) -0.008 (0.299) 1.291 (0.508) 0.202 (0.256) 1.593 (0.255) 0.204 (0.203) 0.002 (0.320) 0.359 (0.192) 0.957 (0.145) 1.836 (0.138) 00.196 (0.234) -0.020 (0.226) 0.253 (0.143) 0.957 (0.180) 1.325 (0.215) 0.217 (0.162) -0.021 (0.226) 0.360 (0.143) 0.951 (0.111) 1.785 (0.136) 10.954 (0.418) 0.019 (0.220) 0.872 (0.251) 0.273 (0.351) 1.417 (0.243) 0.230 (0.215) 0.005 (0.319) 0.387 (0.199) 0.950 (0.149) 1.826 (0.139) 100 22.551 (1.522) 0.013 (0.257) 1.454 (0.526) 0.157 (0.222) 1.535 (0.235) 0.230 (0.238) 0.022 (0.340) 0.376 (0.212) 0.942 (0.164) 1.835 (0.146)
+
+Notes: MSE, Bias, Absolute Bias, as well as Coverage and Width of 95% confidence intervals. All values are averaged over 
+
+M = 500 Monte Carlo replications with N = 1 ,000 and standard deviations across Monte Carlo replications are reported in parentheses. Results pool subgroups l1 and l2 and compare BCF-IV (left) with SBCF-IV (right). We focus on k ∈ { 0, 1, 2}
+
+and P ∈ { 10 , 50 , 100 } for visibility. Table 4 of Appendix E.4 reports full results. 
+
+To check whether the improvements above are specific to the comparison of SBCF-IV with BCF-IV or to the cost weighting of (6), Appendix E.5 reports an analysis that considers the instrumental for-est of the GRF framework as an additional benchmark method (Athey et al. 2019). We further cross each method that estimates the heterogeneity signal (BCF, SBCF, GRF) in line four of Algorithm 1 with the split-frequency cost of (6). Table 5 provides an overview of all six methods as variants of Algorithm 1. The simulation shows that the sparsity-inducing prior, not the cost weighting, is the major source of the improvement. The two SBCF-IV variants (with and without cost weight-ing) are nearly indistinguishable across the (k, P ) grid, consistent with Corollary A.1. In contrast, GRF-based Instrumental Variable Causal Forest (GRF-IV) degrades with P similary to BCF-IV. The cost weighting helps the non-sparse methods that are based on either GRF or BCF, for which it partially restores detection and coverage while improving precision of the final estimates but without matching the performance of SBCF-IV. We present full tables and figures in Appendix E.5. 
+
+5 Empirical application 
+
+We apply SBCF-IV to two empirical datasets, the Oregon Health Insurance Experiment (OHIE) (Finkelstein et al. 2012, Johnson et al. 2022) and the 401(k) dataset (Poterba et al. 1992, Cher-nozhukov et al. 2018, Belloni et al. 2017). The OHIE was a randomized controlled trial conducted in 2008 to assess the effects of expanding Medicaid coverage on health outcomes, financial security, and healthcare utilization. The US state Oregon used a lottery system to allocate a limited number of Medicaid spots to uninsured, low-income adults (Finkelstein et al. 2012, Johnson et al. 2022). This created a natural experiment, allowing researchers to compare those who received Medicaid to those who did not. Following Johnson et al. (2022), we apply SBCF-IV to the OHIE data. The outcome is the number of days in the past month on which poor physical or mental health did not impair the respondent’s usual activities (a survey count between 0 and 30, with higher values indicating better health). SBCF-IV identifies a single complier subgroup with a positive, statistically significant Med-icaid effect: English-preferring individuals aged between 38 and 59 (effect: 2.263 ; adjusted p-value: 
+
+0.0945 ), in contrast to the two subgroups reported by Johnson et al. (2022). Estimated subgroup compliance rates range from 19% to 32% , in line with Johnson et al. (2022) and exhibiting only modest variation relative to the heterogeneity in conditional ITT effects. Both analyses thus locate the dominant source of complier-effect heterogeneity in the variation of the cCACE numerator rather than in compliance probabilities. Appendix F.1 re-investigates the empirical analysis presented in Johnson et al. (2022) in more detail. On the 401(k) data, SBCF-IV partitions eligible households into seven subgroups, of which two possess adjusted p-values at the 10% level: the bulk subgroup with income below $68,810 (89% of the inference sample, bτ CACE (x) = $17 ,818 ) and a small upper-middle-income subgroup with household income between $92 ,690 and $110 ,400 with bτ CACE (x) = $53 ,422 . The remaining five leaves show adjusted p-values without statistical significance. Four carry inference-sample shares at or below 1% and the fifth below 7%, which we read as small-sample artifacts. The discovered splits run almost entirely along income, aligning with the lifecycle and earnings-gradient emphasis of the classical 401(k) saving literature (Poterba et al. 1992, Engen & Gale 2000). As in the OHIE application, complier shares vary far less than the conditional CACE across leaves. The high-mass leaves cluster near a complier share of 0.70, so the heterogeneity is driven by variation in the condi-9tional ITT numerator rather than in the complier denominator. This mirrors the simulation evidence in Section 4 that SBCF-IV recovers ITT-driven partitions reliably. Both statistically significant leaf estimates exceed the overall cross-fitted CACE of $9 ,000 –$13 ,000 reported by Chernozhukov et al. (2018), the bulk leaf modestly (by $5 ,000 –$9 ,000 ) and the upper-middle-income leaf substantially. We present this as a descriptive comparison only: the gap is consistent with several explanations (genuine income-based heterogeneity in the CACE, post-selection effects from reporting leaves af-ter screening, and the upward bias from unobserved saver heterogeneity flagged by Engen et al. (1996)) which the present design cannot separate. We provide an extended discussion of this second empirical application in Appendix F.2. 
+
+6 Conclusion 
+
+This paper introduces SBCF-IV, an extension of BCF-IV (Bargagli-Stoffi et al. 2022) that com-bines Bayesian shrinkage with subgroup-level estimation of the conditional CACE under imperfect compliance in high-dimensional covariate settings. SBCF-IV preserves the interpretive structure of BCF-IV with an explicit partition over compliers and subgroup-level CACE while introducing regularization needed to make that structure stable in high dimensions (Caron et al. 2022). The simulation study in Section 4 demonstrates for varying effect sizes k that, as the covariate dimen-sion P grows, SBCF-IV preserves subgroup discovery rates, precision, and nominal coverage. In comparison, BCF-IV exhibits a degradation along most criteria, leading to a loss of inferential relia-bility. Applied to two empirical applications, SBCF-IV recovers interpretable partitions of compliers whose cCACE estimates differ across subgroups, illustrating its practical value beyond the simulated regime. Several limitations warrant emphasis. First, we establish no selection- or partition-consistency guar-antee for the discovery step. The sparsity prior’s variable-selection benefit is that of Caron et al. (2022), which we demonstrate empirically in our cCACE setting. The discovery–inference coher-ence we invoke is a population-target alignment rather than a finite-sample recovery result. Second, the current formulation is restricted to binary instruments and binary treatments, and the honest sam-ple split between Idisc and Iinf reduces the effective sample size that may hinder subgroup discovery in smaller empirical studies. Extensions to continuous instruments and multi-valued treatments combined with cross-fitting are natural directions for future work. 
+
+Acknowledgments and Disclosure of Funding 
+
+We thank Christoph Hanck and four anonymous referees for valuable comments that improved the paper. The paper has been presented at the Statistical Week 2025 and the ICSDS 2025. We thank all participants for insightful discussions that enhanced the focus of the paper. The authors acknowledge partial financial support from TRR 391 Spatio-temporal Statistics for the Transition of Energy and Transport (520388526) by the Deutsche Forschungsgemeinschaft (DFG, German Research Founda-tion) and from the Rhine-Ruhr Center for Scientific Data Literacy (DKZ.2R) by the German Federal Ministry of Education and Research (BMBF). We acknowledge the use of Anthropic’s Claude Opus 4.8 for proofreading and editorial assistance in preparing this manuscript. All content was checked and verified by the authors, who remain responsible for any errors. Replication code for simulations and both empirical applications is available at https://github.com/jens-klenke/SBART-IV .
+
+References 
+
+Abadie, A. (2003), ‘Semiparametric instrumental variable estimation of treatment response models’, 
+
+Journal of Econometrics 113 (2), 231–263. Angrist, J. D. & Imbens, G. W. (1995), ‘Two-stage least squares estimation of average causal ef-fects in models with variable treatment intensity’, Journal of the American Statistical Association 
+
+90 (430), 431–442. Angrist, J. D., Imbens, G. W. & Rubin, D. B. (1996), ‘Identification of Causal Effects Using Instru-mental Variables’, Journal of the American Statistical Association 91 (434), 444–455. Athey, S. & Imbens, G. (2016), ‘Recursive partitioning for heterogeneous causal effects’, Proceed-ings of the National Academy of Sciences 113 (27), 7353–7360. 10 Athey, S., Tibshirani, J. & Wager, S. (2019), ‘Generalized random forests’, The Annals of Statistics 
+
+47 (2), 1148–1178. Bach, P., Kurz, M. S., Chernozhukov, V., Spindler, M. & Klaassen, S. (2024), ‘DoubleML: An object-oriented implementation of double machine learning in R’, Journal of Statistical Software 
+
+108 (3), 1–56. Bargagli-Stoffi, F. J., Cadei, R., Lee, K. & Dominici, F. (2024), ‘Causal Rule Ensemble: Inter-pretable Discovery and Inference of Heterogeneous Treatment Effects’. arXiv:2009.09036 [stat]. Bargagli-Stoffi, F. J. & Gnecco, G. (2020), ‘Causal tree with instrumental variable: an extension of the causal tree framework to irregular assignment mechanisms’, International Journal of Data Science and Analytics 9(3), 315–337. Bargagli-Stoffi, F. J., Witte, K. D. & Gnecco, G. (2022), ‘Heterogeneous causal effects with im-perfect compliance: A Bayesian machine learning approach’, The Annals of Applied Statistics 
+
+16 (3), 1986–2009. Belloni, A., Chernozhukov, V., Fernández-Val, I. & Hansen, C. (2017), ‘Program Evaluation and Causal Inference With High-Dimensional Data’, Econometrica 85 (1), 233–298. Breiman, L. (2001), ‘Random Forests’, Machine Learning 45 (1), 5–32. Breiman, L., Friedman, J., Olshen, R. A. & Stone, C. J. (1984), Classification and Regression Trees ,Chapman and Hall/CRC, New York. Caron, A., Baio, G. & Manolopoulou, I. (2022), ‘Shrinkage Bayesian Causal Forests for Het-erogeneous Treatment Effects Estimation’, Journal of Computational and Graphical Statistics 
+
+31 (4), 1202–1214. Chernozhukov, V., Chetverikov, D., Demirer, M., Duflo, E., Hansen, C., Newey, W. & Robins, J. (2018), ‘Double/debiased machine learning for treatment and structural parameters’, The Econo-metrics Journal 21 (1), C1–C68. Chetty, R., Friedman, J. N., Leth-Petersen, S., Nielsen, T. H. & Olsen, T. (2014), ‘Active vs. Pas-sive Decisions and Crowd-Out in Retirement Savings Accounts: Evidence from Denmark’, The Quarterly Journal of Economics 129 (3), 1141–1219. Chipman, H. A., George, E. I. & McCulloch, R. E. (2010), ‘BART: Bayesian additive regression trees’, The Annals of Applied Statistics 4(1), 266–298. Deaton, A. (2010), ‘Instruments, Randomization, and Learning about Development’, Journal of Economic Literature 48 (2), 424–455. Ding, P., Feller, A. & Miratrix, L. (2019), ‘Decomposing Treatment Effect Variation’, Journal of the American Statistical Association 114 (525), 304–317. Dwivedi, R., Tan, Y. S., Park, B., Wei, M., Horgan, K., Madigan, D. & Yu, B. (2020), ‘Stable Discovery of Interpretable Subgroups via Calibration in Causal Studies’, International Statistical Review 88 (S1), S135–S178. Engen, E. M. & Gale, W. G. (2000), The Effects of 401(K) Plans on Household Wealth: Differ-ences Across Earnings Groups, NBER Working Paper No. w8032, National Bureau of Economic Research. Engen, E. M., Gale, W. G. & Scholz, J. K. (1996), ‘The Illusory Effects of Saving Incentives on Saving’, Journal of Economic Perspectives 10 (4), 113–138. Finkelstein, A., Taubman, S., Wright, B., Bernstein, M., Gruber, J., Newhouse, J. P., Allen, H., Baicker, K. & Oregon Health Study Group (2012), ‘The Oregon Health Insurance Experiment: Evidence from the First Year’, The Quarterly Journal of Economics 127 (3), 1057–1106. Frölich, M. (2007), ‘Nonparametric IV estimation of local average treatment effects with covariates’, 
+
+Journal of Econometrics 139 (1), 35–75. Endogeneity, instruments and identification. 11 Hahn, P. R., Murray, J. S. & Carvalho, C. M. (2020), ‘Bayesian Regression Tree Models for Causal Inference: Regularization, Confounding, and Heterogeneous Effects (with Discussion)’, Bayesian Analysis 15 (3), 965–1056. Hartford, J., Lewis, G., Leyton-Brown, K. & Taddy, M. (2017), Deep IV: A Flexible Approach for Counterfactual Prediction, in ‘Proceedings of the 34th International Conference on Machine Learning’, PMLR, pp. 1414–1423. Hill, J. L. (2011), ‘Bayesian Nonparametric Modeling for Causal Inference’, Journal of Computa-tional and Graphical Statistics 20 (1), 217–240. Holm, S. (1979), ‘A Simple Sequentially Rejective Multiple Test Procedure’, Scandinavian Journal of Statistics 6(2), 65–70. Huang, M., Tang, T. M. & Kenney, A. M. (2025), ‘Distilling heterogeneous treatment effects: Stable subgroup estimation in causal inference’. arXiv:2502.07275 [stat]. Imbens, G. W. & Angrist, J. D. (1994), ‘Identification and Estimation of Local Average Treatment Effects’, Econometrica 62 (2), 467–475. Imbens, G. W. & Rubin, D. B. (2015), Causal Inference for Statistics, Social, and Biomedical Sci-ences: An Introduction , Cambridge University Press, Cambridge. Johnson, M., Cao, J. & Kang, H. (2022), ‘Detecting heterogeneous treatment effects with instrumen-tal variables and application to the Oregon health insurance experiment’, The Annals of Applied Statistics 16 (2), 1111–1129. Kennedy, E. H. (2023), ‘Towards optimal doubly robust estimation of heterogeneous causal effects’, 
+
+Electronic Journal of Statistics 17 (2), 3008–3049. Kennedy, E. H., Balakrishnan, S. & G’Sell, M. (2020), ‘Sharp instruments for classifying compliers and generalizing causal effects’, The Annals of Statistics 48 (4). Künzel, S. R., Sekhon, J. S., Bickel, P. J. & Yu, B. (2019), ‘Metalearners for estimating heteroge-neous treatment effects using machine learning’, Proceedings of the National Academy of Sci-ences 116 (10), 4156–4165. Lee, K., Small, D. S. & Dominici, F. (2021), ‘Discovering Heterogeneous Exposure Effects Using Randomization Inference in Air Pollution Studies’, Journal of the American Statistical Associa-tion 116 (534), 569–580. Linero, A. R. (2018), ‘Bayesian Regression Trees for High-Dimensional Prediction and Variable Selection’, Journal of the American Statistical Association 113 (522), 626–636. Linero, A. R. & Yang, Y. (2018), ‘Bayesian Regression Tree Ensembles that Adapt to Smooth-ness and Sparsity’, Journal of the Royal Statistical Society Series B: Statistical Methodology 
+
+80 (5), 1087–1110. Lipkovich, I., Dmitrienko, A. & B. D’Agostino Sr., R. (2017), ‘Tutorial in biostatistics: data-driven subgroup identification and analysis in clinical trials’, Statistics in Medicine 36 (1), 136–196. Poterba, J. M., Venti, S. F. & Wise, D. A. (1992), 401(K) Plans and Tax-Deferred Saving, NBER Working Paper No. w4181, National Bureau of Economic Research. Poterba, J. M., Venti, S. F. & Wise, D. A. (1995), ‘Do 401(k) contributions crowd out other personal saving?’, Journal of Public Economics 58 (1), 1–32. R Core Team (2024), R: A Language and Environment for Statistical Computing , R Foundation for Statistical Computing, Vienna, Austria. Semenova, V. & Chernozhukov, V. (2021), ‘Debiased machine learning of conditional average treat-ment effects and other causal functions’, The Econometrics Journal 24 (2), 264–289. Swanson, S. A. & Hernán, M. A. (2014), ‘Think Globally, Act Globally: An Epidemiologist’s Perspective on Instrumental Variable Estimation’, Statistical Science 29 (3), 371–374. 12 Therneau, T. & Atkinson, B. (2026), rpart: Recursive Partitioning and Regression Trees . R package version 4.1.26. Wang, G., Li, J. & Hopp, W. J. (2022), ‘An Instrumental Variable Forest Approach for Detecting Heterogeneous Treatment Effects in Observational Studies’, Management Science 68 (5), 3399– 3418. Wooldridge, J. M. (2010), Econometric Analysis of Cross Section and Panel Data , 2nd edn, MIT Press, Cambridge, MA. 
+
+A Identification of the conditional CACE 
+
+This appendix proves Proposition 2.1: under Assumption 2.1, the complier estimand τ CACE (x) of Definition 2.2 equals the Wald ratio ITT Y (x)/π C (x) and is therefore identified from the observed distribution of (Yi, W i, Z i, X i). The argument adapts Angrist et al. (1996) to the conditional target as in Bargagli-Stoffi et al. (2022). 4
+
+For brevity, contrast this irregular assignment setting with the regular assignment mechanism, where unconfoundedness Wi ⊥⊥  Yi(0) , Y i(1)  | Xi and overlap 0 < Pr( Wi = 1 | Xi = x) < 1 identify the conditional average treatment effect τ (x) = E[Yi | Wi = 1 , X i = x] − E[Yi | Wi = 0 , X i = x]
+
+directly from observed conditional means (Imbens & Rubin 2015). Under irregular assignment, 
+
+Wi is potentially confounded and direct identification of τ (x) fails. Identification of the complier-restricted target τ CACE (x) uses the IV approach below. 
+
+Proof. Fix x in the support of X and define the observable nuisance functions 
+
+μz (x) := E[Yi | Zi = z, X i = x],δz (x) := E[Wi | Zi = z, X i = x],z ∈ { 0, 1}.
+
+Both are identified from the observed distribution. By Definition 2.3, ITT Y (x) = μ1(x) − μ0(x),and we will show that πC (x) = δ1(x)−δ0(x) under monotonicity. The remaining task is to establish 
+
+μ1(x) − μ0(x) = τ CACE (x)  δ1(x) − δ0(x). (9) Let us express μz (x) in potential outcomes. By Assumption 2.1(a) (consistency) and (c) (uncon-founded instrument), 
+
+μz (x) = E[Yi(z, W i(z)) | Zi = z, X i = x] = E[Yi(z, W i(z)) | Xi = x].
+
+Hence 
+
+μ1(x) − μ0(x) = EYi(1 , W i(1)) − Yi(0 , W i(0)) Xi = x
+
+> (d)
+
+= EYi(Wi(1)) − Yi(Wi(0)) Xi = x, (10) where the second equality invokes the exclusion restriction. Since Wi(z) ∈ { 0, 1}, a case analysis over the four values of (Wi(0) , W i(1)) yields 
+
+Yi(Wi(1)) − Yi(Wi(0)) = Yi(1) − Yi(0)  Wi(1) − Wi(0) , (11) which requires no identifying assumption beyond binarity of Wi. Substituting (11) into (10), 
+
+μ1(x) − μ0(x) = E{Yi(1) − Yi(0) }{ Wi(1) − Wi(0) } Xi = x. (12) By Assumption 2.1(e), Wi(1) − Wi(0) ∈ { 0, 1}, so Wi(1) − Wi(0) = 1{Gi = C}. Combining with (12) and iterating the expectation, 
+
+μ1(x) − μ0(x) = EYi(1) − Yi(0) Gi = C, X i = x · πC (x) = τ CACE (x) · πC (x), (13)      
+
+> 4Within this appendix, μz(x)denotes an observable conditional mean and is distinct from the BART prognostic control function μ(·)of the main text.
+
+13 where the second equality uses Definition 2.2 together with (d) (so that Yi(w) is unambiguous on the complier subpopulation). By consistency and unconfoundedness in Assumption 2.1, δz (x) = 
+
+E[Wi(z) | Xi = x]. Under monotonicity in Assumption 2.1(e), 
+
+δ1(x) − δ0(x) = E[Wi(1) − Wi(0) | Xi = x] = Pr( Gi = C | Xi = x) = πC (x), (14) and Assumption 2.1(b) ensures πC (x) > 0 almost surely, so the ratio in (9) is well-defined. Com-bining (13) and (14) yields (9), hence 
+
+τ CACE (x) = μ1(x) − μ0(x)
+
+δ1(x) − δ0(x) = ITT Y (x)
+
+πC (x) , (15) which is identified from the observed distribution of (Yi, W i, Z i, X i).We further note that the cost anchor in (6) rests on a simple relationship between the two within-leaf summaries our procedure in Algorithm 1 uses. The shallow CART fitted to bτ SBCF (x) in Algorithm 1 assigns leaf Xj the covariate-averaged effect Aj := E[τ CACE (Xi) | Xi ∈ Xj ], an average of pointwise ratios. Subgroup 2SLS targets τ CACE  
+
+> Xj
+
+of (1), the complier-averaged (ratio-of-averages) effect. 
+
+Corollary A.1 (Discovery–inference coherence) . Let {Xj }j partition the covariate space and fix a leaf Xj with Ej [πC (Xi)] := E[πC (Xi) | Xi ∈ Xj ] > 0. Let Aj := E[τ CACE (Xi) | Xi ∈ Xj ]
+
+be the covariate-averaged complier effect targeted by the discovery step in Algorithm 1 (the leaf mean of the pointwise signal bτ SBCF (x)). Let τ CACE  
+
+> Xj
+
+of (1) be the complier-averaged effect targeted by subgroup 2SLS. Under Assumption 2.1, 
+
+Aj − τ CACE  
+
+> Xj
+
+= − Cov j
+
+ πC (Xi), τ CACE (Xi)
+
+Ej [πC (Xi)] .
+
+In particular, Aj = τ CACE  
+
+> Xj
+
+whenever, within the leaf, compliance and complier effect are uncorre-lated (i.e., if either is conditionally constant). Proof. By Proposition 2.1, ITT Y (x) = πC (x) τ CACE (x). Taking the expectation operator Ej and applying Ej [πC (Xi) τ CACE (Xi)] = Ej [πC (Xi)] Ej [τ CACE (Xi)]+Cov j (πC (Xi), τ CACE (Xi)) yields 
+
+τ CACE  
+
+> Xj
+
+= Ej [ITT Y (Xi)] /Ej [πC (Xi)] = Aj + Cov j (πC (Xi), τ CACE (Xi)) /Ej [πC (Xi)] ,
+
+with Ej [πC (Xi)] > 0 by Assumption 2.1(b). Corollary A.1 is the leaf-level form of the fact that an aggregated Wald estimand is a compliance-weighted average of covariate-specific complier effects (Angrist & Imbens 1995, Abadie 2003, Frölich 2007). It concerns the alignment of population targets and does not establish selection or partition consistency of the discovery step, which we do not claim. 
+
+B Conditional 2SLS: reduced form and asymptotic properties 
+
+This appendix collects the reduced form of the subgroup-restricted simultaneous system (2) and the asymptotic properties of the 2SLS estimator bτ 2SLS  
+
+> Xj
+
+defined in Definition 2.4. The results restate the unconditional 2SLS theory of Wooldridge (2010) with identification of the unconditional CACE following Angrist et al. (1996) and Imbens & Rubin (2015), transferred to the conditional target 
+
+τ CACE  
+
+> Xj
+
+(Bargagli-Stoffi et al. 2022). Substituting the first-stage equation of (2) into the outcome equation gives the reduced form 
+
+Yi, Xj =  κXj + τ CACE  
+
+> Xj
+
+π0,Xj
+
+ +  τ CACE  
+
+> Xj
+
+πC, Xj
+
+| {z }
+
+> γXj
+
+Zi, Xj +  εi, Xj + τ CACE  
+
+> Xj
+
+νi, Xj
+
+.
+
+14 Under E[εi, Xj ] = E[νi, Xj ] = 0 and E[Zi, Xj νi, Xj ] = E[Zi, Xj εi, Xj ] = 0 , Ordinary Least Squares (OLS) consistently estimates πC, Xj and γXj , such that 
+
+bτ 2SLS  
+
+> Xj
+
+= bγXj
+
+bπC, Xj
+
+(16) coincides with the moment-based ratio of Definition 2.4 (Wooldridge 2010). Let NXj denote the number of observations in Xj , and consider the subgroup-restricted moment conditions (A1) E[Z2 
+
+> i, Xj
+
+]̸ = 0 ;(A2) E[Zi, Xj εi, Xj ] = 0 ;(A3) πC, Xj̸ = 0 ;(A4) E[Z2 
+
+> i, Xj
+
+ε2 
+
+> i, Xj
+
+] < ∞.Conditions (A1)–(A3) are the subgroup analogs of the standard IV moment restrictions and are implied within Xj by Assumption 2.1 together with the exogeneity of Zi.
+
+Theorem B.1 (Consistency) . Under (A1)–(A3), bτ 2SLS  
+
+> Xj
+
+− τ CACE 
+
+> Xj
+> p
+
+−→ 0 as NXj → ∞ .
+
+Theorem B.2 (Asymptotic normality) . Under (A1)–(A4), 
+
+q
+
+NXj
+
+ bτ 2SLS  
+
+> Xj
+
+− τ CACE 
+
+> Xj
+
+ d
+
+−→ N  0, N Xj · avar( bτ 2SLS  
+
+> Xj
+
+) as NXj → ∞ ,
+
+with avar( bτ 2SLS  
+
+> Xj
+
+) the asymptotic variance of the 2SLS estimator, approximated as in Wooldridge (2010). Proof sketch. Both results follow from the unconditional 2SLS case applied to the i.i.d. subsample 
+
+{(Yl, W l, Z l) : Xl ∈ Xj } (Wooldridge 2010, Bargagli-Stoffi et al. 2022). Consistency uses the continuous mapping theorem applied to (16) together with the law of large numbers for the numer-ator and denominator while normality follows from the delta method combined with a central limit theorem for (bγXj , bπC, Xj ), where (A4) ensures a finite asymptotic variance. We note that Assumption (A3) is the subgroup-level relevance condition which does not need to follow from overall instrument strength. In Bargagli-Stoffi et al. (2022) and Ding et al. (2019), the approximations in Theorems B.1–B.2 require a sufficient number of observations within each 
+
+Xj . Shallower trees produce subgroups with both higher interpretability and higher statistical power (Athey & Imbens 2016, Lee et al. 2021), motivating the trimming of small or weak-instrument nodes in SBCF-IV. 
+
+C Background: BART, BCF, SBCF, and CART 
+
+This appendix recalls the ingredients on which SBCF-IV is built. We keep the exposition minimal and refer for full treatments to the cited references. 
+
+Classification and Regression Tree (CART). The CART algorithm (Breiman et al. 1984) recur-sively partitions the covariate space along axis-aligned splits, choosing at each node the split that maximizes within-node homogeneity of the response. The terminal-node piecewise-constant pre-dictor is interpretable but a high-variance single learner. 
+
+Bayesian Additive Regression Trees (BART). BART (Chipman et al. 2010) models the condi-tional mean as a sum of regression trees, and place three regularizing priors: one penalizing tree depth, one shrinking leaf-level predictions toward the response center, and one bounding the er-ror variance away from zero. Jointly, these priors prevent any single tree from dominating the fit and yield coherent posterior uncertainty. At each split, BART draws the candidate splitting vari-able according to a vector of selection probabilities s = ( s1, . . . , s P ), which by default is uniform, 
+
+sj = 1 /P .15 Bayesian Causal Forest (BCF). The BCF of Hahn et al. (2020) adapts BART to causal inference under a regular assignment mechanism. Two features carry over to our setting: (i) the conditional mean of the outcome is decomposed into a control function and a treatment effect function, each assigned an independent BART prior; (ii) the propensity score is included as a covariate in the control function to mitigate regularization-induced confounding and targeted selection. Different depth-penalty parameters across the two components encourage shallower, more interpretable trees for the treatment effect component. Equation (3) is the IV analog of this decomposition, with Zi
+
+and ITT Y (x) replacing the treatment indicator and treatment effect, respectively. 
+
+Shrinkage Bayesian Causal Forest (SBCF). SBCF (Caron et al. 2022) augments BCF with a sparsity-inducing Dirichlet prior on the split-variable selection probabilities, replacing BART’s de-fault uniform sj = 1 /P with s ∼ Dir( α/P, . . . , α/P ) and a hyperprior α/ (α + ρ) ∼ Beta( a, b )
+
+on the concentration parameter. Small α concentrates posterior mass on a few covariates. The hyperprior lets the data determine how aggressive this concentration should be, with the default 
+
+(a, b, ρ ) = (0 .5, 1, P ) strengthening the sparsity preference as P grows. The prior acts at each split independently, so covariates with low posterior inclusion probability are rarely chosen throughout the ensemble. Caron et al. (2022) show that SBCF improves CATE estimation over BCF when many covariates are irrelevant and in confounded-data settings, and that the posterior split frequencies bs
+
+provide a natural variable-importance summary. SBCF-IV inherits both the estimation benefit and the interpretability of bs: the latter is exploited in (6) to steer the subgroup-finding CART toward the covariates the ensemble deemed most relevant. 
+
+D Prior specifications for SBCF-IV 
+
+SBCF-IV combines the BCF decomposition in (3) and (4) with the sparsity-inducing Dirichlet prior on split-variable selection probabilities proposed by Caron et al. (2022). The main text states the prior generically in (5). We record the component-specific hyperparameter choices in the following. Let s• = (s•,1, . . . , s •,P • ) denote the split-probability vector for each of the three functions 
+
+μ(e(x), x ), ITT Y (x), and δ(z, x ) in (3)–(4). We place independent priors 
+
+sμ ∼ Dir 
+
+ αμ  
+
+> P+1
+
+, . . . , αμ 
+
+> P+1
+
+
+
+, αμ 
+
+> αμ+ρμ
+
+∼ Beta( a, b ), ρμ = P + 1 , (17) 
+
+sITT Y ∼ Dir   αITT Y 
+
+> P
+
+, . . . , αITT Y
+
+> P
+
+ , αITT Y 
+
+> αITT Y+ρITT Y
+
+∼ Beta( a, b ), ρITT Y = P/ 2, (18) 
+
+sδ ∼ Dir 
+
+ αδ  
+
+> P+1
+
+, . . . , αδ 
+
+> P+1
+
+
+
+, αδ  
+
+> αδ+ρδ
+
+∼ Beta( a, b ), ρδ = P + 1 , (19) with shared defaults (a, b ) = (0 .5, 1) throughout. Three comments are in order. 
+
+(i) Dimension of sμ. The propensity score e(x) enters μ as an additional covariate, so Pμ = P + 1 .The extra dimension is reflected both in the Dirichlet parameter and in the scale ρμ (Hahn et al. 2020). 
+
+(ii) Targeted shrinkage via ρ. Under (a, b ) = (0 .5, 1) , the hyperprior on α/ (α+ρ) concentrates near zero. Since α is increasing in ρ at any fixed value of the ratio, a smaller ρ pulls α toward zero and strengthens the Dirichlet’s concentration on few covariates. Setting ρITT Y = P/ 2 < P + 1 = ρμ
+
+imposes a sharper sparsity preference on the treatment effect component than on the prognostic function, consistent with the premise that treatment effect heterogeneity is driven by a smaller subset of covariates than the outcome’s prognostic effects (Hahn et al. 2020, Caron et al. 2022). The case 
+
+(a, b ) = (1 , 1) with α → ∞ recovers the uniform s•,j = 1 /P • used by BCF-IV (Bargagli-Stoffi et al. 2022). 
+
+(iii) Unified treatment of Yi and Wi. The instrument z enters δ as an additional splittable covariate, so Pδ = P + 1 ; the extra dimension is reflected in the Dirichlet parameter and in the scale ρδ ,paralleling the treatment of e(x) in μ. Specification (19) thus applies the same Dirichlet-based sparsity mechanism to the compliance model, implemented as a SoftBART probit in the sense of Hill (2011). No separate justification is needed: the sparsity concern (only a subset of covariates drives either outcome heterogeneity or differential compliance) is identical in both components, and the Dirichlet prior is the natural vehicle for it in both cases. Because δ(z, x ) is not further decomposed as in (3), a single sδ suffices rather than a pair of component-specific priors. 16 E Supplementary materials for the simulation study 
+
+E.1 Full simulation design 
+
+This appendix collects the full specification of the DGP summarized in Section 4. For each unit 
+
+i = 1 , . . . , N with N = 1 ,000 , potential outcomes, potential treatments, and covariates are drawn independently as 
+
+Zi ∼ Bernoulli (0 .5) ,Wi(1) ∼ Bernoulli (πcomp = 0 .75) , Wi(0) = 0 ,Wi = Zi Wi(1) + (1 − Zi) Wi(0) ,Yi(0) = μ(Xi) + ϵi, ϵi ∼ N (0 , 1) ,Yi(1) = Yi(0) + Wi(1) τ CACE (Xi),
+
+with observed outcome Yi = Zi Yi(1) + (1 − Zi) Yi(0) under SUTVA (Assumption 2.1(a)). The covariate vector Xi = ( Xi, 1, . . . , X i,P ) ∈ RP consists of P/ 2 binary and P/ 2 continuous indepen-dent components, 
+
+Xi, 1, . . . , X i,P/ 2
+
+> i.i.d.
+
+∼ Bernoulli (0 .5) , Xi,P/ 2+1 , . . . , X i,P 
+
+> i.i.d.
+
+∼ N (0 , 1) ,
+
+with P ∈ { 10 , 50 , 100 }. The three values of P probe increasing degrees of sparsity: only Xi, 1
+
+and Xi, 2 drive heterogeneity in τ CACE (x), so the share of relevant covariates in the treatment effect component is 2/P ∈ { 0.2, 0.04 , 0.02 }. The compliance rate πcomp = 0 .75 governs the strength of 
+
+Zi as an instrument for Wi. One-sided non-compliance is built in via Wi(0) = 0 : units not assigned to treatment cannot receive it, so the population decomposes into compliers ( Wi(1) = 1 ) and never-takers ( Wi(1) = 0 ), with πC = πcomp and πN T = 1 − πcomp . Defiers and always-takers are ruled out by design, and the monotonicity assumption 2.1(e) holds with equality for the never-takers and strictly for the compliers. The conditional CACE follows the setup in (Bargagli-Stoffi et al. 2022) and is piecewise constant over three regions of the binary covariate space, 
+
+τ CACE (Xi) = 
+
+
+
+k, Xi ∈ l1 = {Xi, 1 = 0 , X i, 2 = 0 },
+
+−k, Xi ∈ l2 = {Xi, 1 = 1 , X i, 2 = 1 },
+
+0, Xi ∈ l0 = {Xi /∈ l1 ∪ l2},
+
+(20) with effect size k ∈ { 0, 0.2, 0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2} to distinguish no, moderate, and large heterogeneity regimes. The two non-null subgroups l1 and l2 each have population mass 0.25 
+
+under the Bernoulli distribution of (Xi, 1, X i, 2), and carry opposite-signed effects, so the marginal CACE averages to zero. This design makes a naive marginal estimator uninformative and forces any algorithm targeting τ CACE (x) to recover the heterogeneity structure. The subgroups l1, l 2, l 0
+
+are ground-truth objects defined by the DGP and we distinguish them from the data-driven partition 
+
+{Xj }j produced by SBCF-IV on Idisc , whose leaves approximate l1 and l2 when discovery succeeds. The baseline prognostic outcome function μ(Xi), adopted from Caron et al. (2022), depends only on the first three continuous covariates and takes the explicit form 
+
+μ(Xi) = 3 + 1 .5 sin  π X i,P/ 2+1 
+
+ + 0 .5  Xi,P/ 2+2 − 0.52 + 1 .5  2 − | Xi,P/ 2+3 |. (21) The three terms introduce nonlinearity, curvature, and non-differentiability into the control com-ponent, providing a realistic stress test for the control-function BART prior on μ(e(x), x ) in (3). The relevant covariates for μ(Xi) in Equation (21) and for τ CACE (Xi) in Equation (20) are disjoint (continuous covariates for the former, binary for the latter), which allows us to assess the discovery ability of SBCF-IV cleanly, without confounding the signal in the treatment effect component with the signal in the control function. The full Monte Carlo design varies (k, P ) on the grid {0, 0.2, 0.4, 0.6, 0.8, 1, 1.2, 1.4, 1.6, 1.8, 2} × {10 , 50 , 100 }, yielding 33 scenarios. Each scenario is replicated M = 500 times, and performance is summarized via the classification metrics (Recall, Precision, F -score, FPR) for correctly identifying 
+
+l1 and l2, together with MSE, bias, and coverage for the estimated conditional CACE. 17 E.2 Performance measures for the simulation study 
+
+Our evaluation follows the framework of Bargagli-Stoffi et al. (2022) but refines it by separating structural recovery from inferential significance. We benchmark structural discovery with tree-level metrics, while unit-level metrics provide the evaluation criteria relevant for applications where the true partition is unobserved. Thus, we evaluate SBCF-IV and BCF-IV along three dimensions: (i) tree-level subgroup detection, measuring whether the true heterogeneity regions l1, l 2 appear as leaves of the discovered tree; (ii) unit-level individual classification, measuring whether each observation in Iinf is assigned to a correctly signed leaf; and (iii) unit-level estimation precision of the resulting CACE estimates. All metrics are computed on Iinf in each simulation run m =1, . . . , M and averaged across runs. Throughout, Tm denotes the tree with corresponding subgroups discovered in run m, with leaves {Xj (Tm)}Jj=1 , and padj   
+
+> Xj(Tm)
+
+denotes the Holm-adjusted p-value of the estimated CACE within the discovered leaf Xj (Tm). We set the significance level α = 0 .05 .
+
+E.2.1 Subgroup detection: DR and FDR 
+
+At the tree level, we assess whether the true heterogeneous subgroups l1, l 2 from (8) are recovered as leaves of Tm. The DR is the average share of true subgroups recovered, computed without a significance requirement to isolate the structural recovery ability of the algorithm from inferential uncertainty. We report DR both overall and separately for l1 and l2. The FDR is the share of replications in which at least one spurious leaf (a leaf not corresponding to a truly heterogeneous subgroup) is flagged as significant. FDR is evaluated at the tree level rather than normalized by the number of non-effect subgroups, since the latter is a random quantity that varies across replications and therefore cannot serve as a stable denominator. 5 Formally, DR = 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+PJj=1 1{Xj (Tm) ∈ { l1, l 2}} 
+
+#{l1, l 2} , (22) FDR = 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+1
+
+
+
+> J
+
+X
+
+> j=1
+
+1Xj (Tm) /∈ { l1, l 2}, p adj   
+
+> Xj(Tm)
+
+≤ α ≥ 1
+
+ . (23) Because l1, l 2 are only observable in simulation, DR and FDR serve as benchmarking tools. For empirical applications, the unit-level classification and estimation metrics below are the relevant ones. 
+
+E.2.2 Individual classification: Recall, Precision, FPR, F -score 
+
+At the unit level, we ask whether each observation in Iinf is assigned to a leaf whose significance verdict matches its true heterogeneity status. Let gi ∈ { l0, l 1, l 2} denote the true subgroup of unit 
+
+i under (8), and let padj   
+
+> Xj(Tm)
+
+denote the adjusted p-value of the leaf Xj (Tm) containing i. Each unit contributes to one of four classification cells: TP (Tm) = # i : gi ∈ { l1, l 2}, p adj   
+
+> Xj(Tm)
+
+≤ α , FN (Tm) = # i : gi ∈ { l1, l 2}, p adj   
+
+> Xj(Tm)
+
+> α ,
+
+FP (Tm) = # i : gi = l0, p adj   
+
+> Xj(Tm)
+
+≤ α , TN (Tm) = # i : gi = l0, p adj   
+
+> Xj(Tm)
+
+> α .
+
+From these, we compute the standard classification metrics: Recall = TP TP + FN ,
+
+Precision = TP TP + FP ,
+
+FPR = FP FP + TN ,F -score = TP TP + 12 (FP + FN ) .
+
+(24) 
+
+> 5Normalizing by the tree would yield a less conservative metric and the tree-level indicator imposes a stricter penalty.
+
+18 Recall measures the share of truly heterogeneous units correctly flagged, while Precision is the share of flagged units that are genuinely heterogeneous. We measure the share of null units spuriously flagged with FPR, while the F -score is their harmonic mean. All four are averaged across the M
+
+simulation runs. 
+
+E.2.3 Estimation precision: bias, MSE, and coverage 
+
+For each simulation m, we evaluate the per-replication bias, MSE, and 95% coverage on the truly heterogeneous regions l1 ∪ l2 within Iinf , denoted Ihet inf = {i ∈ I inf : Xi ∈ l1 ∪ l2} with cardinality 
+
+N het inf :|Bias| m
+
+ Ihet inf 
+
+ = 1
+
+N het inf 
+
+X
+
+> i∈I het inf
+
+|τ CACE (Xi) − bτ CACE (Xi)|,
+
+Bias m
+
+ Ihet inf 
+
+ = 1
+
+N het inf 
+
+X
+
+> i∈I het inf
+
+ τ CACE (Xi) − bτ CACE (Xi),
+
+MSE m
+
+ Ihet inf 
+
+ = 1
+
+N het inf 
+
+X
+
+> i∈I het inf
+
+ τ CACE (Xi) − bτ CACE (Xi)2,
+
+Coverage m
+
+ Ihet inf 
+
+ = 1
+
+N het inf 
+
+X
+
+> i∈I het inf
+
+1
+
+n
+
+τ CACE (Xi) ∈ bCI 95 
+
+ bτ CACE (Xi)o
+
+,
+
+(25) with Monte Carlo averages Bias  Ihet inf 
+
+ = 1
+
+> M
+
+PMm=1 Bias m
+
+ Ihet inf 
+
+, and analogously for |Bias |m,MSE m and Coverage m. bCI 95 
+
+ bτ CACE (Xi) is the estimated 95% confidence interval for unit i. Under correct coverage, Coverage  Ihet inf 
+
+ → 0.95 .
+
+E.3 Computational details 
+
+All simulations were implemented in R (version 4.0.0 or later) (R Core Team 2024) and run on CPU resources only. We note that no GPU acceleration is required. The reference machine was a small university server with 25 cores and 256 GB of RAM, though a workstation with at least four cores and 16 GB of RAM is sufficient to reproduce a single simulation cell. We ran M = 500 
+
+Monte Carlo simulation replications for every combination of effect size and covariate dimension, with effect sizes spanning k ∈ { 0, 0.2, . . . , 2.0} and number of covariates P ∈ { 10 , 50 , 100 },yielding 500 × 11 × 3 = 16 ,500 runs. Parallelizing across 25 cores, one full setting required ap-proximately six days of wall-clock time. As a single-machine benchmark, an unparallelized run averaged 376 seconds (with a standard deviation of 37 seconds) on an Intel i7-1365U laptop. We note that in few sparse covariate settings, BCF-IV of Bargagli-Stoffi et al. (2022) occasionally re-turned bπ BCF  
+
+> C
+
+(x) = 0 , which renders the second-stage ratio dITT BCF  
+
+> Y
+
+(x) / bπ BCF  
+
+> C
+
+(x) for BCF-IV un-defined when forming bτ BCF (x). We replaced exact zeros with a small positive constant to let the algorithm proceed. The corresponding SBCF-IV estimates were numerically well behaved across all replications and required no such adjustment. 19 E.4 Results for main simulations 
+
+Table 2: Tree-level subgroup detection. 
+
+BCF-IV SBCF-IV DR DR 
+
+P k Overall l1 l2 FDR Overall l1 l2 FDR 0 0.003 0.004 0.002 0.036 0.013 0.012 0.014 0.030 0.2 0.006 0.006 0.006 0.036 0.051 0.052 0.050 0.034 0.4 0.018 0.018 0.018 0.058 0.211 0.210 0.212 0.062 0.6 0.061 0.070 0.052 0.094 0.391 0.396 0.386 0.058 0.8 0.103 0.098 0.108 0.122 0.656 0.648 0.664 0.062 1 0.178 0.178 0.178 0.236 0.873 0.876 0.870 0.040 1.2 0.222 0.220 0.224 0.336 0.950 0.948 0.952 0.046 1.4 0.263 0.286 0.240 0.468 0.984 0.986 0.982 0.028 1.6 0.289 0.282 0.296 0.552 0.997 1.000 0.994 0.048 1.8 0.322 0.336 0.308 0.624 1.000 1.000 1.000 0.030 10 2 0.328 0.328 0.328 0.728 1.000 1.000 1.000 0.060 0 0.000 0.000 0.000 0.046 0.004 0.004 0.004 0.038 0.2 0.000 0.000 0.000 0.032 0.019 0.020 0.018 0.040 0.4 0.000 0.000 0.000 0.024 0.148 0.146 0.150 0.042 0.6 0.001 0.000 0.002 0.048 0.485 0.490 0.480 0.040 0.8 0.013 0.012 0.014 0.124 0.838 0.836 0.840 0.054 1 0.021 0.014 0.028 0.186 0.963 0.962 0.964 0.028 1.2 0.027 0.022 0.032 0.310 0.984 0.986 0.982 0.046 1.4 0.034 0.034 0.034 0.400 0.997 0.996 0.998 0.036 1.6 0.037 0.026 0.048 0.516 0.999 0.998 1.000 0.050 1.8 0.042 0.042 0.042 0.562 0.999 1.000 0.998 0.052 50 2 0.048 0.050 0.046 0.634 1.000 1.000 1.000 0.048 0 0.000 0.000 0.000 0.030 0.000 0.000 0.000 0.040 0.2 0.000 0.000 0.000 0.028 0.004 0.002 0.006 0.028 0.4 0.000 0.000 0.000 0.036 0.067 0.058 0.076 0.054 0.6 0.001 0.000 0.002 0.058 0.391 0.390 0.392 0.086 0.8 0.000 0.000 0.000 0.086 0.817 0.814 0.820 0.048 1 0.001 0.000 0.002 0.118 0.954 0.952 0.956 0.046 1.2 0.006 0.004 0.008 0.208 0.990 0.990 0.990 0.040 1.4 0.009 0.006 0.012 0.256 0.995 0.996 0.994 0.030 1.6 0.013 0.016 0.010 0.376 1.000 1.000 1.000 0.030 1.8 0.014 0.008 0.020 0.482 0.998 0.998 0.998 0.044 100 2 0.015 0.020 0.010 0.516 0.999 0.998 1.000 0.052 
+
+Notes: DR and FDR for BCF-IV and SBCF-IV across covariate dimensions P ∈ { 10 , 50 , 100 } and effect sizes k ∈{0, 0.2, . . . , 2}. DR is reported overall and separately for the two true heterogeneity subgroups l1 and l2. Results are averaged over M = 500 Monte Carlo replications with N = 1 ,000 . This table reports the numerical values underlying Figure 1. 
+
+20 Figure 3: Unit-level classification performance.                       
+
+> P= 10 P= 50 P= 100
+> F -Score  FPR  Precision  Recall
+> 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.00 0.25 0.50 0.75 1.00 0.00 0.25 0.50 0.75 1.00 0.00 0.25 0.50 0.75 1.00 0.00 0.25 0.50 0.75 1.00
+
+Effect Size ( k)Model BCF-IV SBCF-IV 
+
+Notes: Recall, Precision, False Positive Rate (FPR), and F -score as a function of effect size k, across covariate dimensions 
+
+P ∈ { 10 , 50 , 100 }. All four metrics are defined in (24) and computed over all units in Iinf , with significance evaluated at 
+
+α = 0 .05 using Holm-adjusted p-values. Results are averaged over M = 500 Monte Carlo replications with N = 1 ,000 ,and compare SBCF-IV (orange) with BCF-IV (gray). This figure complements Figure 2, which reports Precision and F -score only, by additionally reporting Recall and FPR across the same (k, P ) grid. We report full results in Table 3. 
+
+21 Table 3: Unit-level classification metrics. BCF-IV SBCF-IV 
+
+P k Recall Precision F -Score FPR Recall Precision F -Score FPR 0 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.013 (0.087) 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.007 (0.046) 0.2 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.012 (0.081) 0.001 (0.015) 0.002 (0.045) 0.001 (0.030) 0.010 (0.061) 0.4 0.001 (0.021) 0.004 (0.063) 0.003 (0.041) 0.018 (0.095) 0.005 (0.042) 0.016 (0.126) 0.011 (0.084) 0.023 (0.108) 0.6 0.003 (0.033) 0.010 (0.100) 0.006 (0.065) 0.042 (0.144) 0.018 (0.080) 0.052 (0.222) 0.036 (0.156) 0.020 (0.088) 0.8 0.021 (0.087) 0.052 (0.216) 0.037 (0.149) 0.057 (0.166) 0.093 (0.166) 0.244 (0.425) 0.176 (0.310) 0.024 (0.099) 1 0.046 (0.124) 0.116 (0.312) 0.083 (0.221) 0.109 (0.214) 0.200 (0.209) 0.494 (0.495) 0.385 (0.398) 0.020 (0.102) 1.2 0.095 (0.175) 0.213 (0.390) 0.156 (0.280) 0.165 (0.262) 0.294 (0.206) 0.700 (0.451) 0.568 (0.387) 0.022 (0.104) 1.4 0.149 (0.204) 0.303 (0.424) 0.232 (0.317) 0.247 (0.300) 0.401 (0.156) 0.900 (0.290) 0.783 (0.293) 0.015 (0.091) 1.6 0.191 (0.222) 0.348 (0.423) 0.283 (0.336) 0.306 (0.322) 0.447 (0.122) 0.944 (0.204) 0.870 (0.227) 0.023 (0.105) 1.8 0.228 (0.231) 0.390 (0.418) 0.326 (0.338) 0.351 (0.327) 0.475 (0.084) 0.985 (0.087) 0.931 (0.142) 0.016 (0.095) 10 2 0.256 (0.245) 0.390 (0.398) 0.341 (0.339) 0.432 (0.331) 0.501 (0.068) 0.980 (0.081) 0.967 (0.090) 0.031 (0.126) 0 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.016 (0.107) 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.009 (0.049) 0.2 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.015 (0.112) 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.009 (0.047) 0.4 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.007 (0.069) 0.007 (0.049) 0.019 (0.135) 0.013 (0.090) 0.013 (0.066) 0.6 0.001 (0.014) 0.002 (0.045) 0.001 (0.029) 0.024 (0.127) 0.029 (0.098) 0.083 (0.275) 0.058 (0.195) 0.013 (0.070) 0.8 0.003 (0.029) 0.008 (0.089) 0.005 (0.058) 0.056 (0.174) 0.124 (0.181) 0.325 (0.464) 0.239 (0.348) 0.022 (0.099) 1 0.006 (0.044) 0.018 (0.133) 0.012 (0.088) 0.091 (0.212) 0.202 (0.198) 0.529 (0.498) 0.398 (0.389) 0.013 (0.077) 1.2 0.014 (0.069) 0.035 (0.181) 0.025 (0.125) 0.172 (0.284) 0.319 (0.191) 0.760 (0.418) 0.619 (0.366) 0.020 (0.095) 1.4 0.018 (0.086) 0.031 (0.157) 0.025 (0.119) 0.223 (0.314) 0.381 (0.170) 0.864 (0.333) 0.743 (0.320) 0.019 (0.100) 1.6 0.025 (0.099) 0.053 (0.210) 0.039 (0.151) 0.323 (0.359) 0.449 (0.115) 0.954 (0.181) 0.873 (0.209) 0.025 (0.111) 1.8 0.033 (0.119) 0.059 (0.213) 0.046 (0.160) 0.366 (0.372) 0.478 (0.086) 0.975 (0.112) 0.928 (0.149) 0.027 (0.114) 50 2 0.039 (0.126) 0.063 (0.211) 0.052 (0.168) 0.424 (0.384) 0.493 (0.070) 0.982 (0.084) 0.964 (0.103) 0.025 (0.112) 0 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.012 (0.103) 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.012 (0.060) 0.2 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.010 (0.094) 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.007 (0.047) 0.4 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.016 (0.109) 0.004 (0.038) 0.011 (0.104) 0.008 (0.071) 0.013 (0.057) 0.6 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.027 (0.137) 0.034 (0.104) 0.096 (0.293) 0.066 (0.201) 0.026 (0.092) 0.8 0.000 (0.000) 0.000 (0.000) 0.000 (0.000) 0.050 (0.185) 0.123 (0.178) 0.328 (0.466) 0.238 (0.343) 0.021 (0.099) 1 0.001 (0.021) 0.001 (0.025) 0.001 (0.023) 0.062 (0.195) 0.226 (0.209) 0.559 (0.491) 0.436 (0.398) 0.022 (0.107) 1.2 0.002 (0.026) 0.006 (0.077) 0.004 (0.052) 0.115 (0.252) 0.326 (0.197) 0.757 (0.420) 0.632 (0.376) 0.020 (0.098) 1.4 0.005 (0.046) 0.012 (0.105) 0.009 (0.077) 0.155 (0.300) 0.389 (0.157) 0.890 (0.302) 0.764 (0.299) 0.014 (0.081) 1.6 0.009 (0.063) 0.016 (0.113) 0.013 (0.087) 0.232 (0.337) 0.444 (0.119) 0.960 (0.179) 0.871 (0.214) 0.016 (0.092) 1.8 0.012 (0.074) 0.017 (0.107) 0.014 (0.089) 0.326 (0.384) 0.477 (0.084) 0.979 (0.105) 0.930 (0.149) 0.021 (0.098) 100 2 0.013 (0.082) 0.019 (0.119) 0.016 (0.099) 0.360 (0.395) 0.491 (0.077) 0.979 (0.092) 0.951 (0.121) 0.027 (0.119) 
+
+Notes: Recall, Precision, F -score, and FPR for BCF-IV and SBCF-IV across covariate dimensions P ∈ { 10 , 50 , 100 } and effect sizes k ∈ { 0, 0.2, . . . , 2}. All four metrics are defined in (24) and computed over units in Iinf , with significance evaluated at α = 0 .05 using Holm-adjusted p-values. Results are averaged over M = 500 Monte Carlo replications with 
+
+N = 1 ,000 ; standard deviations are reported in parentheses. This table reports the numerical values underlying Figure 2 and Figure 3. 
+
+Table 4: Estimation precision and uncertainty quantification for bτ CACE (x).BCF-IV SBCF-IV 
+
+P k MSE Bias Abs. Bias Coverage Width MSE Bias Abs. Bias Coverage Width 0 0.188 (0.163) -0.004 (0.225) 0.286 (0.140) 0.948 (0.176) 1.434 (0.219) 0.191 (0.161) -0.004 (0.222) 0.314 (0.131) 0.957 (0.131) 1.600 (0.176) 0.2 0.214 (0.148) 0.011 (0.233) 0.336 (0.114) 0.891 (0.178) 1.448 (0.200) 0.221 (0.160) 0.005 (0.229) 0.357 (0.129) 0.912 (0.143) 1.612 (0.183) 0.4 0.294 (0.178) 0.014 (0.232) 0.416 (0.122) 0.797 (0.206) 1.474 (0.208) 0.306 (0.193) 0.018 (0.234) 0.438 (0.133) 0.847 (0.176) 1.652 (0.185) 0.6 0.375 (0.222) -0.012 (0.237) 0.494 (0.172) 0.708 (0.297) 1.537 (0.205) 0.376 (0.256) -0.002 (0.271) 0.493 (0.198) 0.784 (0.234) 1.706 (0.193) 0.8 0.452 (0.326) -0.004 (0.254) 0.547 (0.230) 0.697 (0.341) 1.591 (0.258) 0.370 (0.328) -0.013 (0.288) 0.485 (0.262) 0.809 (0.283) 1.759 (0.206) 1 0.473 (0.333) 0.000 (0.286) 0.569 (0.240) 0.695 (0.337) 1.600 (0.210) 0.298 (0.327) -0.002 (0.308) 0.426 (0.256) 0.899 (0.235) 1.794 (0.160) 1.2 0.581 (0.425) -0.003 (0.325) 0.626 (0.275) 0.631 (0.333) 1.653 (0.205) 0.273 (0.317) -0.008 (0.337) 0.404 (0.245) 0.911 (0.216) 1.823 (0.151) 1.4 0.607 (0.483) 0.021 (0.358) 0.641 (0.271) 0.643 (0.318) 1.667 (0.186) 0.232 (0.248) 0.008 (0.331) 0.383 (0.208) 0.947 (0.161) 1.824 (0.147) 1.6 0.718 (0.574) -0.006 (0.380) 0.711 (0.314) 0.553 (0.334) 1.660 (0.198) 0.221 (0.230) 0.009 (0.328) 0.373 (0.200) 0.954 (0.148) 1.831 (0.148) 1.8 0.814 (0.584) -0.016 (0.406) 0.760 (0.313) 0.536 (0.319) 1.681 (0.174) 0.223 (0.225) -0.029 (0.341) 0.376 (0.203) 0.945 (0.161) 1.829 (0.142) 10 2 0.931 (0.729) 0.014 (0.446) 0.811 (0.354) 0.478 (0.335) 1.697 (0.174) 0.214 (0.211) 0.012 (0.337) 0.368 (0.199) 0.953 (0.149) 1.840 (0.141) 0 0.205 (0.244) -0.003 (0.223) 0.273 (0.145) 0.953 (0.178) 1.399 (0.244) 0.214 (0.151) -0.003 (0.222) 0.358 (0.140) 0.960 (0.111) 1.769 (0.143) 0.2 0.229 (0.180) 0.012 (0.226) 0.321 (0.110) 0.894 (0.192) 1.387 (0.206) 0.240 (0.155) 0.014 (0.228) 0.383 (0.129) 0.938 (0.107) 1.780 (0.150) 0.4 0.332 (0.164) 0.013 (0.235) 0.449 (0.079) 0.712 (0.210) 1.381 (0.204) 0.297 (0.199) 0.003 (0.261) 0.431 (0.144) 0.895 (0.144) 1.786 (0.142) 0.6 0.471 (0.220) 0.015 (0.232) 0.574 (0.140) 0.515 (0.314) 1.422 (0.258) 0.271 (0.232) 0.020 (0.279) 0.413 (0.193) 0.912 (0.173) 1.807 (0.150) 0.8 0.640 (0.338) -0.004 (0.244) 0.671 (0.222) 0.457 (0.384) 1.445 (0.233) 0.269 (0.284) -0.010 (0.324) 0.410 (0.217) 0.919 (0.193) 1.825 (0.147) 1 0.785 (0.472) 0.012 (0.241) 0.744 (0.288) 0.454 (0.404) 1.495 (0.232) 0.213 (0.232) -0.003 (0.309) 0.362 (0.203) 0.949 (0.151) 1.830 (0.140) 1.2 0.885 (0.574) -0.004 (0.257) 0.802 (0.333) 0.470 (0.389) 1.531 (0.228) 0.229 (0.253) -0.030 (0.331) 0.375 (0.206) 0.942 (0.167) 1.819 (0.150) 1.4 1.130 (0.750) 0.003 (0.253) 0.923 (0.375) 0.373 (0.349) 1.546 (0.274) 0.223 (0.216) 0.001 (0.338) 0.380 (0.204) 0.953 (0.146) 1.831 (0.142) 1.6 1.401 (0.968) -0.011 (0.279) 1.031 (0.427) 0.341 (0.335) 1.566 (0.245) 0.228 (0.239) -0.021 (0.343) 0.377 (0.213) 0.944 (0.161) 1.845 (0.144) 1.8 1.695 (1.171) 0.001 (0.296) 1.157 (0.457) 0.260 (0.307) 1.587 (0.225) 0.229 (0.242) -0.011 (0.348) 0.380 (0.206) 0.945 (0.161) 1.839 (0.143) 50 2 2.088 (1.446) -0.008 (0.299) 1.291 (0.508) 0.202 (0.256) 1.593 (0.255) 0.204 (0.203) 0.002 (0.320) 0.359 (0.192) 0.957 (0.145) 1.836 (0.138) 0 0.196 (0.234) -0.020 (0.226) 0.253 (0.143) 0.957 (0.180) 1.325 (0.215) 0.217 (0.162) -0.021 (0.226) 0.360 (0.143) 0.951 (0.111) 1.785 (0.136) 0.2 0.244 (0.277) -0.003 (0.226) 0.314 (0.100) 0.882 (0.198) 1.337 (0.216) 0.247 (0.151) -0.002 (0.226) 0.391 (0.123) 0.930 (0.109) 1.780 (0.136) 0.4 0.357 (0.232) -0.002 (0.237) 0.455 (0.070) 0.667 (0.200) 1.346 (0.211) 0.320 (0.252) -0.008 (0.257) 0.450 (0.134) 0.887 (0.143) 1.807 (0.134) 0.6 0.535 (0.304) -0.006 (0.246) 0.608 (0.114) 0.445 (0.279) 1.351 (0.211) 0.304 (0.220) 0.002 (0.291) 0.441 (0.188) 0.889 (0.180) 1.797 (0.148) 0.8 0.736 (0.430) 0.006 (0.236) 0.750 (0.175) 0.299 (0.338) 1.379 (0.244) 0.252 (0.260) -0.001 (0.313) 0.392 (0.210) 0.919 (0.184) 1.834 (0.156) 1 0.954 (0.418) 0.019 (0.220) 0.872 (0.251) 0.273 (0.351) 1.417 (0.243) 0.230 (0.215) 0.005 (0.319) 0.387 (0.199) 0.950 (0.149) 1.826 (0.139) 1.2 1.206 (0.633) -0.013 (0.245) 0.975 (0.326) 0.284 (0.343) 1.460 (0.339) 0.197 (0.196) -0.007 (0.310) 0.354 (0.186) 0.954 (0.147) 1.820 (0.143) 1.4 1.544 (0.806) 0.021 (0.249) 1.122 (0.369) 0.237 (0.307) 1.461 (0.233) 0.229 (0.242) 0.030 (0.336) 0.377 (0.208) 0.945 (0.161) 1.829 (0.142) 1.6 1.803 (0.998) -0.013 (0.253) 1.210 (0.424) 0.221 (0.277) 1.504 (0.269) 0.205 (0.214) -0.021 (0.325) 0.360 (0.195) 0.960 (0.136) 1.832 (0.134) 1.8 2.095 (1.283) -0.011 (0.262) 1.301 (0.489) 0.211 (0.275) 1.516 (0.255) 0.227 (0.245) -0.001 (0.349) 0.373 (0.210) 0.942 (0.166) 1.825 (0.139) 100 2 2.551 (1.522) 0.013 (0.257) 1.454 (0.526) 0.157 (0.222) 1.535 (0.235) 0.230 (0.238) 0.022 (0.340) 0.376 (0.212) 0.942 (0.164) 1.835 (0.146) 
+
+Notes: MSE, Bias, Absolute Bias, as well as Coverage and Width of 95% confidence intervals for BCF-IV and SBCF-IV across covariate dimensions P ∈ { 10 , 50 , 100 } and effect sizes k ∈ { 0, 0.2, . . . , 2}. Results are averaged over M = 500 
+
+Monte Carlo replications with N = 1 ,000 ; standard deviations are reported in parentheses. This table reports the full numerical results underlying Table 1, which restricts attention to k ∈ { 0, 1, 2} and pools l1 and l2.
+
+22 E.5 Results for further simulations 
+
+We complement the simulation study in Section 4 and the DGP outlined in Appendix E.1 with two additions. First, we implement the instrumental forest of the GRF framework (Athey et al. 2019) as an additional benchmark method. Second, we analyze an ablation that crosses the discovery step in Algorithm 1 with the CART cost weighting of (6). We note that GRF enters only as an alternative method to estimate the heterogeneity signal in line 4 of Algorithm 1, not as a competing partition method. The instrumental forest of Athey et al. (2019) targets a unit-level conditional IV function rather than an interpretable partition of the covariate space. We include it to test whether the high-dimensional degradation documented for BCF-IV in Section 4 is specific to that method or more general to other non-sparse competitors. Table 5 lists the six resulting methods that differ in how they estimate the heterogeneity signal bτ (x) of line 4 in Algorithm 1 and whether they use the varying posterior splitting probabilities to guide the CART construction in line 5 of Algorithm 1. Based on the methods in Table 5, we empirically evaluate whether using CART cost weighting with the posterior splitting probabilities, as described in (6), improves subgroup discovery and estimation of cCACE. Table 5: The six competitors as instantiations of Algorithm 1.                                      
+
+> Method Estimation of signal bτ(x)CART cost weighting via (6) BCF-IV (without cost) BCF, BART (Hahn et al. 2020, Hill 2011) no BCF-IV (with cost) BCF, BART (Hahn et al. 2020, Hill 2011) yes SBCF-IV (without cost) SBCF, SoftBART (Caron et al. 2022, Linero & Yang 2018) no SBCF-IV (with cost) SBCF, SoftBART (Caron et al. 2022, Linero & Yang 2018) yes GRF-IV (without cost) GRF (Athey et al. 2019) no GRF-IV (with cost) GRF (Athey et al. 2019) yes
+> Notes: The six competitors rely on Algorithm 1 and only differ in the estimation of the discovery signal bτ(x)and in whether the CART applies the split-frequency cost cpsp . The cost vector cpsp = max( bsITT Y)/bsITT Yof (6) is computed once from the SBCF posterior split frequencies bsITT Yand applied unchanged to the "with-cost" methods. Thus, BCF-IV (with cost) and GRF-IV (with cost) pair a non-sparse discovery signal with the sparse-derived cost. BCF-IV and SBCF-IV form bτ(x)by dividing the estimated dITT Y(x)by the corresponding complier-share estimate bπC. The instrumental forest of Athey et al. (2019) targets (1) directly, so it requires no explicit ratio.
+
+The results in Table 6 isolate the choice of the estimation method for the heterogeneity signal in Algorithm 1 as the dominant source of the improvement in precision. The differences between MSE values of SBCF-IV with and without CART cost weighting via (6) are only marginal. MSE perfor-mance of both SBCF-IV methods remains rather constant across covariate dimension P and effect size k and they outperform BCF-IV and GRF-IV in almost all scenarios. The non-sparse methods (BCF-IV and GRF-IV) only show lower MSE values compared to SBCF-IV for rather homogeneous cases where the effect size k ≤ 0.4, leading to true conditional CACE values that are close to zero via (20). Both non-sparse methods benefit substantially from the inclusion of CART cost weight-ing, as they are able to use sparsity-information from SBCF’s posterior splitting probabilities for subgroup discovery. This is only a partial remedy that never exceeds SBCF-IV’s performance on MSE for moderate to large effect sizes k and all covariate dimensions P . In Table 7, all six methods show bias values close to zero, regardless of CART cost weighting. This indicates that the increase in MSE for the non-sparse methods with rising P and k is driven by estimation instability rather than by systematic over- or underestimation. Table 8 shows the same pattern for interval coverage at the nominal level of 95% . Only the two SBCF-IV methods reach close to the nominal level across 
+
+P , while BCF-IV, GRF-IV, and their cost-weighted variants all undercover progressively with k
+
+and P . This is not achieved by widening intervals, as reported in Table 9. SBCF-IV and GRF-IV have similar mean interval widths, but GRF-IV undercovers heavily, as Table 8 shows. For instance, in the high-dimensional case of ( P = 100 , k = 2 ), BCF-IV has an average coverage of roughly 15%, while SBCF-IV reports an exact mean coverage of 95% and its mean interval width increases by only roughly 20% compared to BCF-IV. Moreover, SBCF-IV and GRF-IV carry near-identical widths, yet GRF-IV possesses mean coverage of only 63% (without cost) and 73% (with cost). Figure 5 displays the Detection Rate of (22) at the tree-level. The two SBCF-IV variants recover essentially all true effect-modifying splits by k ≈ 1.2 at every covariate dimension, whereas BCF-IV and both GRF-IV variants detect fewer splits and fall further behind as P grows. The unit-level 23 metrics in Figure 6 show the same pattern. The two SBCF-IV variants coincide and dominate on both F -score and Precision and remain flat across P , while every non-sparse method degrades. Pre-cision separates the methods most sharply at P = 100 , where SBCF-IV reaches roughly 0.98 and the remaining methods plateau well below. As on the estimation side, cost weighting visibly lifts the non-sparse methods, as the cost-weighted BCF-IV and GRF-IV curves lie above their counterparts without CART cost weighting. The two SBCF-IV curves are indistinguishable, which is consistent with Corollary A.1. Using the sparsity-inducing prior to estimate the heterogeneity signal bτ (x) of line 4 in Algorithm 1 accounts for much of the gains in subgroup discovery, precision, and uncer-tainty quantification. The cost weighting is a component that helps only where the ensemble is not already sparsity-regularized, as for the BCF-IV and GRF-IV methods of Table 5. The transfer of SBCF’s sparsity information to the discovery tree, as for SBCF-IV, adds little on top of the sparsity prior when the signal is already sparse, while partially recovering the non-sparse methods (BCF-IV, GRF-IV) that lack this information. Figure 4: Estimation error and interval coverage for the methods of Table 5.                       
+
+> P= 10 P= 50 P= 100
+> MSE  Coverage
+> 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 120.25 0.50 0.75 1.00 Effect Size ( k)Method BCF-IV (with cost) BCF-IV (without cost) GRF-IV (with cost) GRF-IV (without cost) SBCF-IV (with cost) SBCF-IV (without cost)
+
+Notes: MSE (top row; lower is better) and empirical coverage of nominal 95% intervals (bottom row; dashed red line at the nominal coverage rate 0.95 ) as a function of the effect size k, for covariate dimensions P ∈ { 10 , 50 , 100 } (columns). We compare the six methods of Table 5 where solid lines represent methods without CART cost weighting and dot-dashed lines represent methods with CART cost weighting. Values are means over M = 500 Monte Carlo replications at N = 1 ,000 
+
+and are also reported in Tables 6 and 8. 
+
+24 Figure 5: Tree-level subgroup discovery for the methods of Table 5.                       
+
+> P= 10 P= 50 P= 100
+> DR
+> 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.00 0.25 0.50 0.75 1.00
+
+Effect Size ( k)Method BCF-IV (with cost) BCF-IV (without cost) GRF-IV (with cost) GRF-IV (without cost) SBCF-IV (with cost) SBCF-IV (without cost) 
+
+Notes: Detection Rate (DR) as a function of the effect size k, for covariate dimensions P ∈ { 10 , 50 , 100 } (columns). DR is the share of true effect-modifying splits recovered, defined in (22) and evaluated at the tree level with subgroup significance assessed at α = 0 .05 using Holm-adjusted p-values. We compare the six methods of Table 5 where solid lines represent methods without CART cost weighting and dot-dashed lines represent methods with CART cost weighting. Values are means over M = 500 Monte Carlo replications at N = 1 ,000 .
+
+Figure 6: Unit-level discovery performance ( F -score and precision) for the methods of Table 5.                       
+
+> P= 10 P= 50 P= 100
+> F -Score  Precision
+> 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.0 0.4 0.8 1.2 1.6 2.0 0.00 0.25 0.50 0.75 1.00 0.00 0.25 0.50 0.75 1.00
+
+Effect Size ( k)Method BCF-IV (with cost) BCF-IV (without cost) GRF-IV (with cost) GRF-IV (without cost) SBCF-IV (with cost) SBCF-IV (without cost) 
+
+Notes: F -score (top row) and precision (bottom row) for the classification of units into the true effect subgroups, as a function of the effect size k, for covariate dimensions P ∈ { 10 , 50 , 100 } (columns). Both metrics are defined in (24) and computed over Iinf , with subgroup significance assessed at α = 0 .05 using Holm-adjusted p-values. We compare the six methods of Table 5 where solid lines represent methods without CART cost weighting and dot-dashed lines represent methods with CART cost weighting. Values are means over M = 500 Monte Carlo replications at N = 1 ,000 .
+
+25 Table 6: Mean squared error (MSE; lower is better) for the methods of Table 5. BCF-IV SBCF-IV GRF-IV 
+
+P k without cost with cost without cost with cost without cost with cost 0.0 0.183 (0.198) 0.164 (0.281) 0.209 (0.211) 0.210 (0.223) 0.213 (0.159) 0.191 (0.166) 0.4 0.313 (0.318) 0.294 (0.164) 0.303 (0.222) 0.313 (0.224) 0.346 (0.166) 0.316 (0.154) 0.8 0.454 (0.309) 0.437 (0.304) 0.333 (0.310) 0.371 (0.323) 0.531 (0.307) 0.447 (0.310) 1.2 0.546 (0.469) 0.423 (0.453) 0.229 (0.263) 0.241 (0.289) 0.506 (0.450) 0.364 (0.354) 1.6 0.736 (0.588) 0.509 (0.462) 0.210 (0.213) 0.210 (0.213) 0.400 (0.395) 0.304 (0.317) 10 2.0 1.010 (0.846) 0.605 (0.591) 0.210 (0.210) 0.210 (0.211) 0.298 (0.321) 0.271 (0.284) 0.0 0.204 (0.222) 0.158 (0.160) 0.216 (0.170) 0.221 (0.176) 0.233 (0.190) 0.179 (0.178) 0.4 0.330 (0.176) 0.268 (0.159) 0.279 (0.186) 0.281 (0.183) 0.374 (0.168) 0.316 (0.169) 0.8 0.624 (0.348) 0.374 (0.290) 0.240 (0.249) 0.246 (0.252) 0.751 (0.288) 0.488 (0.301) 1.2 0.967 (0.599) 0.483 (0.430) 0.219 (0.222) 0.224 (0.232) 0.893 (0.604) 0.502 (0.446) 1.6 1.448 (0.970) 0.724 (0.752) 0.211 (0.210) 0.212 (0.211) 0.775 (0.760) 0.438 (0.451) 50 2.0 1.981 (1.449) 0.965 (1.045) 0.202 (0.202) 0.202 (0.202) 0.619 (0.744) 0.379 (0.440) 0.0 0.197 (0.229) 0.161 (0.182) 0.224 (0.165) 0.225 (0.198) 0.216 (0.158) 0.166 (0.148) 0.4 0.352 (0.269) 0.273 (0.190) 0.294 (0.186) 0.299 (0.192) 0.383 (0.174) 0.291 (0.150) 0.8 0.774 (0.759) 0.474 (0.329) 0.263 (0.245) 0.274 (0.251) 0.800 (0.236) 0.558 (0.306) 1.2 1.227 (0.573) 0.614 (0.507) 0.219 (0.217) 0.219 (0.218) 1.174 (0.575) 0.617 (0.469) 1.6 1.901 (0.987) 0.986 (0.912) 0.217 (0.218) 0.218 (0.218) 1.215 (0.961) 0.601 (0.567) 100 2.0 2.722 (1.561) 1.149 (1.230) 0.224 (0.240) 0.224 (0.240) 0.945 (0.991) 0.523 (0.566) 
+
+Notes: MSE across covariate dimension P and effect size k. Means over M = 500 replications at N = 1 ,000 ; standard deviations in parentheses. 
+
+Table 7: Mean signed bias for the methods of Table 5. BCF-IV SBCF-IV GRF-IV 
+
+P k without cost with cost without cost with cost without cost with cost 0.0 0.009 (0.235) 0.011 (0.241) 0.005 (0.229) 0.009 (0.229) 0.012 (0.238) 0.011 (0.234) 0.4 0.026 (0.225) 0.021 (0.228) 0.010 (0.228) 0.008 (0.221) 0.016 (0.227) 0.018 (0.221) 0.8 0.000 (0.275) 0.008 (0.295) 0.019 (0.314) 0.017 (0.309) -0.008 (0.252) 0.002 (0.261) 1.2 -0.017 (0.306) -0.021 (0.349) 0.006 (0.307) 0.008 (0.304) 0.011 (0.297) 0.013 (0.316) 1.6 0.015 (0.387) 0.032 (0.436) 0.001 (0.334) 0.001 (0.334) 0.004 (0.365) 0.005 (0.356) 10 2.0 -0.032 (0.432) 0.015 (0.485) -0.005 (0.334) -0.004 (0.334) -0.002 (0.366) 0.002 (0.359) 0.0 -0.006 (0.235) -0.005 (0.235) -0.004 (0.232) -0.005 (0.233) -0.004 (0.236) -0.003 (0.235) 0.4 -0.005 (0.227) -0.010 (0.224) -0.005 (0.247) -0.008 (0.246) -0.004 (0.225) -0.004 (0.227) 0.8 0.016 (0.244) 0.011 (0.271) 0.018 (0.320) 0.018 (0.318) 0.010 (0.244) 0.009 (0.255) 1.2 -0.016 (0.249) -0.020 (0.336) -0.011 (0.320) -0.011 (0.321) -0.016 (0.251) -0.005 (0.299) 1.6 -0.012 (0.278) -0.033 (0.406) 0.007 (0.332) 0.009 (0.333) -0.005 (0.307) 0.004 (0.325) 50 2.0 0.004 (0.282) -0.014 (0.502) 0.007 (0.325) 0.007 (0.325) 0.003 (0.350) 0.004 (0.346) 0.0 -0.020 (0.239) -0.020 (0.241) -0.018 (0.247) -0.019 (0.245) -0.019 (0.241) -0.019 (0.243) 0.4 -0.003 (0.238) -0.004 (0.236) 0.002 (0.247) -0.002 (0.244) -0.004 (0.234) -0.007 (0.237) 0.8 0.006 (0.236) 0.006 (0.256) -0.002 (0.327) -0.002 (0.322) 0.001 (0.237) 0.003 (0.237) 1.2 0.002 (0.234) -0.005 (0.307) -0.009 (0.330) -0.009 (0.329) -0.003 (0.237) 0.005 (0.280) 1.6 0.009 (0.240) 0.020 (0.364) -0.001 (0.329) -0.002 (0.329) -0.002 (0.275) -0.015 (0.309) 100 2.0 0.023 (0.256) 0.049 (0.464) 0.038 (0.336) 0.038 (0.336) 0.028 (0.317) 0.064 (0.347) 
+
+Notes: Mean signed bias across covariate dimension P and effect size k for the methods of Table 5. Means over M = 500 
+
+replications at N = 1 ,000 ; standard deviations in parentheses. 
+
+26 Table 8: Mean interval coverage for the methods of Table 5. BCF-IV SBCF-IV GRF-IV 
+
+P k without cost with cost without cost with cost without cost with cost 0.0 0.949 (0.162) 0.941 (0.190) 0.955 (0.131) 0.948 (0.141) 0.946 (0.136) 0.945 (0.151) 0.4 0.790 (0.211) 0.767 (0.204) 0.817 (0.186) 0.815 (0.181) 0.848 (0.142) 0.825 (0.170) 0.8 0.690 (0.338) 0.673 (0.348) 0.842 (0.266) 0.813 (0.275) 0.746 (0.233) 0.770 (0.258) 1.2 0.653 (0.340) 0.739 (0.313) 0.944 (0.178) 0.937 (0.190) 0.785 (0.272) 0.844 (0.255) 1.6 0.564 (0.331) 0.704 (0.296) 0.961 (0.139) 0.961 (0.139) 0.834 (0.257) 0.874 (0.242) 10 2.0 0.478 (0.329) 0.657 (0.304) 0.951 (0.149) 0.950 (0.150) 0.885 (0.230) 0.898 (0.220) 0.0 0.944 (0.197) 0.955 (0.161) 0.954 (0.112) 0.955 (0.113) 0.957 (0.111) 0.954 (0.138) 0.4 0.715 (0.217) 0.787 (0.211) 0.910 (0.142) 0.910 (0.137) 0.832 (0.148) 0.816 (0.180) 0.8 0.462 (0.393) 0.724 (0.343) 0.935 (0.176) 0.931 (0.181) 0.592 (0.214) 0.698 (0.305) 1.2 0.416 (0.387) 0.682 (0.338) 0.955 (0.143) 0.951 (0.150) 0.596 (0.322) 0.720 (0.331) 1.6 0.317 (0.328) 0.587 (0.364) 0.954 (0.145) 0.953 (0.146) 0.674 (0.329) 0.770 (0.316) 50 2.0 0.216 (0.274) 0.513 (0.324) 0.965 (0.131) 0.965 (0.131) 0.723 (0.356) 0.809 (0.328) 0.0 0.938 (0.216) 0.943 (0.184) 0.950 (0.124) 0.948 (0.123) 0.949 (0.134) 0.935 (0.189) 0.4 0.658 (0.205) 0.767 (0.215) 0.908 (0.125) 0.900 (0.133) 0.838 (0.142) 0.793 (0.193) 0.8 0.249 (0.321) 0.577 (0.393) 0.923 (0.174) 0.913 (0.188) 0.556 (0.180) 0.573 (0.342) 1.2 0.264 (0.335) 0.567 (0.384) 0.947 (0.157) 0.947 (0.157) 0.449 (0.303) 0.601 (0.359) 1.6 0.196 (0.280) 0.486 (0.379) 0.940 (0.163) 0.939 (0.164) 0.512 (0.350) 0.639 (0.364) 100 2.0 0.150 (0.225) 0.477 (0.350) 0.950 (0.155) 0.950 (0.155) 0.632 (0.352) 0.728 (0.369) 
+
+Notes: Empirical coverage of nominal 95% intervals for the methods of Table 5, across covariate dimension P and effect size k. Means over M = 500 replications at N = 1 ,000 ; standard deviations in parentheses. 
+
+Table 9: Mean interval width for the methods of Table 5. BCF-IV SBCF-IV GRF-IV 
+
+P k without cost with cost without cost with cost without cost with cost 0.0 1.442 (0.209) 1.343 (0.237) 1.575 (0.196) 1.588 (0.182) 1.721 (0.123) 1.570 (0.212) 0.4 1.496 (0.213) 1.430 (0.225) 1.633 (0.200) 1.637 (0.186) 1.741 (0.126) 1.626 (0.189) 0.8 1.580 (0.212) 1.541 (0.241) 1.781 (0.181) 1.776 (0.177) 1.788 (0.116) 1.752 (0.168) 1.2 1.640 (0.216) 1.635 (0.206) 1.828 (0.141) 1.827 (0.144) 1.808 (0.144) 1.790 (0.174) 1.6 1.662 (0.184) 1.663 (0.184) 1.831 (0.138) 1.831 (0.138) 1.805 (0.162) 1.781 (0.185) 10 2.0 1.683 (0.183) 1.672 (0.191) 1.822 (0.139) 1.822 (0.139) 1.800 (0.160) 1.796 (0.162) 0.0 1.375 (0.222) 1.383 (0.260) 1.792 (0.137) 1.773 (0.147) 1.759 (0.128) 1.529 (0.260) 0.4 1.369 (0.227) 1.411 (0.240) 1.798 (0.145) 1.781 (0.157) 1.759 (0.118) 1.548 (0.260) 0.8 1.427 (0.236) 1.481 (0.228) 1.808 (0.149) 1.807 (0.151) 1.778 (0.115) 1.632 (0.233) 1.2 1.507 (0.272) 1.543 (0.226) 1.841 (0.140) 1.841 (0.140) 1.815 (0.140) 1.675 (0.244) 1.6 1.521 (0.283) 1.558 (0.233) 1.830 (0.142) 1.830 (0.142) 1.814 (0.155) 1.724 (0.226) 50 2.0 1.573 (0.256) 1.581 (0.221) 1.830 (0.144) 1.830 (0.144) 1.795 (0.184) 1.749 (0.208) 0.0 1.308 (0.216) 1.344 (0.280) 1.801 (0.131) 1.786 (0.150) 1.750 (0.118) 1.444 (0.271) 0.4 1.309 (0.259) 1.349 (0.258) 1.815 (0.119) 1.803 (0.137) 1.765 (0.116) 1.463 (0.274) 0.8 1.335 (0.296) 1.402 (0.280) 1.826 (0.142) 1.822 (0.147) 1.788 (0.116) 1.479 (0.285) 1.2 1.425 (0.280) 1.455 (0.252) 1.839 (0.141) 1.839 (0.139) 1.818 (0.119) 1.587 (0.260) 1.6 1.446 (0.261) 1.485 (0.277) 1.848 (0.146) 1.848 (0.146) 1.843 (0.147) 1.665 (0.245) 100 2.0 1.512 (0.293) 1.554 (0.240) 1.831 (0.146) 1.831 (0.146) 1.847 (0.151) 1.725 (0.222) 
+
+Notes: Mean 95% interval width across covariate dimension P and effect size k for the methods of Table 5. Means over 
+
+M = 500 replications at N = 1 ,000 ; standard deviations in parentheses. At a given (P, k ), SBCF-IV and GRF-IV have comparable widths despite large coverage differences (cf. Table 8), so the coverage gap is not a width artifact. 
+
+F Supplementary materials for empirical applications 
+
+F.1 Oregon Health Insurance Experiment (OHIE) 
+
+We evaluate SBCF-IV on the OHIE data, replicating the empirical setup of Johnson et al. (2022). The OHIE assembled administrative records (hospital discharges, credit reports, and mortality), sur-vey data (healthcare utilization, financial strain, and self-reported health), and pre-randomization demographic information. Johnson et al. (2022) match individuals on the pre-randomization demo-graphic variables, including sex, age, language preference at lottery sign-up (English or other), Metropolitan Statistical Area (MSA) residency, education (less than high school, high school 27 diploma or GED, vocational or two-year degree, four-year degree or higher), and self-identified race. Because Hispanic and Black self-identification as well as education contained missing values, missingness indicators are included in the matching set. The outcome Yi is the number of days in the past 30 days on which poor physical or mental health did not impair usual activities. The endogenous treatment indicates Medicaid enrollment and the instrument indicates lottery selection (Finkelstein et al. 2012, Johnson et al. 2022). Figure 7 shows that SBCF-IV partitions on age at the root and on English (lottery sign-up language preference) within both age branches. The education covariate appears as a tertiary split within the younger non-English-preferring subtree. We receive seven leaves with conditional CACEs spanning 
+
+−6.017 to 3.630 days, of which only one subgroup has a statistically significant p-value at the 10% level: English-preferring compliers aged between 38 and 59, with bτ CACE (x) = 2 .263 days (adjusted 
+
+p = 0 .0945 ). This leaf carries roughly half of the inference sample and a complier share of 0.324 .Its positive sign and the middle-age, English-preferring composition closely mirror the Medicaid treatment effects reported by Johnson et al. (2022). The remaining six leaves carry inference-sample shares between 4% and 14% and produce esti-mates that should be read as exploratory rather than substantive findings. Two leaves carry negative point estimates ( bτ CACE (x) = −6.017 for non-English-preferring compliers aged ≥ 60 (4% share) and bτ CACE (x) = −1.403 for non-English-preferring compliers aged 26–37 with above-median education (9%)), but are not statistically significant. We do not interpret them as evidence of ad-verse Medicaid effects, as they are most plausibly small-sample noise in thin demographic strata. The non-significant positive leaves at bτ CACE (x) = 3 .630 (English-preferring under 38, 11%) and 
+
+bτ CACE (x) = 1 .563 (non-English-preferring aged 26–37 with low education, 14%) suggest that pos-itive effects may extend beyond the central English-preferring middle-aged subgroup, but are not statistically resolvable at this sample size and tree depth. Relative to the two complier subgroups identified by Johnson et al. (2022) ((i) non-Asian, English-preferring males over age 36, and (ii) compliers under age 36 who prefer English with at most a high-school education or GED), SBCF-IV recovers a partition close to a coarsened version of their subgroup (i): English preference and middle age are the leading dimensions, but our discovery tree does not split on sex or race and therefore cannot reproduce their male-only refinement. The qualitative location of the dominant positive Medicaid effect (older, English-preferring compliers) is preserved across both methods, while the demographic resolution differs. 
+
+F.2 401(k) eligibility and retirement savings 
+
+We apply SBCF-IV to the 401(k) data of Chernozhukov et al. (2018) and Bach et al. (2024), an instrumental variable analysis benchmark in which the endogenous decision to participate in an employer-sponsored retirement plan is instrumented by eligibility. Belloni et al. (2017) provide a high-dimensional treatment of this design. Conditional on a set of job-choice covariates, eligibility is plausibly unconfounded and satisfies the exclusion restriction, while participation remains con-founded by unobserved preferences for saving. In Subsection F.2, we use SBCF-IV to discover the subpopulations of eligible households for which participation has the largest impact on net financial assets. The data are drawn from the 1991 Survey of Income and Program Participation, which has become a canonical testbed for instrumental variable methods in labor and public economics. The outcome 
+
+Yi is a household’s net financial assets (Individual Retirement Account (IRA) and 401(k) balances, checking accounts, savings bonds, and related holdings, net of non-mortgage debt). The endogenous treatment Wi is an indicator for participation in a 401(k) plan, while the instrument Zi is an indica-tor for eligibility to enroll in such a plan through one’s employer. Following Poterba et al. (1992) and Poterba et al. (1995), the identifying argument is that, conditional on a small set of job-choice covariates Xi (notably income, together with age, family size, education, marital status, two-earner and defined-benefit pension status, IRA participation, and home ownership), whether an employer offered a 401(k) plan around the time of the survey can be treated as exogenous to the house-hold’s saving behavior, while the decision to actually participate conditional on eligibility remains endogenous. This places us in the irregular assignment mechanism of Section 2: Zi is plausibly unconfounded given Xi and satisfies the exclusion restriction (eligibility affects assets only through participation), whereas Wi is confounded by unobserved preferences for saving. The SBCF-IV al-28 gorithm is used to discover for which subpopulations of eligible households participation has the largest impact on net financial assets. We show in Figure 8 that SBCF-IV partitions the data primarily on the variable inc (household income), which appears at the root and at every internal node except one. The variable pira (IRA holdings) enters only as a secondary split within a thin upper-middle-income window. None of the other portfolio or household-structure binaries ( db , hown , marr , twoearn ) survive into the depth-four discovery tree. The dominance of income aligns SBCF-IV’s discovered structure with the lifecycle and earnings-gradient emphasis of the classical 401(k) saving literature (Poterba et al. 1992, 1995, Engen et al. 1996, Engen & Gale 2000): heterogeneity in τ CACE (x) is concentrated along the income margin, with effects rising broadly from the lower-middle-income mass into the upper-middle-income range before becoming statistically indistinguishable from zero in the thin high-income tail. Six of the seven leaves carry inference-sample shares below 7%, and four have shares at or below 1%. These small leaves correspond to a few dozen households each and should be read as small-sample artifacts rather than substantive heterogeneity: none of them display statistically significant Holm-adjusted p-values at the 10% level. Only two leaves remain significant at the 10% level after adjustment: the bulk subgroup with household income lower than 68 ,810 (89% of observations in the inference sample and bτ CACE (x) = $17 ,818 for this subgroup), and the small upper-middle-income subgroup with household income between 92 ,690 and 110 ,400 (2.6%, bτ CACE (x) = $53 ,422 ). The qualitative ordering (larger effects in the upper-middle-income subgroup than in the lower-income mass) is consistent with the finding in Engen & Gale (2000) that 401(k) effects on net financial assets are larger for higher-earnings groups, who hold the bulk of 401(k) assets and for whom contributions are most likely to substitute from taxable accounts rather than represent new saving (Chetty et al. 2014). Two structural parallels with OHIE in Section F.1 persist. Complier shares vary only modestly relative to the order-of-magnitude changes in the conditional CACE estimates. Heterogeneity is identified almost entirely from variation in the conditional ITT, matching the simulation evidence in Section 4 that SBCF-IV reliably recovers ITT-driven partitions. Moreover, both statistically signif-icant leaves carry estimates above the cross-fitted CACE on the same trimmed sample ( ≈ $9 ,000 –
+
+$13 ,000 in Chernozhukov et al. (2018)): the bulk leaf at $17,818 lies a modest $5,000–$9,000 above that identification benchmark, while the upper-middle-income leaf at $53,422 lies further above and should be read as partly inflated by sample selection. The residual upward bias is consis-tent with longstanding concerns that 401(k) effects on net financial assets are inflated by selection on saver type (Engen et al. 1996, Engen & Gale 2000) and by mechanical accumulation in tax-favored accounts that does not represent net new saving (Chetty et al. 2014). We therefore read the leaf estimates of the statistically significant subgroups as mildly upward-biased point estimates of the structural participation effect. Further, we treat the high-income tail leaves as exploratory and emphasize the shape of the discovered partition (income-dominated, with effects rising through middle income before destabilizing at the top) over the effect estimate magnitudes of any individual subgroup. 29 Figure 7: Discovered partition from applying SBCF-IV with Algorithm 1 to the Oregon Health Insurance Experiment (OHIE). 
+
+> bτ CACE (x) 1.711
+> Iinf  100%
+> bπC (x) 0.294 Age  ≤ 37.5
+> bτ CACE (x) 2.174
+> Iinf  63%
+> bπC (x) 0.307 English  = 0
+> bτ CACE (x) 0.441
+> Iinf  5%
+> bπC (x) 0.202
+> bτ CACE (x) 2.136
+> Iinf  59%
+> bπC (x) 0.315 Age  < 26
+> bτ CACE (x) 3.630
+> Iinf  11%
+> bπC (x) 0.247
+> bτ CACE (x) 0.520
+> Iinf  23%
+> bπC (x) 0.298 Education  < 0.67
+> bτ CACE (x) 1.563
+> Iinf  14%
+> bπC (x) 0.309
+> bτ CACE (x) −1.403
+> Iinf  9%
+> bπC (x) 0.281 TRUE
+> bτ CACE (x) 0.977
+> Iinf  37%
+> bπC (x) 0.273 English  = 0
+> bτ CACE (x) -6.017
+> Iinf  4%
+> bπC (x) 0.192
+> bτ CACE (x) 1.415
+> Iinf  33%
+> bπC (x) 0.282 Age  ≥ 60
+> bτ CACE (x) 0.749
+> Iinf  7%
+> bπC (x) 0.249
+> bτ CACE (x) 2.263 ∗
+> Iinf  52%
+> bπC (x) 0.324 FALSE
+> Notes:  Each internal and terminal node reports (top) the estimated conditional CACE  bτ CACE (x), (middle) the share of the inference sample  Iinf  falling into the node, and (bottom) the estimated complier share  bπC (x). Splits are made on  Age , English , and  Education , with the splitting rule indicated at each branch. At terminal nodes,  bτ CACE (x) coincides with the subgroup-level 2SLS estimator  bτ 2SLS
+> Xj in Definition 2.4; an asterisk marks leaves whose subgroup CACE is statistically significant at the 10% level.
+
+30 Figure 8: Discovered partition from applying SBCF-IV with Algorithm 1 to the 401(k) dataset. 
+
+> bτ CACE  (x) 27,826
+> Iinf  100%
+> bπC (x) 0.712 inc  < 147,700
+> bτ CACE  (x) 26,470
+> Iinf  99 .7%
+> bπC (x) 0.711 inc  ≥ 110,400
+> bτ CACE  (x) 43,358
+> Iinf  1.2%
+> bπC (x) 0.839 inc  ≥ 135,000
+> bτ CACE  (x) 144,376
+> Iinf  0.3%
+> bπC (x) 1.000
+> bτ CACE  (x) 7,643
+> Iinf  0.9%
+> bπC (x) 0.762 pira  = 1
+> bτ CACE  (x) −6,783
+> Iinf  0.7%
+> bπC (x) 0.824
+> bτ CACE  (x) −29 ,366
+> Iinf  0.2%
+> bπC (x) 0.500
+> bτ CACE  (x) 25,327
+> Iinf  98 .5%
+> bπC (x) 0.709 inc  ≥ 92,690
+> bτ CACE  (x) 53 ,422 ∗
+> Iinf  2.6%
+> bπC (x) 0.913
+> bτ CACE  (x) 22,670
+> Iinf  95 .9%
+> bπC (x) 0.700 inc  < 68,810
+> bτ CACE  (x) 17 ,818 ∗
+> Iinf  89 .1%
+> bπC (x) 0.689
+> bτ CACE  (x) 25,271
+> Iinf  6.8%
+> bπC (x) 0.789 TRUE
+> bτ CACE  (x) 250,409
+> Iinf  0.3%
+> bπC (x) 0.857 FALSE
+> Notes:  Each internal and terminal node reports (top) the estimated conditional CACE  bτ CACE (x), (middle) the share of the inference sample  Iinf  falling into the node, and (bottom) the estimated complier share  bπC (x). At terminal nodes,  bτ CACE (x) coincides with the subgroup-level 2SLS estimator  bτ 2SLS
+> Xj in Definition 2.4. An asterisk marks leaves whose subgroup CACE is statistically significant at the 10% level.
+
+31
