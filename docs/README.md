@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-23</span>
+      <span class="dpr-home-dashboard-kicker">2026-09-24</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 17 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 5 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>8</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>4</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>1</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-23 09:52:35 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-24 09:39:37 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,8 +69,10 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日17篇推荐中精读9篇、速读8篇，两篇9分论文领跑：结构化数据通用智能与未观测混杂因果推断。</p>
-<p>最值得看LimiX-2的上下文机制网络，以及未观测混杂下的混合学习因果推断；速读可补ITSY不规则时间序列因果发现、自适应保形分位预测和PACE表格基础模型特征</p>
+<p>今日共生成 5 篇推荐（精读 4 篇，速读 1 篇）</p>
+<p>精读：《Tail-Aware Geometry Learning for Conformal Ellipsoids》（10.0/10）, 《Functional Causal Discovery via Conditional Covariance Ordering》（9.0/10）</p>
+<p>速读：《CRISP: Scalable Importance-Stratified Coresets for Imbalanced Tabular Learning》（6.0/10）</p>
+<p>这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -79,12 +81,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">9 篇</strong>
+    <strong class="dpr-home-dashboard-count">4 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="LimiX-2: A Contextual Mechanism Network Towards General Structured-Data Intelligence">LimiX-2: A Contextual Mechanism Network Towards General Structured-Data Intelligence</span></li><li><span class="dpr-home-dashboard-paper-title" title="Causal Inference with Unobserved Confounding: A Mixture Learning Perspective">Causal Inference with Unobserved Confounding: A Mixture Learning Perspective</span></li><li><span class="dpr-home-dashboard-paper-title" title="Conformalized Safe Feasible Sets in Uncertain Decision Systems">Conformalized Safe Feasible Sets in Uncertain Decision Systems</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Tail-Aware Geometry Learning for Conformal Ellipsoids">Tail-Aware Geometry Learning for Conformal Ellipsoids</span></li><li><span class="dpr-home-dashboard-paper-title" title="Functional Causal Discovery via Conditional Covariance Ordering">Functional Causal Discovery via Conditional Covariance Ordering</span></li><li><span class="dpr-home-dashboard-paper-title" title="What Do Tabular Foundation Models Compute In Context? In-Situ Representation Refinement through Attention-Gated Updates">What Do Tabular Foundation Models Compute In Context? In-Situ Representation Refinement through Attention-Gated Updates</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>3</strong></span><span class="dpr-home-dashboard-tag">cp <strong>3</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -92,12 +94,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">8 篇</strong>
+    <strong class="dpr-home-dashboard-count">1 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Safety-Critical Control under Uncertainty via Adaptive Conformal Quantile Prediction Intervals">Safety-Critical Control under Uncertainty via Adaptive Conformal Quantile Prediction Intervals</span></li><li><span class="dpr-home-dashboard-paper-title" title="ITSY: Causal Discovery From Irregular Time-Series Data">ITSY: Causal Discovery From Irregular Time-Series Data</span></li><li><span class="dpr-home-dashboard-paper-title" title="PACE: Plug-and-Play Contextual Embedding for Feature Screening with Pretrained Tabular Foundation Models">PACE: Plug-and-Play Contextual Embedding for Feature Screening with Pretrained Tabular Foundation Models</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="CRISP: Scalable Importance-Stratified Coresets for Imbalanced Tabular Learning">CRISP: Scalable Importance-Stratified Coresets for Imbalanced Tabular Learning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>5</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 </div>
 
