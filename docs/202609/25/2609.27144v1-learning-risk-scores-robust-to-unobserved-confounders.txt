@@ -1,0 +1,818 @@
+Title: Learning Risk Scores Robust to Unobserved Confounders
+
+URL Source: https://arxiv.org/pdf/2609.27144v1
+
+Published Time: Thu, 24 Sep 2026 00:21:09 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# Learning Risk Scores Robust to Unobserved Confounders 
+
+Ryan Edmonds 
+
+Center for Artificial Intelligence in Society, University of Southern California, Los Angeles, CA 90089, USA, ryanedmo@usc.edu 
+
+Yingxiao Ye 
+
+Center for Artificial Intelligence in Society, University of Southern California, Los Angeles, CA 90089, USA, yingxiao.ye@usc.edu 
+
+Sina Aghaei 
+
+Center for Artificial Intelligence in Society, University of Southern California, Los Angeles, CA 90089, USA, saghaei@usc.edu 
+
+Andrés Gómez 
+
+Department of Industrial and Systems Engineering, University of Southern California, Los Angeles, CA 90089, USA, gomezand@usc.edu 
+
+Ça˘ gıl Koçyi˘ git 
+
+Department of Engineering, Department of Economics and Management, University of Luxembourg, L-1359 Luxembourg, cagil.kocyigit@uni.lu 
+
+Phebe Vayanos 
+
+Center for Artificial Intelligence in Society, University of Southern California, Los Angeles, CA 90089, USA, phebe.vayanos@usc.edu 
+
+We consider the problem of learning risk scores to prioritize individuals for scarce resources or interventions, from historical observational data affected by unobserved confounding. In settings such as public health and homelessness prevention, decisions about who receives a scarce resource (e.g., a hospital bed or housing) are often guided by a risk score assigned to each individual based on recorded characteristics, such as responses to a survey. These risk scores are increasingly being learned directly from observational data: historical records of individuals’ characteristics, allocation decisions, and outcomes under received allocations. Standard methods such as inverse propensity weighting (IPW), which corrects for the bias introduced by the historical allocation policy, can be used to learn accurate risk scores if the historical decision process is fully explained by the recorded characteristics, an assumption known as unconfoundedness. In practice, however, historical decisions often depend on unrecorded information (e.g., details a caseworker learns in conversation but never logs), causing learned risk scores to systematically under-prioritize exactly the individuals whose unrecorded circumstances drove past prioritization. We propose a method for learning risk scores that are robust to this kind of unobserved confounding, building on IPW. Since propensity weights cannot be reliably estimated under unobserved confounding, we instead treat them as belonging to an uncertainty set determined by the observable data and domain-informed estimates of the degree of confounding, combining sensitivity analysis from causal inference with Wasserstein distributionally robust optimization. The resulting robust risk score learning problem admits a sample-based approximation that we reformulate as an exponential cone program compatible with off-the-shelf solvers. We demonstrate the effectiveness of our approach relative to IPW and other benchmarks on semi-synthetic data derived from datasets in the UCI Machine Learning Repository. 
+
+1arXiv:2609.27144v1 [cs.LG] 22 Sep 2026 2 Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders  
+
+> Our method improves calibration by up to 29 .2% over traditional benchmarks and up to 11 .1% over the state of the art, without compromising other metrics.
+> Key words : robust optimization, unobserved confounders, robust machine learning, conic optimization, risk scores.
+
+1. Introduction 
+
+In high-stakes resource allocation settings, decisions about who receives scarce resources are typically made by people — caseworkers, judges, clinicians — often guided by hand-crafted risk scores: mappings from individual characteristics to a measure of vulnerability that allow interpretable comparisons between different individuals’ needs. Risk scores of this kind have been deployed in fields such as criminal justice and public health, where they inform consequential decisions about parole and medical treatment (Angwin et al. 2016, Nemati et al. 2018). Risk scores have traditionally been hand-crafted from domain expertise. In homelessness prevention, for example, housing authorities use standardized vulnerability surveys such as the VI-SPDAT (OrgCode Consulting, Inc. and Community Solutions 2015), which score risk using hand-crafted rules for different sections of questions (e.g., if a participant answers YES to any of questions 1 through 4, increase risk by 1). In recent years, however, there is a growing interest in using machine learning to learn risk scores directly from historical data, with the goal of producing scores that are more accurate than what hand-crafted rules alone can achieve (Rice et al. 2023, Wang et al. 2023). These approaches often rely on observational data — historical records of individuals’ characteristics, the allocation decisions that were actually made under some prior policy, and the outcomes that followed — rather than data from randomized assignment. In the case of homelessness, this means historical records of individuals who filled out the VI-SPDAT, whether or not they received housing, and their observed outcomes in the system (e.g., remaining housed vs. returning to homelessness). Crucially, we only observe outcomes for each individual for the specific resource they were allocated, and do not observe other counterfactual outcomes. To learn accurate risk scores from observational data, existing methods typically work by debiasing the historical allocation policy itself. A standard tool for this is inverse propensity weighting (Rosenbaum and Rubin 1983), which reweighs observations by an estimated propensity score, representing the probability an individual would have received Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 3
+
+the resource under the historical policy given their recorded characteristics. This causes the reweighted data to behave as if historical allocation had been random. These methods, however, typically require an unconfoundedness assumption that, condi-tional on the recorded characteristics, the historical allocation decision is independent of the outcome. In other words, everything relevant to both the decision and the outcome should be captured in the data. In practice, this assumption frequently fails, because historical decisions were often based on more information than was recorded. In homelessness prevention, for instance, the allocations we observe were shaped not only by survey responses but by factors caseworkers observed in person; factors such as social connections or perceived “resilience” may have no direct analogue in the recorded data. This means individuals who received housing may be systematically different from those who did not, in ways we cannot observe ex post — so a risk score learned using a method that assumes unconfoundedness may not properly debias the historical allocation policy. This problem is not unique to homelessness: whenever historical policies depended on richer information than what was recorded, propensity scores like the one above cannot be reliably estimated, because they are themselves confounded by unobserved variables. This gives rise to our research question: how can we learn risk scores that are robust to unobserved confounding? In this paper, we propose a framework for addressing this question through the lens of robust optimization. The contributions of this paper are summarized as follows. When there is unobserved confounding, propensity scores cannot be estimated from data, and we treat these propensity scores as uncertain. By analyzing the properties that these propensity scores should satisfy when the data-generating distribution is known, we formulate a robust optimization problem with the objective of maximizing the worst-case expected log-likelihood in view of all plausible values that the propensity scores can take. The uncertainty set we construct to capture the plausible propensity score values bounds the unobserved confounding effect by drawing on the marginal sensitivity model (MSM) of Tan (2006), and ensures consistency with the marginal distributions of data components that can be estimated from observational data by drawing on Wasserstein distributionally robust optimization. Our uncertainty set can also incorporate rationality constraints reflecting assumptions such as that historical decision makers, having access to richer information than what is captured in the data, used this knowledge, on average, to make better decisions than they would have made without that information. The problem we formulate admits a 4 Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+sample-based approximation that relies only on the observational data. We reformulate this sample-based approximate problem equivalently as an exponential cone program, facilitating the use of off-the-shelf solvers. We run experiments on several datasets from the UCI Machine Learning Repository to demonstrate the effectiveness of our framework against existing benchmarks. 
+
+1.1. Related Work 
+
+Risk score learning as optimization. Risk scores are simple, additive scoring rules that let practitioners estimate risk with a handful of arithmetic operations, and have long been used in medicine and criminal justice (Angwin et al. 2016, Nemati et al. 2018). Ustun and Rudin (2019) argue that such scores, which were traditionally built ad hoc through expert judgment, are better obtained by directly formulating risk score construction as an optimization program that jointly balances calibration, sparsity, and operational constraints rather than treating them as separate heuristic stages. Our work adopts this same premise — that risk scores are best learned by directly optimizing an objective that reflects the desired properties of the score — but we aim to learn risk scores from observational data, so we only observe outcomes for individuals under the treatment they received. Since treatment assignments may be subject to unobserved confounding, we therefore extend this optimization-based framing to a robust formulation, optimizing against a worst-case realization of the confounder within a causal uncertainty set, rather than against a single fixed dataset. While our experiments focus on real-valued risk scores, our framework can easily accommodate integrality or sparsity constraints if desired. 
+
+Sensitivity analysis, causal uncertainty sets, and partial identification. Sensitivity analysis for unmeasured confounding originates with Cornfield et al. (1959) and Rosenbaum (2002), and was recast by Tan (2006) as the marginal sensitivity model (MSM), which bounds the difference in odds ratios between the true and observed propensity scores. Bertsimas et al. (2023) connect the MSM to distributionally robust optimization, deriving sharp average treatment effect bounds by optimizing over the induced uncertainty set; Dorn and Guo (2023) sharpen this characterization by reducing average treatment effect bounds to a single quantile regression, and Dorn et al. (2025) establish closed-form solutions for expectation-type objectives under this set. Zhang et al. (2025) propose the enhanced MSM (eMSM), supplementing the MSM treatment sensitivity constraint with an outcome sensitivity Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 5
+
+constraint that bounds how much an unobserved confounder can shift treatment effects, yielding tighter sharp bounds on causal estimands. Our uncertainty set also builds on the MSM, but is shaped by a different modeling goal: rather than bounding a causal estimand such as the average treatment effect, we optimize a predictive risk score. Our formulation can accommodate general outcome sensitivity constraints in the style of eMSM, bounding the difference between true and observed treatment effects by an arbitrary interval. Historical rationality — the assumption that decision-makers, given access to richer information than what is recorded, used it on average to make better decisions than they would have without it — corresponds to the one-sided choice of this interval [0 , ∞). We adopt this realization specifically because, unlike eMSM’s outcome constraint, it requires no additional sensitivity parameter to elicit or estimate. More broadly, a large literature derives bounds on causal estimands under a variety of sensitivity models (Tan 2006, Dorn and Guo 2023, Dorn et al. 2025, Zhang et al. 2025, Yadlowsky et al. 2022, Jin et al. 2025) that acknowledge the need for distributional consistency between the true and observed distributions. This consistency is generally enforced by either normalizing on a per-covariate basis or analytically constructing a worst-case consistent distribution that lies within the given uncertainty set, where the worst case is in relation to the bound being derived (usually average treatment effect). Our method instead enforces distributional consistency via a Wasserstein bound on the unknown distribution. At the population level, this bound is equivalent to bounding on a per-covariate basis, but the bound can also be relaxed to account for settings where the distributions being compared do not have the same support, which can arise in sample approximation settings. Additionally, our consistency bound is independent of the objective being optimized, whereas the constructions above are tied to the specific causal estimand whose bound is being derived. 
+
+Robust prediction under distributional shift. Shimodaira (2000) shows that under covariate shift, reweighting examples by the ratio between test and training densities and maximizing the resulting weighted log-likelihood yields asymptotically optimal estimates of a model’s regression coefficients, akin to inverse propensity weighting. In our setting, unobserved confounding means that we cannot exactly know these ratios, motivating worst-case optimization over a causal uncertainty set rather than point-estimate reweighting. Shafieezadeh Abadeh et al. (2015) show that Wasserstein-robust logistic regression admits an exact reformulation as a norm-regularized logistic regression; Esfahani and Kuhn (2018) later 6 Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+generalize this result, establishing that minimax optimization over worst-case distributions with Wasserstein uncertainty sets can be reformulated as tractable convex programs across a broader class of losses. While we leverage Wasserstein distance to establish a consistency constraint, our uncertainty set is defined by propensity score bounds from the MSM rather than direct bounds on the distribution of the observed data, yielding a causally interpretable robustness parameter Γ that practitioners can reason about directly. Sahoo et al. (2026) similarly optimize a predictive model against a worst-case distribution within a Γ-bounded uncertainty set with odds-ratio form identical to the MSM, but their Γ bounds outcome-dependent selection into the observed sample rather than outcome-dependent treatment assignment. Chen et al. (2016) and Liu and Ziebart (2017) extend minimax prediction to general losses, further validating the robustness-over-reweighting philosophy we adopt. 
+
+Robust policy learning. Kallus and Zhou (2021) use MSM-derived uncertainty sets for confounding-robust policy improvement in offline settings, optimizing worst-case policy value. Their target — expected reward under a treatment rule — differs fundamentally from ours. Risk scores are upstream of policy: they produce vulnerability estimates that inform human decision-making rather than prescribe treatment directly, a distinction that matters in social services settings where interpretability and human oversight are desired. Additionally, our uncertainty set includes additional consistency constraints. We show through an example that using the uncertainty set of Kallus and Zhou causes the uncertainty set to include distributions incompatible with the observed data, and show experimentally that this leads to worse predictions. 
+
+1.2. Notation 
+
+All random variables are defined as measurable functions on an abstract probability space (Ω , F, P) and are capitalized (e.g., X), while their realizations are denoted by the same symbols in lowercase letters (e.g., x). For any random vector X, Px denotes its marginal distribution. All (in)equalities involving random variables should be understood to hold almost surely. The family of all bounded Borel-measurable functions from a Borel set A ∈ B (Rℓ) to another C ∈ B (Rk) is denoted by L(A, C). For a finite set Y, ∆( Y) denotes the probability simplex over Y. The indicator function is denoted by 1(·), taking the value 1 if the argument is true, 0 otherwise. Finally, ∥ · ∥ refers to the Euclidean norm, with the understanding that other choices of norms do not change the theoretical conclusions of the work. Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 7
+
+2. Problem Description 
+
+Individuals are characterized by their observed covariates X ∈ X ⊆ Rdx , unobserved con-founders U ∈ U ⊆ Rdu , and potential outcomes {Y t}t∈T ∈ Y = {− 1, 1}m+1 , where T =
+
+{0, 1, . . . , m } is the set of treatments, and Y t is the potential outcome under t ∈ T (Hernan and Robins 2023). We consider Y t = −1 to be the adverse outcome , and use t = 0 to denote the no-treatment case. We denote by P the distribution of ( X, U, {Y t}t∈T ). The distribution P is unknown. Instead, we have access to historical data of the form 
+
+{xi, t i, y i}ni=1 , where ti is the treatment historically assigned to i according to an (unknown) historical policy πh ∈ L (X × U , ∆( T )), and yi = yti 
+
+> i
+
+. Here, πt
+
+> h
+
+(x, u ) denotes the probability of assigning treatment t to an individual with covariates x and unobserved confounders u. In the observed data, neither the confounders ui nor the counterfactual outcomes {yti }t∈T \{ ti}
+
+are available. We make the following assumption throughout. 
+
+Assumption 1. We assume (i) consistency ( Y = Y T ), (ii) positivity ( πt
+
+> h
+
+(X, U ) ≥ δ > 0 for all t ∈ T ), and (iii) conditional exchangeability given both observed covariates and unobserved confounders ( Y t ⊥ T | (X, U ) for all t ∈ T ). 
+
+Assumption 1 (i) and (ii) are standard in the causal inference literature (Hernan and Robins 2023). Assumption 1 (iii) is not restrictive, unlike the standard conditional exchangeability assumption (a.k.a. unconfoundedness), which requires Y t ⊥ T | X for all t ∈ T . Indeed, Assumption 1 (iii) holds without loss of generality because U is defined broadly and may represent any collection of missing confounders required to have conditional exchangeability. 
+
+Problem Formulation. We aim to learn the parameters β of a risk score s(x) = β⊤x that, given observable covariates x, estimates the probability of an adverse outcome ( Y 0 = −1) under no treatment ( t = 0) using the logistic link Pr β (Y 0 = −1 | X = x) = (1 + exp( −β⊤x)) −1.
+
+Under this model, higher risk score corresponds to a higher probability of an adverse outcome. 
+
+β is assumed to lie in some set B ⊆ Rdx , where B can be chosen to capture additional constraints such as integrality or sparsity. If P were known, we could try to solve the following problem to find the coefficients that best explain the relationship between X and Y 0:sup 
+
+> β∈B
+
+EP
+
+> [
+
+log Pr β (Y 0 | X)]
+
+(1) 8 Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+The objective function of (1) is the expected log-likelihood under P. Problem (1) cannot be solved because P is unknown. If the data were fully observable, a standard sample average approximation (SAA) approach would replace the unknown distribution with the empirical distribution induced by the sample. However, this approach is also infeasible with observational data because we observe y0 
+
+> i
+
+only when ti = 0, and therefore cannot estimate the joint distribution of ( X, Y 0) or the expectation in (1) from the data. A common approach in this case is to rely on so-called propensity scores (Rosenbaum and Rubin 1983), i.e., 
+
+μi = P(T = ti | X = xi, U = ui). However, these scores also cannot be estimated from the data when there are unobserved confounders. For this reason, we establish a robust framework to model this uncertainty. To this end, using standard arguments, we next reformulate (1) in terms of P(T = 0 | X, U ). 1
+
+Lemma 1. It holds that 
+
+EP[log Pr β (Y 0 | X)] = EP 
+
+> [
+
+log Pr β (Y | X)
+
+P(T = 0 | X, U ) 
+
+> ∣∣∣∣∣
+
+T = 0 
+
+> ]
+
+P(T = 0) . (2) The right-hand side of (2) can be interpreted as an expectation under a distribution obtained by reweighting the untreated population inversely to its probability of receiving no treatment, thereby correcting for treatment-selection bias. The idea is that this reweighting recovers the distribution of ( X, Y 0) by reweighting the conditional distribution of ( X, Y ) | T = 0. We make this argument more explicit later in this section. We can estimate the conditional distribution of ( X, Y ) | T = 0 from the data. However, U
+
+is never observed, and its meaning and support U are unknown. As a result, P(T = 0 | X, U )is not identifiable from the data. To address this uncertainty, we adopt a robust formulation for learning risk scores that perform well under all plausible P(T = 0 | X, U ). Since neither 
+
+U nor U is known, we introduce a random variable Z : Ω → [δ, 1], representing the unknown 
+
+P(T = 0 | X, U ), and model it as belonging to an uncertainty set Sz of measurable functions from Ω to [ δ, 1]. We will impose additional structure on Sz to ensure consistency with what can be estimated from the observable data and our modeling goals. We are therefore interested in the following robust optimization problem (constant P(T = 0) can be dropped from the objective function). sup 
+
+> β∈B
+
+inf 
+
+> Z∈S z
+
+EP 
+
+> [
+
+log Pr β (Y | X)
+
+Z 
+
+> ∣∣∣∣∣
+
+T = 0 
+
+> ]
+
+(3)    
+
+> 1All proofs can be found in Appendix EC.2. Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 9
+
+This optimization problem should be interpreted as maximizing the objective of (1) under an adversarial realization of Z that lies in our uncertainty set, thereby ensuring robustness under all possible realizations of Z.
+
+Uncertainty Set. We require the following conditions on Sz. These conditions are satisfied by the (unknown) true P(T = 0 | X, U ), i.e., when Z = P(T = 0 | X, U ). We require consistent inflation of the untreated population , i.e., 
+
+EP [1 /Z | T = 0] = 1 /P(T = 0) (C1) and consistent coverage of the covariate distribution , i.e., 
+
+W(Px, Qzx) = 0 . (C2) Here, W is the 1-Wasserstein distance induced by ∥ · ∥ , intuitively, the amount of work needed to transform one distribution into another by moving probability mass (formally defined in Appendix EC.1.1), and Qz is the 1 /Z -reweighted distribution among the untreated population: 
+
+Qz(A) = EP[1(A)/Z | T = 0] 
+
+EP[1 /Z | T = 0] ∀A ∈ F .
+
+Recalling that Z represents the unknown P(T = 0 | X, U ), Qz is a distribution obtained by reweighting the untreated population inversely to its probability of receiving no treatment. Note that this is precisely the distribution referred to in the discussion following Lemma 1; the right-hand side of (2) is exactly equal to EQz [log Pr β (Y 0 | X)] when Z = P(T = 0 | X, U ). Put differently, the 1 /Z -reweighting aims to make the untreated population (i.e., the conditional distribution of ( X, Y ) | T = 0) representative of the entire population (i.e., the distribution of (X, Y 0)). Condition (C1) ensures that the reweighted untreated population is inflated to the correct full-population scale. For example, if the untreated group makes up 20% of the population, so that P(T = 0) = 0 .2, then the average weight in this group must be 1 /0.2 = 5 to scale the untreated group back to the full population size. Condition (C2) ensures that the reweighting is performed so as to recover the estimable full-population distributional property. In particular, even with abundant data, only the marginal distribution of X can be estimated. We use Wasserstein distance to formulate this requirement because, in finite samples, the covariate supports of the treated and untreated groups often do not perfectly overlap. Wasserstein 10 Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+distance can compare distributions with different supports, unlike alternatives such as ϕ-divergences. The next proposition shows that when Z = P(T = 0 | X, U ), the two conditions are satisfied, ensuring consistency with the (unobservable) ground truth distribution. 
+
+Proposition 1. If Z = P(T = 0 | X, U ), then (C1) and (C2) are satisfied. 
+
+We further impose the following conditions on Sz to characterize the plausible effects of unobserved confounding. We refer to these conditions as odds ratio bounds and historical rationality , respectively: Γ−1 ≤ P(T = 0 |X)1 − P(T = 0 |X)1 − ZZ ≤ Γ (C3) 
+
+EP[Y 0/Z | T = 0] ≤ EP[Y 0/P(T = 0 |X) | T = 0] (C4) Condition (C3) is based on Tan’s marginal sensitivity model (Tan 2006) and has been used to capture uncertainty due to unobserved confounding, including in minimax regret policy optimization (Kallus and Zhou 2021). It requires that the true odds of receiving no treatment cannot differ from the observable odds based only on X by more than a multiplicative factor of Γ ≥ 1. The factor Γ quantifies the degree of hidden bias induced by unobserved confounding, and can be calibrated by domain experts (Hsu and Small 2013). Γ = 1 corresponds to the absence of unobserved confounding, while larger values of Γ allow for a greater potential effect of unobserved confounding. Condition (C4) requires that historical treatment decisions should, on average, not have been worse than what would be explained using only observed covariates. This reflects the idea that unobserved confounders provide additional information about Y 0, which is used to better prioritize the most vulnerable individuals (those at higher risk of an adverse outcome if untreated) for treatment. We also note that this constraint resembles a one-sided realization of the eMSM outcome sensitivity constraint of Zhang et al. (2025): the difference between the left and right terms is bounded below by 0 and above by 
+
+∞. These bounds can be adapted to reflect alternative historical decision logics if desired. To emphasize the importance of Condition (C2), consider an example where the true population distribution is such that P(X = −1) = P(X = 1) = 0 .5, and P(T = 0 | X = −1) = 
+
+P(T = 0 | X = 1) = 0 .5. Consider a selection of the unknown Z such that Z | (X = −1) = 0 .25 and Z | (X = 1) = 0 .75. We have not explicitly specified the unobserved confounding effect here because it is not essential to the message. Such a Z satisfies (C1) and (C3) (and we Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 11 
+
+can also construct the distribution of Y 0 so that it satisfies (C4)). However, under such a Z,we have Qzx(X = −1) = 0 .75 and Qzx(X = 1) = 0 .25, so this reweighting selection results in a covariate distribution significantly different from the true covariate distribution overall, and it fails to satisfy (C2). This failure is important because the point of reweighting the untreated group is to recover the overall distribution across all treatment groups, and in this case we see that this purpose fails significantly, as we cannot recover even the covariate distribution. 
+
+3. Sample-Based Approximation 
+
+Given that P, or even its marginals that can be estimated from data, are unknown, we cannot solve Problem (3) directly. However, unlike Problem (1), Problem (3) admits a sample-based approximation. The following additional notation will be useful throughout this section. Recall that 
+
+μi = P(T = ti | X = xi, U = ui) and let ˆ μi represent an estimate of P(T = ti|X = xi), which can be learned from the data. Let ˆ wi = 1 /ˆμi, wi = 1 /μ i and w = ( w1, w 2, . . . , w n). As w is unknown and cannot be estimated from data, we treat it as an uncertain parameter, analogous to before, belonging to an uncertainty set that we will define shortly. Lastly, let N = {1, . . . , n }
+
+be the index set of the data samples, and let N0 = {i ∈ N : ti = 0 } be the subset of indices with ti = 0. Then, the sample-based approximation of (3) is given by sup 
+
+> β∈B
+
+inf 
+
+> w∈U (
+
+̂ Pn;Γ ,ε )
+
+∑
+
+> i∈N 0
+
+wi log Pr β (yi | xi), (4) where ̂ Pn = 1
+
+> n
+
+∑ 
+
+> i∈N
+
+δxi is the empirical distribution, δxi is the Dirac point mass at observation 
+
+xi, and 
+
+U(̂ Pn; Γ , ε ) = 
+
+
+
+w ∈ Rn 
+
+> +
+
+:
+
+Q = ∑
+
+> i∈N 0
+> wi
+
+∑ 
+
+> k∈N 0wk
+
+δxi
+
+> 1
+> n
+
+∑ 
+
+> i∈N 0
+
+wi = 1 
+
+W(̂Pn, Q) ≤ ε
+
+Γ−1 ≤ 1/ ˆwi  
+
+> 1−1/ˆwi
+> 1−1/w i
+> 1/w i
+
+≤ Γ ∀i ∈ N 0
+
+∑ 
+
+> i∈N 0
+
+yiwi ≤ ∑ 
+
+> i∈N 0
+
+yi ˆwi
+
+12 Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+for some Γ ≥ 1 and ε ≥ 0. U(̂Pn; Γ , ε ) encapsulates the conditions posed on the population level uncertainty set: the first two constraints capture (C2), the third captures (C1), the fourth captures (C3), and the fifth captures (C4). Note that the formulation includes W(̂Pn, Q) ≤ ε, whereas (C2) sets the right side to zero. This is due to our earlier observation that the covariate supports of the treated and untreated groups need not match in historical data, which results in a nonzero Wasserstein distance even in the unconfounded case. The inner infimum problem in (4) is guaranteed to be feasible when ε ≥ W(̂Pn,̂ Q), where ̂ Q = ∑ 
+
+> i∈N 0
+> ˆwi∑
+> k∈N 0ˆwk
+
+δxi , and the weights ˆ w are self-normalized using the Hájek IPW estimator (Hájek 1971, Hernan and Robins 2023) and greater than 1. By recasting the Wasserstein distance as a transportation problem and employing strong duality arguments, we formulate problem (4) as an exponential cone program amenable to off-the-shelf solvers in the following proposition. 
+
+Proposition 2. Problem (4) , given that the inner infimum is feasible and ˆwi ≥ 1 for all 
+
+i ∈ N 0, admits an equivalent reformulation as the following exponential cone program: 
+
+sup ∑
+
+> i∈N 0
+
+ˆwi
+
+> (
+
+Γ−1θi − Γθi − κy i
+
+> )
+
++ ∑
+
+> i∈N 0
+> (
+
+(1 − Γ−1)θi − (1 − Γ) θi
+
+> )
+
+− ετ + 1
+
+n
+
+> ∑
+> j∈N
+
+φj + nρ (5) s.t. log Pr β (yi | xi) − θi + θi + κy i + ψi
+
+n ≥ ρ ∀i ∈ N 0
+
+φj + ψi ≤ ∥ xi − xj ∥τ ∀i ∈ N 0, j ∈ N 
+
+β ∈ B , θ, θ ∈ Rn
+
+> +
+
+, τ, κ ∈ R+
+
+ρ ∈ R, φ ∈ Rn, ψ ∈ Rn
+
+Proposition 2 allows us to leverage off-the-shelf solvers to compute robust risk scores for certain choices of B. For our experiments we consider continuous risk score coefficients, and implement and solve the exponential cone program using MOSEK ApS (2026). The number of decision variables grows linearly in max( dx, n ), while the number of constraints grows quadratically in n. While this is considered tractable from a theoretical point of view, the quadratic number of constraints can practically create computational issues for datasets larger than those used in our experiments. In this case, the computation time can be improved via standard delayed constraint generation techniques. Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 13 
+
+4. Experiments 
+
+To demonstrate the effectiveness of our method, we run experiments on several datasets from the UCI machine learning repository (Dua and Karra Taniskidou 2017). We begin with a standard binary classification dataset with labels yi ∈ {− 1, 1}; note that such datasets are not observational and do not contain a treatment assignment component ti. To convert this into a semi-synthetic observational dataset, we introduce a binary treatment variable ti ∈ { 0, 1},and while doing so, systematically introduce unobserved confounding. We adapt datasets in this way so that we have access to both the ground truth and a confounding sample for each dataset; to the best of our knowledge there is no pre-existing repository of intentionally confounded observational datasets. By considering the labels yi in the dataset to be the outcome y0 
+
+> i
+
+under no treatment as well as an unobserved confounder, we generate a treatment policy π0(x, y 0) of the form log  
+
+> (
+
+π0(x, y 0)1 − π0(x, y 0)
+
+> )
+
+= f (x) + γy 0,
+
+where f : X → R and γ ≥ 0, which indicates that the probability of no treatment to a unit with fixed x and a non-adversarial outcome y0 = 1 is at least as high as that for the case of an adversarial outcome y0 = −1. We take f to be an affine function of the observed covariates, and in the experiments we sample the corresponding coefficients λ1, . . . , λ dx independently and identically from a uniform distribution, i.e., λ1, . . . , λ dx ∼ U( −0.1, 0.1). Note that under this policy, if two individuals i, j have identical observable features 
+
+xi = xj = x, we have 
+
+π0(x, y 0 
+
+> i
+
+)1 − π0(x, y 0 
+
+> i
+
+)1 − π0(x, y 0 
+
+> j
+
+)
+
+π0(x, y 0 
+
+> j
+
+) = eγ(y0  
+
+> i−y0
+> j)
+
+. (6) Thus, for two units with the same observable features, the difference in treatment odds relies only on γ and the difference in outcomes. Generating treatments in this manner gives us a reasonable intuition of how γ relates to Γ: since the difference in outcomes is bounded above and below by 2 and −2 respectively, we can approximately bound the ratio of the odds under the true propensity score μi and that under the estimated score ˆ μi from below and above by 
+
+e−2γ and e2γ , respectively (see Appendix EC.3.3 for details). To choose datasets to run experiments on, we select classification datasets from the UCI repository for which a logistic relation is a decent, but not perfect explanation (i.e., cross-validated log loss between 0 .35 and log 2, the log-loss of random guess). If a classification 14 Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+dataset is already extremely well explained by a logistic relation, then baseline methods that do not leverage propensity scores would already suffice to explain the corresponding observational dataset, with no dependence on the historical treatment policy. For each of the 15 acquired datasets, target classes are relabeled with {− 1, 1}: datasets with more than 2 classes accordingly have certain classes merged to reflect binary outcomes, choosing to merge similar classes on a per-domain basis when possible. 1500 training points and 500 test points are sampled from each dataset. Historical treatments are generated according to the above model for various choices of γ. We estimate propensity scores using logistic regression, gradient boosting, and a support vector machine, and let ˆ μ denote the self-normalized scores from the model with the highest classification accuracy on a held-out validation set of 300 points. Setting ε to be 1 .025 times the Wasserstein distance between the entire training population and the 1 /ˆμ-reweighted distribution among the untreated population, we then compute our robust risk scores by solving problem (5) with B = Rdx . We additionally run the following methods for comparison: • Full Information: logistic regression on all data with access to counterfactual outcomes. • Direct Method: logistic regression on ti = 0 data with no propensity weighting. • IPW: logistic regression on ti = 0 data, weighted by ˆ μ.• Doubly Robust 2 (DR): a combination of direct and IPW estimation (Robins et al. 1994). • Robust Baseline: the exponential cone program reformulation of problem (4) without Wasserstein or historical rationality constraints, preserving (C1) and (C3). We note that the Robust Baseline invokes an uncertainty set that consists purely of the odds-ratio bound, matching the uncertainty set used by Kallus and Zhou (2021) for policy regret minimization. To the best of our knowledge, this is the state of the art benchmark for our framework, as methods from e.g., Dorn et al. (2025) and Zhang et al. (2025) are analytically tailored for bounding treatment effects. For coefficients β generated by any of the above methods, performance is evaluated using the following metrics: • Log-likelihood improvement compared to a method that predicts a risk of 1 /2 for all individuals.    
+
+> 2Not to be confused with robustness to unobserved confounders. Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 15
+
+A value of 1 indicates that β yields zero log-loss, and 0 or below indicates that β is no better or worse than random guessing. log Pr β = ∑
+
+> i∈N test
+
+log Pr β (yi | xi)log Pr rand = ∑
+
+> i∈N test
+
+log 0 .5Improvement = log Pr rand − log Pr β
+
+log Pr rand 
+
+• Expected calibration error. A value of 0 indicates perfect calibration, while 1 indicates total miscalibration. • Spearman’s rank correlation between the rankings generated by β and those generated by the test-data-optimal risk scores, computed via logistic regression with full visibility into the test data, including access to all y0 outcomes. A value of 1 indicates that β and the test-data-optimal scores generate identical rankings, whereas −1 indicates completely opposite rankings. Results for 15 independent replications per dataset are collected in Table 1. We first note that the full information benchmark has identical results regardless of γ, since this method has access to counterfactuals and can ignore the effect of confounders on treatment assignment. As γ increases, all other methods decrease in performance, as the treatment assignments (and thus the set of observations the methods have access to) become more confounded. We find that in general, setting Γ somewhere between eγ and e2γ leads to our robust method having the best performance. For these choices of Γ, our robust method outperforms the non-full information benchmarks in all metrics; most notably, we see up to a 29 .2% relative reduction in calibration error compared to the DR benchmark. We also see up to an 11 .1% relative reduction in calibration error compared to the robust baseline, displaying the benefits of distributional consistency and historical rationality constraints. 
+
+5. Conclusion 
+
+We introduce a framework for learning risk scores from observational data that are robust in the presence of unobserved confounding. By modeling ground truth propensity weights as belonging to an uncertainty set, we cast risk score learning as a max-min optimization that hedges against adversarial, but plausible, confounding. We showed that this problem admits an exact reformulation as an exponential cone program, making it solvable with 16 Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+γ
+
+Metric 0.0 1.0 1.5 2.0 Improvement Cal. Error Rank Corr. Improvement Cal. Error Rank Corr. Improvement Cal. Error Rank Corr. Improvement Cal. Error Rank Corr. Full Information 0.318 0.051 0.889 0.318 0.051 0.889 0.318 0.051 0.889 0.318 0.051 0.889 IPW 0.264 0 .067 0.789 0.126 0.148 0.662 −0.031 0.206 0.572 −0.285 0.260 0.483 Direct 0 .270 0 .067 0 .797 0.126 0.157 0.655 −0.048 0.226 0.549 −0.309 0.287 0.452 Doubly Robust 0.258 0.068 0.778 0.149 0.138 0.651 0.037 0.189 0.566 −0.180 0.240 0.472 Robust Baseline (best Γ) 0.264 0 .067 0.789 0.149 0.135 0.640 0.071 0.160 0.540 0.001 0.183 0.458 Robust (Γ = e0.0) 0.264 0 .067 0.789 0.126 0.148 0.662 −0.031 0.206 0.572 −0.285 0.260 0.483 Robust (Γ = e1.0) 0.247 0.079 0.787 0 .179 0 .120 0.693 0.083 0.166 0.590 −0.092 0.218 0.479 Robust (Γ = e2.0) 0.189 0.104 0.745 0.159 0.124 0 .695 0 .112 0 .148 0 .595 0.012 0.181 0 .487 
+
+Robust (Γ = e3.0) 0.166 0.111 0.724 0.140 0.133 0.690 0.104 0.149 0.592 0 .030 0.172 0.486 Robust (Γ = e4.0) 0.161 0.112 0.715 0.133 0.136 0.688 0.097 0.150 0.588 0.024 0 .170 0.482 
+
+Table 1 Results across γ values for the following metrics: log likelihood improvement over random guess, expected calibration error, and Spearman’s rank correlation with optimal policy. Italicized values indicate the best result for that metric within each γ group: higher values are better for Improvement and Rank Corr., while lower values are better for Cal. Error. Robust results are reported for each choice of Γ, while Robust Baseline results are reported for whichever Γ yields the best Improvement. As confounding increases, our robust method outperforms all other baselines across all metrics, with the best choice of Γ generally lying between eγ and e2γ .
+
+off-the-shelf solvers. Our experiments show that when the degree of confounding can be reasonably estimated, our method improves calibration by up to 29 .2% over traditional benchmarks and up to 11 .1% over the state of the art. This work suggests that unobserved confounding can be reasonably managed in settings where domain knowledge allows for estimation of the severity of confounding. This may be particularly relevant in domains like homelessness service or public health, where practitioners often have intuition on what information is missing from recorded data, and how strong its influence on treatments and outcomes is compared to the observable data. Several aspects of our framework naturally point to directions for future work. The choice of B is intentionally modular, such that additional integrality or sparsity constraints can be included if desired. Adding these additional constraints may require additional computational strategies to efficiently solve the resulting problem. Similar computational issues may arise when scaling to domains with access to very large datasets, due to the quadratic growth of constraints with respect to dataset size. We also note that our framework allows for different objective functions beyond maximizing log-likelihood, which points to the possibility of tractably and robustly learning quantities beyond risk scores. Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 17 
+
+References 
+
+Angwin J, Larson J, Mattu S, Kirchner L (2016) Machine bias: There’s soft-ware used across the country to predict future criminals. And it’s biased against blacks. ProPublica URL https://www.propublica.org/article/ machine-bias-risk-assessments-in-criminal-sentencing .Bertsimas D, Imai K, Li ML (2023) Distributionally robust causal inference with observational data. URL https://arxiv.org/abs/2210.08326 .Chen X, Monfort M, Liu A, Ziebart BD (2016) Robust covariate shift regression. Gretton A, Robert CC, eds., Proceedings of the 19th International Conference on Artificial Intelligence and Statistics , volume 51 of Proceedings of Machine Learning Research , 1270– 1279 (Cadiz, Spain: PMLR), URL https://proceedings.mlr.press/v51/chen16d. html .Cornfield J, Haenszel W, Hammond EC, Lilienfeld AM, Shimkin MB, Wynder EL (1959) Smoking and Lung Cancer: Recent Evidence and a Discussion of Some Questions. 
+
+JNCI: Journal of the National Cancer Institute 22(1):173–203, ISSN 0027-8874, URL 
+
+http://dx.doi.org/10.1093/jnci/22.1.173 .Dorn J, Guo K (2023) Sharp sensitivity analysis for inverse propensity weighting via quantile balancing. Journal of the American Statistical Association 118(544):2645–2657, URL 
+
+http://dx.doi.org/10.1080/01621459.2022.2069572 .Dorn J, Guo K, Kallus N (2025) Doubly-valid/doubly-sharp sensitivity analysis for causal inference with unmeasured confounding. Journal of the American Statistical Association 
+
+120(549):331–342, URL http://dx.doi.org/10.1080/01621459.2024.2335588 .Dua D, Karra Taniskidou E (2017) UCI machine learning repository. URL http://archive. ics.uci.edu/ml .Esfahani PM, Kuhn D (2018) Data-driven distributionally robust optimization using the Wasserstein metric: Performance guarantees and tractable reformulations. 
+
+Mathematical Programming 171(1–2):115–166, URL http://dx.doi.org/10.1007/ s10107-017-1172-1 .Hájek J (1971) Comment on “An essay on the logical foundations of survey sampling” by Basu, D. Godambe VP, Sprott DA, eds., Foundations of Statistical Inference , 236 (Holt, Rinehart and Winston). 18 Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+Hernan M, Robins J (2023) Causal Inference: What If . Boca Raton: Chapman & Hall (CRC Press). Hsu JY, Small DS (2013) Calibrating Sensitivity Analyses to Observed Covariates in Observa-tional Studies. Biometrics 69(4):803–811, ISSN 0006-341X, URL http://dx.doi.org/ 10.1111/biom.12101 .Jin Y, Ren Z, Zhou Z (2025) Sensitivity analysis under the f-sensitivity model: A distributional robustness perspective. Operations Research 74(2):860–878, URL http://dx.doi.org/ 10.1287/opre.2023.0001 .Kallus N, Zhou A (2021) Minimax-optimal policy learning under unobserved confounding. 
+
+Management Science 67(5):2870–2890. Kantorovich L, Rubinstein GS (1958) On a space of totally additive functions. Vestnik Leningrad. Univ 13:52–59. Liu A, Ziebart BD (2017) Robust covariate shift prediction with general losses and feature views. URL https://arxiv.org/abs/1712.10043 .MOSEK ApS (2026) The MOSEK Optimizer API for Python, version 11.1 . URL https: //docs.mosek.com/latest/pythonapi/index.html .Nemati S, Holder A, Razmi F, Stanley MD, Clifford GD, Buchman TG (2018) An interpretable machine learning model for accurate prediction of sepsis in the ICU. Critical Care Medicine 46(4):547–553, URL http://dx.doi.org/10.1097/CCM.0000000000002936 .OrgCode Consulting, Inc, Community Solutions (2015) Vulnerability Index-Service Prioriti-zation Decision Assistance Tool (VI-SPDAT) Prescreen Triage Tool for Single Adults, Version 2.0 . OrgCode Consulting, Inc., Oakville, ON and New York, NY, available at 
+
+https://www.orgcode.com/ .Rice E, Milburn NG, Vayanos P, Rountree J, Hill C, Petering R, Blackwell B, Santillano R, Onasch-Vera L, Winetrobe Nadel H, Tang B, Aghaei S, Hsu HT, Petry L (2023) CEST-TRR: Coordinated entry system triage tool research and refinement. Final report, USC Center for Artificial Intelligence in Society, URL https://cais.usc.edu/wp-content/ uploads/2023/11/CESTTRR-Final-Report-2023.pdf .Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 19 
+
+Robins JM, Rotnitzky A, Zhao LP (1994) Estimation of regression coefficients when some regressors are not always observed. Journal of the American Statistical Association 
+
+89(427):846–866, ISSN 01621459, URL http://www.jstor.org/stable/2290910 .Rosenbaum PR (2002) Observational Studies (2nd ed.) (New York: Springer). Rosenbaum PR, Rubin DB (1983) The central role of the propensity score in observational studies for causal effects. Biometrika 70(1):41–55, ISSN 0006-3444, URL http://dx. doi.org/10.1093/biomet/70.1.41 .Sahoo R, Lei L, Wager S (2026) Learning from a biased sample. URL https://arxiv.org/ abs/2209.01754 .Shafieezadeh Abadeh S, Mohajerin Esfahani PM, Kuhn D (2015) Distributionally robust logistic regression. Cortes C, Lawrence N, Lee D, Sugiyama M, Garnett R, eds., Advances in Neural Information Processing Systems , volume 28 (Curran Associates, Inc.), URL https://proceedings.neurips.cc/paper_files/paper/2015/ file/cc1aa436277138f61cda703991069eaf-Paper.pdf .Shimodaira H (2000) Improving predictive inference under covariate shift by weighting the log-likelihood function. Journal of Statistical Planning and Inference 90(2):227–244, ISSN 0378-3758, URL http://dx.doi.org/10.1016/S0378-3758(00)00115-4 .Tan Z (2006) A distributional approach for causal inference using propensity scores. Journal of the American Statistical Association 101(476):1619–1637, URL http://dx.doi.org/ 10.1198/016214506000000023 .Ustun B, Rudin C (2019) Learning optimized risk scores. Journal of Machine Learning Research 20(150):1–75. Wang C, Han B, Patel B, Rudin C (2023) In pursuit of interpretable, fair and accurate machine learning for criminal recidivism prediction. Journal of Quantitative Criminology 
+
+39(2):519–581, URL http://dx.doi.org/10.1007/s10940-022-09545-w .Yadlowsky S, Namkoong H, Basu S, Duchi J, Tian L (2022) Bounds on the conditional and average treatment effect with unobserved confounding factors. The Annals of Statistics 
+
+50(5):2587–2615, URL http://dx.doi.org/10.1214/22-AOS2195 .Zhang Y, Xu W, Tan Z (2025) Enhanced marginal sensitivity model and bounds. URL 
+
+https://arxiv.org/abs/2504.08301 .e-companion to Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders ec1 
+
+## E-Companion 
+
+EC.1. Additional Definitions 
+
+EC.1.1. 1-Wasserstein distance (Kantorovich and Rubinstein 1958) 
+
+The Wasserstein distance W(Q1, Q2) between two distributions Q1 and Q2 on Ξ ⊆ Rm is defined as 
+
+W(Q1, Q2) = inf 
+
+> M∈M (Q1,Q2)
+
+∫
+
+> Ξ2
+
+∥ξ1 − ξ2∥ M(d ξ1, dξ2),
+
+where M(Q1, Q2) denotes the set of all joint probability distributions of ξ1 and ξ2 with marginals Q1 and Q2, respectively. 
+
+EC.2. Proofs 
+
+EC.2.1. Proof of Lemma 1 
+
+We have 
+
+EP[log Pr β (Y 0 | X)] =EP[EP[log Pr β (Y 0 | X) | X, U ]] =EP[EP[log Pr β (Y 0 | X) | X, U, T = 0]] =EP[EP[log Pr β (Y | X) | X, U, T = 0]] ,
+
+where the second and third equalities follow from Assumption 1 (iii) and (i), respectively. We further have 
+
+EP[EP[log Pr β (Y | X) | X, U, T = 0]] =EP
+
+[ EP [log Pr β (Y | X)1(T = 0) | X, U ]
+
+P(T = 0 | X, U )
+
+]
+
+=EP
+
+[ log Pr β (Y | X)1(T = 0) 
+
+P(T = 0 | X, U )
+
+]
+
+=EP
+
+[ log Pr β (Y | X)
+
+P(T = 0 | X, U )
+
+∣∣∣∣∣ T = 0 
+
+]
+
+P(T = 0) ,
+
+where equalities follow from standard properties of conditional expectations. 
+
+EC.2.2. Proof of Proposition 1 
+
+Suppose that Z = P(T = 0 | X, U ). By the definition of conditional expectation, we have 
+
+EP [1 /Z | T = 0] = EP [1(T = 0) /Z ]
+
+P(T = 0) .ec2 e-companion to Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+By Z = P(T = 0 | X, U ) and the properties of conditional expectation, we further have 
+
+EP [1(T = 0) /Z ]=EP [EP [1(T = 0) /Z | X, U ]] =EP [EP [1(T = 0) /P(T = 0 | X, U ) | X, U ]] =EP [(1 /P(T = 0 | X, U )) EP [1(T = 0) | X, U ]] =EP [(1 /P(T = 0 | X, U )) P(T = 0 | X, U )] = 1 .
+
+This shows that (C1) is satisfied. For (C2), note that, by the definition of Qz, for all A ∈ B (X ), 
+
+Qzx(A) = EP[1(X ∈ A)/Z | T = 0] 
+
+EP[1 /Z | T = 0] .
+
+Following similar steps to before, we obtain 
+
+EP[1(X ∈ A)/Z | T = 0] = EP[1(X ∈ A)1(T = 0) /Z ]
+
+P(T = 0) and 
+
+EP[1(X ∈ A)1(T = 0) /Z ]=EP[EP[1(X ∈ A)1(T = 0) /Z | X, U ]] =P(X ∈ A).
+
+Therefore, 
+
+Qzx(A) = 1
+
+EP[1 /Z | T = 0] 
+
+P(X ∈ A)
+
+P(T = 0) = P(T = 0) P(X ∈ A)
+
+P(T = 0) = P(X ∈ A) = Px(A).
+
+This equality holds for all A ∈ B (X ) so the two probability distributions Qzx and Px are equal. Because of this and by the definition of the Wasserstein distance, (C2) is therefore satisfied. 
+
+EC.2.3. Proof of Proposition 2 
+
+As ̂ Pn and Q are both discrete distributions, the Wasserstein distance between them can be computed via the following optimal transport problem: inf 
+
+> ζ
+
+∑
+
+> i∈N 0
+
+∑
+
+> j∈N
+
+∥xi − xj ∥ζij 
+
+s. t. ∑
+
+> i∈N 0
+
+ζij = 1
+
+n ∀j ∈ N e-companion to Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders ec3 
+
+∑
+
+> j∈N
+
+ζij = 1
+
+nwi ∀i ∈ N 0
+
+1
+
+n
+
+∑
+
+> i∈N 0
+
+wi = 1 
+
+w ∈ Rn
+
+> +
+
+, ζ ∈ Rn×n 
+
+> +
+
+,
+
+where ζij represents the amount of probability mass transported from xi to xj in order to transform Q to ̂ Pn. Note that the third constraint above requires that any feasible realization of weights reweight the untreated population to the correct full-population scale, thereby requiring a sample-based version of (C1) to hold. We therefore have the following equivalent reformulation of problem (4). sup 
+
+> β∈B
+
+inf 
+
+> w,ζ
+
+∑
+
+> i∈N 0
+
+wi log Pr β (yi | xi)s. t. Γ−1( ˆ wi − 1) ≤ wi − 1 ≤ Γ( ˆ wi − 1) ∀i ∈ N 0
+
+∑
+
+> i∈N 0
+
+∑
+
+> j∈N
+
+∥xi − xj ∥ζij ≤ ε
+
+∑
+
+> i∈N 0
+
+ζij = 1
+
+n ∀j ∈ N 
+
+∑
+
+> j∈N
+
+ζij = 1
+
+nwi ∀i ∈ N 0
+
+1
+
+n
+
+∑
+
+> i∈N 0
+
+wi = 1 
+
+∑
+
+> i∈N 0
+
+yiwi ≤ ∑
+
+> i∈N 0
+
+yi ˆwi
+
+w ∈ Rn
+
+> +
+
+, ζ ∈ Rn×n
+
+> +
+
+Notably, the inner infimum is now linear in w and ζ. Applying strong duality to the inner infimum gives a supremum problem which can be merged with the outer supremum, thus resulting in an exponential cone problem. Introducing dual variables θi, θ i, τ, φ j , ψ i, κ for each constraint, respectively (noting that the first constraint corresponds to both θ terms), and replacing the inner infimum with its dual supremum yields the problem stated in Proposition 2. 
+
+EC.3. Experimental Details 
+
+EC.3.1. Compute Resources 
+
+All experiments are implemented on a cloud computing platform with a mixture of the following compute nodes: ec4 e-companion to Edmonds et al.: Learning Risk Scores Robust to Unobserved Confounders 
+
+• AMD EPYC 7513 CPU @ 2.60 GHz, 248 GB RAM • AMD EPYC 7542 CPU @ 2.90 GHz, 248 GB RAM • INTEL XEON Silver 4116 CPU @ 2.10 GHz, 185 GB RAM • INTEL XEON Silver 4116 CPU @ 2.10 GHz, 89 GB RAM 
+
+EC.3.2. Datasets 
+
+We use the following datasets from the UCI machine learning repository: Abalone, Adult, Connect-4, Covertype, Default of Credit Card Clients, EEG Eye State, Electrical Grid Stability Simulated Data, NHANES Age Prediction Subset, In-Vehicle Coupon Recommendation, Letter Recognition, MAGIC Gamma Telescope, Online News Popularity, Pen-Based Recognition of Handwritten Digits, Spambase, Wine Quality. 
+
+EC.3.3. Approximately relating Γ to γ
+
+Under the treatment generation model of our experimental section, we have 
+
+μ0
+
+> i
+
+1 − μ0
+
+> i
+
+1 − ˆμ0
+
+> i
+
+ˆμ0
+
+> i
+
+≈ π0(xi, y 0 
+
+> i
+
+)1 − π0(xi, y 0 
+
+> i
+
+)1 − E [π0(xi, Y 0)] 
+
+E [π0(xi, Y 0)] 
+
+≤ π0(xi, y 0 
+
+> i
+
+)1 − π0(xi, y 0 
+
+> i
+
+)E
+
+[ 1 − π0(xi, Y 0)
+
+π0(xi, Y 0)
+
+]
+
+=E [
+
+eγ(y0  
+
+> i−Y0)
+
+]
+
+≤ e2γ
+
+and 
+
+μ0
+
+> i
+
+1 − μ0
+
+> i
+
+1 − ˆμ0
+
+> i
+
+ˆμ0
+
+> i
+
+=1 
+
+/ 1 − μ0
+
+> i
+
+μ0
+
+> i
+
+ˆμ0
+
+> i
+
+1 − ˆμ0
+
+> i
+
+≈1
+
+/ 1 − π0(xi, y 0 
+
+> i
+
+)
+
+π0(xi, y 0 
+
+> i
+
+)
+
+E [π0(xi, Y 0)] 1 − E [π0(xi, Y 0)] 
+
+≥1
+
+/ 1 − π0(xi, y 0 
+
+> i
+
+)
+
+π0(xi, y 0 
+
+> i
+
+) E
+
+[ π0(xi, Y 0)1 − π0(xi, Y 0)
+
+]
+
+=E [
+
+e−γ(y0  
+
+> i−Y0)
+
+]
+
+≥ e−2γ ,
+
+where all expectations are conditional on X = xi, and the inequalities follow from Jensen’s inequality and 0 < π 0 < 1. Thus, we expect e2γ to be the highest reasonable value (and e−2γ
+
+the lowest) for Γ in the uncertainty set U.

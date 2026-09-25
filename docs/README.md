@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-24</span>
+      <span class="dpr-home-dashboard-kicker">2026-09-25</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 5 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 12 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>4</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>1</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>3</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-24 09:39:37 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-25 10:13:42 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日共生成 5 篇推荐（精读 4 篇，速读 1 篇）</p>
-<p>精读：《Tail-Aware Geometry Learning for Conformal Ellipsoids》（10.0/10）, 《Functional Causal Discovery via Conditional Covariance Ordering》（9.0/10）</p>
-<p>速读：《CRISP: Scalable Importance-Stratified Coresets for Imbalanced Tabular Learning》（6.0/10）</p>
+<p>今日共生成 12 篇推荐（精读 9 篇，速读 3 篇）</p>
+<p>精读：《Sequential Confidence Sets for Coverage-Constrained Conformal Model Selection》（9.0/10）, 《Statistical Inference for Causal Discovery under Selection and Latent Variables via Single-Target Interventions》（9.0/10）</p>
+<p>速读：《SwitchPFN: Shared Switching Dynamics for Frozen In-Context Time Series Classification》（7.0/10）, 《First as Tragedy? Second as What? Estimating Dynamic Effects of Recurrent Events》（7.0/10）, 《CounterRoute: Self-Routed Reasoning via Hierarchical Counterfactual Credit Assignment》（6.0/10）</p>
 <p>这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。</p>
   </div>
 </section>
@@ -81,12 +81,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">4 篇</strong>
+    <strong class="dpr-home-dashboard-count">9 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Tail-Aware Geometry Learning for Conformal Ellipsoids">Tail-Aware Geometry Learning for Conformal Ellipsoids</span></li><li><span class="dpr-home-dashboard-paper-title" title="Functional Causal Discovery via Conditional Covariance Ordering">Functional Causal Discovery via Conditional Covariance Ordering</span></li><li><span class="dpr-home-dashboard-paper-title" title="What Do Tabular Foundation Models Compute In Context? In-Situ Representation Refinement through Attention-Gated Updates">What Do Tabular Foundation Models Compute In Context? In-Situ Representation Refinement through Attention-Gated Updates</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Sequential Confidence Sets for Coverage-Constrained Conformal Model Selection">Sequential Confidence Sets for Coverage-Constrained Conformal Model Selection</span></li><li><span class="dpr-home-dashboard-paper-title" title="Statistical Inference for Causal Discovery under Selection and Latent Variables via Single-Target Interventions">Statistical Inference for Causal Discovery under Selection and Latent Variables via Single-Target Interventions</span></li><li><span class="dpr-home-dashboard-paper-title" title="How to Estimate Whether You Have Found Several Needles in a Haystack: Measuring Calibration in Multi-Label Text Classification">How to Estimate Whether You Have Found Several Needles in a Haystack: Measuring Calibration in Multi-Label Text Classification</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>3</strong></span><span class="dpr-home-dashboard-tag">cp <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -94,12 +94,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">1 篇</strong>
+    <strong class="dpr-home-dashboard-count">3 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="CRISP: Scalable Importance-Stratified Coresets for Imbalanced Tabular Learning">CRISP: Scalable Importance-Stratified Coresets for Imbalanced Tabular Learning</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="SwitchPFN: Shared Switching Dynamics for Frozen In-Context Time Series Classification">SwitchPFN: Shared Switching Dynamics for Frozen In-Context Time Series Classification</span></li><li><span class="dpr-home-dashboard-paper-title" title="First as Tragedy? Second as What? Estimating Dynamic Effects of Recurrent Events">First as Tragedy? Second as What? Estimating Dynamic Effects of Recurrent Events</span></li><li><span class="dpr-home-dashboard-paper-title" title="CounterRoute: Self-Routed Reasoning via Hierarchical Counterfactual Credit Assignment">CounterRoute: Self-Routed Reasoning via Hierarchical Counterfactual Credit Assignment</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 </div>
 
