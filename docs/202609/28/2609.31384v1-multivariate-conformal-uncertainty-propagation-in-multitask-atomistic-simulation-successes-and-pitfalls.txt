@@ -1,0 +1,2117 @@
+Fisher et al
+Preprint
+PAPER
+Multivariate conformal uncertainty propagation in multitask
+atomistic simulation: Successes and pitfalls
+Katharine Fisher1,∗
+, Michael Herbst2,3
+, James Kermode4
+and Youssef Marzouk1
+1Department of Aeronautics and Astronautics, Massachusetts Institute of Technology, Cambridge, MA 02139, USA
+2Mathematics for Materials Modelling, Institute of Mathematics & Institute of Materials, ´Ecole Polytechnique F´ed´erale
+de Lausanne, 1015 Lausanne, Switzerland
+3National Centre for Computational Design and Discovery of Novel Materials (MARVEL), ´Ecole Polytechnique
+F´ed´erale de Lausanne, 1015 Lausanne, Switzerland
+4Warwick Centre for Predictive Modelling, School of Engineering, University of Warwick, Coventry CV4 7AL, United
+Kingdom
+∗Author to whom any correspondence should be addressed.
+E-mail: kefisher@mit.edu
+Keywords: atomistic modeling, Bayesian inference, multivariate conformal prediction, conformal risk control, corre-
+lated prediction sets, uncertainty propagation
+Abstract
+Machine learning has become the standard tool for the design of interatomic potentials
+which balance efficiency and accuracy, but uncertainty quantification remains an open
+problem. Multiscale simulations introduce an additional challenge: robust uncertainty
+quantification across scales. Even within one scale, computations are often multistage,
+producing a sequence of target quantities, each dependent on the previous, and each with
+some uncertainty. Conformal methods have emerged as a model agnostic framework for
+recalibrating surrogate predictions to produce sets which contain the truth at a
+user-specified rate. For multistage workflows, we require uncertainty calibration for
+multiple chemical properties and atomistic configurations, and we want to propagate
+uncertainty sets to downstream quantities of interest. Such propagation should capture
+the error cancellations which occur in many downstream targets in materials science; for
+instance, an approximate energy difference is often more accurate than individual energy
+predictions. We present the first exploration of multivariate conformal methods for
+chemical properties, including Bonferroni-corrected hyperrectangles, hyperellipsoidal sets
+based on the Mahalanobis distance, and custom loss functions within conformal risk
+control. Calibration is applied directly to predicted energies, atomic forces, and virial
+stresses, then propagated to elastic constants and vacancy formation energies employing a
+variety of commonly considered approximate protocols in materials modeling. We
+highlight the benefits of building correlation predictions into the conformal procedure,
+making it possible to build sets which capture near symmetries and error cancellation. We
+conclude with a discussion of the interplay of the employed approximate computational
+protocol and conformal guarantees.
+1
+Introduction
+First principles methods can accurately simulate materials, but their computational cost quickly
+becomes astronomical as system size increases. In recent decades, machine learning surrogates have
+become standard in atomistic simulation because of their comparative computational efficiency [1,
+2, 3]. As a result, modern surrogate workflows can capture multiscale processes, incorporating un-
+precedented time and length scales. Being able to push traditional boundaries raises novel challenges:
+gauging the accuracy of surrogate predictions.
+Both deep learning [3] and kernel based [4, 5, 6, 7] surrogates have seen remarkable success in ma-
+terials simulations, but the two approaches pose different challenges for uncertainty quantification.
+The process by which deep learning architectures encode information from data remains mysteri-
+ous [8], and the interpretation of uncertainty estimates for model parameters is not obvious [9]. In
+contrast, kernel methods, such as Gaussian process regression, offer principled predictions, but in
+1
+arXiv:2609.31384v1  [physics.chem-ph]  25 Sep 2026
+
+
+Fisher et al
+realistic settings, data generally does not comply with the probabilistic assumptions of these surro-
+gates, leading to overconfident and misleading estimates. There is a need for reliable uncertainty
+quantification strategies which extract useful information from available data and can be easily and
+efficiently incorporated into multistage materials workflows.
+PREDICT
+CALIBRATE
+PROPAGATE
+Y
+L1
+Y
+Y
+Y
+Q1
+Q1
+Q1
+Q2
+Q2
+Q2
+Q2
+more information
+multivariate
+Q1
+L1
+L1
+L1
+multi-prop
+Bonferroni
+univariate
+L2
+L2
+L2
+L2
+Figure 1.
+Workflows to calibrate and propagate uncertainty in surrogate predictions: We illustrate
+several conformal methods which leverage different degrees of information to construct multivariate uncertainty sets
+for a target Y . These uncertainty sets may then be propagated to downstream quantities of interest Q1 and Q2 via
+linear operators L1 and L2, respectively. Where applicable, prediction sets are labeled with an abbreviation of the
+corresponding conformal guarantee. Let pi be the probability that an individual component of the true quantity is
+contained in the corresponding prediction set and P be the probability that the entire truth vector is contained in
+the multivariate set. The lower bound v ≤. . . indicates that a coverage (also called a validity) constraint holds; the
+upper bound · · · ≤s indicates a sharpness constraint, which guarantees that predictive sets will not be overly
+conservative. When using more information (e.g., a covariance Σ or knowledge of the operator L), tighter bounds
+can be derived for the propagated sets. The stars accompanying sets on Q1 indicate correspondence with Figure 2.
+Figure 2.
+Finding near symmetries: multivariate conformal prediction can leverage the correlation between
+properties. As an example, the multivariate approach (purple) discovers the near symmetry of the C12 elastic
+constant components for two perturbed silicon configurations. In contrast, univariate conformal methods (gold and
+orange) produce uncorrelated sets which either undercover or include excessive volume. The conformal sets are
+calibrated on energy predictions for perturbed and relaxed supercells of Si16 diamond crystals with tolerance
+α = 0.25 and uncertainty sets are projected into elastic constant space. The stars in the upper left corner show
+correspondence with Figure 1.
+Conformal methods can use surrogate outputs to construct prediction sets with finite sample
+calibration guarantees [10, 11, 12]. The procedure can be applied post hoc to any model and essen-
+tially learns that model’s prediction and uncertainty quantification capabilities. Initial explorations
+of these methods for atomistic simulation have demonstrated their broad compatibility and their
+ability to utilize model specific outputs, such as standard deviations from Gaussian process predic-
+tive distributions [13, 14, 15, 16]. One limitation of existing work is the focus on scalar quantities
+2
+
+
+1.1
+Contributions
+Fisher et al
+of interest, such as global energy for a single system.
+Often, a multiscale workflow will require
+uncertainty estimates for multivariate quantities of interest, such as virial stresses. Furthermore,
+within multistage simulations, we will be interested in the propagation of uncertainty from multiple
+systems into downstream and derived quantities. For example, we may leverage the global energy
+of each member of an ensemble of perturbed systems to predict downstream properties such as the
+elastic constant tensor. Several strategies have recently been proposed to build prediction sets with
+multivariate guarantees, typically tested on toy data and benchmarking problems [17, 18]. To our
+knowledge, this paper is the first to extend these methods to material properties prediction.
+In this work, we test computationally efficient methods for obtaining multivariate prediction
+sets on chemical properties. We consider both standard conformal prediction and its generaliza-
+tion to arbitrary, set-valued loss functions, conformal risk control [19].
+Specifically, we use the
+correlation between chemical properties, estimated by the Gaussian process predicted covariance, to
+construct hyperelliptical sets [20, 21]. Further, we consider the propagation of these uncertainty sets
+to downstream quantities of interest. We compare several multistage simulation workflows, shown
+schematically in Figure 1. The choice of conformal method determines set shape and the proba-
+bilistic guarantee that the set contains the true property. In particular, we explore the behavior of
+hyperelliptical sets which automatically provide coverage guarantees for downstream quantities of
+interest. The consequences are apparent in Figure 2. Here, conformal calibration was applied to the
+energy of several geometrically similar Silicon crystals, then propagated to produce two-dimensional
+sets predicting the same elastic constant component for two different systems1. Not only do the mul-
+tivariate sets show superior coverage of the true values, but they reflect the near symmetry in related
+quantities, often producing nearly diagonal sets. We achieve this result by training the conformal
+procedure to recognize the correlation between related quantities. This adaptation is crucial to cap-
+turing the error cancellations which occur in the computation of many key quantities in materials
+science, such as trends and differences in properties. By capturing these relationships, elliptical sets
+often produce sets at smaller volume than competing methods, at a given coverage level. Thus, these
+sets are simultaneously robust and less conservative than alternatives because they are less likely to
+incorporate unlikely predictions.
+We enumerate our contributions in the following subsection, and Section 2 puts them in the
+context of existing literature. In Section 3, we provide an overview of the methods combined in our
+work. Our numerical experiments are detailed in Section 4, and we conclude in Sections 5 and 6
+with a discussion of the strengths and potential pitfalls of our approach.
+1.1
+Contributions
+• We identify algorithms for conformal prediction and risk control which efficiently construct
+multivariate prediction sets. By combining these algorithms with interatomic potentials, we
+create calibrated prediction workflows.
+• Our workflow melds Bayesian and frequentist procedures. The covariance provided by Gaussian
+process regression is incorporated into the conformal scores so that predictive sets capture the
+relationships between quantities of interest, achieving sets with frequentist validity which are
+not overly conservative.
+• We combine multiple information sources using a multitask Gaussian process interatomic po-
+tential which relates the energies, forces, and stresses for bulk and vacancy atomistic systems.
+• The test cases considered include conformal sets with O(100) dimensions, one to two orders of
+magnitude larger than typically considered in conformal literature, with few exceptions [22].
+• Two new loss functions for conformal risk control are formulated to promote high component-
+wise coverage rates for multivariate quantities of interest by leveraging covariance predictions.
+These strategies can avoid producing the overly conservative sets which can arise when multi-
+variate conformal methods are applied to sufficiently high dimensional targets.
+• We examine nontrivial examples of propagation of multivariate uncertainty sets. Specifically,
+we consider the prediction of elastic constants and vacancy formation energies, i.e. quantities
+which involve multiple energy and force evaluations as part of a prediction workflow involving
+structural perturbations and relaxations.
+• We discuss potential pitfalls which may arise when propagating conformal sets through ap-
+proximate transformations.
+1More detail on this experiment will be provided in Section 4.4
+3
+
+
+Fisher et al
+2
+Related work
+2.1
+Machine learning interatomic potentials
+Due to the computational expense of simulation from first principles [23], machine learning has
+become standard in the design of potential energy surfaces and force fields. In recent years, a favorable
+balance of accuracy and efficiency has been achieved with data intensive, deep neural network based
+frameworks [3]. Graph based architectures capture the structure of atomistic systems [24, 25] and
+encode equivariant transformations [26, 27]. Foundation models [28] and chemistry focused large
+language models [29] demonstrate the promise of large-scale learning for general purpose prediction.
+While deep learning achieves state of the art performance, reliable UQ for these methods remains
+an open problem, as discussed in Subsection 2.2.
+Kernel methods form another class of machine learning surrogates where the similarity between
+atomistic systems is explicitly modeled. The Bayesian framework was used to build Gaussian ap-
+proximation potentials [4, 5, 6, 7], providing interpretable, probabilistic uncertainty quantification.
+In certain regimes, the accuracy of kernel methods can rival deep neural networks [30, 31, 32], and a
+suite of strategies have been developed for scaling these approaches to large datasets [33, 34, 35]. In
+this work, we focus on kernel methods for their ease of implementation and principled UQ, but all
+of our experiments are straightforward to port to the neural network setting. Similarly, surrogates
+which learn from multiple information sources can be designed as neural networks or kernel models,
+but in the latter case similarity can be explicitly modeled. Examples include multitask inference [36,
+37], multifidelity information fusion [38, 39, 40, 41, 42], and optimized combinations of submod-
+els [43, 44, 45, 46]. A variant of learning from multiple data sources is ∆-learning [47, 48, 49, 38],
+which directly models the difference between two datasets. This procedure can also be extended
+to the multitask setting [36]. Such multitask methods inherit the UQ challenges of the underlying
+choice of surrogate model.
+2.2
+UQ in atomistic simulation
+A wide range of uncertainty quantification strategies devised for machine learning have been tested
+in the materials science setting [50, 51, 52]. A few UQ methods have been developed in response
+to specific challenges in atomistic simulation, i.e. misspecified, deterministic models [53]. In this
+work, we focus primarily on uncertainty predicted by Gaussian process models [4, 5, 6, 7] and cali-
+brated through conformal procedures [13, 14, 15, 16]. We note that both approaches offer principled
+theoretical guarantees, provided modeling assumptions are met, which offer interpretability. Such
+guarantees are challenging to access for UQ methods tailored to neural network architectures [54,
+55], even in ostensibly Bayesian settings [9]. Sampling the high-dimensional, multimodal posteriors
+of Bayesian neural networks is generally intractable. Deep ensemble members can be interpreted
+as posterior samples [56] and show strong empirical performance but are computationally expen-
+sive [57, 58]. Last layer ensembles [59, 58] offer an efficient solution for atomistic simulations [60, 61,
+62] and can be interpreted as a model of a single posterior mode (Laplace approximation). None of
+these methods guarantee calibrated UQ, and unimodal approximations are particularly vulnerable
+to overconfidence [63, 64, 9].
+Existing approaches to propagation of atomistic scale uncertainty generally involve pushing sam-
+ples {y(i)}n
+i=1 through a forward model {f(y(i))}n
+i=1. If samples are difficult to obtain or f is nonlin-
+ear, this approach to propagation can incur a high computational cost. We can mitigate this expense
+by linearizing f, i.e. via a Taylor expansion [60, 61, 62]. Furthermore, if the samples {y(i)}n
+i=1 are
+distributed according to a Gaussian density, that distribution can be pushed through a linear model,
+eliminating the need for sampling [65]. Thus, the output of Gaussian process regression models are
+particularly amenable to propagation, provided that we can ensure that predicted distributions are
+trustworthy. For this purpose, we turn to conformal methods.
+2.3
+Multivariate conformal methods
+Within the past few years, a wealth of new strategies have been proposed for conformalizing multi-
+variate targets [17, 18]. One class of methods applies univariate algorithms to each dimension; the
+intersection of their predictive intervals forms a predictive hypperrectangle [66]. Tools from classical
+statistics, such as the Bonferroni correction [67] or multiple hypothesis testing [68, 69], can be used to
+adjust the probability that the hypperrectangle covers the true value. We use such hyperrectangular
+sets as a baselines in our work.
+Conformal algorithms rely on a score function which rates the accuracy of surrogate predictions.
+Several methods function by transforming a multivariate prediction into a univariate score which
+is compatible with the original conformal algorithm [70, 17].
+The score may be, for example, a
+probability density [71, 72, 73, 70, 74, 70, 17]. Closely related is the Mahalanobis distance score, a
+4
+
+
+2.4
+Conformal uncertainty propagation
+Fisher et al
+transformation of the Gaussian density [20, 21, 22, 75]. We adopt this score because it is straight-
+forward to implement and fast at prediction time. The resulting hyperelliptical sets are conducive
+to uncertainty propagation and capture correlation. Other explorations of hyperelliptical conformal
+sets learn correlation from the sample covariance [20, 22, 75] or a parameterized model [21], but
+we use the covariance predicted by Bayesian regression.
+This workflow bears some similarity to
+methods which build scores from the Bayesian covariance, computed using a kernel which relates
+prediction residuals [76]. However, the latter approach does not necessarily produce convex sets
+which are amenable to uncertainty propagation. The same shortcoming holds for generalizations of
+the Mahalanobis score to an ℓp distance where p and distribution statistics are learned hyperparame-
+ters [77]. Further approaches also present computational challenges: leveraging optimal transport to
+generalize the notion of a quantile to multiple dimensions [78, 79, 80], modeling correlation structure
+using copulas [81, 82, 83], performing quantile regression [84], and optimizing transformations of
+hypercubes [85, 86].
+2.4
+Conformal uncertainty propagation
+We focus on hyperrectangular and hyperellipsoidal sets because both are amenable to transforma-
+tion. Prior exploration of conformal uncertainty propagation has been limited. The closest work [21]
+to our own considers the propagation of ellipsoidal uncertainty sets and notes the coverage properties
+of downstream sets. However, the results presented consist of only toy examples or randomly sam-
+pled propagation operators applied to sets of at most 16 dimensions, whereas we consider a practical
+workflow for atomistic modeling and higher dimensional calibration spaces. A few works have prop-
+agated univariate conformal sets for specific applications: for instance, pushing uncertainty in crop
+yield forward to a prediction interval for profit [87] or adjusting the standard deviations propagated
+by a Kalman filter in multiple object tracking [88]. Beyond these works, the most relevant field to
+conformal uncertainty propagation appears to be conformal decision making [89], where uncertainty
+sets inform an action. Within this category are, to the authors’ knowledge, the only previous applica-
+tions of multivariate conformal prediction [90] and of conformal risk control [91] to materials science
+workflows. These applications differ from ours in that their goal is to design a diverse set of atomistic
+systems with low manufacturing cost, rather than to build prediction sets for chemical properties.
+Other works in decision making consider the settings of multiple object detection where a conformal
+set on labels is the basis for class conditional conformal regression on a bounding box [68], trajectory
+optimization where the coverage constraints are reallocated across time as the state evolves [92],
+hierarchical medical diagnosis based on a downstream loss function [93], and a financial model where
+the first stage of conformal prediction can lead to early stopping of the automated procedure and
+escalation to a human reviewer [94].
+3
+Methods
+3.1
+Gaussian approximation potential (GAP)
+For each of n systems, consider a 4-tuple of properties: {(R(i), E(i), F (i), ς(i))}n
+i=1. R(i) ∈RM (i)×3
+holds the Cartesian coordinates in 3-dimensional space for the M (i) atoms which compose the ith
+system. E(i) ∈R, F (i) ∈RM (i)×3, and ς(i) ∈R3×3 are, respectively, the global energy, atomic forces,
+and virial stresses of the system. Note also that for our experiments, we focus on periodic systems,
+which also require a 3 × 3 cell matrix, conjugate to the stress. The quantities are related via
+F (i)
+=
+−∇R(i)E(i) ,
+(1)
+r(i)
+abc
+=
+R(i)
+ac −R(i)
+bc ,
+(2)
+ς(i)
+αβ
+=
+1
+V (i)
+M (i)
+X
+a=1
+M (i)
+X
+b>a
+r(i)
+abα
+∂E(i)
+∂r(i)
+abβ
+∂r(i)
+abβ
+∂R(i)
+aβ
+=
+1
+V (i)
+∂E(i)
+∂ϵαβ
+,
+(3)
+where V (i) and ϵ are respectively the volume and the strain tensor of the configuration cell.
+The first component of our prediction pipeline is a surrogate model which maps representations
+of atomistic geometry to some subset of (E(i), F (i), ς(i)). These predictions will then be calibrated
+with conformal methods which, conveniently, are agnostic to the form of the surrogate f. We choose
+to use Gaussian approximation potentials (GAP) which are established in chemical modeling [4, 5,
+6, 7], straightforward to implement, and interpretable. In particular, we will leverage covariance
+predictions which are grounded in probability theory, in contrast to the comparatively ad hoc UQ
+methods available for neural networks [63, 57, 64] as discussed in Subsection 2.2.
+To build a GAP model, we require features X which capture the similarity between configurations.
+Using the Smooth Overlap of Atomic Positions (SOAP) [95, 5, 96], we construct X(i) ∈RdX×M (i)
+5
+
+
+3.2
+Multitask Gaussian process models
+Fisher et al
+where each column X(i) represents atom a and its interaction with neighboring atoms. Implicitly, our
+surrogate model will assume that the global energy is additively decomposed into local contributions
+E(i)
+=
+f(X(i)) + η(i) =
+M (i)
+X
+a=1
+ε(X(i)
+a ) + η(i) ,
+(4)
+X(i)
+a
+=
+ξ(R(i)
+a ; ℓmax, nmax, rcut) ,
+(5)
+where ξ is the SOAP map which introduces hyperparameters ℓmax, nmax, and rcut. η(i) is a centered,
+Gaussian noise term, realized independently for different atomistic systems, with variance γ. Given
+a kernel function k : RdX × RdX →R, we define a Gaussian process prior
+f(X∗) ∼N
+
+0,
+M ∗
+X
+a=1
+M ′
+X
+b=1
+k(X∗
+a, X′
+b)
+
+.
+(6)
+We pair SOAP descriptors with a polynomial kernel because the inner product effectively computes
+an integral over all rotations of the descriptor power spectrum, producing a rotationally invariant
+covariance. Note that this prior model only describes system energy. We also want the ability to
+learn from and predict forces and stresses. Following Equations (1)-(3), we derive the covariances
+between each pair of properties by differentiating through k and ξ [5].
+Once a training set t and testing set ∗of atomistic systems and properties have been identified,
+let Yt be the column vector of all training data and K represent the covariance given by k for the
+sets indicated in the subscript. Gaussian process regression [97] provides the predictive distribution
+for f conditioned on Yt. The predictive mean and covariance are
+µ
+=
+K∗t(Ktt + γI)−1Yt ,
+(7)
+Σ
+=
+K∗∗−K∗t(Ktt + γI)−1Kt∗.
+(8)
+These expressions require the inversion of a potentially large matrix, but the computational cost can
+be greatly ameliorated using methods from the well developed field of scalable Gaussian processes [33,
+34, 35]. The final covariance Σ is the initial test covariance K∗∗minus the squared Mahalanobis
+distance between the training and testing data. Assuming that the multivariate Gaussian model for
+f is justified, this adjustment is a principled update to our knowledge about the testing set.
+3.2
+Multitask Gaussian process models
+There is a clear physical relationship between energy, force, and stress which guides the incorporation
+of these heterogeneous data types into one model. However, we may also have access to heterogeneous
+data where the mathematical relationship between different sets is not precisely known. For instance,
+for a single geometry R(i), we may have experimental observations of energy E(i, exp) along with
+predictions at multiple levels of quantum chemical theory [36], i.e. E(i, DFT) and E(i, CCSD). In our
+numerical experiments, we will consider an example where we learn from the energy of bulk and the
+vacancy configurations. Na¨ıvely, each heterogeneous dataset can be used to build an independent
+model.
+We will instead consider a multitask Gaussian process approach [98, 99, 100, 36] which
+models correlations in all training data and can predict correlations in heterogeneous testing sets.
+Each heterogeneous set of data will be labeled a task. We will identify one task as the primary
+task p, and the remaining tasks will be secondary tasks s1, . . . , sJ. Following Equation (4), we model
+the energy predictions of the tasks as
+E(i, p)
+=
+f (p)(X(i, p)) + η(i, p) ,
+(9)
+E(i, sj)
+=
+f (sj)(X(i, sj)) + η(i, sj) ,
+j = 1, . . . , J .
+(10)
+To allow for joint learning, we must choose an ansatz to capture the relationship between tasks. A
+straightforward and effective [36] approach models the linear correlation between tasks:
+E(i, sj)(X(i, sj)) = ϱ(sj)E(i, p)(X(i, p)) + δ(sj)(X(i, sj)) .
+(11)
+Above, we have introduced the task specific correlation hyperparameter ϱ(sj) and residual δ(sj)(X(i, sj)).
+The latter prevents “negative transfer” by modeling behavior of task sj which is not linearly corre-
+lated to the primary task. In contrast to multifidelity fusion models [98], all secondary tasks have
+an equivalent relationship to the primary task, so no hierarchy is encoded in s1, . . . , sJ.
+6
+
+
+3.3
+Conformal prediction
+Fisher et al
+To train our model, we assume Gaussian process priors for the residuals δ(sj)(X(i, sj)) for j =
+1, . . . J. Using Equations Equations (1)-(3) and (11), we can find the covariance between any pair of
+data points from the union of our training and test set. Crucially, we do not require full knowledge
+of our training examples. More concretely, if we only have data from example (i) for one task, we
+can still incorporate that data into our model. Similarly, we do not need to have the complete set
+(E(i), F (i), ς(i)) for each (i) to learn from a subset of these properties.
+3.3
+Conformal prediction
+Gaussian process regression produces a predictive distribution with uncertainty encoded in the pos-
+terior covariance: Σ. Conditioning on new data points leads to coherent updates of this uncertainty
+representation provided that priors, kernel models, and noise assumptions are well specified.
+In
+practical chemistry models, some level of misspecification is nearly certain, i.e. due to interaction
+truncations, descriptor approximations, etc. The exact degree of misspecification is challenging to
+identify. Conformal methods offer a post-hoc procedure that learns to correct to raw predictions and
+uncertainty estimates of a surrogate model [10, 11, 12].
+Suppose we have a calibration dataset {(X(n+i), Y (n+i)}m
+i=1 of m data points which have been
+set aside during training of the surrogate model. For the moment, Y (i) may take on the value of
+system energy or an element of the force or stress matrices. Given a new test point (X(test), Y (test)),
+conformal prediction constructs a set Γm(X(test)) with the finite sample guarantee
+1 −α ≤P
+
+Y (test) ∈Γm(X(test))
+
+≤1 −α +
+1
+1 + m ,
+(12)
+provided that the calibration and testing data are exchangeable (a relaxation of independent and
+identically distributed).
+The bounded quantity is the coverage of the prediction set of the true
+property. We refer to the lower bound as a coverage or validity guarantee, controlled by the user’s
+chosen tolerance α. The upper bound is a sharpness guarantee which indicates that valid sets will
+not be overly conservative.
+Split, or inductive, conformal prediction is a computationally efficient strategy for building
+Γm(X(test)).
+We define a score function s(X, Y ) which evaluates the ability of the surrogate to
+predict Y given X. Larger scores indicate worse predictive performance. Optionally, the score may
+give surrogates credit for estimating high uncertainty for poor predictions. For instance, a common
+score applied to regression problems is
+suni(X, Y ) = |µ(X) −Y |
+σ(X)
+,
+(13)
+where µ(X) and σ(X) are the surrogate’s mean and standard deviation predictions, respectively.
+s(X, Y ) is used to score each calibration data pair, and we let ˆq be the ⌈m−1(m+1)(α−1)⌉quantile
+of the resulting scores. Then,
+Γm(X(test)) =
+n
+Y : s(X(test), Y ) ≤ˆq
+o
+,
+(14)
+achieves the conformal guarantees (12).
+Choosing the score (13) leads to a prediction interval:
+Y ∈[µ(X) −ˆqσ(X), µ(X) + ˆqσ(X)]. Note that for any X, this approach produces a ˆq scaling of the
+original one standard deviation interval about the mean. Without further assumptions, conformal
+methods cannot guarantee coverage conditional on X [12]. Rather, scores may be chosen which
+empirically provide good conditional coverage, procedural modifications may be made to achieve
+class conditional coverage, or additional assumptions may be imposed.
+3.4
+Multivariate conformal prediction
+Conformal prediction was originally formulated for scalar predictions Y . In our materials science
+setting, however, we are interested in the atomic forces and virial stresses of a configuration, in
+addition to global energy. Applying the univariate approach to each component of a multivariate
+Y ∈RdY results in the conformal guarantee (12) applying independently to each coordinate. The
+coverage probability for the entire vector is bounded below by approximately 1−d−1
+Y α. Based on this
+observation, a Bonferroni-style correction divides the original choice of α by dY [67]. As reviewed
+in Section 2, diverse additional strategies have been proposed for extending conformal methods to
+multivariate settings [17, 18].
+Some quantities of interest, such as atomic forces, scale with the number of atoms in a given
+system, and we are often interested in the correlation of properties across systems. Consequently,
+7
+
+
+3.5
+Conformal risk control
+Fisher et al
+we consider higher dimensional vectors than are typically seen in literature. Save one exception [22]
+previously reported examples only considered applications between 2 and 16 dimensions. To handle
+the high dimensional properties in this work, we require a computationally efficient approach. The
+Mahalanobis distance score [20, 21]
+smulti(X, Y ) = d−1/2
+Y
+∥Σ(X)−1/2(Y −µ(X))∥2 ,
+(15)
+can be incorporated seamlessly into the existing conformal workflow because it maps multivariate
+predictions to scalar scores.
+Furthermore, this approach allows us to build calibration and test
+sets where the size of Y is nonuniform, as occurs if we consider systems with different numbers of
+atoms. For univariate Y , the Mahalanobis distance reduces to suni(X, Y ). Unlike the univariate
+approach, smulti uses the full covariance prediction Σ.
+Thus, when our Gaussian process model
+identifies correlated predictions, multivariate conformal calibration can leverage the relationship to
+produce smaller sets. Specifically, for a test point, the predictive set
+smulti(X(test), Y ) ≤ˆq2 ,
+is a (hyper)ellipsoid. As discussed further in Subsection 3.6, this shape facilitates sample-free uncer-
+tainty propagation through a multi-step workflow.
+3.5
+Conformal risk control
+The choice between univariate and full vector coverage may seem restrictive, particularly as the
+dimension of Y grows.
+One response may be to compensate by adjusting α.
+This strategy has
+limitations: in the univariate setting, all correlations are discarded, risking unnecessarily large sets;
+in the multivariate setting in the multivariate setting, a Y ∈R1000, which is not covered could imply
+everything between two extremes: namely that (1) all components of Y are outside the component-
+wise intervals induced by Γm(X(test)) or that (2) 999 components of Y ∈R1000 are contained in a
+projection of Γm(X(test)) (onto the corresponding 999 dimensional space), but only the remaining
+1000th component is not.
+More bespoke guarantees are possible through conformal risk control [19]. A set Γm, λ(X(test)) is
+constructed so that
+α −
+2B
+m + 1 ≤E
+h
+ℓ
+
+Γm, bλ(X(test)), Y (test)i
+≤α ,
+(16)
+where ℓ
+
+Γm, bλ(·), ·
+
+is some loss function which is non-increasing in bλ and bounded above by B.
+Choosing ℓto be 1
+n
+Y (test) ∈Γm, bλ(X(test))
+o
+recovers traditional conformal prediction. As previous
+work [19] describes in detail, bλ is determined from the average loss of the calibration set, analogously
+to ˆq in conformal prediction.
+For ease of implementation and propagation, we focus on (hyper)ellipsoidal sets
+∥∆∥2 = d−1/2
+Y
+∥Σ(X)−1/2(Y −µ(X))∥2 ≤λ ,
+(17)
+where for convenience, we introduce ∆= (dY λΣ(X))−1/2(Y −µ(X)). A natural choice of loss may
+be
+ℓ2
+λ(X, Y ) = min {B, ∥∆∥2 −λ} ,
+(18)
+which applies a linear penalty to violation of (17) and a linear reward when the left hand side of (17)
+is smaller than λ, subject to truncation by hyperparameter B. In our experience, this approach
+produces similar behavior to the loss induced by using smulti in conformal prediction. Instead, we
+introduce two loss functions applied to ∆:
+ℓ1
+λ(X, Y )
+=
+∥∆∥1 ,
+(19)
+ℓq
+λ, β(X, Y )
+=
+quantileβ (∆) .
+(20)
+The above losses promotes sparsity in ∆, compared to results obtained by using a loss based on
+∥∆∥2. We aim to construct ellipsoidal sets with high, but not complete, component-wise coverage.
+8
+
+
+3.6
+Conformal uncertainty propagation
+Fisher et al
+3.6
+Conformal uncertainty propagation
+We are interested in propagating our prediction sets to downstream quantities of interest Q ∈RdQ
+where dQ ≤dY .
+This task is relevant to multistage prediction pipelines.
+First, we are inter-
+ested in uncertainty of the direct predictions of our surrogate for energies, atomic forces, and virial
+stresses. Then, we want to push that uncertainty to downstream quantities of interest such as elas-
+tic constants and vacancy formation energies, linear functions of surrogate predictions. Both the
+(hyper)rectangular sets obtained through univariate methods and the (hyper)ellipsoids of multivari-
+ate methods retain their shape under linear transformation. Furthermore, given a linear operator
+L ∈RdQ×dY , the propagated set L(Γ(X)) can be found in closed form, so there is no need to push
+samples from the set through the transformation. In practice, we approximate the transformations
+applied to our original prediction sets. As discussed in Section 4, we will require our surrogate to
+make predictions for multiple related atomic configurations, which we form and geometrically relax.
+Multivariate conformal uncertainty prediction and propagation will rely on the covariance Σ of these
+configurations.
+For uncertainty sets to be meaningful in propagated space, we need to understand how conformal
+guarantees translate. Let PLΣ1/2 = Σ1/2L⊤ LΣL⊤−1 LΣ1/2, the projection onto the row space of
+LΣ1/2. Then,
+∥Σ(X)−1/2(Y −µ(X))∥2
+≥
+∥PLΣ1/2Σ(X)−1/2(Y −µ(X))∥2 ,
+=
+∥(LΣ(X)L⊤)−1/2(LY −Lµ(X))∥2 .
+Equality is achieved when dY = dQ. We conclude that in multivariate conformal with tolerance
+αmulti we obtain a coverage guarantee
+P (LY ∈L(Γ(X))) ≥1 −αmulti ,
+(21)
+but the upper bound which guarantees sharpness only translates when L is invertible. Similarly, in
+conformal risk control with upper bound αcrc
+E [ℓ(L(Γ(X)), Y )] ≤αcrc ,
+(22)
+and the lower bound is achieved for invertible L. Thus, we expect propagated sets to contain the true
+value at a controlled rate, but the conservatism of these sets depends on the particular transformation
+L. In multivariate conformal literature, the alternative score
+smulti-L = ∥(LΣ(X)L⊤)−1/2(LY −Lµ(X))∥2 ,
+(23)
+has been proposed [21] to preemptively correct for propagation and achieve both validity and sharp-
+ness guarantees. Notably, this score depends on L, i.e. the respective downstream quantity consid-
+ered. It thus implies a separate recomputation of the conformalization procedure for each considered
+output quantity, which can be costly. We will discuss the tradeoffs of this score in Sections 4 and 5.
+4
+Experiments
+4.1
+Synthetic experiments
+We first consider a synthetic case study which illustrates the behavior of conformal sets under
+propagation. To imitate the workflow of our material science set up, we train a Gaussian process
+model on data pairs {(X(i)), Y (i))}n=1000
+i=1
+. The covariates X ∈R100×100 are drawn from a centered,
+unit variance Gaussian distribution.
+Rows are independent, but between each column, there is
+correlation ρ. X(i) is independent of X(j) whenever i̸ = j. Each column of X(i) is mapped to a
+component of Y (i) ∈R100 by a shallow neural network with error function activation and observation
+noise variance 10−4.
+An additional 1000 data points are generated by the same process to be
+used for calibration. We compare two conformal procedures in this example: univariate conformal
+with score (13) applied to each component of each Y (i) and multivariate conformal with score (15)
+applied to each full vector Y (i).
+For both methods, we let the tolerance α range from 0.05 to
+0.6. To understand the impact of dimension compression during propagation, we consider linear
+transformations into spaces of dimension dQ ∈{5, 10, 15, . . . , 100}. Note that in the last case, the
+dimension of Y is preserved under transformation.
+We report results averaged over 10 random
+propagation operators for each dQ.
+Figure 3 relates the full vector coverage of the propagated sets to their volume (standardized by
+taking the 1/dth
+Q root). Subfigure (a) shows the case when correlation ρ between the covariates of
+each component of Y (i) is relatively weak while (b) shows stronger correlation ρ = 0.9. Red squares
+9
+
+
+4.2
+Dataset and representation for chemical experiments
+Fisher et al
+Figure 3.
+Synthetic propagation study: Comparison of full vector coverage against volume for prediction sets
+propagated into a dimension dQ space. We consider dQ = {5, 10, 15, . . . , 100}, and darker shades indicate larger dQ.
+The dimension of the space were conformal calibration is performed (pre-propagation) is 100. We report the average
+results from 10 randomly drawn linear propagation operators. Red squares (r. blue circles) scatter points represent
+sets constructed via univariate (r. multivariate) conformal prediction. (a): input features X of a given test point
+have correlation ρ = 0.3. The solid orange arrow points toward increasing 1 −α while the transparent green arrow
+points toward decreasing dQ. (b): input features have correlation ρ = 0.9.
+represent univariate conformal and blue circles multivariate conformal. The shade of the markers
+darkens as the propagation dimension dQ increases. We can see that for univariate conformal, set
+volume is an increasing function of set coverage. Changing ρ or the propagation dimension leads to
+only minor variation. In contrast, both ρ and the propagation dimension have a clear impact on the
+behavior of multivariate conformal sets. For a given tolerance and propagation dimension, larger
+correlation ρ produces smaller sets. We expect this result as the multivariate method can leverage
+correlation in Y . For ρ = 0.9, nearly all of the multivariate sets are smaller than the univariate
+sets even though, as shown in more detail in Appendix B, many of the multivariate sets produce
+greater coverage. Perhaps more surprising is the observation that multivariate set volume becomes
+smaller as propagation dimension decreases (along transparent green arrow).
+While the square
+markers corresponding to univariate conformalized sets show no significant separation according to
+propagation dimension, the circular markers of the multivariate approach form clear rows for each
+dQ, particularly evident for larger dimensions. Along each row (in the direction of the solid orange
+arrow), 1 −α increases, producing greater coverage. We can understand the decrease in set size
+with dQ by noting that in smaller dimensions, it is more likely that all components of LY will be
+close together than in larger dimensions. However, we also noted in Subsection 3.6 that propagated
+conformal sets do not have a sharpness guarantee when the propagation reduces dimension, and we
+confirm in Appendix B that sets for small dQ tend to overcover. We also confirm that correcting for
+propagation using the score (23) prevents overcoverage. Figure 3 demonstrates that while propagated
+multivariate conformal sets may be more conservative than necessary, this effect does not produce
+drastic increases in volume.
+4.2
+Dataset and representation for chemical experiments
+In our numerical experiments, we first consider a synthetic case study, then present several examples
+based on a silicon dataset which has previously been used to build a general-purpose Gaussian
+approximation potential [6]. Specifically, we use diamond-structured configurations in periodic unit
+cells.
+There are 104 configurations containing 2 atoms, 220 configurations with 16 atoms, 110
+configurations with 54 atoms, and 55 configurations with 128 atoms. We also consider diamond
+vacancy configurations: 100 configurations with 63 atoms and 111 configurations with 215 atoms.
+Typical modern MLIPs would be fit to thousands or, in the case of foundation models, even millions
+of configurations. Here, we are interested in the relatively low data setting. Note that the vacancy
+configurations do not correspond to the bulk configurations in the dataset–that is, they are not formed
+by removing an atom from one of the other configurations in the set. When constructing feature
+representations of the configurations, it is crucial to account for the periodic boundary conditions.
+We compute SOAP [95, 5, 96] features using the QUIP [101] software package and quippy [102]
+interface. Details on all hyperparameters can be found in Appendix A.
+For each configuration, the silicon dataset includes density functional theory reference values for
+10
+
+
+4.3
+Calibration of energy and atomic forces
+Fisher et al
+Figure 4.
+Energy and atomic force calibration: Verification of the coverage and sharpness guarantees of
+conformal prediction for a given tolerance α. Calibration is applied to a vector containing the global energy and
+atomic forces for a configuration. (a): fraction of vector components which fall in predictive interval obtained by
+univariate (gold triangles) and multivariate (purple circles) conformal prediction. (b): fraction of vectors which fall
+entirely within the multivariate predictive set. The y = x line is dotted in gray.
+total energy, atomic forces, and virial stresses computed with the CASTEP code as described in
+[6]. We use these values to train Gaussian process models, implemented in Julia, and available at
+https://github.com/kefisher98/multivariate-conformal/. The properties included in the training set
+are determined on a case by case basis. Empirical evidence [4, 103, 104] has shown that including
+gradient properties, such as forces and stresses, in machine learning models is beneficial for predicting
+gradients in test cases. Theoretical work [105] has suggested that gradient training data may only
+aid in the prediction of gradients and can detract from the prediction of function values, i.e. energy.
+Furthermore, including gradients significantly increases the dimension of our quantity of interest as
+there are three force dimensions per atom in the system. Consequently, we train with forces only
+when are goal is to predict forces and train with stresses only when our goal is to predict stresses.
+4.3
+Calibration of energy and atomic forces
+We now consider calibrated uncertainties for high dimensional materials science quantities of interest
+and motivate the use of conformal risk control. Our prediction target is the global energy and all
+atomic forces for a given atomistic system. The training set consists of 200 configurations randomly
+sampled from the silicon diamond configuration dataset. Training vectors therefore range in dimen-
+sion from 7 to 385. For efficiency, we use the subset of regressors [106] approximation to build the
+training covariance by selecting 30 inducing configurations with the k medoids algorithm [107]. We
+find that minor variations in the size of the inducing set and training set produce little change in
+prediction performance. A further 120 configurations are set aside as the calibration set, and 80
+configurations are used for testing. The latter two sets are randomly selected from the systems with
+16, 54, and 162 atoms, so the prediction vectors have dimension between 49 and 385.
+Figure 4 verifies the univariate and multivariate conformal guarantees. As expected, both uni-
+variate and multivariate conformal achieve their corresponding validity and sharpness guarantees:
+the gold triangles representing the performance of the univariate method lie on the y = x line in
+plot (a), and the purple circles for the multivariate method trace this line in the plot (b). There is
+slightly more noise in the multivariate line in (b) compared to the univariate line in (a) because the
+multivariate method effectively has a smaller calibration set. The m = 120 calibration vectors con-
+tribute one score each to the multivariate conformal algorithm. In univariate conformal, the energies
+and forces are treated separately though both are considered in the evaluation of coverage. Thus,
+there are also m = 120 calibration points for the energy predictions, but the univariate conformal
+algorithm has > 10, 000 scores to calibrate the force predictions. Figure 4 also provides insight into
+the component-wise performance of multivariate methods and the full vector performance of univari-
+ate methods. Achieving the required multivariate coverage produces ellipsoidal sets that have near
+perfect coverage of individual components (measured by projecting sets into lower dimensions). In
+contrast, univariate methods produce zero multivariate coverage for large enough tolerance α. This
+behavior makes sense given that the coverage probability for a dY dimensional vector is 1 −dY α.
+Lowering α to enforce a high probability of univariate coverage (i.e. applying a Bonferroni correction)
+eventually forces nonzero multivariate coverage, but there is not fine grained control over multivariate
+11
+
+
+4.4
+Uncertainty propagation to elastic constant prediction
+Fisher et al
+Figure 5.
+Energy and atomic force calibration: Relationship between component-wise coverage, full vector
+coverage, and set volume for univariate (gold triangles) and multivariate (purple circles) conformal prediction as well
+as conformal risk control with 1-norm (turquoise stars) and quantile (green squares) loss. Both calibration and test
+datasets contain atomistic systems of multiple sizes. Consequently, in the test set, vectors containing the global
+energy and all atomic forces for a system take on dimensions dY ∈{49, 163, 385}.
+performance.
+Conformal risk control with an appropriate loss function offers more flexibility when calibrating
+high dimensional data. We consider two options: the 1-norm loss given by (19) and the 0.9-quantile
+loss given by (20). Appendix C confirms that both losses achieve the risk control guarantees (16). We
+set the truncation parameter B to the 0.95-quantile of the calibration losses and show other options in
+the appendix. Figure 5 shows how multivariate coverage and set volume relate to univariate coverage
+for the four options. We see that the risk control methods indeed have different incentives from the
+two conformal prediction approaches.
+Both risk control approaches can achieve high univariate
+coverage with low multivariate coverage. The threshold of α at which their multivariate coverage
+begins to increase is larger than for univariate conformal methods.
+As a consequence, the sets
+produced by risk control are consistently smaller than univariate conformal hyper-rectangles and
+generally smaller than the multivariate hyper-ellipsoids.
+4.4
+Uncertainty propagation to elastic constant prediction
+The elastic constant tensor C characterizes the behavior of a given material under deformation. Both
+energy and virial stresses can be mapped to the elastic constant via linear differential operators
+C = ∂ς
+∂η
+
+η∗
+,
+ς(η) =
+1
+V (η)
+∂E
+∂η ,
+(24)
+where η is an applied strain and V (η) is the deformed volume. Consequently, using our GAP sur-
+rogate and finite difference schemes, we have two routes to estimating elastic constant components:
+(1) through a second difference approximation applied to energy predictions and (2) via a first dif-
+ference approximation applied to stress predictions. We consider both approaches in this subsection,
+applying conformal prediction to the GAP predictions (either energies or stresses) and propagating
+uncertainty sets into elastic constant space.
+For cubic crystals like silicon, there is additional structure in the elastic constant that we use to
+simplify our computations. Specifically, there are several symmetries and zero components:
+
+
+ς1
+ς2
+ς3
+ς4
+ς5
+ς6
+
+
+=
+
+
+c11
+c12
+c12
+0
+0
+0
+c12
+c11
+c12
+0
+0
+0
+c12
+c12
+c11
+0
+0
+0
+0
+0
+0
+c44
+0
+0
+0
+0
+0
+0
+c44
+0
+0
+0
+0
+0
+0
+c44
+
+
+
+
+η1
+η2
+η3
+η4
+η5
+η6
+
+
+.
+(25)
+The stress and strain vectors are presented in Voigt notation. Supposing that we have knowledge of
+this structure, the value of each unique component can be determined by simultaneously perturbing
+η1 and η4. (The derivative found in this scenario will be [c11 c12 c12 c44 0 0]⊤). Thus, we can solve
+for all three elastic constants based on the difference in stress of two configurations, a and b.
+12
+
+
+4.4
+Uncertainty propagation to elastic constant prediction
+Fisher et al
+Figure 6.
+Propagation to elastic constant uncertainty: Comparison of prediction sets in the space of the
+three unique nonzero components of the elastic constant of silicon. α is the specified miscoverage tolerance. The
+dotted gray line marks x = y. (a): full vector coverage for component-wise conformal (gold triangles),
+Bonferroni-corrected conformal (red +s), and multivariate conformal (purple xs). Calibration was performed in the
+space of energies. (b): Same quantities as (a) resulting from calibration performed in the space of stresses. (c): Ratio
+between the cube root volume of prediction sets. Red +s (gold triangles) mark the ratio between
+Bonferroni-corrected (component-wise) sets and multivariate sets. Ribbons shade the region between the 0.25 and
+0.75 quantiles.
+If we use route (1) based on energies, we will estimate the six unique stress components for a and
+b using a central difference scheme. Each central difference scheme is implemented by perturbing
+either a or b to create two further configurations. Using GAP, the geometry of these configurations is
+relaxed and the energy is predicted. The relaxation is necessary because of the multilattice structure
+of the silicon crystals: Cauchy-Born non-affine shifts between the two sublattices cannot be predicted
+solely from applied strain, so atomic positions must be relaxed with respect to a fixed cell. We require
+predictions for energy at a total of 24 configurations, perturbed from an equilibrium configuration, to
+compute the elastic constant. Thus, we will apply conformal calibration to a 24 dimensional vector,
+then project the prediction sets to six dimensional elastic constant space. We further project to
+3-dimensional space by selecting the unique, nonzero values c11, c12, and c44.
+If, instead, we use route (2), we will first relax the geometries of configurations a and b, then
+predict their stresses with the GAP model. This step produces a twelve-dimensional quantity of
+interest which we project to the 3-dimensional elastic constant space.
+Figure 6 summarizes the performance of propagated prediction sets for elastic constant values,
+obtained using vanilla univariate conformal prediction, Bonferroni-corrected conformal, and multi-
+variate conformal. Predictions are made by perturbing the equilibrium configuration of a 16 atom
+silicon diamond configuration. Results are estimated based on 100 random draws of both the training
+and calibration data sets. GAP models which are used to predict energy are trained on 350 diamond
+configurations.
+The calibration set is based on an additional 100 configurations.
+To implement
+multivariate conformal, 200 random bags of 24 configurations are drawn with replacement from the
+calibration set. This approach is more computationally efficient than perturbing each calibration
+configuration 24 times (as is done for test points) and appears to work well. Further discussion
+can be found in Appendix D. For GAP models which predict stress, we can include both energy
+and stress data in our training set.
+To compensate for additional computational cost, we use a
+training set of a total of 300 atomistic systems where energy data is included for each system but
+stress data is included for only 15 systems. We find that this training set composition is sufficient
+to achieve good performance provided the stress training data is sampled from systems sufficiently
+close to equilibrium. To calibrate the stress configurations, 350 random bags of size 2 where drawn
+with replacement from the calibration set, and the stress predictions of the two configurations were
+concatenated. Conformal calibration was applied with tolerances ranging from 0.4 to 0.95.
+Plots (a) and (b) within Figure 6 show empirical coverage found for a given lower bound 1 −α.
+Since we are evaluating the behavior of multivariate propagated sets, we do not expect any method
+to be exactly on the y = x line (simultaneously satisfying both validity and sharpness constraints).
+Rather, we expect the multivariate and Bonferroni-corrections to be above y = x, meeting their
+validity guarantee. For the univariate approach, neither guarantee is expected to hold though we
+expect the stress example to show more coverage at each 1 −α than the energy example because its
+finite difference propagation operator L has two nonzeros per row rather than four. The empirical
+results confirm these expectations, and we see that the full vector coverage of the univariate approach
+13
+
+
+4.5
+Uncertainty propagation to vacancy formation energy prediction
+Fisher et al
+is considerable lower than the other two methods. For the stress example, we see that both the
+multivariate and Bonferroni-corrected methods meet the expected guarantee. The energy example
+shows somewhat different behavior: the multivariate method meets the expected guarantee, but the
+Bonferroni-corrected coverage is only above the y = x line for smaller 1 −α. The plateau in the
+Bonferroni corrected curve occurs because for α ≥0.55, the Bonferroni-correction in the energy
+case results in zero tolerance for miscoverage. There is no mechanism for improving coverage by
+decreasing α.
+The underlying reason for the miscoverage in the Bonferroni curve is likely partially due to the
+limited size of our dataset and partially due to the evaluation procedure. Coverage plots such as
+(a) and (b) within Figure 6 confirm coverage by determining the fraction of test configurations for
+which the DFT reference for elastic constant lies within the 3-dimensional prediction set. While
+Equation (24) shows that the elastic constant is obtained from linear differentiation operators ap-
+plied to the true energy or true virial stresses, one set of approximations is required to obtain the
+DFT prediction, and another set of approximations is made by our GP based workflow. Furthermore,
+approximate prediction requires geometric relaxation of perturbed configurations: a nonlinear mini-
+mization problem which determines the energy values to be conformalized. Separate relaxations are
+performed for the DFT reference and the GP workflow, each respectively employing force predictions
+from the corresponding method. Thus, we do not expect conformal guarantees to hold exactly when
+we evaluate coverage of the DFT references. For more context, we include cases in Appendix D
+where both the Bonferroni and the multivariate approaches undercover while still producing better
+coverage than the vanilla univariate method.
+We can also compare the volume of the propagated prediction sets. Plot (c) of Figure 6 plots
+ratios of the volume (corrected for dimension by taking the cube root) for pairs of methods resulting
+from case ii) prediction via stresses. Specifically, the red +s indicate the ratio of Bonferroni-corrected
+set volume to multivariate set volume, and the gold triangles represent the ratio of univariate set
+volume to multivariate volumes.
+The dashed line at unity indicates equal volume.
+We can see
+that univariate conformal produces the smallest prediction sets.
+This finding is not surprising,
+considering that this approach systematically fails to achieve the desired coverage guarantees in
+contrast to the other methods. Interestingly, in Appendix D, we show cases of prediction of the vector
+[c11 c12 c12 c44 0 0]⊤where the multivariate approach produces better coverage than the univariate
+approach as well as smaller sets.
+The latter result occurs because the multivariate method can
+leverage the symmetries of repeated elements. In our present setting, the comparison of the methods
+with similar coverage, the Bonferroni-corrected and multivariate approaches, shows that multivariate
+sets are consistently smaller than Bonferroni sets. Thus, leveraging covariance predictions to build
+ellipsoidal sets produces a size benefit compared at a given coverage level.
+4.5
+Uncertainty propagation to vacancy formation energy prediction
+For our final example, we estimate the energy required to remove an atom from a bulk crystal,
+creating a vacancy in the configuration. Recalling that M (i) is the number of atoms in the (i)th
+configuration, the vacancy formation energy is the difference
+E(i)
+formation = E(i)
+vacancy −
+M (i) −1
+M (i)
+
+E(i)
+bulk .
+(26)
+The energies on the right hand side are the global energies before (E(i)
+bulk) and after (E(i)
+vacancy) the
+removal of the atom. We will train a multitask GAP model where the primary task is learning the
+energy of bulk diamond configurations, and the secondary task is the energy of the diamond vacancy
+systems. Note that our silicon dataset contains examples for both tasks, but for a given (i), we have
+either E(i)
+bulk or E(i)
+vacancy, not both.
+The multitask framework can be successfully implemented in this setting, but we would expect
+a performance improvement if we filled in the gaps in the training set [36]. For a test structure (j),
+we relax the vacancy geometry R(j)
+vacancy using the GAP model, then make predictions for the mean
+and covariance of [E(j)
+bulk E(j)
+vacancy]⊤. We apply conformal calibration to the two-dimensional energy
+predictions, then propagate the resulting sets to obtain interval predictions for the system’s vacancy
+formation energy.
+In Figure 7, we compare the performance of four approaches to calibration: vanilla univari-
+ate conformal, Bonferroni-corrected univariate conformal, multivariate conformal, and propagation-
+corrected multivariate conformal. The latter uses the score (23). We consider this example to be
+a reasonable use case for the propagation-corrected score because the transformation from global
+energies to vacancy formation energy only depends on system size—unlike our previous example,
+14
+
+
+Fisher et al
+Figure 7.
+Propagation to vacancy formation energy uncertainty: Coverage and relative volume of
+prediction sets propagated to univariate intervals over vacancy formation energy. (a): coverage of propagated
+conformal sets produced by univariate (gold triangles), Bonferroni-corrected univariate (red +s), multivariate (purple
+xs), and propagation-corrected multivariate (turquoise stars) approaches at tolerance α. The y = x line is dotted in
+gray. (b): Gold triangles mark the ratio between univariate and projection corrected multivariate prediction interval
+length. Red +s compare Bonferroni-corrected univariate to the projection corrected multivariate method. A dotted
+horizontal line marks a ratio of 1. Ribbons shade the region between the 0.25 and 0.75 quantiles.
+where the transformation to compute the elastic constant depends on the volume of perturbed con-
+figurations. Results are averaged over 25 training and calibration sets randomly drawn for each of 55
+near-equilibrium test configurations with either 54 or 128 atoms. For training, we use the energies
+of 350 diamond bulk configurations and 150 diamond vacancy configurations. For calibration, we
+use 100 additional diamond configurations and 40 additional vacancy configurations, constructing
+200 random pairings between the two. We note that we have relatively few vacancy configurations
+in the silicon dataset, and ≈150 training configurations appear necessary to achieve secondary task
+accuracy comparable to primary task accuracy. More details on the experiment, and results for a
+smaller primary training set are reported in Appendix E.
+Plot (a) of Figure 7 demonstrates that all methods achieve coverage greater than 1 −α, even
+though conformal calibration does not theoretically guarantee this bound.
+There are two clear
+groupings based on coverage performance: the multivariate approach is similar to the Bonferroni-
+correction, and the propagation-corrected approach is similar to the vanilla univariate method. Thus,
+the approaches which provide similar full vector coverage at the calibration stage also provide similar
+coverage after propagation. Within each pair of methods, modeling seems to produce somewhat more
+conservative sets. For α = 0.05, all methods provide complete coverage of test vacancy formation
+energies. In plot (b), we compare the width of the prediction interval produced by the propagation-
+corrected multivariate approach to both the vanilla and Bonferroni-corrected multivariate methods.
+The propagation-corrected intervals are consistently smaller than their univariate counterparts, but
+only by a small factor. Unsurprisingly, the Bonferroni-corrected intervals are as much as 2.3 times
+as large as the propagation-corrected intervals, and the difference narrows as the coverage of the
+two methods converges with decreasing α. We see an outlier in the Bonferroni-corrected volume at
+1 −α = 0.9, around where the method achieves complete coverage. Notably, when 1 −α = 0.95 and
+all methods reach complete coverage, the widths of the sets produced by the different methods do
+not converge. The propagation-corrected multivariate approach produces the sharpest set.
+5
+Discussion
+We use this section to expose the approximations, assumptions, and sources of error present in
+our workflow. Based on these observations, we discuss the relevant considerations for choosing a
+conformal approach for practical, multistage problems.
+5.1
+Limited Data
+Several challenges arise from data limitations. For one, we implement our materials science examples
+based on fewer than one thousand configurations, not all of which are relevant to each problem.
+These configurations must be divided between subproblems: hyperparameter optimization, surrogate
+training, calibration, and evaluation. While conformal methods provide finite sample guarantees, the
+sharpness of the predictive sets depends on the size of the calibration dataset.
+15
+
+
+5.2
+Exchangeability
+Fisher et al
+5.2
+Exchangeability
+Perhaps a greater challenge than dataset size: for the methods we investigate, the conformal guar-
+antees rely on the assumption that the calibration dataset is statistically exchangeable with our test
+cases. This assumption is difficult to directly verify for atomistic systems. The generating probability
+distribution is unknown, and the practical procedure for sampling new configurations often involves
+simulations that make a series of approximations [6].
+Rather, we can argue that the success of conformal calibration for sets of energies and forces
+reported in Figure 4 provides empirical evidence for the exchangeability of the diamond configurations
+in our silicon dataset. However, exchangeability of this dataset is not sufficient for our uncertainty
+propagation tests, where the final quantity of interest is based on predictions for perturbations of the
+configurations in our original dataset. For instance, one approach to computing the elastic constant
+requires us to apply 24 perturbations to one configuration, relax the resulting geometries using our
+GAP surrogate, and predict the mean µ and covariance Σ for the energies of these configurations. To
+calibrate, we use 24 configurations chosen randomly from the original silicon set; we do not perturb
+one configuration 24 times because data generation would be computationally expensive, and our
+goal is to investigate conformal methods for an easy to implement workflow. Consequently, we expect
+more correlation in our test cases than our calibration set. As synthetic experiments reported in
+Appendix B demonstrate, this setting leads multivariate conformal approaches to overcover.
+5.3
+Approximate workflow
+It is likely that our empirical results show a balance of factors which promote over- and under-
+coverage. Theoretically, we know that propagated multivariate sets meet a validity guarantee but not
+a sharpness guarantee. Our synthetic experiments, shown in more detail in Appendix B, demonstrate
+that propagation produces overly conservative sets, and this effect increases with dY /dQ, the ratio
+of prediction dimension during conformalisation to the dimension of the propagated quantity of
+interest.
+This behavior likely combines with the tendency toward overcoverage produced by the
+non-exchangeability of our calibration and test set.
+These factors may counteract a tendency towards uncercoverage produced by our propagation
+and evaluation procedure. Specifically, the propagation operator Ltrue used to obtain the reference
+density functional theory (DFT) quantities is not the same finite difference operator Lapprox which we
+use apply to our conformal sets. To get a sense of the impact of Lapprox, note that we apply different
+approximate operators to predict the elastic constant based on GAP energy predictions and based
+on GAP stress predictions, but for both scenarios, we compare to the same reference DFT value.
+In the energy based example, which employs an additional stage of approximation, the coverage is
+lower. Further note that in Appendix D, we consider a workflow which predicts the same elastic
+constant using a larger silicon system and an example which uses a smaller finite difference step size
+which performs well in hyperparameter tuning but is farther from the step size which is expected to
+balance approximation errors. In these examples, propagated set coverage is partially or completely
+below the expected validity guarantee. Relative effects are still present: we see greater coverage in
+the stress example than the energy example, and the vanilla univariate approach typically produces
+the smallest coverage for a given α. Further, the difference in the performance of multivariate sets
+and Bonferroni-corrected sets demonstrates that using the full covariance Σ is a meaningful source
+of information for conformal scores.
+From these results, we draw several conclusions. First, while the conformal methods are trained
+on the errors of GAP surrogate predictions for energy, force, and stress against DFT reference, it
+does not capture the full effect of configuration perturbation, surrogate relaxation, and approximate
+propagation. Second, the effect of these results is sufficiently small that for reasonable settings, we
+achieve expected coverage. Finally, even in the presence of approximation error, we find insight into
+the relative behavior of conformal strategies.
+5.4
+Choosing a conformal method
+Each conformal approach offers performance tradeoffs, and the choice of score should be informed
+by the problem at hand. Basic univariate methods may be appropriate if component-wise cover-
+age is the goal or if covariance information is unavailable. If the covariance is insignificant, but
+full vector coverage is required, a Bonferroni correction to a univariate procedure may be suitable.
+When covariance estimates with some signal are available, multivariate conformal methods based
+on a Mahalanobis distance score are easy to implement to provide similar coverage to the Bonfer-
+roni approach with smaller set volume. The resulting sets can capture error cancellations common
+in target quantities within materials science. These (hyper)ellipsoidal sets are straightforward to
+16
+
+
+Fisher et al
+propagate through a linear operator L, but resulting sets may be overly conservative or impacted by
+approximations in L.
+If L is known at calibration time, it can be built into the conformal score. Such an approach
+essentially propagates the calibration set. Unfortunately, when L depends on the test case, as is
+common in materials science, the conformal procedure will require frequent retraining. Furthermore,
+in materials science, we are often interested in uncertainty at each stage of a multi-step workflow. In
+the general case, applying propagation-corrected conformal prediction produces a pre-propagation
+prediction ellipse without validity guarantees, and for additional transformations applied following
+L, the resulting prediction sets only have a validity guarantee with no sharpness guarantee—the
+same as vanilla multivariate propagation.
+Finally, we consider the flexibility offered by conformal risk control. We find that these methods
+can be promising for high dimensional calibration targets where covariance information is available.
+Tailoring a loss function to our goals can create sets with theoretical guarantees and high univariate
+coverage but comparatively low volume. There is a large design space for new loss functions, but
+the corresponding danger is that methods may be developed which are overly adapted to a given
+problem or dataset. A more complete understanding of the role of conformal risk control in materials
+workflows is a compelling direction for future research.
+6
+Conclusion
+Our experiments uncover both the utility and potential pitfalls that arise when conformal methods
+are built into a multivariate, multistage workflow. We aim to build a bridge between the theoretical
+development of conformal strategies and their practical use within materials science. For this reason,
+we focus on methods which can be efficiently applied to high dimensional targets Y and propagated
+to downstream quantities of interest Q. As baselines, we consider two approaches which calibrate
+each component of Y individually: one to achieve target univariate coverage of Y and another to
+achieve target full coverage. Neither of these methods use surrogate predictions for the correlation
+in Y , so the resulting sets may include unnecessary corners which inflate their volume. We show
+that multivariate approaches based on the Mahalanobis distance are easy to implement and produce
+ellipsoidal sets conducive to uncertainty propagation. These approaches can leverage estimates of
+the correlation between different configurations and between properties, in some cases discovering
+near symmetries and thereby considerably reducing set volume. Thus, elliptical conformal sets can
+capture error cancellations common in predictions of relative properties in materials science. Finally,
+we examine the validity of propagated sets to predict elastic constant components and vacancy
+formation energies, discussing the impact of approximations in our workflow.
+There are many viable directions for future inquiry to build on our results. While our experiments
+consider the calibration of Gaussian process surrogates, conformal prediction is model agnostic, so
+these methods can straightforwardly be incorporated in a neural network workflow. Further, much
+work [108, 109, 110, 111, 112, 113] has explored conformal approaches robust to distribution shift
+which will be useful for many workflows based on atomistic data.
+For interpretation of results,
+it will be useful to analyze class conditional or relative representations of uncertainty given by
+conformal sets. Finally, the generalization to conformal risk control allows for great flexibility in the
+development of new uncertainty guarantees. We believe that intricate materials science prediction
+pipelines will draw from an extensive toolbox of methods.
+Acknowledgments
+The authors thank Stephen Bates and Niklas Schmitz for productive conversations. Further, the
+authors acknowledge the MIT Libraries for the resources provided and the MIT Office of Research
+Computing and Data for providing high performance computing resources that have contributed to
+the research results reported within this paper.
+Funding
+MFH acknowledges support by the Swiss National Science Foundation (SNSF, Grant No. 10002757)
+as well as the NCCR MARVEL, a National Centre of Competence in Research, funded by the SNSF
+(Grant No. 205602). KEF expresses gratitude for the support by the Don Loomis Galusha (1904)
+Fellowship from the MIT Office of Graduate Education as well as the National Science Foundation
+Graduate Research Fellowship (Grant No. 1745302). KEF and YMM acknowledge support from
+the Department of Energy (DOE), National Nuclear Security Administration PSAAP-III program
+(award number DE-NA0003965) and PSAAP-IV program (award number DE-NA0004266).
+17
+
+
+REFERENCES
+Fisher et al
+Data availability
+The data that support the findings of this study are openly available in multivariate-conformal at
+https://github.com/kefisher98/multivariate-conformal/.
+References
+[1]
+Volker L. Deringer, Miguel A. Caro, and G´abor Cs´anyi. “Machine Learning Interatomic
+Potentials as Emerging Tools for Materials Science”. In: Advanced Materials 31.46 (2019),
+p. 1902765. doi: https://doi.org/10.1002/adma.201902765. eprint: https://advanced.
+onlinelibrary.wiley.com/doi/pdf/10.1002/adma.201902765. url: https://advanced.
+onlinelibrary.wiley.com/doi/abs/10.1002/adma.201902765.
+[2]
+Tim Mueller, Alberto Hernandez, and Chuhong Wang. “Machine learning for interatomic
+potential models”. In: The Journal of Chemical Physics 152.5 (Feb. 2020), p. 050902. issn:
+0021-9606. doi: 10.1063/1.5126336. url: https://doi.org/10.1063/1.5126336.
+[3]
+Silvan K¨aser et al. “Neural network potentials for chemistry: concepts, applications and
+prospects”. In: Digital Discovery 2 (1 2023), pp. 28–58. doi: 10.1039/D2DD00102K. url:
+http://dx.doi.org/10.1039/D2DD00102K.
+[4]
+Albert P. Bart´ok et al. “Gaussian Approximation Potentials: The Accuracy of Quantum
+Mechanics, without the Electrons”. In: Physical Review Letters 104 (13 Apr. 2010). doi:
+10.1103/physrevlett.104.136403. url: http://dx.doi.org/10.1103/physrevlett.
+104.136403.
+[5]
+Albert P. Bart´ok and G´abor Cs´anyi. “Gaussian approximation potentials: A brief tutorial
+introduction”. In: International Journal of Quantum Chemistry 115 (16 Aug. 2015), pp. 1051–
+1057. doi: 10.1002/qua.24927. url: http://dx.doi.org/10.1002/qua.24927.
+[6]
+Albert P. Bart´ok et al. “Machine Learning a General-Purpose Interatomic Potential for Sili-
+con”. In: Phys. Rev. X 8 (4 Dec. 2018), p. 041048. doi: 10.1103/PhysRevX.8.041048. url:
+https://link.aps.org/doi/10.1103/PhysRevX.8.041048.
+[7]
+Albert P. Bart´ok and G´abor Cs´anyi. Gaussian Approximation Potentials: a brief tutorial
+introduction. 2020. arXiv: 1502.01366 [cond-mat.mtrl-sci]. url: https://arxiv.org/
+abs/1502.01366.
+[8]
+Jamie Simon et al. There Will Be a Scientific Theory of Deep Learning. 2026. arXiv: 2604.
+21691 [stat.ML]. url: https://arxiv.org/abs/2604.21691.
+[9]
+Katharine Fisher and Youssef Marzouk. Can Bayesian Neural Networks Make Confident Pre-
+dictions? url: https://arxiv.org/abs/2501.11773. 2025. arXiv: 2501.11773 [stat.ML].
+[10]
+Vladimir Vovk, Alex Gammerman, and Glenn Shafer. “Algorithmic Learning in a Random
+World”. In: Jan. 2005. doi: 10.1007/b106715.
+[11]
+Glenn Shafer and Vladimir Vovk. A tutorial on conformal prediction. 2007. arXiv: 0706.3188
+[cs.LG]. url: https://arxiv.org/abs/0706.3188.
+[12]
+Anastasios N. Angelopoulos and Stephen Bates. A Gentle Introduction to Conformal Pre-
+diction and Distribution-Free Uncertainty Quantification. 2022. arXiv: 2107.07511 [cs.LG].
+url: https://arxiv.org/abs/2107.07511.
+[13]
+Yuge Hu et al. “Robust and scalable uncertainty estimation with conformal prediction for
+machine-learned interatomic potentials”. In: Machine Learning: Science and Technology 3.4
+(Dec. 2022), p. 045028. doi: 10.1088/2632-2153/aca7b1. url: https://doi.org/10.1088/
+2632-2153/aca7b1.
+[14]
+I. R. Best, T. J. Sullivan, and J. R. Kermode. “Uncertainty quantification in atomistic sim-
+ulations of silicon using interatomic potentials”. In: The Journal of Chemical Physics 161.6
+(Aug. 2024). issn: 1089-7690. doi: 10.1063/5.0214590. url: http://dx.doi.org/10.1063/
+5.0214590.
+[15]
+Iain Best. “Uncertainty quantification with machine learning interatomic potentials using
+conformal prediction”. Unpublished. Oct. 2024. url: http://webcat.warwick.ac.uk/
+record=b4154025.
+[16]
+Viktor Zaverkin et al. “Uncertainty-biased molecular dynamics for learning uniformly accurate
+interatomic potentials”. In: npj Computational Materials 10.1 (Apr. 2024), p. 83. issn: 2057-
+3960. doi: 10.1038/s41524-024-01254-1. url: https://doi.org/10.1038/s41524-024-
+01254-1.
+18
+
+
+REFERENCES
+Fisher et al
+[17]
+Victor Dheur et al. “A Unified Comparative Study with Generalized Conformity Scores for
+Multi-Output Conformal Regression”. In: Proceedings of the 42nd International Conference
+on Machine Learning. Ed. by Aarti Singh et al. Vol. 267. Proceedings of Machine Learning
+Research. PMLR, 13–19 Jul 2025, pp. 13444–13485. url: https://proceedings.mlr.press/
+v267/dheur25a.html.
+[18]
+Xiaofan Zhou et al. Conformal Prediction: A Data Perspective. 2025. arXiv: 2410.06494
+[cs.LG]. url: https://arxiv.org/abs/2410.06494.
+[19]
+Anastasios N. Angelopoulos et al. Conformal Risk Control. 2025. arXiv: 2208.02814 [stat.ME].
+url: https://arxiv.org/abs/2208.02814.
+[20]
+Chancellor Johnstone and Bruce Cox. Conformal Uncertainty Sets for Robust Optimization.
+2021. arXiv: 2105.14957 [stat.ME]. url: https://arxiv.org/abs/2105.14957.
+[21]
+Sacha Braun et al. Multivariate Standardized Residuals for Conformal Prediction. 2026. arXiv:
+2507.20941 [stat.ML]. url: https://arxiv.org/abs/2507.20941.
+[22]
+Guillaume Principato et al. Conformal Prediction for Hierarchical Data. 2025. arXiv: 2411.
+13479 [stat.ML]. url: https://arxiv.org/abs/2411.13479.
+[23]
+Lin Lin, Jianfeng Lu, and Lexing Ying. “Numerical methods for Kohn–Sham density func-
+tional theory”. In: Acta Numerica 28 (2019), pp. 405–539. doi: 10.1017/S0962492919000047.
+[24]
+Chi Chen and Shyue Ping Ong. “A universal graph deep learning interatomic potential for
+the periodic table”. In: Nature Computational Science 2.11 (Nov. 2022), pp. 718–728. issn:
+2662-8457. doi: 10.1038/s43588-022-00349-3. url: https://doi.org/10.1038/s43588-
+022-00349-3.
+[25]
+Yutack Park et al. “Scalable Parallel Algorithm for Graph Neural Network Interatomic Poten-
+tials in Molecular Dynamics Simulations”. In: Journal of Chemical Theory and Computation
+20.11 (June 2024), pp. 4857–4868. issn: 1549-9618. doi: 10.1021/acs.jctc.4c00190. url:
+https://doi.org/10.1021/acs.jctc.4c00190.
+[26]
+Simon Batzner et al. “E(3)-equivariant graph neural networks for data-efficient and accurate
+interatomic potentials”. In: Nature Communications 13.1 (May 2022), p. 2453. issn: 2041-
+1723. doi: 10.1038/s41467-022-29939-5. url: https://doi.org/10.1038/s41467-022-
+29939-5.
+[27]
+Ziduo Yang et al. “Efficient equivariant model for machine learning interatomic potentials”. In:
+npj Computational Materials 11.1 (Feb. 2025), p. 49. issn: 2057-3960. doi: 10.1038/s41524-
+025-01535-3. url: https://doi.org/10.1038/s41524-025-01535-3.
+[28]
+Ilyes Batatia et al. “A foundation model for atomistic materials chemistry”. In: The Journal of
+Chemical Physics 163.18 (Nov. 2025), p. 184110. issn: 0021-9606. doi: 10.1063/5.0297006.
+[29]
+Agustinus Kristiadi et al. A Sober Look at LLMs for Material Discovery: Are They Actually
+Good for Bayesian Optimization Over Molecules? 2024. arXiv: 2402.05015 [cs.LG]. url:
+https://arxiv.org/abs/2402.05015.
+[30]
+Sanjeev Arora et al. Harnessing the Power of Infinitely Wide Deep Nets on Small-data Tasks.
+2019. arXiv: 1910.01663 [cs.LG]. url: https://arxiv.org/abs/1910.01663.
+[31]
+Jaehoon Lee et al. “Finite versus infinite neural networks: an empirical study”. In: Proceedings
+of the 34th International Conference on Neural Information Processing Systems. NIPS ’20.
+Vancouver, BC, Canada: Curran Associates Inc., 2020. isbn: 9781713829546.
+[32]
+Adityanarayanan Radhakrishnan et al. “Simple, fast, and flexible framework for matrix com-
+pletion with infinite width neural networks”. In: Proceedings of the National Academy of
+Sciences 119.16 (2022), e2115064119. doi: 10.1073/pnas.2115064119. eprint: https://
+www.pnas.org/doi/pdf/10.1073/pnas.2115064119. url: https://www.pnas.org/doi/
+abs/10.1073/pnas.2115064119.
+[33]
+SIYUAN MA and Mikhail Belkin. “Diving into the shallows: a computational perspective on
+large-scale shallow learning”. In: Advances in Neural Information Processing Systems. Ed. by
+I. Guyon et al. Vol. 30. Curran Associates, Inc., 2017. url: https://proceedings.neurips.
+cc/paper_files/paper/2017/file/bf424cb7b0dea050a42b9739eb261a3a-Paper.pdf.
+[34]
+Giacomo Meanti et al. “Kernel methods through the roof: handling billions of points effi-
+ciently”. In: Proceedings of the 34th International Conference on Neural Information Pro-
+cessing Systems. NIPS ’20. Vancouver, BC, Canada: Curran Associates Inc., 2020. isbn:
+9781713829546.
+19
+
+
+REFERENCES
+Fisher et al
+[35]
+Haitao Liu et al. “When Gaussian process meets big data: A review of scalable GPs”. In:
+IEEE transactions on neural networks and learning systems 31.11 (2020), pp. 4405–4423.
+[36]
+K. E. Fisher, M. F. Herbst, and Y. M. Marzouk. “Multitask methods for predicting molecular
+properties from heterogeneous data”. In: The Journal of Chemical Physics 161.1 (July 2024),
+p. 014114. issn: 0021-9606. doi: 10.1063/5.0201681. url: https://doi.org/10.1063/5.
+0201681.
+[37]
+Danial Khatamsaz, Brent Vela, and Raymundo Arr´oyave. “Multi-objective Bayesian alloy
+design using multi-task Gaussian processes”. In: Materials Letters 351 (2023), p. 135067.
+issn: 0167-577X. doi: https://doi.org/10.1016/j.matlet.2023.135067. url: https:
+//www.sciencedirect.com/science/article/pii/S0167577X23012521.
+[38]
+Stephen M. Goodlett, Justin M. Turney, and Henry F. Schaefer. “Comparison of multifidelity
+machine learning models for potential energy surfaces”. In: The Journal of Chemical Physics
+159 (4 July 2023). doi: 10.1063/5.0158919. url: http://dx.doi.org/10.1063/5.0158919.
+[39]
+G. Pilania, J.E. Gubernatis, and T. Lookman. “Multi-fidelity machine learning models for
+accurate bandgap predictions of solids”. In: Computational Materials Science 129 (2017),
+pp. 156–162. doi: 10.1016/j.commatsci.2016.12.004. url: http://dx.doi.org/10.
+1016/j.commatsci.2016.12.004.
+[40]
+R. Batra et al. “Multifidelity Information Fusion with Machine Learning: A Case Study of
+Dopant Formation Energies in Hafnia”. In: ACS Applied Materials & Inference 11 (2019),
+pp. 24906–24918. doi: 10.1021/acsami.9b02174. url: http://dx.doi.org/10.1021/
+acsami.9b02174.
+[41]
+Abhirup Patra et al. “A multi-fidelity information-fusion approach to machine learn and
+predict polymer bandgap”. In: Computational Materials Science 172 (2020), p. 109286. issn:
+0927-0256. doi: https://doi.org/10.1016/j.commatsci.2019.109286. url: https:
+//www.sciencedirect.com/science/article/pii/S0927025619305853.
+[42]
+Clyde Fare et al. “A multi-fidelity machine learning approach to high throughput materials
+screening”. In: npj Computational Materials 8.1 (Dec. 2022), p. 257. issn: 2057-3960. doi:
+10.1038/s41524-022-00947-9. url: https://doi.org/10.1038/s41524-022-00947-9.
+[43]
+Vivin Vinod et al. “Multifidelity Machine Learning for Molecular Excitation Energies”. In:
+Journal of Chemical Theory and Computation 19.21 (2023). PMID: 37862054, pp. 7658–7670.
+doi: 10.1021/acs.jctc.3c00882.
+[44]
+Vivin Vinod, Ulrich Kleinekath¨ofer, and Peter Zaspel. Optimized Multifidelity Machine Learn-
+ing for Quantum Chemistry. 2023. arXiv: 2312.05661 [physics.chem-ph].
+[45]
+Vivin Vinod and Peter Zaspel. “QeMFi: A Multifidelity Dataset of Quantum Chemical Prop-
+erties of Diverse Molecules”. In: Scientific Data 12.1 (Feb. 2025), p. 202. issn: 2052-4463. doi:
+10.1038/s41597-024-04247-3. url: https://doi.org/10.1038/s41597-024-04247-3.
+[46]
+Vivin Vinod and Peter Zaspel. Improvise, Adapt, Overcome: An On-The-Fly Multifidelity
+Algorithm for Efficient Machine Learning. 2026. arXiv: 2606.02662 [cs.LG]. url: https:
+//arxiv.org/abs/2606.02662.
+[47]
+Raghunathan Ramakrishnan et al. “Big Data Meets Quantum Chemistry Approximations:
+The ∆-Machine Learning Approach”. In: Journal of Chemical Theory and Computation 11
+(5 May 2015), pp. 2087–2096. doi: 10.1021/acs.jctc.5b00099. url: http://dx.doi.org/
+10.1021/acs.jctc.5b00099.
+[48]
+Pavlo O. Dral et al. “Hierarchical machine learning of potential energy surfaces”. In: The
+Journal of Chemical Physics 152 (20 May 2020). doi: 10.1063/5.0006498. url: http:
+//dx.doi.org/10.1063/5.0006498.
+[49]
+Pavlo O Dral, Tetiana Zubatiuk, and Bao-Xin Xue. “Learning from multiple quantum chem-
+ical methods: ∆-learning, transfer learning, co-kriging, and beyond”. In: Quantum Chemistry
+in the Age of Machine Learning. Elsevier, 2023, pp. 491–507.
+[50]
+Tom Fr¨ombgen et al. “Uncertainty Quantification for In Silico Chemistry”. In: Chemical
+Reviews 126.7 (2026), pp. 4189–4236. doi: 10.1021/acs.chemrev.5c00931.
+20
+
+
+REFERENCES
+Fisher et al
+[51]
+Yan Wang and David L. McDowell. “1 - Uncertainty quantification in materials modeling”. In:
+Uncertainty Quantification in Multiscale Materials Modeling. Ed. by Yan Wang and David
+L. McDowell. Elsevier Series in Mechanics of Advanced Materials. Woodhead Publishing,
+2020, pp. 1–40. isbn: 978-0-08-102941-1. doi: https://doi.org/10.1016/B978- 0- 08-
+102941- 1.00001- 8. url: https://www.sciencedirect.com/science/article/pii/
+B9780081029411000018.
+[52]
+Federico Grasselli et al. Uncertainty in the era of machine learning for atomistic modeling.
+2025. arXiv: 2503.09196 [physics.chem-ph]. url: https://arxiv.org/abs/2503.09196.
+[53]
+Thomas D Swinburne and Danny Perez. “Parameter uncertainties for imperfect surrogate
+models in the low-noise regime”. In: Machine Learning: Science and Technology 6.1 (Jan.
+2025), p. 015008. doi: 10.1088/2632-2153/ad9fce. url: https://doi.org/10.1088/2632-
+2153/ad9fce.
+[54]
+Jakob Gawlikowski et al. “A survey of uncertainty in deep neural networks”. In: Artif. Intell.
+Rev. 56.Suppl 1 (July 2023), pp. 1513–1589. issn: 0269-2821. doi: 10.1007/s10462-023-
+10562-9. url: https://doi.org/10.1007/s10462-023-10562-9.
+[55]
+Wenchong He et al. “A Survey on Uncertainty Quantification Methods for Deep Learning”.
+In: 58.7 (Feb. 2026). issn: 0360-0300. doi: 10.1145/3786319. url: https://doi.org/10.
+1145/3786319.
+[56]
+Pavel Izmailov et al. What Are Bayesian Neural Network Posteriors Really Like? 2021. arXiv:
+2104.14421 [cs.LG]. url: https://arxiv.org/abs/2104.14421.
+[57]
+Aik Rui Tan et al. “Single-model uncertainty quantification in neural network potentials
+does not consistently outperform model ensembles”. In: npj Computational Materials 9.1
+(Dec. 2023), p. 225. issn: 2057-3960. doi: 10.1038/s41524- 023- 01180- 8. url: https:
+//doi.org/10.1038/s41524-023-01180-8.
+[58]
+Matias Valdenegro-Toro. “Sub-Ensembles for Fast Uncertainty Estimation in Neural Net-
+works”. In: 2023 IEEE/CVF International Conference on Computer Vision Workshops (IC-
+CVW). 2023, pp. 4121–4129. doi: 10.1109/ICCVW60793.2023.00445.
+[59]
+Stefan Lee et al. Why M Heads are Better than One: Training a Diverse Ensemble of Deep
+Networks. 2015. arXiv: 1511.06314 [cs.CV]. url: https://arxiv.org/abs/1511.06314.
+[60]
+Matthias Kellner and Michele Ceriotti. “Uncertainty quantification by direct propagation of
+shallow ensembles”. In: Machine Learning: Science and Technology 5.3 (July 2024), p. 035006.
+doi: 10.1088/2632-2153/ad594a. url: https://doi.org/10.1088/2632-2153/ad594a.
+[61]
+Matthias Kellner et al. Errors that matter: Uncertainty-aware universal machine-learning
+potentials calibrated on experiments. 2026. arXiv: 2604 . 24607 [physics.chem-ph]. url:
+https://arxiv.org/abs/2604.24607.
+[62]
+Moritz Sch¨afer et al. “How to Train a Shallow Ensemble”. In: Journal of Chemical Theory and
+Computation 22.10 (May 2026), pp. 4939–4950. issn: 1549-9618. doi: 10.1021/acs.jctc.
+6c00310. eprint: https://pubs.acs.org/jctcce/article-pdf/22/10/4939/65435202/
+ct6c00310.pdf. url: https://doi.org/10.1021/acs.jctc.6c00310.
+[63]
+Leonid Kahle and Federico Zipoli. “Quality of uncertainty estimates from neural network
+potential ensembles”. In: Phys. Rev. E 105 (1 Jan. 2022), p. 015311. doi: 10.1103/PhysRevE.
+105.015311. url: https://link.aps.org/doi/10.1103/PhysRevE.105.015311.
+[64]
+Shuaihua Lu et al. On the Uncertainty Estimates of Equivariant-Neural-Network-Ensembles
+Interatomic Potentials. 2023. arXiv: 2309.00195 [cond-mat.mtrl-sci]. url: https://
+arxiv.org/abs/2309.00195.
+[65]
+Niklas Frederik Schmitz, Bruno Ploumhans, and Michael F. Herbst. Algorithmic differentia-
+tion for plane-wave DFT: materials design, error control and learning model parameters. 2025.
+arXiv: 2509.07785 [cond-mat.mtrl-sci]. url: https://arxiv.org/abs/2509.07785.
+[66]
+Jelmer Neeven and Evgueni Smirnov. “Conformal stacked weather forecasting”. In: Proceed-
+ings of the Seventh Workshop on Conformal and Probabilistic Prediction and Applications.
+Ed. by Alex Gammerman et al. Vol. 91. Proceedings of Machine Learning Research. PMLR,
+Nov. 2018, pp. 220–233.
+21
+
+
+REFERENCES
+Fisher et al
+[67]
+Kamile Stankeviciute, Ahmed M. Alaa, and Mihaela van der Schaar. “Conformal Time-series
+Forecasting”. In: Advances in Neural Information Processing Systems. Ed. by M. Ranzato et
+al. Vol. 34. Curran Associates, Inc., 2021, pp. 6216–6228. url: https : / / proceedings .
+neurips . cc / paper _ files / paper / 2021 / file / 312f1ba2a72318edaaa995a67835fad5 -
+Paper.pdf.
+[68]
+Alexander Timans et al. Adaptive Bounding Box Uncertainties via Two-Step Conformal Pre-
+diction. 2024. arXiv: 2403.07263 [cs.CV]. url: https://arxiv.org/abs/2403.07263.
+[69]
+Alexander Timans et al. Max-Rank: Efficient Multiple Testing for Conformal Prediction. 2025.
+arXiv: 2311.10900 [stat.ME]. url: https://arxiv.org/abs/2311.10900.
+[70]
+Zhendong Wang et al. “Probabilistic Conformal Prediction Using Conditional Random Sam-
+ples”. In: Proceedings of The 26th International Conference on Artificial Intelligence and
+Statistics. Ed. by Francisco Ruiz, Jennifer Dy, and Jan-Willem van de Meent. Vol. 206. Pro-
+ceedings of Machine Learning Research. PMLR, Apr. 2023, pp. 8814–8836.
+[71]
+Mauricio Sadinle, Jing Lei, and Larry Wasserman. “Least Ambiguous Set-Valued Classifiers
+With Bounded Error Levels”. In: Journal of the American Statistical Association 114.525
+(2018), pp. 223–234. issn: 1537-274X. doi: 10.1080/01621459.2017.1395341. url: http:
+//dx.doi.org/10.1080/01621459.2017.1395341.
+[72]
+Rafael Izbicki, Gilson Shimizu, and Rafael B. Stern. “CD-split and HPD-split: efficient con-
+formal regions in high dimensions”. In: 23.1 (Jan. 2022). issn: 1532-4435.
+[73]
+Max Sampson and Kung-Sik Chan. Flexible Conformal Highest Predictive Conditional Density
+Sets. 2025. arXiv: 2406.18052 [stat.ME]. url: https://arxiv.org/abs/2406.18052.
+[74]
+Jing Lei, Alessandro Rinaldo, and Larry Wasserman. “A conformal prediction approach to
+explore functional data”. In: Annals of Mathematics and Artificial Intelligence 74.1 (June
+2015), pp. 29–43. issn: 1573-7470. doi: 10.1007/s10472-013-9366-6. url: https://doi.
+org/10.1007/s10472-013-9366-6.
+[75]
+Chen Xu, Hanyang Jiang, and Yao Xie. “Conformal prediction for multi-dimensional time
+series by ellipsoidal sets”. In: Proceedings of the 41st International Conference on Machine
+Learning. Ed. by Ruslan Salakhutdinov et al. Vol. 235. Proceedings of Machine Learning
+Research. PMLR, 21–27 Jul 2024, pp. 55076–55099. url: https://proceedings.mlr.press/
+v235/xu24m.html.
+[76]
+Louis Meyer and Wenkai Xu. A Kernel Nonconformity Score for Multivariate Conformal
+Prediction. 2026. arXiv: 2604.21595 [stat.ML]. url: https://arxiv.org/abs/2604.21595.
+[77]
+Sacha Braun et al. Minimum Volume Conformal Sets for Multivariate Regression. 2026. arXiv:
+2503.19068 [stat.ML]. url: https://arxiv.org/abs/2503.19068.
+[78]
+Michal Klein et al. Multivariate Conformal Prediction using Optimal Transport. 2025. arXiv:
+2502.03609 [stat.ML]. url: https://arxiv.org/abs/2502.03609.
+[79]
+Gauthier Thurin, Kimia Nadjahi, and Claire Boyer. Optimal Transport-based Conformal Pre-
+diction. 2025. arXiv: 2501.18991 [stat.ML]. url: https://arxiv.org/abs/2501.18991.
+[80]
+Eugene Ndiaye. Beyond Uncertainty Sets: Leveraging Optimal Transport to Extend Conformal
+Predictive Distribution to Multivariate Settings. 2025. arXiv: 2511.15146 [stat.ML]. url:
+https://arxiv.org/abs/2511.15146.
+[81]
+Soundouss Messoudi, S´ebastien Destercke, and Sylvain Rousseau. Copula-based conformal
+prediction for Multi-Target Regression. 2021. arXiv: 2101.12002 [cs.LG]. url: https://
+arxiv.org/abs/2101.12002.
+[82]
+Ji Won Park, Robert Tibshirani, and Kyunghyun Cho. Semiparametric conformal prediction.
+2025. arXiv: 2411.02114 [cs.LG]. url: https://arxiv.org/abs/2411.02114.
+[83]
+Sophia Sun and Rose Yu. Copula Conformal Prediction for Multi-step Time Series Forecast-
+ing. 2024. arXiv: 2212.03281 [cs.LG]. url: https://arxiv.org/abs/2212.03281.
+[84]
+Shai Feldman, Stephen Bates, and Yaniv Romano. Calibrated Multiple-Output Quantile Re-
+gression with Representation Learning. 2022. arXiv: 2110.00816 [cs.LG]. url: https://
+arxiv.org/abs/2110.00816.
+[85]
+Ander Gray et al. Guaranteed prediction sets for functional surrogate models. 2025. arXiv:
+2501.18426 [cs.LG]. url: https://arxiv.org/abs/2501.18426.
+22
+
+
+REFERENCES
+Fisher et al
+[86]
+Laura L¨utzow et al. Zono-Conformal Prediction: Zonotope-Based Uncertainty Quantification
+for Regression and Classification Tasks. 2025. arXiv: 2508.11025 [cs.LG]. url: https:
+//arxiv.org/abs/2508.11025.
+[87]
+Abuzar Khan et al. “Smart sensing-enabled risk-aware nitrogen prescriptions via confor-
+mal profit bounds for precision agriculture”. In: Frontiers in Plant Science Volume 17 -
+2026 (2026). issn: 1664-462X. doi: 10.3389/fpls.2026.1821003. url: https://www.
+frontiersin.org/journals/plant-science/articles/10.3389/fpls.2026.1821003.
+[88]
+Sanbao Su et al. Collaborative Multi-Object Tracking with Conformal Uncertainty Propagation.
+2024. arXiv: 2303.14346 [cs.CV]. url: https://arxiv.org/abs/2303.14346.
+[89]
+Vladimir Vovk and Claus Bendtsen. “Conformal predictive decision making”. In: Proceedings
+of the Seventh Workshop on Conformal and Probabilistic Prediction and Applications. Ed. by
+Alex Gammerman et al. Vol. 91. Proceedings of Machine Learning Research. PMLR, Nov.
+2018, pp. 52–62. url: https://proceedings.mlr.press/v91/vovk18b.html.
+[90]
+Tian Bai et al. Multivariate Conformal Selection. 2025. arXiv: 2505.00917 [stat.ME]. url:
+https://arxiv.org/abs/2505.00917.
+[91]
+Tian Bai and Ying Jin. Conformal Selective Prediction with General Risk Control. 2026. arXiv:
+2603.24704 [stat.ME]. url: https://arxiv.org/abs/2603.24704.
+[92]
+Han Wang and Chao Ning. Conformal Prediction in The Loop: A Feedback-Based Uncertainty
+Model for Trajectory Optimization. 2025. arXiv: 2510.16376 [math.OC]. url: https://
+arxiv.org/abs/2510.16376.
+[93]
+Santiago Cortes-Gomez et al. Utility-Directed Conformal Prediction: A Decision-Aware Frame-
+work for Actionable Uncertainty Quantification. 2025. arXiv: 2410 . 01767 [cs.LG]. url:
+https://arxiv.org/abs/2410.01767.
+[94]
+Stefan Haas and Eyke H¨ullermeier. “Conformalized prescriptive machine learning for uncertainty-
+aware automated decision making: the case of goodwill requests”. In: International Jour-
+nal of Data Science and Analytics 20.3 (Sept. 2025), pp. 2061–2077. issn: 2364-4168. doi:
+10.1007/s41060-024-00573-2. url: https://doi.org/10.1007/s41060-024-00573-2.
+[95]
+Albert P. Bart´ok, Risi Kondor, and G´abor Cs´anyi. “On representing chemical environments”.
+In: Physical Review B 87 (18 May 2013), p. 184115. doi: 10.1103/physrevb.87.184115.
+url: http://dx.doi.org/10.1103/physrevb.87.184115.
+[96]
+Felix Musil et al. “Physics-Inspired Structural Representations for Molecules and Materials”.
+In: Chemical Reviews 121.16 (2021), pp. 9759–9815. doi: 10.1021/acs.chemrev.1c00021.
+[97]
+C. E. Rasmussen and C. K. I. Williams. Gaussian Processes for Machine Learning. the MIT
+Press, 2006. isbn: 026218253X. url: www.GaussianProcess.org/gpml.
+[98]
+M. Kennedy and A O’Hagan. “Predicting the Output from a Complex Computer Code When
+Fast Approximations Are Available”. In: Biometrika 87.1 (2000), pp. 1–13. doi: 10.1093/
+biomet/87.1.1.
+[99]
+E.V. Bonilla, K.M.A Chai, and C.K.I. Williams. “Multi-task Gaussian process prediction”.
+In: Advances in neural information processing systems. Ed. by J.C. Platt et al. Cambridge,
+Massachusetts: MIT Press, 2008, pp. 153–160.
+[100]
+G. Leen, J. Peltonen, and S. Kaski. “Focused multi-task learning in a Gaussian process frame-
+work”. In: Machine Learning 1-2 (89 2012), pp. 157–182. doi: 10.1007/s10994-012-5302-y.
+url: http://dx.doi.org/10.1007/s10994-012-5302-y.
+[101]
+G´abor Cs´anyi et al. “Expressive Programming for Computational Physics in Fortran 95+”.
+In: IoP Comput. Phys. Newsletter (2007), Spring 2007.
+[102]
+James R Kermode. “f90wrap: an automated tool for constructing deep Python interfaces to
+modern Fortran codes”. In: J. Phys. Condens. Matter (Mar. 2020). issn: 0953-8984, 1361-
+648X. doi: 10.1088/1361-648X/ab82d2.
+[103]
+Soohaeng Yoo Willow et al. Bayesian E(3)-Equivariant Interatomic Potential with Itera-
+tive Restratification of Many-body Message Passing. 2026. arXiv: 2510.03046 [cs.LG]. url:
+https://arxiv.org/abs/2510.03046.
+[104]
+Moritz Sch¨afer et al. “How to Train a Shallow Ensemble”. In: Journal of Chemical Theory
+and Computation 22.10 (May 2026), pp. 4939–4950. issn: 1549-9618. doi: 10.1021/acs.
+jctc.6c00310. url: https://doi.org/10.1021/acs.jctc.6c00310.
+23
+
+
+REFERENCES
+Fisher et al
+[105]
+Katharine E Fisher et al. Precise asymptotic analysis of Sobolev training for random feature
+models. url: https://arxiv.org/abs/2511.03050. 2025. arXiv: 2511.03050 [stat.ML].
+[106]
+Alex Smola and Peter Bartlett. “Sparse Greedy Gaussian Process Regression”. In: Advances in
+Neural Information Processing Systems. Ed. by T. Leen, T. Dietterich, and V. Tresp. Vol. 13.
+MIT Press, 2000. url: https://proceedings.neurips.cc/paper_files/paper/2000/
+file/3214a6d842cc69597f9edf26df552e43-Paper.pdf.
+[107]
+Leonard Kaufmann and Peter Rousseeuw. “Clustering by Means of Medoids”. In: Data Anal-
+ysis based on the L1-Norm and Related Methods (Jan. 1987), pp. 405–416.
+[108]
+Aleksandr Podkopaev and Aaditya Ramdas. Distribution-free uncertainty quantification for
+classification under label shift. 2021. arXiv: 2103.03323 [stat.ML]. url: https://arxiv.
+org/abs/2103.03323.
+[109]
+Ryan J. Tibshirani et al. Conformal Prediction Under Covariate Shift. 2020. arXiv: 1904.
+06019 [stat.ME]. url: https://arxiv.org/abs/1904.06019.
+[110]
+Asaf Gendler et al. “Adversarially Robust Conformal Prediction”. In: International Con-
+ference on Learning Representations. 2022. url: https://openreview.net/forum?id=
+9L1BsI4wP1H.
+[111]
+Jase Clarkson et al. Split Conformal Prediction under Data Contamination. 2025. arXiv:
+2407.07700 [stat.ML]. url: https://arxiv.org/abs/2407.07700.
+[112]
+Maxime Cauchois et al. “Robust Validation: Confident Predictions Even When Distributions
+Shift”. In: Journal of the American Statistical Association 119.548 (Feb. 2024), pp. 3033–
+3044. issn: 1537-274X. doi: 10.1080/01621459.2023.2298037. url: http://dx.doi.org/
+10.1080/01621459.2023.2298037.
+[113]
+Liviu Aolaritei et al. Conformal Prediction under Levy-Prokhorov Distribution Shifts: Robust-
+ness to Local and Global Perturbations. 2025. arXiv: 2502.14105 [stat.ML]. url: https:
+//arxiv.org/abs/2502.14105.
+[114]
+Tobin A. Driscoll and Richard J. Braun. Fundamentals of Numerical Computation. Philadel-
+phia, PA, USA: SIAM-Society for Industrial and Applied Mathematics, 2017. isbn: 1611975077.
+24
+
+
+Fisher et al
+A
+Hyperparameter settings
+Since our workflow combines several computational tools, we have multiple hyperparameter cate-
+gories:
+• SOAP hyperparameters: We set these hyperparamters based on best practices in literature [6,
+96] and previous experience [36]. The cutoff radius which defines atomic neighborhoods is set
+to 5 angstroms. Each atom is represented by a Gaussian function with variance 0.25. Finally,
+the spherical harmonics expansion is truncated according to nmax = 8 and ℓmax = 6.
+• Gaussian process kernel hyperparameters: We choose a polynomial kernel with exponent 4,
+which has been shown to be effective for Gaussian approximation potentials [4, 5, 6, 7]. The
+kernel function introduces hyperparameters variance v and normalization c in addition to the
+data noise standard deviation γ. Note that because the model’s predictive covariance Σ is
+rescaled by conformal calibration, the absolute scale of Σ does not impact our final predictions.
+Then, the predictive µ and Σ depend only on the composite scalar hyperparameter γ2/(cv).
+We find that the accuracy of the Gaussian process potential is sensitive to the scale of this
+parameter, but optimization of the precise value produces diminishing returns and risks overfit-
+ting. Consequently, we set aside a small optimization dataset of 20 configurations and perform
+a line search on powers of γ2/(cv) = 10a for a ∈{−12, . . . , 0, 1}, evaluating performance on
+energy prediction with leave one out cross validation. Ultimately, we find a = −8.
+• Multitask hyperparameters: In our examples, the bulk diamond configurations will inform the
+primary task, and the vacancy configurations will inform the secondary task. This designation is
+made because the primary tasks hyperparameters can be optimized independently; thus, we are
+able to reuse the optimal values already found for the bulk diamond configurations, as described
+above. For both tasks, we will use polynomial kernels with quartic exponents. Again noting
+that conformal calibration makes our results insensitive to the absolute scale of the predictive
+covariance, we find that the remaining hyperparameters are the ratio of primary and secondary
+kernel variance vp/vs and the correlation ϱs. Using the 20 configuration primary optimization
+set and 10 additional vacancy configurations set aside for secondary task optimization, we
+perform a 2-dimensional line search using leave one out cross validation. We find a narrow
+basin of low error for ϱs ≥0.95 and large vp/vs and a wide basin of low error about ϱs = 0.5
+and vp/vs ≈1. To avoid overfitting, we set vp/vs = 1 and ϱs = 0.55.
+• Finite difference hyperparameters: We will propagate uncertainty sets using a central difference
+approximation and must choose the step size. For one set of tests, we will use the differences
+of energies for perturbed configurations to predict stress, then use the differences of stresses
+to predict the elastic constant tensor for silicon. For another set of tests, we directly predict
+stress with a Gaussian process model, then apply a finite difference scheme to predict the
+elastic constant. Since each configuration has the same elastic constant and it is our target
+for prediction, we cannot optimize hyperparameters based on their performance predicting the
+elastic constant. Rather, we optimize based on error in stress prediction, using leave one out
+cross validation on the 20 configuration optimization set. To balance errors in an order m
+finite difference approximation, the step size should be chosen to be about 1/(m + 1) root of
+the surrogate error [114]. Since central difference is a second order approximation and the
+Gaussian process produces errors on order of 0.005 eV, we perform a line search of step sizes
+between 10−4 and 0.5. For our experiments, we choose step size 0.05, and in Appendix D, we
+present additional results for step size 0.01, another well performing value.
+• Conformal hyperparameters: The character of conformal sets is controlled by the tolerance
+α. Conformal risk control may introduce additional loss function parameters, including the
+upper bound B. In general, we will choose B to be some quantile of the calibration losses. We
+perform tests for a range of conformal parameters and present representative results.
+Overall, we aim to select hyperparameters using minimal data and to avoid overfitting.
+25
+
+
+Fisher et al
+B
+Additional results of synthetic experiment
+Figure 8.
+Synthetic propagation study: Full vector coverage of propagated conformal sets. Calibration is
+applied to a 100 dimensional vector, and sets are propagated via linear transformation dimension
+d ∈{5, 10, . . . , 95, 100}. Color indicates d, more brown is smaller and more blue is larger. Results are averaged over
+10 random propagation operators. The performance of component-wise conformal calibration is reported in the left
+column, and multivariate conformal results are in the right. ρ indicates the correlation of the covariates of the
+components of each vector which is calibrated.
+The results in Figure 8 complement those shown in Section 4.1. Specifically, we examine the
+coverage a propagated prediction set where the propagation dimension dQ varies from 5 to 100. The
+left column shows the performance of univariate conformal prediction, while the right column reports
+the results for multivariate methods. The propagated univariate conformal sets often fail to achieve
+the desired coverage level 1 −α. This effect is exacerbated for smaller covariate correlation ρ = 0.3
+or larger tolerance α. As α →0, the low tolerance forces the univariate conformal prediction sets to
+achieve high coverage, but the price is the larger volume sets reported in Figure 3. The propagated
+sets produced by multivariate conformal methods achieve the desired coverage, but as dQ descreases,
+these sets become increasingly conservative.
+Using propagation-corrected multivariate conformal prediction is expected to alleviate this conser-
+vatism. This approach provides a sharpness bound on the propagated set, but it requires knowledge
+of the propagation operator at the time of calibration. Figure 9 confirms that for all dQ consid-
+ered, the propagation-corrected approach produces sets that satisfy both the coverage and sharpness
+guarantees.
+For our synthetic tests, we have assumed that for both the calibration and testing data, the
+elements in each multivariate covariate have the same correlation level ρ.
+We now consider the
+case where there is ρ = 0 correlation in the covariate elements for the calibration set and ρ = 0.99
+correlation in the covariate elements of the test set. These settings represent an extreme case, but
+we do expect some disparity in the correlation of our calibration and test sets for our elastic constant
+experiment. This disparity arise because the test set is created by applying small perturbations to the
+geometry of one system, and the difference in geometry of any two calibration structures is larger than
+this perturbation. In Figure 10, we see that the propagated sets achieve the desired coverage level
+but are consistently over-conservative. This effect occurs for both the basic (a) and propagation-
+corrected (b) forms of multivariate conformal prediction.
+The misspecification in calibration set
+covariance reduces the difference in performance between the two methods.
+26
+
+
+Fisher et al
+Figure 9.
+Synthetic propagation study: Full vector coverage of multivariate conformal calibration with
+propagation correction. As in Figure 8, calibration is performed on a 100 dimensional vector which propagated into
+space with dimension d ∈{5, 10, . . . , 95, 100}.
+C
+Additional results of energy and force calibration
+Conformal risk control guarantees that the average loss of our prediction sets will be bounded, as
+shown in (16).
+Figure 11 verifies these guarantees for the experiments presented in Section 4.3.
+The subfigures correspond to different user defined loss functions: the 1 norm loss and quantile
+loss, respectively. In both cases, we see that the empirical expectation of the loss—calculated over
+random draws of the train, calibration, and test sets—closely tracks the tolerance α. Deviation from
+the x = y reference line likely occurs due to the finite size of the calibration dataset.
+Conformal risk control also includes an additional hyperparameter when compared with conformal
+prediction: the upper bound B of the loss function. In the main text, this hyperparameter is set to
+0.95 of the maximum loss value achieved on the calibration dataset. To show the insensitivity of our
+results to this choice, Figure 12 reproduces the experiment with B set to 0.8 of the maximum loss
+value achieved on the calibration dataset.
+D
+Additional results of elastic constant prediction
+Table 1 records the accuracy of the elastic constant predictions made by our Gaussian process model.
+As described in Section 4.4, we apply perturbations to the geometry of a silicon diamond structure
+and the resulting properties to build finite difference approximations to elastic constant components.
+We consider one case where the input to the finite difference approximation is the energy of each
+perturbed system and a second case where the inputs are virial stresses. The choice of perturbations
+lead us to predict the three unique components of silicon’s elastic constant tensor (C11, C12,C44) in
+addition to redundancies and zero components (C21 = C12, C45 = C54 = 0). We report the error
+of all size predicted values for both the energy and stress based workflows. The relative error is
+reported for all components with a nonzero reference (C11, C12, C21, C44). For the zero components
+(C45, C54) report absolute error in units of eV/˚A3. We note that the main purpose of work is to
+evaluate an uncertainty quantification workflow and not to propose a state of the art approach to
+prediction, so reasonable accuracy suffices for our purposes.
+In the main text, Figure 6 reports the performance of prediction sets propagated into the space
+of the three nontrivial elastic constant components (C11, C12,C44). Figure 13 reports the coverage
+and volume of the conformal sets propagated into the space of all six predicted elastic constant
+components. In this case, the multivariate and Bonferroni-corrected approaches do not achieve the
+guaranteed coverage level for all α. We attribute this behavior to the challenges discussed in Section 5.
+The univariate conformal approach still leads to systematically lower coverage than the competing
+approaches. Notably, in the energy based example, even while the multivariate approach leads to
+prediction sets with greater coverage than the univariate approach, it also systematically produces
+sets with smaller volume. We emphasize that the volume ratio reported in Figure 13 standardized by
+taking the root of the prediction dimension, so the true volume ratios reach O(1000). This extreme
+difference in volume likely occurs because multivariate conformal prediction leverages covariance
+27
+
+
+Fisher et al
+Figure 10.
+Synthetic propagation study: Coverage post-propagation when the calibration data set has
+uncorrelatd covariates, and the test set has highly correlated (ρ = 0.99) covariates. As in Figure 8, calibration is
+performed on a 100 dimensional vector which propagated into space with dimension d ∈{5, 10, . . . , 95, 100}. (a):
+performance of multivariate conformal prediction. (b): multivariate conformal prediction with propagation
+correction.
+Figure 11.
+Energy and atomic force calibration: verification that multivariate conformal risk control achieves
+guaranteed loss bounds for tolerance α. (a): loss attained by the risk control applied with loss based on the ℓ1 norm
+of the score vector. (b): risk control based on the 0.9 quantile of the score vector. The x = y line is dotted in gray.
+information to identify symmetries (such as C12 = C21) in our quantity of interest.
+While our primary interest is the multivariate coverage of our propagated prediction sets, we can
+also evaluate univariate coverage by projecting to one dimension. Figure 14 shows the univariate
+coverage on the vector [C11, C12, C44] achieved by the conformal methods for both the energy and
+stress based workflows. As expected, the multivariate conformal approach consistently achieves high
+univariate coverage. This effect may be exacerbated because the components that the multivariate
+sets are most likely to miscover (C45 = C54 = 0) are excluded from this test. The univariate method
+is expected to produce univariate coverage close to 1 −α. While it achieves this guarantee in the
+stress based example, in falls short in the energy based example, likely due to the approximation
+limitations discussed in Section 5.
+As documented in Appendix A, our workflow relies on many hyperparameters. In particular,
+our exploration of the finite difference step size suggest that a range of values may work well in
+practice.
+For most of our results, we use a step size of 0.05 angstrom, but we also repeat our
+energy based experiments using a step size of 0.01 angstroms. The accuracy is reported in Table 2,
+and the coverage and volume ratios are shown in Figure 15.
+The left column shows results for
+all six predicted components of the elastic constant, while the right column describes only the three
+nontrivial components. The coverage of multivariate conformal prediction sets is reduced in this case
+compared with our other experiments and the expected guarantee. Section 5 discuss the balance of
+errors which is likely responsible for this behavior.
+We also repeat our energy based experiments for Si54 rather than Si16. In practice, the elastic
+28
+
+
+Fisher et al
+Figure 12.
+Energy and atomic force calibration: Replication of Figure 12 for upper bound on loss function
+set to the 0.8 quantile of the calibration scores rather than the 0.95 quantile. Relationship between component-wise
+coverage, full vector coverage, and set volume for univariate (gold triangles) and multivariate (purple circles)
+conformal prediction as well as conformal risk control with 1-norm (turquoise stars) and quantile (green squares)
+loss. Both calibration and test datasets contain systems of multiple sizes. Consequently, in the test set, vectors
+containing the global energy and all atomic forces for a system take on dimensions d ∈{49, 163, 385}.
+Table 1. Propagation to elastic constant uncertainty: Relative error of elastic constant predictions against
+DFT reference. Note: the true value of C45 = C54 is 0, so absolute error is reported for these quantities. The 0.25,
+0.5, 0.75 quantiles are taken across 100 random draws of the training and calibration sets from silicon diamond
+configurations with {2, 16, 54, 128} atoms. The top sets are obtained with a finite difference approximation of the
+second derivative of energy, and the bottom results are an approximation of the first derivative of virial stress.
+Geometric relaxation, energy, and stress prediction were preformed with a GP model. For these results the finite
+difference step sizes are set to 0.05 angstrom.
+quantiles
+0.25
+0.5
+0.75
+via energy
+C11
+0.142154
+0.32009
+0.810568
+C12
+0.366259
+2.22343
+2.95303
+C21
+0.151435
+0.395372
+2.79784
+C45
+0.0007689
+0.00196889
+0.00340531
+C54
+0.000624246
+0.00163359
+0.00289075
+C44
+0.123629
+0.315627
+0.57253
+via stress
+C11
+0.238593
+0.3784
+0.569042
+C12
+0.204968
+0.39699
+0.625762
+C21
+0.205036
+0.397864
+0.632561
+C45
+0.00134252
+0.00268628
+0.00459271
+C54
+0.000856786
+0.00167998
+0.00299521
+C44
+0.0455208
+0.100135
+0.19318
+constant should be computed using only the smaller system, as the constant is the same for all system
+sizes, and predictions for larger systems are more computationally expensive. We perform this test
+to establish that our prediction set performance is similar in both cases. We report the error of our
+predictions of the elastic constant in Table 3 and show the coverage and volume in Figure 16. We
+see qualitatively similar behavior to our previous experiments on Si16. The multivariate conformal
+method produces prediction sets with greater coverage than the univariate method. The left column
+shows results for all six predicted components of the elastic constant, while the right column describes
+only the three nontrivial components. For six dimensional prediction, the multivariate prediction sets
+do not achieve the guaranteed coverage but manage to produce prediction sets considerably smaller
+than the univariate prediction sets. For the nontrivial components, the multivariate prediction sets
+achieve the coverage guarantee for almost all values of α. We attribute this difference in behavior
+depending on target dimension to the difficulty of covering the zero components (C45, C54).
+29
+
+
+Fisher et al
+Figure 13.
+Propagation to elastic constant uncertainty: Results from the experiment presented in Figure 6.
+Here we consider only the projection into elastic constant space preformed by the finite difference approximation
+with no further projection step to isolate the non-redundant, nonzero components. As a result, the prediction sets
+described in these plots are 6 dimensional, rather than 3 dimensional. Left column: elastic constant computed as a
+second derivative of GP energy predictions. Right column: elastic constant computed as a first derivative of GP
+stress predictions. Conformal methods: univariate (gold triangles), univariate with Bonferroni correction (red +s),
+multivariate (purple xs). Top row: full vector coverage for tolerance α. Bottom row: ratio (corrected for d = 6) of
+univariate sets size (gold triangles) as well as Bonferroni-corrected size (red +s) to multivariate set size.
+Figure 14.
+Propagation to elastic constant uncertainty: Results from the experiment presented in Figure 6.
+Here, we present the coverage of each component of the final 3 dimensional prediction for the elastic constant. (a):
+elastic constant computed as a second derivative of GP energy predictions. (b): elastic constant computed as a first
+derivative of GP stress predictions. Conformal methods: univariate (gold triangles), univariate with Bonferroni
+correction (red +s), multivariate (purple xs).
+30
+
+
+Fisher et al
+Table 2. Propagation to elastic constant uncertainty: Replication of results shown for elastic constant
+prediction via energy in Table 1 with the finite difference step sizes are set to 0.01 angstroms.
+quantiles
+0.25
+0.5
+0.75
+via energy
+C11
+0.0554215
+0.121471
+0.17805
+C12
+0.230013
+0.358458
+0.531036
+C21
+0.178043
+0.301457
+0.444404
+C45
+0.00716034
+0.016069
+0.0411496
+C54
+0.00524922
+0.0184795
+0.0337626
+C44
+0.18665
+0.257848
+0.331342
+Figure 15.
+Propagation to elastic constant uncertainty: Replication of energy based results presented in
+Figures 6 and 13 with finite difference step size set to 0.01 angstrom. These results correspond to the error reported
+in Table 2. Left column: coverage and volume comparison for 3 dimensional elastic constant prediction. Right
+column: results for final 6 dimensional elastic constant prediction. Top row: full vector coverage for tolerance α.
+Bottom row: ratio (corrected for d = 6) of univariate sets size to multivariate set size.
+Table 3. Propagation to elastic constant uncertainty: Replication of results shown for elastic constant
+prediction via energy in Table 1 for a diamond silicon configuration with 54 atoms rather than 16.
+quantiles
+0.25
+0.5
+0.75
+via energy
+C11
+0.130652
+0.333228
+0.633059
+C12
+0.10643
+0.246696
+0.450938
+C21
+0.111804
+0.241559
+0.418278
+C45
+0.000138352
+0.000262387
+0.000460765
+C54
+0.000145068
+0.000277879
+0.000521586
+C44
+0.205293
+0.342873
+0.460263
+31
+
+
+Fisher et al
+Figure 16.
+Propagation to elastic constant uncertainty: Replication of energy based results presented in
+Figures 6 and 13 for a diamond silicon configuration with 54 atoms rather than 16. These results correspond to the
+error reported in Table 3. Left column: coverage and volume comparison for 6 dimensional elastic constant
+prediction. Right column: results for final 3 dimensional elastic constant prediction. Top row: full vector coverage
+for tolerance α. Bottom row: ratio (corrected for d = 6) of univariate sets size to multivariate set size.
+32
+
+
+Fisher et al
+E
+Additional results of vacancy formation energy prediction
+Table 4 reports the error distribution of the vacancy formation energy predictions used for our main
+text results in Section 4.5.
+For Figure 7 and Table 4, we trained our surrogate using 350 bulk
+configurations. In Figure 17, we demonstrate that the conformal prediction methods show similar
+qualitative behavior for a training set of 150 training configurations.
+Table 4. Propagation to vacancy formation energy: Relative error of vacancy formation energy predictions
+against DFT reference. The 0.25, 0.5, 0.75 quantiles are taken across 100 random draws of the training and
+calibration sets from silicon diamond configurations with {2, 16, 54, 128} atoms. Calibration is performed in the
+space of the bulk configuration and vacancy energies and propagated to their scaled difference.
+quantiles
+0.25
+0.5
+0.75
+0.0369428
+0.0796825
+0.140459
+Figure 17.
+Propagation to vacancy formation energy uncertainty: Replication of results from Figure 7
+where the multitask dataset is trained with only 150 configurations to inform the primary task, rather than 350. (a):
+coverage of propagated conformal sets produced by univariate (gold triangles), Bonferroni-corrected univariate (red
++s), multivariate (purple xs), and projection corrected multivariate (turquoise stars) approaches at tolerance α. The
+y = x line is dotted in gray. (b): Gold triangles mark the ratio between univariate and multivariate prediction
+interval length. Red +s compare Bonferroni-corrected univariate to the projection corrected multivariate method. A
+dotted horizontal line marks a ratio of 1. (c): the comparison in volume ratio is repeated for univariate methods
+compared against the multivariate approach with propagation-corrected scores. Ribbons shade the region between
+the 0.25 and 0.75 quantiles. Results are obtained from 25 randomly drawn training and calibration sets for each of
+55 silicon configurations.
+33
