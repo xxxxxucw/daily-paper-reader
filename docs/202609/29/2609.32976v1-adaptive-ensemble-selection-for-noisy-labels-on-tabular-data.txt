@@ -1,0 +1,1221 @@
+Adaptive Ensemble Selection for Noisy Labels on Tabular Data
+Faizaan Ali
+Rensselaer Polytechnic Institute
+Troy, New York, USA
+alif2@rpi.edu
+Inwon Kang
+Rensselaer Polytechnic Institute
+Troy, New York, USA
+kangi@rpi.edu
+Oshani Seneviratne
+Rensselaer Polytechnic Institute
+Troy, New York, USA
+senevo@rpi.edu
+Abstract
+Incorrect or corrupted labels in tabular datasets can significantly
+degrade supervised learning performance, particularly when misla-
+beling is subtle and not easily detectable from feature space alone.
+In the context of automated or AI-augmented data science work-
+flows, robust detection of such label noise is critical for building
+reliable models. We propose a data-centric reasoning module for AI
+data science systems that automatically diagnoses dataset quality
+and selects appropriate cleaning strategies. Given a dataset, a meta-
+model predicts weights over a diverse set of detectors, including
+confidence-based, neighborhood-based, and distributional methods.
+Across benchmark datasets with controlled noise, our approach
+achieves performance comparable to a Confident Learning baseline
+on average, with dataset-dependent gains and losses, particularly in
+heterogeneous regimes. We further show that detector effectiveness
+is systematically linked to dataset properties. These results demon-
+strate the value of descriptor-driven, data-centric ensembling as a
+component of AI-assisted data-science pipelines for robust dataset
+assessment and model reliability.
+CCS Concepts
+• Computing methodologies →Ensemble methods; Intelligent
+agents; • Information systems →Data cleaning.
+Keywords
+Label Noise Detection, Meta-Learning, Dataset Descriptors, Adap-
+tive Ensembling, Data-Centric AI, Confident Learning
+1
+Introduction
+Label noise is a fundamental challenge in supervised learning, aris-
+ing when observed target labels do not reflect the true underlying
+class of an instance. Such noise can result from annotation errors,
+ambiguous labeling guidelines, or class overlap. In automated or
+AI-augmented data science workflows, mislabeled examples dis-
+torts model objectives, leading to incorrect pattern learning and
+degraded generalization. This challenge is especially pronounced
+in tabular data, where heterogeneous features lack the spatial or
+semantic structure present in vision or language tasks. Mislabeled
+instances often occur near class boundaries or in sparsely populated
+regions, making them difficult to distinguish from genuinely hard
+examples [9].
+A variety of label noise detection methods exist, including confidence-
+based filtering [9], nearest-neighbor consistency [3], and probabilis-
+tic approaches, such as Confident Learning [10]. However, prior
+work [3, 9] demonstrates that no single method is universally op-
+timal. Detector performance depends strongly on dataset char-
+acteristics, such as class imbalance, feature dimensionality, and
+distributional properties.
+In this work, we adopt a data-centric, meta-learning perspective
+aligned with AI data science systems: can label noise detection be
+dynamically adapted to the dataset itself? We propose an adaptive
+ensemble framework where a meta-model maps dataset descriptors
+to weights over a diverse set of detectors, enabling dynamic aggre-
+gation tailored to the underlying data regime. This approach can be
+viewed as an automated, intelligent module that augments human
+data scientists or AI data science systems in evaluating dataset
+quality and improving model reliability. This meta-model can be
+integrated with LLM-based agents that extract dataset descriptors
+or reason about cleaning strategies.
+We evaluate the approach on benchmark tabular datasets with
+controlled noise and demonstrate performance that is competi-
+tive with the baseline, with dataset-dependent gains and losses.
+Further analysis reveals that detector performance correlates sys-
+tematically with dataset properties, and that the meta-model learns
+interpretable weighting strategies aligned with these relationships.
+Our contributions are:
+• We formulate label noise detection as a meta-learning prob-
+lem over dataset descriptors, enabling adaptive, dataset-
+aware decision-making.
+• We propose an adaptive ensemble that dynamically weights
+complementary detectors, suitable for integration into AI-
+assisted data-science pipelines.
+• We show that descriptor-driven ensembling can improve
+robustness in some dataset and noise regimes.
+• We provide empirical and interpretable evidence linking
+dataset properties to detector effectiveness, offering in-
+sights for intelligent system design in data science work-
+flows.
+2
+Related Work
+The problem of identifying mislabeled data has been widely stud-
+ied in the context of improving dataset quality and downstream
+model performance [3, 10, 15]. Nazaretyan et al. [9] systematically
+benchmark label-error detection methods for tabular data, including
+classifier-, neighborhood-, and ensemble-based approaches. Their
+results show that no single method consistently dominates across
+datasets and noise conditions, and that mislabeled instances often
+lie in the fringe near class boundaries, motivating the use of local
+inconsistency and confidence-based signals. Early work by Reb-
+bapragada et al. [12] introduced active label correction, in which
+likely errors are iteratively selected for expert review.
+More recent work by Northcutt et al. [10] introduces the Confi-
+dent Learning framework, which estimates the joint distribution
+between noisy and latent true labels using out-of-sample predicted
+probabilities. Confident Learning enables principled identification
+and ranking of mislabeled instances and has become a widely
+arXiv:2609.32976v1  [cs.LG]  26 Sep 2026
+
+
+Ali, Kang and Seneviratne
+adopted baseline through its Cleanlab implementation due to its
+strong empirical performance and ease of integration.
+Despite these advances, both benchmarking studies [9] and prob-
+abilistic approaches [10] highlight a key limitation: detector effec-
+tiveness is highly dependent on dataset characteristics, such as
+class imbalance, feature structure, and noise type. Supporting this
+observation, Srikanth et al. [15] show that even strong pipelines
+built on Confident Learning vary significantly across datasets and
+noise regimes. Furthermore, Garcia et al. [3] demonstrate that het-
+erogeneous ensemble-based filtering strategies based on majority
+consensus can improve robustness but exhibit inconsistent gains
+across settings.
+These findings underscore a central challenge: no single detector
+or fixed aggregation strategy performs reliably across heteroge-
+neous datasets. In contrast, our work models detector selection as
+a function of dataset-level characteristics, learning to adaptively
+weight detectors based on meta-features to better capture this vari-
+ability.
+The present work also builds on broader data-centric and task-
+adaptive approaches to tabular learning. Seneviratne et al. frame
+data excellence as a first-class requirement for data-centric AI [14]
+and examine explanation-driven quality assessment in rule-based
+systems [13]. Kang et al. study representation learning and bench-
+marking for tabular data distillation, emphasizing the heterogeneity
+of tabular features and downstream learners [4]. More recently, they
+use handcrafted task descriptors in a meta-learner that adapts soft-
+max calibration across few-shot tabular classification tasks [5]. Our
+setting differs in its objective: rather than adapting a classifier or a
+distilled representation, we learn dataset-conditioned weights over
+label-error detectors. These works nevertheless motivate the use of
+dataset descriptors to adapt data-processing and learning strategies
+across heterogeneous tabular regimes.
+3
+Methodology
+3.1
+Problem Formulation
+Let D = {(x𝑖,𝑦𝑖)}𝑁
+𝑖=1 be a classification dataset where each label
+𝑦𝑖∈{1, . . . ,𝐶} may have been corrupted by an unknown noise
+process. We define a label noise detector as a function 𝑓: (X, y) →
+s ∈[0, 1]𝑁that assigns a scalar suspicion score to every sam-
+ple, where higher values indicate a greater likelihood of misla-
+beling. These scores may represent probabilities or normalized
+anomaly measures depending on the detector. Given a portfolio of
+𝐾detectors F = {𝑓1, . . . , 𝑓𝐾}, our goal is to learn a meta-function
+𝑔: 𝜙(D) →w ∈R𝐾that maps dataset-level meta-features 𝜙(D)
+to a non-negative weight vector satisfying Í𝐾
+𝑘=1 𝑤𝑘= 1. The result-
+ing ensemble score is given by s∗= Í𝐾
+𝑘=1 𝑤𝑘𝑓𝑘(X, y), which aims
+to maximize detection performance across diverse dataset regimes.
+3.2
+Fringe-Based Noise Injection
+To generate controlled ground-truth noise for meta-model training,
+we adopt a fringe-based injection strategy as shown in Algorithm 1
+rather than using uniform random label flipping. The motivation is
+that real-world annotation errors are disproportionately concen-
+trated near decision boundaries, where examples are ambiguous
+and annotators are least confident [9].
+Algorithm 1 Fringe-Based Label Noise Injection
+Require: Feature matrix X ∈R𝑁×𝑑, labels y ∈C𝑁, noise rate 𝜀
+Ensure: Noisy labels y′, flipped index set F𝜀
+1: 𝑁←|y|
+2: Standardize features: Xs ←StandardScaler(X)
+3: Encode labels to integers
+4: Train logistic regression classifier on (Xs, y)
+5: Compute class probabilities 𝑃(𝑦| x𝑖) for each sample
+6: Compute self-confidence scores 𝑝𝑖= 𝑃(𝑦𝑖| x𝑖)
+7: 𝑛←⌊𝑁· 𝜀⌋
+8: F𝜀←indices of the 𝑛smallest 𝑝𝑖
+9: y′ ←y
+10: for each 𝑖∈F𝜀do
+11:
+Sample 𝑦′
+𝑖uniformly from {𝑐∈C | 𝑐≠𝑦𝑖}
+12: end for
+13: return y′, F𝜀
+For a given noise rate 𝜀∈(0, 1), we first fit a logistic regres-
+sion model on the standardized feature matrix X and extract the
+predicted probability 𝑝𝑖= ˆ𝑃(𝑦𝑖| x𝑖) for each sample under its
+current label. Let 𝑁= |D| denote the number of samples. The
+⌊𝑁· 𝜀⌋samples with the lowest confidence scores (i.e., assigned
+the lowest observed-label confidence) form the fringe set F𝜀. Each
+sample 𝑖∈F𝜀has its label replaced by a class drawn uniformly
+at random from the remaining classes. The set of flipped indices
+is retained as the ground-truth noise mask for evaluation. We ap-
+ply this procedure uniformly across both meta-model training and
+benchmarking at noise rates 𝜀∈{0.05, 0.10, 0.20, 0.30, 0.40, 0.50}.
+The noise rate 𝜀specifies the fraction of samples that are selected
+for label flipping from the lowest-confidence fringe. It does not
+imply that every sample has an independent probability 𝜀of be-
+ing corrupted. Consequently, the corruption sets are nested: as 𝜖
+increases, they expand from the lowest-confidence region.
+3.3
+Label Noise Detector Suite
+To identify mislabeled samples, we assemble a diverse suite of eight
+complementary detectors, each reflecting a distinct inductive bias
+about what constitutes a suspicious label. Our goal is for the ensem-
+ble to capture multiple facets of label noise: some detectors exploit
+model uncertainty (low-confidence predictions), others measure
+local or global consistency (neighbor or graph agreement), and
+others detect distributional anomalies that may indicate outliers.
+By combining different approaches, the suite balances sensitivity to
+subtle mislabeling with robustness against spurious signals. Next,
+we describe each detector in detail, highlighting their assumptions,
+mechanisms, and key hyperparameters.
+3.3.1
+Out-of-Fold Confidence Detectors. Three supervised classi-
+fiers, logistic regression (logreg_conf), random forest (rf_oof),
+and histogram-based gradient boosting (gb_conf), are each trained
+under stratified 𝐾-fold cross-validation (𝐾= 3). For each held-out
+fold, predicted class probabilities are recorded, and the per-sample
+suspicion score is defined as 𝑠𝑖= 1 −ˆ𝑃(𝑦𝑖| x𝑖) capturing the
+idea that a consistently low posterior under the observed label is
+evidence of mislabeling. To mitigate within-fold overfitting, we
+apply ℓ2 regularization (𝐶=0.5) to the logistic regression, enforce
+
+
+Adaptive Ensemble Selection for Noisy Labels on Tabular Data
+min_samples_leaf=3 in the random forest, and use ℓ2 regulariza-
+tion with early stopping in the gradient boosting model.
+3.3.2
+K-Nearest Neighbor Inconsistency. The KNN detector trains
+a 𝐾-nearest neighbor classifier (𝐾=15) on the full dataset and flags
+samples where the predicted label disagrees with the observed label.
+This yields a binary suspicion score that captures local neighbor-
+hood inconsistency without requiring a held-out partition.
+3.3.3
+Density-Based Anomaly Detectors. Two unsupervised, label-
+agnostic detectors capture distributional outliers. Isolation For-
+est [7] partitions the feature space via random axis-aligned splits
+and assigns anomaly scores based on the mean path length required
+to isolate a sample. Local Outlier Factor [2] computes the ratio of a
+sample’s local reachability density to that of its 𝐾-nearest neighbors
+(𝐾=20), flagging samples that reside in regions significantly less
+dense than their surroundings. Both detectors return binary flags
+(1 for anomaly, 0 otherwise).
+3.3.4
+Graph-Based Label Propagation. The Label Propagation de-
+tector exploits semi-supervised learning principles to identify labels
+that are inconsistent with the graph structure of the feature space.
+A 𝑘-nearest neighbor graph (𝑘=15) is constructed over the standard-
+ized features, and a Label Spreading model [16] propagates label
+information across graph edges with a clamping parameter 𝛼=0.2,
+allowing labels to diffuse smoothly through connected regions. For
+each sample, the detector computes the discrepancy between the
+observed label and the graph-smoothed posterior distribution:
+𝑠𝑖= 1 −˜𝑃(𝑦𝑖| x𝑖, G),
+(1)
+where ˜𝑃denotes the propagated label distribution and G is the
+feature-space graph. This approach is particularly effective when
+mislabeled samples reside in neighborhoods dominated by a differ-
+ent class, as the graph consensus overrides the corrupted observa-
+tion.
+3.3.5
+Confident Learning as a Detector. We additionally include
+Confident Learning [10] as an individual detector within the en-
+semble. Using out-of-sample predicted probabilities from stratified
+cross-validation, Confident Learning produces per-sample label
+quality estimates 𝑞𝑖∈[0, 1] based on normalized prediction mar-
+gins.
+To align with the rest of our framework, we convert these into
+suspicion scores via
+𝑠𝑖= 1 −𝑞𝑖.
+(2)
+This allows Confident Learning to function both as a strong
+standalone baseline (Section 3.6) and as a complementary signal
+within the ensemble.
+3.4
+Dataset Meta-Features
+To capture relevant characteristics of each dataset, we summarize it
+using a 19-dimensional descriptor vector 𝜙(D) ∈R19, grouped into
+four categories. These meta-features are designed to provide the
+label noise detectors with information about class structure, feature
+geometry, distributional properties, and signal strength, which can
+all influence the detectability of mislabeled samples.
+Class distribution (4 features): The number of classes 𝐶, the
+proportion of the majority class, the Shannon entropy of the class
+labels, and the imbalance ratio (maximum-to-minimum class count).
+These features describe the overall label balance, which can affect
+how easily a mislabeled point stands out: for example, noise in a
+highly imbalanced dataset may be harder to detect without consid-
+ering the class proportions.
+Dataset geometry (3 features): The number of features 𝑑, the
+log-transformed sample count log(1+𝑁), and the sample-to-feature
+ratio 𝑁/𝑑. These geometric properties inform the model about
+dataset scale and dimensionality, helping to contextualize distances,
+sparsity, and density estimates used in neighbor- and graph-based
+detectors.
+Feature statistics (7 features): The mean feature variance, frac-
+tion of near-constant features (variance <10−5), sparsity (fraction
+of zero entries), mean absolute skewness, and pairwise correlation
+statistics (mean, maximum, and fraction of correlations |𝜌| > 0.8).
+These statistics highlight the structure and redundancy in the fea-
+ture space: for example, highly correlated or near-constant features
+may reduce effective dimensionality, affecting detectors that rely
+on distances or density.
+Signal structure (5 features): The between-class/within-class
+variance ratio; the explained-variance ratios of the first three prin-
+cipal components; and their cumulative explained variance.
+All features are sanitized by replacing NaN and infinite values
+with zero prior to model input. By providing this mixture of de-
+scriptive statistics and structure-aware metrics, the meta-features
+give the label noise detectors a richer understanding of the dataset,
+improving their ability to identify subtle mislabeling patterns.
+3.5
+Meta-Model Architecture and Training
+Objective
+Given a dataset descriptor 𝜙(D), the meta-model predicts a set of
+weights over the base detectors. These weights reflect the relative
+reliability of each detector for the dataset at hand, enabling the
+ensemble to adapt to different data regimes. In essence, the meta-
+model learns to reason about which detectors are likely to be most
+effective, based on dataset-level characteristics, without requiring
+access to the ground-truth labels at inference time.
+3.5.1
+Architecture. The meta-model 𝑔𝜃is a two-layer feed-forward
+network. Let x ∈R𝑑𝜙denote the input descriptor vector (i.e., the
+output of 𝜙(D)). The network computes:
+𝑔𝜃(x) = W2 ReLU(W1x + b1) + b2,
+(3)
+where
+• W1 ∈R64×𝑑𝜙and b1 ∈R64 are the weight matrix and bias
+vector of the first layer,
+• W2 ∈R𝐾×64 and b2 ∈R𝐾are the weight matrix and bias
+vector of the second layer,
+• 𝐾is the number of label noise detectors in the ensemble,
+• 𝑑𝜙= 𝑑in and 𝐾= 𝑑out.
+The output logits 𝑔𝜃(x) are converted to a probability vector
+over detectors using softmax normalization:
+w = softmax(𝑔𝜃(x)),
+(4)
+so that Í𝐾
+𝑘=1 𝑤𝑘= 1 and 𝑤𝑘represents the predicted importance of
+detector 𝑘for the given dataset.
+
+
+Ali, Kang and Seneviratne
+Algorithm 2 Meta-Training Data Generation
+Require: Benchmark dataset collection D = {D1, . . . , D𝐽}, detec-
+tor set F = {𝑓1, . . . , 𝑓𝐾}, noise rates set E, empty training pair
+list T ←[]
+Ensure: Meta-training pairs T
+1: for each dataset D𝑗∈D do
+2:
+Compute dataset descriptor 𝜙(D𝑗)
+3:
+for each noise rate 𝜀∈E do
+4:
+Generate noisy dataset ˜D𝑗using Algorithm 1
+5:
+for each detector 𝑓𝑘∈F do
+6:
+Train 𝑓𝑘on ˜D𝑗
+7:
+Compute detector suspicion scores s𝑘
+8:
+Evaluate ROC-AUC 𝑎𝑘with the ground-truth noise
+mask
+9:
+end for
+10:
+Append (𝜙( ˜D𝑗), a) to T
+11:
+end for
+12: end for
+13: return T
+3.5.2
+Pairwise Ranking Loss. The meta-model predicts detector log-
+its ˆw = 𝑔𝜃(x), which are converted to weights via w = softmax( ˆw).
+The detector ROC-AUC values a(𝑚) ∈R𝐾for dataset 𝑚serve as
+supervision targets, where 𝑎(𝑚)
+𝑖
+is the performance of detector 𝑖.
+We train the meta-model using a pairwise ranking loss, which
+penalizes disordered pairs of detectors:
+L =
+1
+𝐾(𝐾−1)
+∑︁
+𝑖≠𝑗
+E𝑚
+h
+max
+
+0, margin
+−sgn(𝑎(𝑚)
+𝑖
+−𝑎(𝑚)
+𝑗
+) · ( ˆ𝑤(𝑚)
+𝑖
+−ˆ𝑤(𝑚)
+𝑗
+)
+i
+.
+(5)
+Intuitively, the loss minimizes the number and severity of rank
+inversions: it encourages detectors with higher ROC-AUC values to
+receive higher predicted logits than weaker detectors. This aligns
+the learned weights with relative detector quality without directly
+predicting raw ROC-AUC values.
+3.5.3
+Training Protocol. The meta-model is trained for 150 epochs
+with Adam (lr = 5×10−3) using instances from OpenML-CC18 [1],
+with up to six per dataset (one per noise rate). Datasets with fewer
+than two classes are discarded. Features are standardized, and
+datasets are stratified and subsampled to at most 1,000 examples
+to preserve class balance. Meta-training pairs are constructed by
+simulating noisy datasets and benchmarking detector performance
+across data regimes (Algorithm 2), and are then used to train a
+meta-model that predicts dataset-dependent detector weights for
+adaptive ensembling at inference (Algorithm 3).
+3.6
+Baseline: Confident Learning
+As our primary baseline, we employ the Confident Learning frame-
+work implemented in the modern cleanlab library [10]. Confident
+Learning estimates the probability that an observed label is correct
+by leveraging cross-validated model predictions and the structure of
+the label noise distribution. Rather than explicitly implementing the
+Algorithm 3 Meta-Model Training and Inference
+Require: Meta-training pairs T, detector set F = {𝑓1, . . . , 𝑓𝐾},
+target dataset D
+Ensure: Final ensemble suspicion scores s∗
+1: Meta-Model Training
+2: Initialize meta-model 𝑔𝜃
+3: for each (x, a) ∈T do
+4:
+Compute predicted logits ˆw = 𝑔𝜃(x) (Eq. 3)
+5:
+Compute pairwise ranking loss with ˆw and a (Eq. 5)
+6:
+Update 𝑔𝜃via gradient step
+7: end for
+8: Inference on Target Dataset
+9: Extract descriptor x = 𝜙(D)
+10: Compute detector weights w = softmax(𝑔𝜃(x))
+11: for each detector 𝑓𝑘∈F do
+12:
+Train detector 𝑓𝑘on D and compute suspicion score 𝑠𝑘
+13: end for
+14: Compute ensemble score s∗= Í𝐾
+𝑘=1 𝑤𝑘𝑠𝑘
+15: return s∗
+original pruning-based pipeline, we follow the recommended scor-
+ing interface provided in Cleanlab v2, which produces continuous
+label-quality scores suitable for ranking-based evaluation.
+First, out-of-sample predicted probabilities ˆ𝑃(𝑦| x) are esti-
+mated using stratified cross-validation with multinomial logistic
+regression. This produces a matrix of predicted probabilities for
+each example across all classes while avoiding training-set leakage.
+These probabilities are then passed to the Cleanlab ranking proce-
+dure, which computes per-example label quality scores based on
+the normalized margin criterion.
+The normalized margin measures the difference between the
+probability assigned to the observed label and the highest probabil-
+ity assigned to any alternative class. Intuitively, examples whose
+observed label receives substantially lower probability than a com-
+peting class are more likely to be mislabeled. Cleanlab converts
+this margin into a label quality score 𝑞𝑖∈[0, 1], where larger val-
+ues correspond to more reliable labels. For compatibility with our
+evaluation protocol, we convert this quantity into a suspicion score
+𝑠𝑖= 1 −𝑞𝑖so that higher values indicate a greater likelihood of
+mislabeling.
+3.7
+Evaluation Protocol
+We evaluate performance on a diverse collection of benchmark
+datasets spanning standard tabular tasks and high-dimensional
+biomedical domains, following prior work on label noise detec-
+tion [9]. The tabular datasets include Adult, DryBean, Magic, and
+Chess from OpenML [1]. To capture more challenging, high-dimensional
+regimes, we additionally include four medical datasets: two RNA ex-
+pression datasets derived from single-cell transcriptomic data [11],
+and two ClinVar-based variant classification datasets [6].
+The RNA datasets are constructed by selecting clusters that
+are distinguishable but not trivially separable, yielding moderately
+difficult classification tasks. The ClinVar datasets incorporate real-
+world label noise from evolving clinical interpretations of genetic
+
+
+Adaptive Ensemble Selection for Noisy Labels on Tabular Data
+variants, providing a realistic evaluation setting alongside synthetic
+noise [6].
+All datasets are subsampled to at most 1,500 instances to stan-
+dardize computational cost. For controlled experiments, we inject
+fringe-based label noise at rate 𝜀and evaluate both the proposed
+meta-ensemble and the Confident Learning baseline.
+3.7.1
+Metrics. We report two primary metrics:
+• Area Under the Receiver Operating Characteristic
+Curve (ROC-AUC) evaluates how well the sample-level
+suspicion scores rank corrupted examples above clean ex-
+amples. For the meta-ensemble, ROC-AUC is computed
+from the ensemble score 𝑠∗
+𝑖and the binary corruption indi-
+cator for each sample.
+• F1 score is computed on a binary detection task by thresh-
+olding the top-⌊𝑁· 𝜀⌋samples, using the known noise bud-
+get. This assesses practical detection performance under a
+known corruption budget.
+In addition to aggregate metrics, we log detector-specific ROC-
+AUC values to analyze the behavior of individual methods across
+datasets and noise regimes. This enables a detailed study of detector
+specialization and its relationship to dataset characteristics.
+3.8
+Interpretability via SHAP
+To quantify which dataset properties most strongly drive detector
+preference, we compute Shapley attributions over the softmax-
+normalized detector weight outputs. Specifically, we apply Ker-
+nel SHAP [8] to the trained meta-model. A background set of 20
+randomly sampled training descriptors is used as the reference
+distribution. SHAP values are computed over up to 40 held-out
+descriptors, and mean absolute SHAP values are averaged across
+all 𝐾detector outputs to produce a single global importance score
+per meta-feature.
+4
+Experiments and Results
+4.1
+Overall Performance Metrics
+Across all datasets and noise levels, both the proposed meta-ensemble
+and the Confident Learning baseline achieve moderate-to-high
+ROC-AUC under the tested conditions, with performance generally
+increasing as the noise rate grows. This trend, as shown in Figure 1,
+is expected because higher noise levels produce more mislabeled
+examples that are easier for detectors to identify. The distributional
+boxplots show that the meta-ensemble achieves performance com-
+parable to or slightly exceeding Confident Learning across most
+regimes. In particular, the meta-ensemble shows modest improve-
+ments in median ROC-AUC and F1 at moderate noise levels (e.g.,
+0.20–0.40), where label ambiguity is most pronounced. At very
+low noise rates, both methods demonstrate higher variance due
+to the limited number of corrupted labels available for detection.
+Overall, these results indicate that the adaptive ensemble is com-
+petitive with a strong single-method baseline while maintaining
+stable performance across diverse datasets and noise regimes.
+To understand when the meta-ensemble provides benefits over
+the baseline, we analyze performance differences at the level of
+individual datasets and noise rates, rather than relying solely on
+aggregate metrics. This allows us to identify regimes where one
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+AUC
+Performance Distribution: AUC across Datasets
+Method
+Meta
+CL
+0.05
+0.1
+0.2
+0.3
+0.4
+0.5
+Noise Rate
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+F1
+Performance Distribution: F1 across Datasets
+Method
+Meta
+CL
+Figure 1: ROC-AUC and F1 Comparison of the Meta-
+Ensemble and Confident Learning.
+method consistently outperforms the other. Figure 2 reports dataset-
+level and noise-rate-specific performance differences between the
+proposed method and Confident Learning. Positive values indicate
+that the meta-ensemble achieves higher detection accuracy. The
+results reveal substantial heterogeneity in relative performance
+across both datasets and noise regimes.
+ClinVarArt exhibits the strongest and most consistent improve-
+ments under the meta-ensemble, with gains increasing at higher
+noise rates, particularly for F1 score, where improvements exceed
+0.05 at the 0.4 and 0.5 noise levels. DryBean and RNA1 similarly
+show moderate positive gains across most noise conditions. In con-
+trast, Chess demonstrates a consistent advantage for Confident
+Learning across all noise rates and both metrics, with the gap most
+pronounced at lower noise levels. Magic and RNA0 also favor the
+baseline, though less uniformly.
+Interestingly, several datasets exhibit varied noise-rate-dependent
+behavior. For example, Adult shows strong meta-ensemble improve-
+ments at specific noise rates (e.g., 0.1 for ROC-AUC, 0.2 for F1) but
+performs worse than the baseline at other levels. This indicates
+that the relative effectiveness of adaptive ensembling versus single-
+model confidence scoring depends not only on dataset structure
+but also on the severity and concentration of label corruption.
+4.2
+Performance of Individual Detectors across
+Datasets
+Figure 3 shows the behavior of individual detectors across bench-
+mark datasets and noise regimes to understand the sources of
+ensemble performance. Confidence-based detectors from super-
+vised classifiers—logistic regression, gradient boosting, and random
+forests—generally achieve high ROC-AUC values, particularly on
+
+
+Ali, Kang and Seneviratne
+0.10
+0.05
+0.00
+0.05
+0.10
+AUC Improvement (Meta - CleanLab)
+Chess
+RNA0
+Adult
+Magic
+ClinVarReal
+RNA1
+DryBean
+ClinVarArt
+Dataset
+Meta vs CleanLab: AUC Gain by Dataset and Noise Level
+Noise Rate
+0.05
+0.1
+0.2
+0.3
+0.4
+0.5
+0.125
+0.100
+0.075
+0.050
+0.025
+0.000
+0.025
+0.050
+0.075
+F1 Improvement (Meta - CleanLab)
+Chess
+RNA0
+Adult
+Magic
+ClinVarReal
+RNA1
+DryBean
+ClinVarArt
+Dataset
+Meta vs CleanLab: F1 Gain by Dataset and Noise Level
+Noise Rate
+0.05
+0.1
+0.2
+0.3
+0.4
+0.5
+Figure 2: Meta-Ensemble and Confident Learning across
+Datasets.
+datasets where mislabeled examples induce noticeable probabilistic
+disagreement. However, their performance varies across datasets
+and noise levels, underscoring that no single detector uniformly
+dominates. In contrast, unsupervised anomaly detectors, such as
+Isolation Forest and Local Outlier Factor, show limited overall effec-
+tiveness on this specific benchmark, though they can detect misla-
+beled samples in specific high-variance or low-density regions. The
+K-nearest-neighbor disagreement detector provides moderate de-
+tection performance, contributing in certain datasets (ClinVarReal,
+ClinVarArt, RNA0, and RNA1), where local label inconsistencies
+are prominent. These results highlight substantial heterogeneity
+in detector effectiveness, motivating the proposed meta-learning
+framework that adaptively combines detector outputs rather than
+relying on a single fixed strategy.
+4.3
+Meta-Model Descriptor Importance
+We use SHAP values [8] to assess how dataset descriptors influence
+the meta-model’s predicted detector weights. Figure 4 shows that
+descriptors capturing signal structure and feature-space character-
+istics dominate, rather than raw dimensionality. The first principal
+component’s explained variance (pca_ev1) has the highest attribu-
+tion (˜0.07), followed by mean feature variance and a signal-to-noise
+proxy, indicating that detector selection favors datasets with con-
+centrated informative variance. Sparsity ranks fourth, suggesting
+that feature density may also matter.
+Descriptors of intermediate importance include the sample-to-
+feature ratio, number of classes, imbalance ratio, and mean feature
+0.1
+0.2
+0.3
+0.4
+0.5
+Noise
+0.0
+0.5
+1.0
+AUC
+Adult
+0.1
+0.2
+0.3
+0.4
+0.5
+Noise
+Chess
+0.1
+0.2
+0.3
+0.4
+0.5
+Noise
+0.0
+0.5
+1.0
+AUC
+ClinVarArt
+0.1
+0.2
+0.3
+0.4
+0.5
+Noise
+ClinVarReal
+0.1
+0.2
+0.3
+0.4
+0.5
+Noise
+0.0
+0.5
+1.0
+AUC
+DryBean
+0.1
+0.2
+0.3
+0.4
+0.5
+Noise
+Magic
+0.1
+0.2
+0.3
+0.4
+0.5
+Noise
+0.0
+0.5
+1.0
+AUC
+RNA0
+0.1
+0.2
+0.3
+0.4
+0.5
+Noise
+RNA1
+Detector AUC vs Noise Across Datasets (BENCHMARK)
+Detector
+logreg_conf
+rf_oof
+gb_conf
+knn
+iforest
+lof
+cleanlab_margin
+label_prop
+Figure 3: Performance of Meta-Ensemble Component Detec-
+tors across Noise Levels.
+Figure 4: Analysis of SHAP Values for Dataset Descriptors.
+skewness. Correlation structure descriptors and raw dimensionality
+measures, including log_n, have minimal impact.
+Overall, SHAP values range roughly 0.045–0.07, suggesting the
+meta-model integrates multiple characteristics rather than relying
+on one. PCA-based features highlight that adaptive weighting is
+primarily guided by intrinsic variance structure, with simpler scale
+features playing a secondary role.
+
+
+Adaptive Ensemble Selection for Noisy Labels on Tabular Data
+Adult
+DryBean
+Magic
+Chess
+RNA0
+RNA1
+ClinVarArt ClinVarReal
+Dataset
+n_classes
+majority_prop
+class_entropy
+imbalance_ratio
+n_features
+log_n
+sample_feature_ratio
+mean_variance
+near_constant_frac
+sparsity
+mean_abs_corr
+max_abs_corr
+high_corr_frac
+mean_skew
+snr_proxy
+pca_ev1
+pca_ev2
+pca_ev3
+pca_cumulative
+Descriptor
+Dataset Descriptor Heatmap (Z-scored)
+2
+1
+0
+1
+2
+Figure 5: Dataset Descriptor Deviations from the Mean (z
+Scores).
+4.4
+Dataset Descriptor Heatmap
+To understand how dataset characteristics may influence detector
+performance, we analyze the distribution of descriptor values across
+benchmark datasets. We compute z-scored profiles for each descrip-
+tor to standardize scales and highlight relative differences. Figure 5
+shows the resulting heatmap, revealing heterogeneity in dataset
+structure: Chess exhibits high sparsity and many near-constant
+features; Magic has a high sample-to-feature ratio; DryBean shows
+extreme class imbalance; and the RNA datasets display high di-
+mensionality with few samples. This diversity helps explain why
+different detection strategies perform variably across datasets and
+motivates the use of an adaptive meta-ensemble.
+4.5
+Descriptor Correlations with Overall Model
+Performance
+To understand which dataset characteristics influence label noise
+detection, we examine correlations between descriptor values and
+overall model performance.
+Figure 6 shows these relationships for both Confident Learning
+and the meta-ensemble. Detection performance tends to decrease
+(negative correlation) in high-dimensional datasets with strong
+feature correlations (high_corr_frac, max_abs_corr, pca_ev1,
+log_n, n_features), and improves (positive correlation) in sparse
+datasets with many near-constant features, dominant majority
+classes, and high signal-to-noise ratios. Interestingly, these pat-
+terns are consistent across both methods, suggesting that despite
+architectural differences, they are challenged by similar dataset
+regimes. This analysis highlights which dataset properties are most
+strongly associated with difficulty in label-noise detection.
+CL_AUC
+CL_F1
+Meta_AUC
+Meta_F1
+Metric
+class_entropy
+high_corr_frac
+imbalance_ratio
+log_n
+majority_prop
+max_abs_corr
+mean_abs_corr
+mean_skew
+mean_variance
+n_classes
+n_features
+near_constant_frac
+pca_cumulative
+pca_ev1
+pca_ev2
+pca_ev3
+sample_feature_ratio
+snr_proxy
+sparsity
+Descriptor
+-0.19
+-0.13
+-0.14
+-0.05
+-0.59
+-0.40
+-0.57
+-0.36
+0.01
+0.01
+0.15
+0.15
+-0.43
+-0.29
+-0.43
+-0.29
+0.39
+0.26
+0.40
+0.23
+-0.62
+-0.40
+-0.61
+-0.37
+-0.35
+-0.25
+-0.39
+-0.27
+-0.07
+-0.02
+-0.09
+-0.04
+-0.06
+-0.06
+0.07
+0.06
+0.05
+0.03
+0.17
+0.16
+-0.39
+-0.24
+-0.34
+-0.16
+0.39
+0.28
+0.27
+0.16
+-0.23
+-0.17
+-0.25
+-0.18
+-0.35
+-0.25
+-0.39
+-0.27
+-0.06
+-0.07
+-0.11
+-0.11
+-0.02
+-0.04
+-0.02
+-0.04
+-0.16
+-0.12
+-0.18
+-0.14
+0.36
+0.24
+0.38
+0.24
+0.39
+0.28
+0.27
+0.16
+Spearman Correlation: Descriptors vs Overall Model Results
+0.6
+0.4
+0.2
+0.0
+0.2
+0.4
+Figure 6: Dataset Descriptor Correlations with Overall Per-
+formance.
+cleanlab_margin
+gb_conf
+iforest
+knn
+label_prop
+lof
+logreg_conf
+rf_oof
+Detector
+class_entropy
+high_corr_frac
+imbalance_ratio
+log_n
+majority_prop
+max_abs_corr
+mean_abs_corr
+mean_skew
+mean_variance
+n_classes
+n_features
+near_constant_frac
+pca_cumulative
+pca_ev1
+pca_ev2
+pca_ev3
+sample_feature_ratio
+snr_proxy
+sparsity
+Descriptor
+Descriptor Correlations with Detector Performance Deviations (Relative AUC)
+0.6
+0.4
+0.2
+0.0
+0.2
+0.4
+0.6
+Figure 7: Descriptor Correlations with Detector-Specific Per-
+formance.
+4.6
+Descriptor Correlations with Detector
+Performance
+To investigate how individual dataset characteristics influence spe-
+cific detectors, we examine correlations between dataset descriptors
+and detector-level performance.
+Figure 7 visualizes these relationships, revealing strong special-
+ization patterns. Sparsity and near-constant features favor confidence-
+based methods (cleanlab_margin, logreg_conf) while reducing
+effectiveness for tree-based and nearest-neighbor detectors. Class
+imbalance (imbalance_ratio, class_entropy) benefits KNN dis-
+agreement, likely because local neighborhoods become more homo-
+geneous in imbalanced settings. Feature skewness (mean_skew) has
+the most pronounced detector-specific impact, sharply degrading
+label propagation performance while leaving other methods largely
+
+
+Ali, Kang and Seneviratne
+unaffected, likely due to its reliance on smooth, well-behaved fea-
+ture geometries. These divergent responses highlight that no single
+detector dominates across all dataset regimes, motivating the adap-
+tive ensemble framework: the meta-model can learn to upweight
+detectors whose inductive biases align with observed dataset char-
+acteristics, exploiting complementary signals inaccessible to any
+fixed strategy.
+5
+Discussion
+The experimental results provide strong evidence that detector
+effectiveness is highly dependent on dataset structure and that
+adaptive ensembling offers an effective way to exploit this het-
+erogeneity. Although the meta-ensemble and Confident Learning
+achieve largely indistinguishable overall performance, the detailed
+descriptor and detector analyses reveal substantial differences in
+how each method leverages dataset characteristics.
+Specifically, the dataset-descriptor heatmap (Figure 5) and over-
+all correlation analysis (Figure 6) demonstrate that both the meta-
+ensemble and Confident Learning are sensitive to similar global
+dataset properties. In particular, high dimensionality, strong feature
+correlations, and dominant principal components (high pca_ev1)
+are consistently associated with reduced detection performance.
+These regimes likely correspond to datasets where decision bound-
+aries are more complex or where feature redundancy obscures clear
+class separation. Conversely, sparse datasets with near-constant
+features and higher signal-to-noise ratios are more favorable for
+label error detection, as mislabeled points stand out more clearly
+against the underlying structure.
+However, the individual detector-level analysis (Figures 3 and
+7) reveals a more nuanced picture. Different detectors respond in
+fundamentally different ways to the same dataset characteristics.
+Confidence-based methods (e.g., logistic regression and Confident
+Learning) benefit strongly from sparsity and low-variance features,
+where probabilistic models can form stable decision boundaries. In
+contrast, KNN-based methods show improved relative performance
+under class imbalance, likely due to increased local homogeneity in
+majority-class neighborhoods. Label propagation is highly sensitive
+to feature skewness, with performance degrading sharply as skew
+increases, indicating its reliance on well-behaved, near-symmetric
+feature geometries. Meanwhile, unsupervised anomaly detectors
+(Isolation Forest, Local Outlier Factor) remain largely uninformative
+across most data regimes, reinforcing the observation that label
+noise does not necessarily manifest as feature-space outliers.
+These findings support the core premise under the evaluated
+conditions: no single detector is universally optimal, and their rela-
+tive performance varies systematically with the observed dataset
+meta-properties. The proposed meta-model leverages this structure
+by learning a mapping from dataset descriptors to detector weights,
+effectively performing a form of data-driven algorithm selection.
+Rather than treating detector outputs as equally informative, the
+ensemble adapts to emphasize detectors whose inductive biases
+align with the observed dataset characteristics.
+Importantly, the similarity in global performance correlations
+(Figure 6) between the meta-ensemble and Confident Learning sug-
+gests that both methods are constrained by the same fundamental
+limits of the data. The advantage of the meta-ensemble, therefore,
+is not in overcoming these limits entirely, but in better navigating
+intermediate regimes where multiple weak signals can be com-
+bined. This is most evident in datasets, such as ClinVarArt and
+DryBean, where heterogeneous noise patterns allow the ensemble
+to outperform any single detector. Conversely, Chess and Magic
+represent regimes where Confident Learning’s single-model proba-
+bilistic approach is already near-optimal. Chess exhibits extreme
+sparsity and a high fraction of near-constant features (Figure 5),
+conditions under which confidence-based detectors already achieve
+maximal discriminability and additional ensemble members con-
+tribute primarily noise rather than complementary signal. Similarly,
+Magic’s high sample-to-feature ratio and strong class separation
+create a regime where logistic regression confidence alone pro-
+vides sufficient information for label error detection. In these cases,
+the meta-ensemble’s adaptive weighting cannot improve upon an
+already-strong baseline, and the inclusion of unsuitable detectors
+dilutes the final score. This highlights a fundamental limitation
+of ensemble approaches: when a single strong signal dominates,
+aggregation offers no benefit and may introduce unnecessary vari-
+ance.
+Overall, these results underscore the value of a data-centric per-
+spective on AI-assisted data science in label noise detection. By
+explicitly capturing the relationship between dataset characteris-
+tics and detector effectiveness, our adaptive ensemble provides a
+flexible, interpretable, and automated framework for improving
+robustness in noisy supervision scenarios, supporting more reliable
+and scalable data science workflows.
+6
+Conclusion
+In this work, we introduced an adaptive ensemble framework for
+label noise detection in tabular datasets, formulated as a meta-
+learning problem over dataset characteristics. By combining a di-
+verse set of complementary detectors and learning to weight them
+based on dataset-level descriptors, the approach addresses a key
+challenge in data-centric AI: no single detection method performs
+optimally across all data regimes.
+Empirical evaluation across benchmark datasets and controlled
+noise levels shows that the meta-ensemble is competitive with
+and, in some cases, outperforms the baseline. More importantly,
+our analysis demonstrates that detector effectiveness is associated
+with dataset properties, such as sparsity, class imbalance, feature
+correlation, and signal structure. The meta-model successfully cap-
+tures these relationships, enabling adaptive weighting that aligns
+detector inductive biases with dataset characteristics, a capability
+particularly relevant for AI systems that must operate across hetero-
+geneous datasets. Beyond performance gains, this work provides
+a data-centric and interpretable perspective on label noise detec-
+tion. Through descriptor analysis, SHAP-based interpretability, and
+detector-level correlation studies, we offer insight into why certain
+methods succeed or fail under different conditions, reframing label
+quality assessment as a function of dataset structure rather than
+purely model choice. This aligns closely with the goals of AI data
+science systems, which aim to automate, assist, and optimize data
+workflows while providing transparency to human practitioners.
+We note several limitations. The framework introduces addi-
+tional computational overhead, as multiple detectors and descriptor
+
+
+Adaptive Ensemble Selection for Noisy Labels on Tabular Data
+extraction must be evaluated, which may constrain deployment in
+large-scale or low-latency settings. However, this overhead can be
+reframed as a cost-aware trade-off, where the meta-model selects
+only the top-ranked detector instead of a full ensemble, improving
+efficiency while preserving most performance. The meta-model
+is trained on a relatively small collection of benchmark datasets,
+which may limit generalization to domains with substantially differ-
+ent feature distributions or noise patterns. However, the descriptor-
+driven approach suggests a modality-agnostic extension, where ap-
+propriate dataset descriptors could enable transfer beyond tabular
+settings, such as in image- or text-based data. Additionally, our eval-
+uation relies on synthetic fringe-based noise injection, which, while
+more realistic than uniform corruption, may not fully capture the
+complexity of real-world labeling across all contexts. Nevertheless,
+the strong performance observed on the ClinVar and ClinVarArt
+datasets [6], both of which contain real-world and clinically derived
+annotation noise, suggests that medical labeling errors may still
+exhibit fringe-like structure, where uncertainty concentrates near
+decision boundaries due to annotator disagreement.
+Overall, this study demonstrates that adaptive, descriptor-driven
+ensembling is a promising direction for robust label noise detec-
+tion, bridging the gap between algorithm-centric and data-centric
+approaches in modern machine learning. By emphasizing dataset-
+aware reasoning, this work contributes to the development of AI
+data-science systems capable of supporting end-to-end data work-
+flows in real-world settings.
+References
+[1] Bernd Bischl, Giuseppe Casalicchio, Matthias Feurer, Pieter Gijsbers, Frank Hut-
+ter, Michel Lang, Rafael G. Mantovani, Jan N. van Rijn, and Joaquin Vanschoren.
+2019. OpenML Benchmarking Suites. arXiv preprint arXiv:1708.03731 (2019).
+[2] Markus M. Breunig, Hans-Peter Kriegel, Raymond T. Ng, and Jörg Sander. 2000.
+LOF: Identifying Density-Based Local Outliers. In Proceedings of the 2000 ACM
+SIGMOD International Conference on Management of Data (SIGMOD ’00). ACM,
+93–104. https://doi.org/10.1145/342009.335388
+[3] Luís Paulo F. Garcia, Ana Carolina Lorena, and André C.P.L.F. Carvalho. 2012. A
+Study on Class Noise Detection and Elimination. In 2012 Brazilian Symposium
+on Neural Networks. 13–18. https://doi.org/10.1109/SBRN.2012.49
+[4] Inwon Kang, Parikshit Ram, Yi Zhou, Horst Samulowitz, and Oshani Seneviratne.
+2025. On Learning Representations for Tabular Data Distillation. Transac-
+tions on Machine Learning Research (2025). https://openreview.net/forum?id=
+GXlsrvOGIK
+[5] Inwon Kang, Parikshit Ram, Yi Zhou, Horst Samulowitz, and Oshani Seneviratne.
+2026. Language Model Representations for Efficient Few-Shot Tabular Classifi-
+cation. In ACM Web Conference. ACM. https://doi.org/10.1145/3774904.3792477
+[6] Melissa J Landrum, Jennifer M Lee, Mark Benson, Garth R Brown, Chen Chao,
+Shanmuga Chitipiralla, Baoshan Gu, Jennifer Hart, Douglas Hoffman, Wonhee
+Jang, et al. 2018. ClinVar: Improving Access to Variant Interpretations and
+Supporting Evidence. Nucleic Acids Research 46, D1 (2018), D1062–D1067.
+[7] Fei Tony Liu, Kai Ming Ting, and Zhi-Hua Zhou. 2008. Isolation Forest. In
+Proceedings of the 2008 Eighth IEEE International Conference on Data Mining
+(ICDM ’08). IEEE, 413–422. https://doi.org/10.1109/ICDM.2008.17
+[8] Scott M. Lundberg and Su-In Lee. 2017. A Unified Approach to Interpreting
+Model Predictions. In Advances in Neural Information Processing Systems, Vol. 30.
+Curran Associates, Inc., 4765–4774.
+[9] Lusine Nazaretyan, Ulf Leser, and Martin Kircher. 2025. Benchmarking Machine
+Learning Methods for the Identification of Mislabeled Data. Artificial Intelligence
+Review 58, 10 (2025), 310.
+[10] Curtis G. Northcutt, Lu Jiang, and Isaac L. Chuang. 2021. Confident Learning: Es-
+timating Uncertainty in Dataset Labels. Journal of Artificial Intelligence Research
+70 (2021), 1373–1411. https://doi.org/10.1613/jair.1.12125
+[11] Blanca Pijuan-Sala, Jonathan A Griffiths, Carolina Guibentif, Tom W Hiscock,
+Wajid Jawaid, Fernando J Calero-Nieto, Carla Mulas, Ximena Ibarra-Soria,
+Richard CV Tyser, Debbie Lee Lian Ho, et al. 2019. A Single-Cell Molecular
+Map of Mouse Gastrulation and Early Organogenesis. Nature 566, 7745 (2019),
+490–495.
+[12] Umaa Rebbapragada, Carla E Brodley, Damien Sulla-Menashe, and Mark A Friedl.
+2012. Active Label Correction. In 2012 IEEE 12th International Conference on Data
+Mining. IEEE, 1080–1085.
+[13] Oshani Seneviratne, Brendan Capuzzo, and William Van Woensel. 2025.
+Explainability-Driven Quality Assessment for Rule-Based Systems. In Companion
+Proceedings of the ACM on Web Conference 2025 (Sydney NSW, Australia) (WWW
+’25). Association for Computing Machinery, New York, NY, USA, 2133–2140.
+https://doi.org/10.1145/3701716.3717571
+[14] Oshani Seneviratne, Oktie Hassanzadeh, Daniel Gruen, Jamie P. McCusker, and
+Deborah L. McGuinness. 2021. Towards a Framework for Data Excellence in
+Data-Centric AI: Lessons from the Semantic Web. In Data-centric AI Workshop,
+NeurIPS 2021. https://nips.cc/virtual/2021/38256
+[15] Maya Srikanth, Jeremy Irvin, Brian Wesley Hill, Felipe Godoy, Ishan Sabane, and
+Andrew Y. Ng. 2023. An Empirical Study of Automated Mislabel Detection in
+Real World Vision Datasets. arXiv:2312.02200 [cs.CV] https://arxiv.org/abs/
+2312.02200
+[16] Dengyong Zhou, Olivier Bousquet, Thomas Lal, Jason Weston, and Bernhard
+Schölkopf. 2003. Learning with Local and Global Consistency. Advances in
+Neural Information Processing Systems 16 (2003).

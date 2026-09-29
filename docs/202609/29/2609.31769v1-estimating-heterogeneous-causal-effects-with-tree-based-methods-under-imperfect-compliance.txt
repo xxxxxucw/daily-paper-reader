@@ -1,0 +1,3521 @@
+Pages: 1–58
+Estimating Heterogeneous Causal Effects with Tree-Based Methods
+under Imperfect Compliance
+Karolina Gliszczy´nska-Schroeder
+KAROLINA.GLISZCZYNSKA(AT)VWL.UNI-DUE.DE
+Chair of Econometrics, Faculty of Business Administration and Economics, University of Duisburg-Essen,
+Universit¨atsstraße 12, 45117 Essen, Germany
+Abstract
+We study the impact of conditional complier average causal effect (CCACE) estimation methods
+on the performance of subgroup discovery and heterogeneous causal effect estimation under im-
+perfect compliance. Building on the Bayesian Causal Forest with Instrumental Variable (BCF-IV;
+Bargagli-Stoffi et al. (2022)) method, we introduce a two-step, model-agnostic approach that al-
+lows any suitable machine learning method to be used for the CCACE estimation in the first step.
+Specifically, we implement two non-Bayesian tree-based methods, both using forest-based learn-
+ers: DRRF-IV, a debiased transformed-outcome regression-forest approach, and a GRF-based IV
+adaptation of the generalized random forest framework. Through a simulation study, we assess
+the precision, bias, and the ability to correctly identify the underlying subgroup structure of the
+proposed methods relative to BCF-IV. The results show that the non-Bayesian methods perform
+competitively across the considered simulation settings, with performance improving for larger
+sample sizes and moderately large treatment effects, while reducing computational runtime. We
+apply our new methods by revisiting an empirical study that examines the effect of prompt ad-
+mission to intensive care units (ICU) on 28-day mortality across 48 UK National Health Service
+hospitals. While previous work finds no significant overall treatment effect, we investigate whether
+subgroups of patients may benefit more from prompt ICU admission.
+Keywords: Heterogeneous treatment effects, instrumental variables, subgroup discovery, causal
+forest
+JEL classification: C14, C21, C26, C52
+1. Introduction
+Randomized controlled trials (RCTs) have been considered the gold standard for causal inference
+(Raita et al., 2021). However, RCTs are often infeasible in practice, due to ethical or financial
+constraints (Hariton and Locascio, 2018; Olier et al., 2023). As a consequence, researchers fre-
+quently rely on observational data, which are often affected by treatment endogeneity, that is, by
+correlation between the treatment variable and unobserved factors influencing the outcome. Instru-
+mental variable (IV) methods (Wooldridge, 2010) offer a strategy for addressing endogeneity by
+using instruments that affect the treatment but have no direct effect on the outcome. Traditionally,
+instrumental variable methods have been used primarily to identify local causal effects for complier
+subpopulations, most notably the Local Average Treatment Effect (LATE) (Imbens and Angrist,
+1994; Angrist and Imbens, 1995; Angrist et al., 1996). Although some recent contributions study
+identification of the population-wide Average Treatment Effect (ATE) under IV assumptions, these
+approaches typically require stronger conditions (Wang and Tchetgen Tchetgen, 2018). While these
+methods provide internally valid causal estimates, they summarize effects at an aggregate level and
+may conceal heterogeneity in treatment effects across subpopulations. Specifically, this means that
+© K. Gliszczy´nska-Schroeder.
+arXiv:2609.31769v1  [stat.ME]  24 Sep 2026
+
+
+GLISZCZY ´NSKA-SCHROEDER
+the effect of treatment for compliers may differ across patient or covariate groups, even when the
+overall LATE or CACE is close to zero.
+This paper contributes to the literature on causal forest-based methods for heterogeneous treat-
+ment effect estimation (Athey and Imbens, 2016; Wager and Athey, 2018; Athey et al., 2019;
+Oprescu et al., 2019; Hahn et al., 2020) in the context of instrumental variable settings. In particular,
+we focus on treatment endogeneity and imperfect compliance, meaning that treatment assignment
+does not necessarily coincide with the actual received treatment. In this setting, the target param-
+eter is the conditional complier average causal effect (CCACE), rather than the standard CATE.
+Specifically, we study subgroup discovery in tree-based IV models, aiming to identify interpretable
+subsamples for which complier treatment effects might differ.
+Recent contributions have combined tree-based methods with treatment endogeneity using in-
+strumental variables. For example, the Generalized Random Forest (GRF) framework of Athey et al.
+(2019) provides a general approach for estimation problems defined by local moment conditions,
+including an IV framework as a special case. While GRF-IV can estimate heterogeneous treatment
+effects, it does not directly produce a single interpretable subgroup partition, since predictions are
+aggregated across many trees (Bargagli-Stoffi et al., 2022).
+Closely related, both Wang et al. (2021) and Stoffi and Gnecco (2018) develop causal tree ap-
+proaches for IV settings (CT-IV), which estimate treatment effects at the leaf level. In Wang et al.
+(2021), the single-tree CT-IV serves as the base learner for the broader instrumental variable for-
+est (IVF). While the tree component yields an interpretable partition, the full forest estimator ag-
+gregates across many trees. In parallel, Stoffi and Gnecco (2018) proposed an alternative CT-IV
+framework, which address the problem of treatment endogeneity by incorporating a propensity-
+score-like correction, replacing the treatment variable with an instrument. Although these CT-IV
+approaches differ in implementation, they primarily use tree-based partitions as a way to estimate
+heterogeneous treatment effects. The resulting leaves can be interpreted as subgroups, but subgroup
+discovery is not separated from the estimation task and the primary focus is on improving the accu-
+racy of heterogeneous treatment effect estimation. The Bayesian Causal Forest with IV (BCF-IV)
+(Bargagli-Stoffi et al., 2022) extends this line of work by introducing a two-step approach that di-
+rectly supports subgroup detection, but relies on Bayesian modeling assumptions. Furthermore,
+in its original formulation and evaluation, subgroup discovery is studied primarily in settings with
+binary covariates.
+Our work builds directly on the BCF-IV framework but replaces its Bayesian discovery step
+with a model-agnostic discovery step in the spirit of Komura et al. (2025). We keep the overall two-
+step structure largely unchanged, because it usefully separates the task of identifying subgroups
+from the task of estimating subgroup-specific causal effects. Following the honesty idea of Athey
+and Imbens (2016), the sample is split into two disjoint subsamples. The first subsample is used to
+estimate heterogeneous treatment effects, which are then treated as outcomes in a CART algorithm
+(Breiman et al., 1984) to get a tree structure capturing treatment effect heterogeneity. In the second
+step, the tree structure is held fixed and used to estimate subgroup-specific causal effects via IV
+regressions within the terminal nodes.
+Thus, the main modification in our paper is therefore not the two-step logic itself, but the esti-
+mator used in the discovery step. Recent work has already explored replacing the original BCF-IV
+estimator with alternative Bayesian tree learners. For example, Maßmann and Klenke (2026) in-
+troduce Shrinkage Bayesian Causal Forest with Instrumental Variables (SBCF-IV), which replaces
+the original BCF-IV discovery step by a sparsity-inducing SoftBART estimator. Our contribution
+2
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+takes this idea one step further by generalizing the discovery step itself. In particular, we allow any
+suitable machine learning method to estimate treatment effects, thereby removing the restriction
+to Bayesian models in the first step. Furthermore, we introduce two tree-based implementations
+within this framework. The first is the Debiased Robust Random Forest with IV (DRRF-IV), which
+is inspired by the double/debiased machine learning approach of Chernozhukov et al. (2018), but
+uses estimated nuisance parameters like propensity scores and conditional outcome expectations
+to construct a transformed outcome. The second is a GRF-IV adaptation for subgroup identifica-
+tion. In addition, we refine existing evaluation metrics to accommodate continuous covariates. We
+are interested in how effectively these proposed estimators capture heterogeneous treatment effects
+under varying subgroup structures and treatment effect sizes, and how the choice of method has a
+systematic impact in terms of accuracy and interpretability.
+The paper is structured as follows. Section 2 reviews the potential outcome framework and
+outlines the required modifications for the IV setting. It further introduces the general two-step
+framework and presents the DRRF-IV and GRF-IV implementations. Section 3 reports results
+from a simulation study that compares the performance of the proposed estimators across multiple
+heterogeneity scenarios and treatment effect sizes. Section 4 provides an empirical application
+using ICU Spotlight data (Keele et al., 2020), where prompt admission to an intensive care unit
+(ICU) may affect patient mortality, and bed availability serves as an instrument. Building on their
+previous work, which finds no statistically significant average effects, we investigate heterogeneity
+in treatment effects across patient groups and demonstrate how the methods identify subgroups.
+Section 5 concludes and discusses potential extensions.
+2. Tree-based methods with instrumental variables
+We use the potential outcome framework and notation of Rubin’s causal model (Rubin, 1974, 1978;
+Imbens and Rubin, 2008). Consider a set of N units, indexed by i = 1, . . . N. For each unit i let
+Di ∈{0, 1} be the binary treatment indicator and let Xi ∈RK be a K-dimensional covariate or
+feature vector. The potential outcome for unit i under treatment d ∈{0, 1} is denoted by Yi(d),
+where Yi(0) represents the outcome under control, and Yi(1) the outcome under treatment. The
+individual treatment effect (ITE) for a given unit is then defined as
+τi := Yi(1) −Yi(0).
+(1)
+The Causal inference framework relies on a set of foundational assumptions, which we provide,
+before relaxing unconfoundedness in the IV framework introduced below. The first assumption is
+the Stable Unit Treatment Value Assumption (SUTVA), which rules out two potential complications.
+First, it excludes interference between units, so that the potential outcome of unit i is affected only
+by its own treatment status and not by the treatment assignment of other units. Second, it requires
+that the treatment is well defined, meaning that there are no different or hidden versions of the same
+treatment level.
+Assumption 1 (Stable unit treatment value assumption (SUTVA)).
+If Di = d, then Yi(d) = Y obs
+i
+, ∀d ∈{0, 1} , ∀i = 1, ..., N.
+Under SUTVA, each unit has two potential outcomes, but only one of them can be observed for a
+given unit. Hence, the observed outcome can be written as
+Y obs
+i
+= Yi(1)Di + Yi(0)(1 −Di)
+3
+
+
+GLISZCZY ´NSKA-SCHROEDER
+. The second assumption is unconfoundedness, which requires that, conditional on Xi, the treatment
+is independent of the potential outcomes.
+Assumption 2 (Unconfoundedness).
+Di ⊥⊥(Yi(1), Yi(0)) | Xi.
+The third assumption is positivity (also referred to as overlap). Let the propensity score denote
+the conditional probability of receiving treatment given covariates
+p(x) := Pr(Di = 1|Xi = x).
+(2)
+Then the positivity or overlap assumption requires that for all x in the support of Xi, the probabilities
+are bounded away from 0 and 1.
+Assumption 3 (Overlap).
+0 < p(Xi = x) < 1
+∀x in support of Xi.
+Since the ITE in Equation (1) is not observable and therefore not directly identifiable, the literature
+commonly focuses on aggregated treatment effects such as the average treatment effect (ATE):
+τ := E[Yi(1) −Yi(0)],
+(3)
+or the conditional average treatment effect (CATE)
+τ(x) := E[Yi(1) −Yi(0) | Xi = x].
+(4)
+Note, that under the Assumptions 1–3, CATE can be identified from observable outcomes Y obs
+i
+E[Y obs
+i
+| Di = 1, Xi = x] −E[Y obs
+i
+| Di = 0, Xi = x].
+(5)
+In observational studies, the treatment variable Di is often endogenous (Zhong et al., 2021). Even
+when accounting for observed covariates, treatment decisions may still be influenced by unobserved
+factors that are also related to Yi. Endogeneity violates the unconfoundedness assumption and can
+lead to biased estimates (Dominici et al., 2021). To address this problem, instrumental variable
+(IV) methods are a popular alternative for identifying causal effects (Keele et al., 2020). Let Zi
+denote a binary instrument representing treatment assignment, for unit i. Following the notation
+of Bargagli-Stoffi et al. (2022), we distinguish between the assigned treatment Zi and the actual
+received treatment Di, allowing for imperfect compliance. Let Di(z) denote the treatment that unit
+i would receive under assignment Zi = z. The realized treatment is given by Di = Di(Zi). The
+received treatment is a function of the treatment assignment Di(z). Then, potential outcomes can be
+written as Yi(z) := Yi(z, Di(z)). Depending on how units respond to their treatment assignments,
+we can categorize them into four subgroups:
+1. Compliers: Units who take the treatment if and only if assigned to it Di(Zi = 0) = 0 and
+Di(Zi = 1) = 1.
+2. Defiers: Units who do the opposite of their assignment; Di(Zi = 0) = 1, Di(Zi = 1) = 0.
+4
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+3. Always-takers: Units who always receive treatment regardless of assignment; Di(Zi = 0) =
+1, Di(Zi = 1) = 1.
+4. Never-takers: Units who never receive treatment, regardless of assignment; Di(Zi = 0) = 0,
+Di(Zi = 1) = 0.
+To enable causal interpretation in the presence of endogeneity, we replace Assumption 2 with a
+set of IV assumptions, following Stoffi and Gnecco (2018). The first assumption is monotonicity,
+which rules out the existence of defiers.
+Assumption 4 (Monotonicity).
+Di(1) ≥Di(0)
+for all i = 1, . . . , N.
+In the case of one-sided noncompliance, such as when only those assigned to treatment can ac-
+cess it, this assumption is automatically satisfied. In two-sided noncompliance settings, the mono-
+tonicity assumption is generally plausible, though it cannot typically be verified empirically by the
+researcher (see Stoffi and Gnecco (2018) for a detailed discussion). The next assumption is the ex-
+istence of compliers. This assumption requires that the complier subpopulation exists with positive
+probability.
+Assumption 5 (Existence of Compliers). The complier subpopulation exists with positive proba-
+bility
+Pr (Di(1) > Di(0)) > 0.
+Next, we assume unconfoundedness of Zi. Analogous to Assumption 2, this assumption requires
+that the instrument is as good as randomly assigned, conditional on the covariates. It ensures that
+the instrument is independent of both the potential outcomes and the potential treatment statuses,
+given Xi.
+Assumption 6 (Unconfoundedness of the IV).
+Zi ⊥⊥
+
+{Yi(z, d) : z, d ∈{0, 1}}, Di(0), Di(1)
+
+| Xi.
+Further we have the exclusion restriction, which asserts that the instrument affects the outcome
+only through its influence on the treatment.
+Assumption 7 (Exclusion Restriction).
+Yi(z, d) = Yi(d)
+∀z, d ∈{0, 1}.
+That is, conditional on the treatment received, the instrument has no direct effect on the outcome.
+Lastly, we define the instrument propensity score as
+pZ(x) := Pr(Zi = 1 | Xi = x),
+(6)
+and assume overlap for the instrument.
+5
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Assumption 8 (Instrument Positivity).
+0 < pZ(x) < 1
+∀x in the support of Xi.
+Under Assumptions1 4-8, the causal effect of the treatment can be identified for the subpopulation of
+compliers. This effect is known as the Complier Average Causal Effect (CACE) or LATE (Angrist
+and Pischke, 2009), and captures the average effect of the treatment on the outcome Yi for units who
+comply with their assignment (Imbens and Rubin, 2015)
+τCACE := E[Yi | Zi = 1] −E[Yi | Zi = 0]
+E[Di | Zi = 1] −E[Di | Zi = 0] = ITT
+πC
+.
+(7)
+We focus on the Conditional Complier Average Causal Effect (CCACE), which is conceptually
+analogous to the CATE in Equation (4), but extends the CACE by accounting for heterogeneity
+across observed covariates. The CCACE is defined as follows
+τCCACE(x) := E[Yi | Zi = 1, Xi = x] −E[Yi | Zi = 0, Xi = x]
+E[Di | Zi = 1, Xi = x] −E[Di | Zi = 0, Xi = x] = ITT(x)
+πC(x) ,
+(8)
+where the numerator ITT(x) denotes the conditional intention-to-treat effect and the denominator
+πC(x) represents the conditional proportion of compliers (Angrist et al., 1996).
+2.1. General Two-Step Approach
+The pragmatic two-step framework (Komura et al., 2025) is a model-agnostic approach for identi-
+fying interpretable subgroups. In the first step, heterogeneous treatment effect estimates ˆτ(x) are
+obtained using a suitable machine learning method, such as causal forests, Bayesian causal forests
+(BCF) (Hahn et al., 2020), or meta-learners (K¨unzel et al., 2019), based on the full covariate vector
+Xi. In the second step, a CART model regresses the estimated effects bτ(Xi) on a pre-specified
+subset of interpretable covariates Xinterp
+i
+⊆Xi to construct subgroups. Note, that treatment effects
+are not re-estimated within the discovered leaves, but it is possible to estimate the ATE of each
+subgroup by separate regression models, see Algorithm 4 in Appendix A.4.
+Bargagli-Stoffi et al. (2022) propose the BCF-IV algorithm, which uses an honest sample split-
+ting approach together with Bayesian Causal Forests in the discovery step to detect heterogeneity,
+followed by an inference step that estimates the treatment effect τCCACE(x) from Equation (8),
+within the discovered subgroups. Our contribution builds on the BCF-IV framework, while relax-
+ing its reliance on Bayesian first-stage estimation. Inspired by the model-agnostic idea of Komura
+et al. (2025), we generalize the discovery step and allow any suitable machine learning method to
+estimate d
+ITT(x) and ˆπC(x), which are used solely to construct an interpretable partition of the co-
+variate space via CART. While the framework is agnostic with respect to the choice of first-stage
+estimator, we focus on tree-based methods, which are described in Sections 2.2–2.4, for estimating
+d
+ITT(x) and ˆπC(x). Holding the resulting partition fixed, the CCACE is then re-estimated within
+each leaf using IV regression on an independent inference sample, yielding the final ˆτCCACE(x).
+Algorithm 1 summarizes the procedure.
+1. Technically, one doesn’t need Assumption 8 here to identify CACE. However, we need it to construct the DRRF-IV
+estimator in Section 2.2.
+6
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Algorithm 1 Two-Step Procedure with Instrumental Variables
+Inputs: N units i = 1, . . . , N with data (Xi, Zi, Di, Yi)
+Outputs:
+• Tree structure identifying heterogeneity in causal effects
+• Estimates ˆτCCACE(x)
+Step 0: Honest Sample Splitting
+• Randomly split the data into a discovery set Idis and an inference set Iinf.
+Step 1: Discovery (on Idis)
+1. Estimate d
+ITT(x) using an estimator described in Sections 2.2–2.4
+2. Estimate compliance probabilities ˆπC(x) using an estimator described in Sections 2.2–2.4
+3. Compute CCACE for Idis
+ˆτ dis
+CCACE(x) = d
+ITT(x)/ˆπC(x)
+4. Fit a decision tree to (ˆτ dis
+CCACE(x), Xi) to identify subgroups
+Step 2: Inference (on Iinf)
+1. For each terminal node Lj, j = 1, . . . , J, estimate the subgroup-specific effect ˆτCCACE,Lj.
+2. Run weak-instrument tests and discard leaves with weak instrument strength from the set of
+reported subgroups.
+Let L1, . . . , LJ denote the J terminal nodes or leaves, of the discovered tree, where each leaf
+corresponds to one discovered subgroup. In particular, following Bargagli-Stoffi et al. (2022), and
+noting that Zi, Di ∈{0, 1}, for each terminal node Lj obtained in the discovery step, the subgroup-
+specific CCACE is defined as
+τCCACE,Lj = E[Yi | Zi = 1, Xi ∈Lj] −E[Yi | Zi = 0, Xi ∈Lj]
+E[Di | Zi = 1, Xi ∈Lj] −E[Di | Zi = 0, Xi ∈Lj].
+(9)
+Under Assumptions 4-7 and with a binary Zi and Di, the corresponding IV estimator bτCCACE,Lj
+coincides with the two-stage least squares (2SLS) estimator for the CCACE within each subgroup
+(see Bargagli-Stoffi et al. (2022) for details). Finally, for Xi ∈Lj, we define
+bτCCACE(Xi) = bτCCACE,Lj.
+Subgroups with weak instrument strength are discarded from the set of reported valid subgroups
+in order to mitigate potential bias arising from weak identification or a small proportion of compliers
+within a leaf. To control for false discoveries due to multiple subgroup-level inference, we adjust
+p-values using Holm’s method (Holm, 1979), as implemented in Bargagli-Stoffi et al. (2022). Al-
+ternative familywise error rate or false discovery rate controlling procedures are beyond the scope
+of this paper.
+7
+
+
+GLISZCZY ´NSKA-SCHROEDER
+The next sections illustrate how different estimators can be incorporated into the discovery step
+of Algorithm 1. Section 2.2 introduces a debiased robust transformed-outcome regression forest
+for estimating ITT(x). Section 2.3 present GRF-IV by Athey et al. (2019), which directly targets
+τCCACE(x). Finally, Section 2.4 considers the original BCF-IV procedure of Bargagli-Stoffi et al.
+(2022). We aim to investigate how alternative estimation strategies influence subgroup discovery
+within the general two-step framework.
+2.2. Transformed Outcome Regression with Instrumental Variables
+In this section, we derive an estimator for ITT(x) from Equation (8), which is based on the dou-
+ble/debiased machine learning (DML; Chernozhukov et al. (2018)) and transformed-outcome (up-
+lift) approaches (Gutierrez and G´erardy, 2017). Before we extend this idea to the IV setting by con-
+structing an orthogonal IV score in transformed–outcome form, we briefly discuss both methods.
+The DML framework builds on two central ideas from semiparametric inference: sample splitting
+and the use of Neyman–orthogonal score functions, which are robust to first-order nuisance estima-
+tion errors. In our setting, for the parameter of interest θ(x) = ITT(x), orthogonality is defined as
+follows.
+Definition 1. Let ψi(θ(x), η) denote a score function for unit i, identifying θ(x) through the con-
+ditional moment condition
+E[ψi(θ(x), η) | Xi = x] = 0,
+where η is a nuisance function. The score is called Neyman-orthogonal with respect to η if
+∂
+∂λE[ψi(θ(x), η + λh) | Xi = x]
+
+λ=0
+= 0
+for any perturbation h(·).
+To illustrate orthogonal score construction, consider the partially linear model
+Yi = τDi + g(Xi) + εi,
+E[εi | Xi, Di] = 0,
+Di = p(Xi) + vi,
+E[vi | Xi] = 0,
+(10)
+with τ from Equation (3). Let p(x) := E[Di | Xi = x] and m(x) := E[Yi | Xi = x] be the
+nuisance functions. Throughout this section, m(x) and p(x) denote the nuisance functions evaluated
+at a generic covariate value x, while m(Xi) and p(Xi) denote the same functions evaluated at the
+observed covariates of unit i. Under the partially linear model, we have
+˜Yi := Yi −m(Xi),
+(11)
+˜Di := Di −p(Xi).
+(12)
+and therefore
+Yi −m(Xi) = τ(Di −p(Xi)) + εi.
+(13)
+Hence, estimation of τ reduces to a final regression of ˜Yi on ˜Di, which corresponds to the orthogonal
+score function
+ψi(τ, m, p) =
+ Yi −m(Xi) −τ(Di −p(Xi))
+
+(Di −p(Xi))
+8
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+and satisfies the moment condition E[ψi(τ, m, p) | Xi = x] = 0. Moreover, this score is also
+orthogonal with respect to the nuisance functions (m, p) in the sense of Definition 1.
+Transformed-outcome methods, on the other hand, construct an outcome transformation Y ⋆
+i
+whose conditional expectation equals the causal effect of interest. This allows standard machine
+learning methods to be applied directly to Y ⋆
+i , since
+E[Y ⋆
+i | Xi = x] = τ(x).
+For example, Wager and Athey (2018) note that the CATE can be estimated by applying standard
+machine learning methods to a transformed outcome
+Y ⋆
+i := DiYi
+ˆp(Xi) −(1 −Di)Yi
+1 −ˆp(Xi) ,
+(14)
+where ˆp(x) denotes a consistent estimator of the propensity score. Under Assumptions 1-3, this
+transformation satisfies
+E[Y ⋆
+i | Xi = x] = τ(x).
+Furthermore, Stoffi and Gnecco (2018) transform Yi using the instrument Zi and the corresponding
+propensity score pZ(Xi) from Equation (6) and define
+Y IV
+i
+:=
+(Zi −pZ(Xi))Yi
+pZ(Xi)(1 −pZ(Xi)),
+(15)
+which satisfies E
+
+Y IV
+i
+| Xi = x
+
+= ITT(x).
+Building on Equation (15), we consider a residualized version of the outcome based on m(x)
+and defined the transformed outcome as
+Y ⋆IV
+i
+:= (Zi −pZ(Xi))(Yi −m(Xi))
+pZ(Xi)(1 −pZ(Xi))
+.
+(16)
+Note that residualizing the outcome does not affect the identification of the target parameter, since
+E[(Zi −pZ(x))m(x) | Xi = x] = 0.
+Following the logic of prior work on transformed outcome trees for treatment effect estimation
+(Gutierrez and G´erardy, 2017; Athey and Imbens, 2016), we can formalize the result as follows.
+Theorem 2.
+Let m(x) = E[Yi | Xi = x] and pZ(x) = Pr(Zi = 1 | Xi = x) and suppose
+Assumptions 4–7 hold. Then Y ⋆IV
+i
+satisfies
+E[Y ⋆IV
+i
+| Xi = x] = E[Yi | Zi = 1, Xi = x] −E[Yi | Zi = 0, Xi = x] = ITT(x).
+Proof. See Appendix B.
+Equation (16) is related to the orthogonal score construction used in the DML framework. While
+DML orthogonalizes both Di and Yi via residual-on-residual regression and solves moment condi-
+tions explicitly, our approach use the orthogonal IV score as a pseudo–outcome.
+9
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Lemma 3. Let θ(x) := ITT(x) and define the score function
+ψi(θ(x), m, pZ) := (Zi −pZ(Xi))(Yi −m(Xi))
+pZ(Xi)(1 −pZ(Xi))
+−θ(x).
+The corresponding conditional moment functional is
+Ψ(θ(x), m, pZ) := E[ψi(θ(x), m, pZ) | Xi = x] .
+Then Ψ(θ(x), m, pZ) is Neyman–orthogonal with respect to m(·). That is, for any perturbation
+h(·),
+∂
+∂λΨ(θ(x), m + λh, pZ)
+
+λ=0
+= 0.
+Proof. See Appendix B.
+Taken together, Theorem 2 and Lemma 3 show that Y ⋆IV
+i
+can be used as a pseudo-outcome for
+ITT(x). Since
+E[Y ⋆IV
+i
+| Xi = x] = ITT(x),
+we can estimate ITT(x) by applying a regression forest with Y ⋆IV
+i
+as the response. The orthog-
+onality result shows that this pseudo-outcome is locally insensitive to first-order errors in m(·).
+This estimator is then used in Step 1.1 of Algorithm 1. The resulting procedure is summarized in
+Algorithm 2, with implementation details provided in Appendix C.
+To estimate the conditional compliance rate πC(x), we fit a separate regression model for Di as
+a function of (Xi, Zi). Let
+µD(x, z) := E[Di | Xi = x, Zi = z].
+We then estimate
+πC(x) = µD(x, 1) −µD(x, 0)
+by
+bπC(x) = ˆµD(x, 1) −ˆµD(x, 0).
+Combined with the transformed-outcome estimator d
+ITT(x), this yields
+ˆτCCACE(x) =
+d
+ITT(x)
+bπC(x) ,
+which we use to compute CCACE for Idis.
+Remark 4. We use the term “robust” in the sense of orthogonal or debiased score construction. An
+theoretical extension to doubly robust estimators, which combine outcome modeling and propensity
+score weighting to obtain consistent estimates if at least one of the two nuisance components is
+correctly specified, can be found in Appendix A.4.
+10
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+To complete the discovery-stage estimator bτ dis
+CCACE(x), we also specify the splitting criterion used
+for tree construction. Since estimation is now based on the transformed outcome Y ⋆IV
+i
+rather than
+the raw outcome Yi, the tree construction is also performed using Y ⋆IV
+i
+as the response variable. So
+the usual regression-tree splitting criterion can be written in terms of between-child-node variation
+in the transformed outcome. In the present setting, this gives the transformed-outcome tree criterion
+TOTIV := NL( ¯Y ⋆
+L −¯Y ⋆)2 + NR( ¯Y ⋆
+R −¯Y ⋆)2
+NL + NR
+,
+where L and R denote the left and right child nodes with sample sizes NL and NR, respectively,
+and ¯Y ⋆
+L, ¯Y ⋆
+R, and ¯Y ⋆are the corresponding means of Y ⋆IV
+i
+. This criterion favors splits that target
+heterogeneity in ITT(x).
+Finally, our preceding results provide the framework for a discovery-stage estimator bτ dis
+CCACE(x).
+We refer to this implementation as the Debiased Robust Random Forest with IV (DRRF-IV). Rel-
+ative to the general two-step procedure in Algorithm 1, we change how Step 1 is carried out. We
+estimate ITT(x) using the debiased transformed outcome Y ⋆IV
+i
+and the conditional compliance
+rate πC(x), to obtain bτ dis
+CCACE(x) for the discovery sample. These estimated effects are then passed
+to fit a decision tree in Step 1.4 of Algorithm 1. Algorithm 2 summarizes the DRRF-IV algorithm.
+11
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Algorithm 2 Debiased Transformed Outcome Tree (DRRF-IV) for Estimating bτ dis
+CCACE
+Input: Idis, number of trees B
+Output: Estimated CCACE for Idis
+Step 1:
+1. Estimate nuisance function ˆpZ(x) via logistic regression, bm(x) via regression forest and ˆµD(x, z) via
+causal forest (see Appendix C.2).
+2. Compute the debiased transformed outcome for all units:
+bY ⋆IV
+i
+= (Zi −ˆpZ(Xi))(Yi −bm(Xi))
+ˆpZ(Xi)(1 −ˆpZ(Xi))
+.
+Step 2: for b = 1 to B do
+Split Idis into two disjoint sets:
+• A training set Itrain
+b
+for tree construction,
+• An estimation set Iest
+b
+for leaf-weight computation.
+Tree Growing (on Itrain
+b
+):
+• Train a regression tree using the transformed outcome bY ⋆IV
+i
+and TOT-IV splitting criterion:
+TOTIV = NL( ¯Y ⋆
+L −¯Y ⋆)2 + NR( ¯Y ⋆
+R −¯Y ⋆)2
+NL + NR
+Weighting (on Iest
+b
+):
+• For each x = Xi, i ∈Idis, identify the corresponding leaf Lb(x)
+• Assign weights:
+αbi(x) = 1(Xi ∈Lb(x))
+|Lb(x)|
+,
+i ∈Iest
+b
+end
+Final Estimation:
+• Aggregate weights: αi(x) = 1
+B
+PB
+b=1 αbi(x)
+• Estimate the conditional intention-to-treat effect and the conditional compliance rate:
+d
+ITT(x) =
+X
+i∈Idis
+αi(x)bY ⋆IV
+i
+,
+bπC(x) = bµD(x, 1) −bµD(x, 0).
+• Compute the discovery-sample CCACE estimate:
+bτ dis
+CCACE(x) =
+d
+ITT(x)
+bπC(x) .
+12
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+2.3. Causal Forests with instrumental variables
+To estimate heterogeneous treatment effects under endogeneity or irregular treatment assignment,
+Athey et al. (2019) extend the GRF framework to an IV setting. The GRF-IV estimator targets
+τCCACE(x),2 under the structural model
+Yi = η(x) + τCCACE(x) · Di + εi,
+where εi is an error term and η(x) is a nuisance function. Under Assumptions 4-7, the treatment
+effect τCCACE(x) is identified by
+τCCACE(x) = Cov[Yi, Zi | Xi = x]
+Cov[Di, Zi | Xi = x].
+The local estimates are obtained using gradient-based pseudo-outcomes derived from orthogo-
+nal moment conditions. Each tree solves a local estimating equation, and predictions are aggregated
+using forest weights obtained under an honest sample-splitting scheme. These pseudo-outcomes
+isolate variation in the treatment effect rather than in the outcome itself (see Algorithm 5 in Ap-
+pendix A.4 or Athey et al. (2019)).
+In our setting, GRF-IV is used in the discovery step of Algorithm 1 to obtain unit-level esti-
+mates bτCCACE(x). These estimates are then used in the inference step of Algorithm 1 to identify
+interpretable subgroups. While GRF-IV itself is an established method for estimating heteroge-
+neous treatment effects with instruments, our contribution lies in embedding it within a general
+two-step framework for subgroup identification.
+Both GRF-IV and DRRF-IV aim to estimate heterogeneous causal effects in IV settings, but
+they rely on different estimation strategies. GRF-IV is a moment-based approach that estimates
+τCCACE(x) by solving local orthogonal estimating equations and aggregating the resulting estimates
+using forest weights. In contrast, DRRF-IV, introduced in Section 2.2, constructs a debiased/robust
+transformed outcome whose conditional expectation equals the causal parameter of interest. This
+transformation allows heterogeneous effects to be estimated directly via standard regression forests
+applied to the transformed outcome.
+2.4. Bayesian instrumental variable causal forest
+We now briefly describe the Bayesian Causal Forest with Instrumental Variables (BCF-IV) al-
+gorithm by Bargagli-Stoffi et al. (2022), which extends the Bayesian Additive Regression Trees
+(BART; Chipman et al. (2010); Hill (2011)) framework to instrumental-variable settings with im-
+perfect compliance. Following their notation, for the estimation of the conditional intention-to-treat,
+the outcome is modeled by including Zi into a BART ensemble
+Yi = f(Zi, Xi) + εi ≈T1(Zi, Xi) + · · · + Tq(Zi, Xi) + εi,
+εi ∼N(0, σ2),
+where each Tj j ∈{1 . . . q} denotes a binary regression tree together with its associated structure
+and leaf parameters. The conditional expected value of Yi can then be written as
+E[Yi | Zi = z, Xi = x] = g(z, x),
+2. In Athey et al. (2019), this estimand is referred to as the Conditional Local Average Treatment Effect (CLATE). We
+maintain the notation τCCACE(x) for consistency.
+13
+
+
+GLISZCZY ´NSKA-SCHROEDER
+from which the conditional intention-to-treat effect is given by
+ITT(x) = g(1, x) −g(0, x).
+Note, that the functions f and g are related but notationally distinct, f denotes the BART regression
+function in the outcome equation, whereas g denotes the corresponding conditional outcome mean.
+Adapting the model to an irregular assignment mechanism, BCF-IV decomposes the conditional
+mean of the outcome into a baseline component and a heterogeneous intention-to-treat component
+E[Yi | Zi = z, Xi = x] = µ(pZ(x), x) + ITT(x)z,
+(17)
+where the baseline function µ(pZ(x), x) captures variation in Yi unrelated to Zi. Both µ(·) and
+ITT are modeled through separate BART priors, and ITT is constrained to have shallower trees. To
+estimate the conditional proportion of compliers, BCF-IV fits a second BART model for treatment
+receipt,
+Di = ℓ(Zi, Xi) + ψi ≈˜T1(Zi, Xi) + · · · + ˜Tq(Zi, Xi) + ψi,
+ψi ∼N(0, θ2),
+where ˜Tj denotes a separate BART ensemble. As in Bargagli-Stoffi et al. (2022), this notation is
+used as a compact representation of the treatment model. Since Di is binary, the conditional mean
+δ(z, x) = E[Di | Zi = z, Xi = x] corresponds to the conditional probability Pr(Di = 1 | Zi =
+z, Xi = x). The conditional proportion of compliers is then obtained as
+πC(x) = δ(1, x) −δ(0, x).
+Combining ITT(x) and the compliance rate yields
+τCCACE(x) = ITT(x)
+πC(x) .
+In the original BCF-IV procedure proposed by Bargagli-Stoffi et al. (2022), the estimates d
+ITT(x)
+and bπC(x) obtained in the discovery sample are combined to form ˆτ dis
+CCACE(x). These fitted effects
+are then used to train a CART tree for identifying interpretable subgroups; see Algorithm 3 for
+details. Algorithm 1 extends this idea by allowing alternative estimators of d
+ITT(x) and bπC(x),
+including BCF-IV, GRF-IV, and DRRF-IV, to be incorporated within the same subgroup discovery
+framework.
+14
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Algorithm 3 BCF-IV
+Inputs: N units i = 1, . . . , N with data (Xi, Zi, Di, Yi)
+Outputs:
+• Tree structure identifying heterogeneity in causal effects
+• Estimates ˆτCCACE,Lj for the discovered subgroups
+Step 0: Honest Sample Splitting
+• Randomly split the data into a discovery set Idis and an inference set Iinf.
+Step 1: Discovery (on Idis)
+1. Estimate the conditional intention-to-treat effect d
+ITT(x) using BCF.
+2. Estimate the conditional compliance rate
+ˆπC(x) = ˆδ(1, x) −ˆδ(0, x),
+where ˆδ(z, x) is obtained from a BART model for treatment receipt.
+3. Compute
+ˆτ dis
+CCACE(x) =
+d
+ITT(x)
+ˆπC(x) .
+4. Fit a decision tree to
+ ˆτ dis
+CCACE(x), Xi
+
+to discover subgroups.
+Step 2: Inference (on Iinf)
+1. For each terminal node Lj, j = 1, . . . , J, estimate the subgroup-specific effect ˆτCCACE,Lj.
+2. Run weak-instrument tests and discard leaves with weak instrument strength from the set of reported
+subgroups.
+3. Simulation Study
+To investigate the performance of the proposed methods in the presence of imperfect compliance,
+we conduct a simulation study with two heterogeneity settings based on the data generating process
+by Bargagli-Stoffi et al. (2022). The aim is to evaluate how well the proposed estimators capture
+heterogeneous treatment effects across varying subgroup structures and treatment effect sizes. As a
+benchmark, we compare performance against the established BCF-IV algorithm.
+3.1. Setup
+For each design, we simulate MC = 500 independent samples. In the baseline specification, the
+sample size is N = 2000, and we additionally consider larger samples N = 10000. For each
+observation i, the covariates Xi1, . . . , Xi10 are generated independently from a standard normal
+distribution,
+Xij ∼N(0, 1),
+for j = 1, . . . , 10.
+The instrument Zi is drawn independently from a binomial distribution, Zi ∼Binom(0.5). We con-
+sider one-sided noncompliance. Units assigned to control never receive treatment, whereas among
+15
+
+
+GLISZCZY ´NSKA-SCHROEDER
+units assigned to treatment, compliance occurs with probability 0.75. Formally,
+Di(0) = 0,
+Di(1) ∼Bernoulli(0.75).
+Potential outcomes under control are generated as
+Yi(0) ∼N(0, 1),
+and potential outcomes under treatment are given by
+Yi(1) = Yi(0) + Di(1)τCCACE(Xi).
+where τCCACE(Xi) denotes the individual-level complier average causal effect, which varies across
+covariate profiles. We consider two heterogeneity scenarios.
+1. Strong heterogeneity scenario:
+τCCACE(Xi) =
+
+
+
+
+
+k
+if Xi1 < −0.5 and Xi2 < −0.5,
+−k
+if Xi1 > 0.5 and Xi2 > 0.5,
+0
+otherwise.
+2. Slight heterogeneity scenario:
+τCCACE(Xi) =
+
+
+
+
+
+
+
+
+
+
+
+k
+if Xi1 < 0 and Xi2 < 0,
+−k
+if Xi1 > 0 and Xi2 > 0,
+0.5k
+if Xi1 > 0 and Xi2 < 0,
+−0.5k
+otherwise.
+Here, k ∈{0.5, 1, 1.5, 2.5, 3, 3.5, 4} denotes the treatment effect size. The two heterogeneity sce-
+narios differ in the complexity of the induced subgroup structure. In the strong heterogeneity design,
+the covariate space contains two clearly separated active subgroups with nonzero effects and a larger
+null-effect region otherwise. The slight design has a more diffused heterogeneity: instead of two
+clearly isolated regions, the covariate space is partitioned into four subgroups with different effect
+magnitudes and signs, which introduces finer bands between the extreme subgroups and therefore
+makes subgroup identification more difficult. Overall, these treatment effect scenarios induce the
+following true subgroup leaves:
+Strong heterogeneity: Only two active subgroups with nonzero effects:
+L1 = {Xi : Xi1 < −0.5 and Xi2 < −0.5},
+L2 = {Xi : Xi1 > 0.5 and Xi2 > 0.5}
+All other units are assigned to the null-effect leaf:
+L0 = {Xi | Xi /∈L1 ∪L2}
+Slight heterogeneity: Four subgroups defined by combinations of Xi1 and Xi2:
+L1 = {Xi : Xi1 < 0 and Xi2 < 0},
+L2 = {Xi : Xi1 > 0 and Xi2 > 0},
+L3 = {Xi : Xi1 > 0 and Xi2 < 0},
+L4 = {Xi : Xi1 < 0 and Xi2 > 0}.
+16
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+We evaluate performance along two dimensions. First, we evaluate subgroup discovery by
+measuring how accurately units are assigned to their true subgroup. Since exact split points are
+not directly comparable across methods in designs with continuous covariates, we adopt a unit-level
+evaluation based on the predicted and true leaves. Details on the matching procedure are provided in
+Appendix A.1. The aligned true and predicted subgroup labels can be summarized by the confusion
+matrix in Table 1.
+True Lj
+True not Lj
+Predicted Lj
+True Positive (TPLj)
+False Positive (FPLj)
+Predicted not Lj
+False Negative (FNLj)
+True Negative (TNLj)
+Table 1: Classification scheme for subgroup detection in the multi-class setting.
+Based on these aligned subgroup labels, we compute the true detection rate (TDR), the false
+detection rate (FDR), and the overall detection rate (ODR). In this section, FDR denotes the false
+detection rate and should not be confused with the false discovery rate used in multiple-testing
+procedures. We refer to these quantities as detection metrics because they evaluate whether units
+are assigned to their correct subgroups.
+TDRLj =
+TPLj
+TPLj + FNLj
+,
+FDRLj =
+FPLj
+FPLj + TNLj
+,
+ODR = 1
+N
+J
+X
+j=0
+TPLj.
+Second, we consider also significance-based subgroup discovery metrics. These are stricter,
+because a subgroup assignment is counted as successful only if the observation is assigned to the
+correct leaf and the estimated treatment effect is statistically significant in that leaf. In particular,
+we follow the original implementation of Bargagli-Stoffi et al. (2022), which reports leaf-level IV
+estimates, their p-values, and multiple-testing-adjusted p-values. Specifically, for each discovered
+leaf Lj, the null hypothesis
+H0,j : τCCACE,Lj = 0
+is tested using the leaf-level IV estimate computed on the inference sample. The resulting p-values
+are adjusted across leaves using Holm’s method, and a leaf is treated as significant if its adjusted
+p-value satisfies padj
+Lj < 0.05.
+We use this reported significance classification when constructing the significance-based dis-
+covery metrics. To distinguish these quantities from the purely detection-based counts above, we
+denote the corresponding confusion-matrix entries by ∗. Thus, TP∗
+Lj counts observations that are
+correctly assigned to Lj and for which the estimated treatment effect is significant, with FP∗
+Lj, FN∗
+Lj,
+and TN∗
+Lj defined analogously. The resulting significance-based metrics are
+TPRLj =
+TP∗
+Lj
+TP∗
+Lj + FN∗
+Lj
+,
+FPRLj =
+FP∗
+Lj
+FP∗
+Lj + TN∗
+Lj
+,
+SigRateLj = Pr(detected significant | true label = Lj).
+Accordingly, TPR and FPR should be interpreted as significance-adjusted analogues of TDR and
+FDR. When the significance rate is close to one, the detection-based and significance-based mea-
+sures become similar. Additionally, we evaluate estimation accuracy by using the MSE, MAE and
+17
+
+
+GLISZCZY ´NSKA-SCHROEDER
+bias. For each observation i ∈Iinf, we compute
+MSE =
+1
+|Iinf|
+X
+i∈Iinf
+ bτCCACE,i −τ ⋆
+CCACE,i
+2 ,
+(18)
+MAE =
+1
+|Iinf|
+X
+i∈Iinf
+bτCCACE,i −τ ⋆
+CCACE,i
+ ,
+(19)
+Bias =
+1
+|Iinf|
+X
+i∈Iinf
+ bτCCACE,i −τ ⋆
+CCACE,i
+
+,
+(20)
+where bτCCACE,i denotes the estimated subgroup effect for observation i, and τ ⋆
+CCACE,i is the corre-
+sponding CCACE based on the subgroup to which the observation was assigned by the method.
+Note that, τ ⋆
+CCACE,i may differ from the true individual subgroup effect τCCACE(Xi) when the
+method assigns observation i to an incorrect subgroup. This choice is intentional, since subgroup
+identification is already evaluated by the detection-based and significance-based metrics, whereas
+MSE, MAE, and bias are used to assess the accuracy of the effect estimate associated with the
+subgroup selected by the method.
+3.2. Results
+Figures 1–3 report the average detection and significance metrics for subgroup discovery for N =
+10000, while Table 2 reports estimation accuracy for the CCACE. The corresponding tables and
+leafwise results are given in Appendix A. The results for N = 2000 are also reported in Appendix
+A and lead to a similar conclusion, but subgroup discovery and estimation accuracy are generally
+weaker, particularly for DRRF-IV and GRF-IV. Overall, these results suggest that when the sample
+size is rather small, a larger effect size is needed to perform on par with BCF-IV.
+We first consider the strong heterogeneity setting. At the smallest effect size, k = 0.5, BCF-IV
+achieves the strongest subgroup discovery performance, with TDR = 0.786 and TPR = 0.594,
+compared to TDR = 0.632 and 0.643 for DRRF-IV and GRF-IV, and TPR = 0.518 and 0.499,
+respectively. As the effect size increases, all methods improve quickly. By k = 1, TPR rises to
+0.882 for BCF-IV, 0.848 for DRRF-IV, and 0.833 for GRF-IV, and by k = 4 all methods attain
+TDR above 0.93 and TPR above 0.92. So overall, from k = 0.5 to k = 4, TPR increases by
+about 56% for BCF-IV, 80% for DRRF-IV, and 87% for GRF-IV. False discovery rates remain
+higher than in the slight heterogeneity case, with FDR = 0.150 for BCF-IV and about 0.20 for
+the forest-based methods, but decrease substantially, while significance rates increase from 0.519,
+0.427, and 0.415 at k = 0.5 to at least 0.984, 0.986, and 0.988, respectively. Estimation accuracy is
+also very similar across methods. BCF-IV has a slight advantage at small effect sizes, but the gap is
+small: at k = 0.5, MSE is 0.007 for BCF-IV versus 0.009 and 0.008 for DRRF-IV and GRF-IV. For
+larger k, MSE and bias remain close across all three methods. MAE is small throughout, typically
+between 0.065 and 0.08, indicating that all methods estimate subgroup effects quite accurately once
+subgroup assignment is sufficiently reliable.
+The slight heterogeneity setting follows a similar pattern. While subgroup discovery is already
+strong at moderate effect sizes, the gap between the methods is more visible when k is small. At
+k = 0.5, BCF-IV again performs best, with TDR = 0.875 and TPR = 0.825, while FDR and
+FPR remain close to zero. By contrast, DRRF-IV and GRF-IV still struggle to correctly identify
+the true subgroups at this effect size, with TDR = 0.381 and 0.262, respectively, but improve
+18
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+rapidly as k increases. By k = 1.5, all three methods achieve TDR and TPR above 0.98, and
+from k = 2 onward the differences are negligible. Significance rates are already high at k = 0.5,
+ranging from 0.945 for BCF-IV to 0.958 and 0.956 for DRRF-IV and GRF-IV, and equal 1.0 for
+all methods at larger effect sizes. BCF-IV has the lowest MSE at small effect sizes, with 0.007 at
+k = 0.5, compared with 0.011 for DRRF-IV and 0.018 for GRF-IV. Thus, relative to BCF-IV, the
+initial MSE is about 57% higher for DRRF-IV and more than 150% higher for GRF-IV. From about
+k = 1.5 onward, however, all methods achieve essentially identical MSE levels around 0.006.
+Overall, BCF-IV shows the strongest subgroup discovery and the lowest estimation error at
+small effect sizes. This finding is consistent with the BCF literature, which emphasizes the value
+of shrinkage and regularization when the signal is weak (Hahn et al., 2020). BCF-IV models
+µ(pZ(x), x) and ITT(x) from Equation (17) separately and allows different levels of regularization
+for each component. When the true heterogeneity structure is simple or heterogeneity is modest,
+this leads to more stable estimates and, in our setting, lowers the risk of spurious subgroup detec-
+tion. By contrast, DRRF-IV and GRF-IV are more sensitive to small effect sizes. As shown in Hou
+and Fern´andez-Lor´ıa (2025), GRF can struggle to discover heterogeneity under honest estimation,
+since honesty uses less data for tree construction. When the effect size is small and, as a result,
+also CCACE, the forest becomes less able to detect the true subgroup structure, even though hon-
+esty helps protect against overfitting. Consequently, the GRF-based methods are less effective at
+identifying the covariates that truly drive heterogeneity when the signal is weak. As k increases to a
+moderate level, however, the heterogeneity signal becomes clearer, and the performance differences
+across methods largely disappear.
+19
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Table 2: MSE, bias, and MAE under strong and slight heterogeneity.
+heterogeneity scenario
+strong
+slight
+Method
+k
+MSE
+Bias
+MAE
+MSE
+Bias
+MAE
+BCF-IV
+0.5
+0.007
+-0.002
+0.065
+0.007
+-0.004
+0.063
+1.0
+0.008
+-0.003
+0.070
+0.006
+-0.001
+0.061
+1.5
+0.008
+-0.004
+0.070
+0.006
+-0.002
+0.060
+2.0
+0.008
+-0.004
+0.070
+0.006
+-0.003
+0.060
+2.5
+0.009
+-0.004
+0.072
+0.006
+-0.001
+0.059
+3.0
+0.010
+-0.004
+0.077
+0.006
+-0.002
+0.061
+3.5
+0.010
+-0.003
+0.075
+0.006
+-0.002
+0.061
+4.0
+0.011
+-0.005
+0.079
+0.006
+0.000
+0.060
+DRRF-IV
+0.5
+0.009
+-0.001
+0.070
+0.011
+0.000
+0.076
+1.0
+0.008
+-0.004
+0.067
+0.008
+-0.001
+0.065
+1.5
+0.008
+-0.002
+0.068
+0.006
+-0.001
+0.062
+2.0
+0.008
+-0.000
+0.070
+0.006
+-0.004
+0.061
+2.5
+0.008
+-0.004
+0.071
+0.006
+-0.002
+0.061
+3.0
+0.010
+-0.000
+0.074
+0.006
+-0.001
+0.064
+3.5
+0.009
+-0.001
+0.075
+0.006
+-0.003
+0.060
+4.0
+0.010
+-0.004
+0.078
+0.006
+-0.001
+0.061
+GRF-IV
+0.5
+0.008
+-0.005
+0.066
+0.018
+-0.002
+0.089
+1.0
+0.008
+-0.004
+0.067
+0.014
+-0.006
+0.072
+1.5
+0.008
+-0.003
+0.069
+0.006
+-0.001
+0.059
+2.0
+0.008
+-0.001
+0.070
+0.006
+-0.002
+0.060
+2.5
+0.009
+-0.001
+0.072
+0.006
+-0.001
+0.061
+3.0
+0.009
+-0.001
+0.072
+0.006
+-0.003
+0.060
+3.5
+0.010
+-0.002
+0.077
+0.006
+-0.001
+0.060
+4.0
+0.011
+-0.003
+0.080
+0.006
+-0.001
+0.061
+Notes: Entries report average estimation accuracy measures across simulation replications for N = 10000. Lower values
+indicate better performance.
+20
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Figure 1: TDR and TPR under strong and slight heterogeneity
+Notes: Results are averaged over 500 Monte Carlo replications with N = 10,000. The horizontal axis shows the treatment effect
+size k. Higher values indicate better subgroup detection. From k = 2 onward, the curves nearly coincide for both heterogeneity
+scenarios.
+Figure 2: FDR and FPR under strong and slight heterogeneity
+Notes: Results are averaged over 500 Monte Carlo replications with N = 10,000. Lower values indicate better performance.
+Starting from a lower level than BCF-IV, the non-Bayesian methods exhibit a spike at k = 1 in the slight heterogeneity case.
+From k = 2 onward, the curves nearly coincide for both heterogeneity scenarios.
+21
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Figure 3: ODR and SigRate under strong and slight heterogeneity
+Notes: Results are averaged over 500 Monte Carlo replications with N = 10000. Higher values indicate better performance.
+SigRate measures the frequency with which observations in a true subgroup are assigned to a leaf whose estimated effect is
+statistically significant.
+In addition to statistical performance, we also compare the computational runtime of the three
+methods. Detailed runtime results are reported in Appendix C.3. Overall, GRF-IV is by far the
+fastest method across all considered designs. For example, when N = 10,000, average runtimes
+are approximately 2.6–2.8 seconds for GRF-IV, compared to approximately 14.3–15.2 seconds for
+DRRF-IV and 23.5–23.8 seconds for BCF-IV. Thus, although the modified BCF-IV implementation
+used in this work is faster and more stable than the original implementation by Bargagli-Stoffi et al.
+(2022), it remains the most computationally demanding approach. The higher runtime of BCF-IV
+is mainly driven by the Bayesian estimation of ITT(x), whereas the additional computational cost
+of DRRF-IV is primarily due to the transformation and rewritten splitting rule.
+4. Empirical application
+There are indications that prompt admission to the intensive care units (ICUs) may affect patient
+mortality. Cardoso et al. (2011) demonstrated that delays in ICU admission were associated with
+higher mortality, even for patients who were eventually admitted. These findings emphasize that
+critically ill patients benefit from early access to intensive care. However, as Keele et al. (2020)
+highlight, observational studies of ICU admission face methodological challenges, as patients who
+are admitted promptly to the ICU often present with greater severity of illness, according to their
+medical characteristics. Consequently, standard regression-based methods may yield biased esti-
+mates, which has led researchers to adopt IV approaches to study the effects of critical care Hu et al.
+(2018).
+We use data from the SPOTlight study, a prospective cohort of 13,011 adult patients from 48 UK
+National Health Service (NHS) hospitals, collected between November 2010 and December 2011.
+Because the original data could not be publicly released, Keele et al. (2020) provide a pseudo-
+22
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+dataset generated by resampling the original data with replacement until obtaining a resample that
+was close to the distribution of the original data. Furthermore, they applied IV methods to estimate
+the causal effect of ICU admission on mortality. The approach relies on ICU bed availability at
+the time of clinical assessment, which serves as an instrument to address unmeasured confounding
+in the assignment of ICU care. While their findings suggest that prompt ICU admission may re-
+duce short-term mortality, the estimated effects were not statistically significant. Building on that
+work, we investigate heterogeneity in treatment effects across patient groups using our two-step
+algorithms. Specifically, we aim to identify patient subgroups that benefit more or less from prompt
+ICU admission, even when the overall average effect is close to zero. Identifying such variation
+may influence clinical decision-making and more efficient allocation of critical care resources. We
+therefore first conduct a primary single-run analysis using each method once. Second, to examine
+the robustness of subgroup findings, we repeat the entire procedure 100 times with different infer-
+ence and discovery splits. Note that this analysis is exploratory in nature, as subgroup structures
+may vary across repetitions. The goal is not to make general claims but to examine patterns and
+highlight subgroups that appear consistently across runs.
+4.1. Data preprocessing
+Building on the pseudo-data provided by Keele et al. (2020), we focus on the short- to medium-term
+effects of ICU admission and use 28-day mortality (dead28) as the outcome variable. Alternative
+outcomes such as 7-day or 90-day mortality are not considered in this analysis. We also exclude
+patients older than 93 years, resulting in a sample of 12,903 patients. From the original pseudo-data,
+which contains 40 variables, we select the 18 covariates, which were also used in the ivmodel R
+package (Kang et al., 2023). The treatment is defined as ICU admission within the hospital stay
+(icu bed) and the instrument is determined by ICU bed availability at the time of assessment
+(open bin), with a value of one if fewer than four ICU beds were available and zero otherwise.
+Thus, following the original coding, open bin = 1 corresponds to lower ICU bed availability.
+This coding is the reverse of a convention in which Zi = 1 denotes greater treatment availability, but
+it is kept here to remain consistent with the original data documentation. The dataset also contains
+patient characteristics, including demographic variables (age, sex), comorbidities (sepsis diagnosis,
+peri-arrest), and clinical severity measuress: the ICNARC physiological score (icnarc score),
+the National Early Warning Score (news score), and the Sequential Organ Failure Assessment
+score (sofa score). Additionally, indicators are provided for the observed level of care at assess-
+ment and the recommended level of care after assessment.
+Lastly, we exclude site from the main analysis, since our goal is to uncover heterogeneity
+in treatment effects across patient characteristics, whereas including hospital indicators would shift
+part of the heterogeneity analysis toward between-hospital differences. As a robustness check, we
+conducted an additional analysis with hospital ”fixed effects”, and report these results in Appendix
+A.3. In total, the final dataset consists of 12,903 patients and 18 variables, including the outcome,
+treatment, instrument and baseline covariates. Summary statistics for the main variables are reported
+in Tables 9 and 10 in Appendix A.3.
+4.2. Results
+The overall estimate of the CACE is approximately −0.07 for all methods, which is comparable
+to the estimates reported by (Keele et al., 2020). This suggests that prompt ICU admission may
+23
+
+
+GLISZCZY ´NSKA-SCHROEDER
+slightly reduce 28-day mortality among compliers. While this indicates a potential survival benefit,
+the effect is not statistically significant. Moreover, the resulting subgroup effects are also not sta-
+tistically significantly. Nevertheless, examining the subgroup patterns remains informative as the
+patterns of discovered subgroups varied across approaches.
+In total, GRF-IV produced 22 subgroups, DRRF-IV identified sixteen subgroups, whereas BCF-
+IV identified four subgroups. The latter method tended to form much larger subgroups, with max-
+imum leaf sizes encompassing up to 90.3% of the sample, compared to 16.3% for DRRF-IV and
+14.6% for GRF-IV. Note that the weak-IV diagnostics are reported for each leaf in Appendix A.3,
+but are not used to remove leaves from the displayed trees in Figures 4 and 5. Using a 5% threshold
+for the weak-IV diagnostic, 9 of the 16 DRRF-IV leaves and 14 of the 22 GRF-IV leaves are flagged
+as weakly identified. For BCF-IV, diagnostics were available for three of the four terminal leaves,
+of which two were flagged as weakly identified. These diagnostics indicate that several leaf-level
+estimates should be interpreted cautiously and not as reliable evidence of subgroup-specific causal
+effects.
+The estimated CACEs also varied across methods, driven by different variables that contribute
+to heterogeneity. Since 28-day mortality is binary, the true subgroup-specific CCACE is a causal
+risk difference and is bounded by [−1, 1] (Chiba et al., 2007). However, the IV estimator is a ratio of
+the estimated intention-to-treat effect and the estimated compliance rate. Consequently, leaf-level
+estimates can fall outside this logical range when the estimated compliance rate is close to zero,
+when the leaf contains relatively few observations, or when the first-stage relationship between the
+instrument and treatment receipt is weak. The weak-IV diagnostics reported in Appendix A.3 help
+identify such cases. Very large leaf-level estimates should therefore be interpreted as evidence of
+instability in the corresponding leaves rather than as clinically meaningful effect sizes.
+For example, for DRRF-IV, the raw leaf-level estimates ranged from −57 among patients aged
+at least 77 years with ICNARC scores below 21, to 8.6, among patients in the same branch who
+additionally had low NEWS scores and for whom normal ward care was recommended after as-
+sessment. Both extreme estimates occurred in leaves flagged as weakly identified by the weak-IV
+diagnostic. Among the DRRF-IV leaves not flagged by this diagnostic, the estimates ranged from
+−0.21 to 0.56.
+GRF-IV produced estimates varying from −1.62 (for patients with an ICNARC score of less
+than 14, no sepsis, a NEWS score of less than 6 and an age greater than 78) to 6.61 (for patients
+with an ICNARC score between 14 and 24, a SOFA score of less than 3 and an age greater than
+83). Again, both extreme estimates occurred in leaves flagged as weakly identified by the weak-IV
+diagnostic. Among the GRF-IV leaves, which are not flagged, the estimates ranged from −0.49 to
+0.35. By contrast, BCF-IV yielded the narrowest range of raw leaf-level estimates, from −0.28 to
+0.90. However, BCF-IV identified only four terminal subgroups, one of which contained approxi-
+mately 90% of the sample. Just for three of the four terminal leaves diagnostics were available, and
+only one of these was not flagged by the weak-IV diagnostic. This non-flagged leaf corresponded
+to patients over 63 years with SOFA scores over 5 and a recommendation for level 3 care after
+assessment, with an estimated CCACE of 0.90.
+24
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Figure 4: Decision tree generated by DRRF-IV
+Notes: The figure shows the subgroup tree obtained from the DRRF-IV procedure. Terminal nodes correspond to discovered patient
+subgroups, with subgroup-specific CCACE estimates reported in the leaves. DRRF-IV identifies 16 terminal subgroups. Using a 5%
+threshold for the weak-IV diagnostic, 7 of the 16 leaves are not flagged as weakly identified. Lighter colors indicate smaller CCACE
+estimates, while darker colors indicate larger CCACE estimates.
+25
+
+
+GLISZCZY ´NSKA-SCHROEDER
+From a clinical perspective, some of these splitting patterns are plausible. Generally, patients
+showing signs of illness, such as sepsis, organ dysfunction (moderate SOFA scores) or intermediate
+ICNARC scores, or those with advanced age, tended to benefit from prompt ICU admission. How-
+ever, very elderly patients and/or patients with only mild physiological derangements (low SOFA
+scores or intermediate ICNARC scores) exhibited an increased risk of mortality. A review of prog-
+nostic factors among very elderly ICU patients emphasizes that poor outcomes are not explained by
+age alone, but also by severity of illness (De Rooij et al., 2005). Moreover, for relatively healthy or
+only moderately ill patients, the risks associated with ICU care (delirium, nosocomial infections, or
+other complications) may outweigh the potential benefits. Again, these patterns should be viewed
+as exploratory signals rather than confirmatory evidence.
+26
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Figure 5: Decision trees generated by GRF-IV and BCF-IV
+(a) GRF-IV
+(b) BCF-IV
+Notes: Terminal nodes correspond to discovered patient subgroups, with subgroup-specific CCACE estimates reported
+in the leaves. GRF-IV identifies 22 terminal subgroups, of which 14 are flagged as weakly identified. BCF-IV identifies
+4 terminal subgroups; diagnostics were available for three of these leaves, and only one was not flagged by the weak-IV
+diagnostic.
+27
+
+
+GLISZCZY ´NSKA-SCHROEDER
+As a robustness check, we also examined which variables are most frequently used for con-
+structing subgroups. For both BCF-IV and GRF-IV, the top three splitting variables were age and
+medical scores, which appears reasonable for defining subgroups. To assess this, we inspected the
+splitting variables across all leaves of the trees and counted their frequencies. Because BCF-IV
+partitions the sample into fewer and larger subgroups, it produces fewer splitting rules, so splitting
+variables appear less frequently by construction. The overall patterns of variable frequencies across
+the three methods are summarized in Figure 9 in Appendix A.3.
+5. Discussion
+This paper examined heterogenous causal effects under imperfect compliance by developing a gen-
+eral two-step framework for CCACE estimation and subgroup discovery in IV settings. Building
+on the BCF-IV framework while relaxing its Bayesian constraints, we proposed two tree-based im-
+plementations, DRRF-IV and GRF-IV, that aim to provide more interpretable subgroup structures
+than existing forest-based IV estimators. In addition, we refined evaluation metrics to accommodate
+continuous covariates.
+Our Monte Carlo comparison of DRRF-IV, GRF-IV, and BCF-IV shows that the non-Bayesian
+estimators perform on par with BCF-IV when treatment heterogeneity is sufficiently strong. By
+contrast, in low-signal settings, BCF-IV remains superior. Together, these findings suggest that
+the choice of estimator systematically interacts with the strength and structure of heterogeneous
+complier effects, which can be relevant in applied IV contexts where heterogeneity is weak or
+unevenly distributed across the covariate space.
+The empirical application with pseudo-data from the SPOTlight study illustrates the limitations
+of all proposed methods. When the overall CACE is small and statistically insignificant, targeted
+subgroup discovery also struggled to identify subgroups with significant complier effects. Although
+the discovered subgroups varied across methods and showed substantial uncertainty, some patterns,
+such as the role of age and physiological severity, remain consistent with established clinical knowl-
+edge. These findings suggest that, in practice, hospitals may not be systematically misallocating
+ICU beds: prioritizing emergency admissions uniformly appears broadly consistent with the low
+and diffuse treatment effect signal found in the data.
+There are several directions for future research. A straightforward extension is to broaden
+the two-step framework to high-dimensional covariate settings or to integrate alternative machine-
+learning approaches, such as metalearners (K¨unzel et al., 2019), either for estimating ITT(x) or
+for directly targeting CCACE estimation in the subgroup discovery step. Another limitation of
+the current simulation design is that instrument is generated randomly. Future work should there-
+fore consider settings with covariate-dependent instruments, weaker overlap, and propensity scores
+closer to one or zero. So far, we have just focused on modifying the discovery step. However,
+refining the inference step might also be promising. While our implementation relies on a standard
+IV regression, more advanced techniques, such as kernel IV regression (Singh et al., 2019), may
+offer advantages in settings with non-binary instruments or treatments or general nonlinearities. Fi-
+nally, method-specific parameter tuning could also improve the performance of our methods. In the
+present study, all parameters were run using identical default settings to ensure comparability. A
+systematic investigation of tuning strategies may yield further gains in accuracy.
+28
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Acknowledgments
+I would like to thank Christoph Hanck for valuable feedback on earlier drafts of this manuscript
+and I am grateful to seminar participants at the RuhrMetrics Research Seminar, Statistische Woche
+2025 and the EuroCIM 2025 for helpful comments and discussions. I also acknowledge partial fi-
+nancial support from TRR 391 Spatio-temporal Statistics for the Transition of Energy and Transport
+(520388526) by the Deutsche Forschungsgemeinschaft (DFG, German Research Foundation) and
+from the Rhine-Ruhr Center for Scientific Data Literacy (DKZ.2R) by the German Federal Ministry
+of Education and Research (BMBF). During the preparation of this manuscript, I used OpenAI’s
+large language models (up to and including GPT-5.5) to assist with proofreading and language edit-
+ing. I reviewed and verified all generated content and am solely responsible for the accuracy of the
+final manuscript and any remaining errors.
+References
+Angrist, J. D. and Imbens, G. W. (1995). Average causal response with variable treatment intensity.
+NBER Technical Working Papers 0127, National Bureau of Economic Research, Inc.
+Angrist, J. D., Imbens, G. W., and Rubin, D. B. (1996).
+Identification of causal effects using
+instrumental variables. Journal of the American Statistical Association, 91(434):444–455.
+Angrist, J. D. and Pischke, J.-S. (2009). Mostly Harmless Econometrics: An Empiricist’s Compan-
+ion. Princeton University Press.
+Athey, S. and Imbens, G. (2016). Recursive partitioning for heterogeneous causal effects. Proceed-
+ings of the National Academy of Sciences, 113(27):7353–7360.
+Athey, S., Tibshirani, J., and Wager, S. (2019). Generalized random forests. The Annals of Statistics,
+47(2):1148 – 1178.
+Bang, H. and Robins, J. (2006). Doubly robust estimation in missing data and causal inference
+models. Biometrics, 61:962–73.
+Bargagli-Stoffi, F. J., De Witte, K., and Gnecco, G. (2022). Heterogeneous causal effects with
+imperfect compliance: A bayesian machine learning approach. The Annals of Applied Statistics,
+16(3):1986–2009.
+Battocchi, K., Dillon, E., Hei, M., Lewis, G., Oka, P., Oprescu, M., and Syrgkanis, V. (2019).
+EconML: A python package for ml-based heterogeneous treatment effects estimation. Version
+0.16.0, https://github.com/py-why/EconML.
+Breiman, L., Friedman, J. H., Olshen, R. A., and Stone, C. J. (1984). Classification and Regres-
+sion Trees. Statistics/Probability Series. Wadsworth Publishing Company, Belmont, California,
+U.S.A.
+Cardoso, L. T., Grion, C. M., Matsuo, T., Anami, E. H., Kauss, I. A., Seko, L., and Bonametti,
+A. M. (2011). Impact of delayed admission to intensive care units on mortality of critically ill
+patients: a cohort study. Critical care, 15(1):R28.
+29
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Caron, A., Baio, G., and Manolopoulou, I. (2022).
+Shrinkage bayesian causal forests for het-
+erogeneous treatment effects estimation. Journal of Computational and Graphical Statistics,
+31(4):1202–1214.
+Chernozhukov, V., Chetverikov, D., Demirer, M., Duflo, E., Hansen, C., Newey, W., and Robins, J.
+(2018). Double/debiased machine learning for treatment and structural parameters. The Econo-
+metrics Journal, 21(1):C1–C68.
+Chiba, Y., Sato, T., and Greenland, S. (2007). Bounds on potential risks and causal risk differences
+under assumptions about confounding parameters. Statistics in Medicine, 26(28):5125–5135.
+Chipman, H. A., George, E. I., and McCulloch, R. E. (2010). Bart: Bayesian additive regression
+trees. The Annals of Applied Statistics, 4(1).
+De Rooij, S., Abu-Hanna, A., Levi, M., and Jonge, E. (2005). Factors that predict outcome of
+intensive care treatment in very elderly patients: a review. Critical Care, 9:R307–14.
+Dominici, F., Bargagli Stoffi, F. J., and Mealli, F. (2021). From controlled to undisciplined data:
+Estimating causal effects in the era of data science using a potential outcome framework. Harvard
+Data Science Review, 3(3).
+Dorie, V. and Hill, J. (2025). bartCause: Causal Inference using Bayesian Additive Regression
+Trees. R package version 1.0-10, https://CRAN.R-project.org/package=bartCause.
+Funk, M. J., Westreich, D., Wiesen, C., St¨urmer, T., Brookhart, M. A., and Davidian, M. (2011).
+Doubly robust estimation of causal effects. American Journal of Epidemiology, 173(7):761–767.
+Gutierrez, P. and G´erardy, J.-Y. (2017). Causal Inference and Uplift Modelling: A Review of the
+Literature. In Proceedings of The 3rd International Conference on Predictive Applications and
+APIs, pages 1–13. PMLR.
+Hahn, P. R., Murray, J. S., and Carvalho, C. M. (2020). Bayesian regression tree models for causal
+inference: Regularization, confounding, and heterogeneous effects (with discussion). Bayesian
+Analysis, 15(3):965–1056.
+Hariton, E. and Locascio, J. J. (2018). Randomised controlled trials – the gold standard for effec-
+tiveness research. BJOG: An International Journal of Obstetrics & Gynaecology, 125(13):1716–
+1716.
+Hill, J. L. (2011). Bayesian nonparametric modeling for causal inference. Journal of Computational
+and Graphical Statistics, 20(1):217–240.
+Holm, S. (1979). A simple sequentially rejective multiple test procedure. Scandinavian Journal of
+Statistics, 6(2):65–70.
+Hou, Y. and Fern´andez-Lor´ıa, C. (2025). Honesty in causal forests: When it helps and when it hurts.
+arXiv. https://doi.org/10.48550/arXiv.2506.13107.
+Hu, W., Chan, C., Zubizarreta, J., and Escobar, G. (2018). An examination of early transfers to the
+icu based on a physiologic risk score. Manufacturing & Service Operations Management, 20.
+30
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Imbens, G. W. and Angrist, J. D. (1994). Identification and estimation of local average treatment
+effects. Econometrica, 62(2):467–475.
+Imbens, G. W. and Rubin, D. B. (2008). Rubin causal model. In The new palgrave dictionary of
+economics, pages 1–10. Springer.
+Imbens, G. W. and Rubin, D. B. (2015). Causal Inference for Statistics, Social, and Biomedical
+Sciences: An Introduction. Cambridge University Press, Cambridge.
+Kang, H., Jiang, Y., Zhao, Q., and Small, D. (2023). ivmodel: Statistical Inference and Sensi-
+tivity Analysis for Instrumental Variables Model.
+R package version 1.9.1, https://CRAN.R-
+project.org/package=ivmodel.
+Keele, L., Harris, S., Pimentel, S. D., and Grieve, R. (2020). Stronger instruments and refined
+covariate balance in an observational study of the effectiveness of prompt admission to intensive
+care units. Journal of the Royal Statistical Society Series A: Statistics in Society, 183(4):pp.
+1501–1521.
+Komura, T., Bargagli Stoffi, F., Shiba, K., and Inoue, K. (2025). Two-step pragmatic subgroup dis-
+covery for heterogeneous treatment effects analyses: perspectives toward enhanced interpretabil-
+ity. European Journal of Epidemiology, 40:141–150.
+K¨unzel, S. R., Sekhon, J. S., Bickel, P. J., and Yu, B. (2019). Metalearners for estimating heteroge-
+neous treatment effects using machine learning. Proceedings of the national academy of sciences,
+116(10):4156–4165.
+Maßmann, L. and Klenke, J. (2026). Shrinkage bayesian causal forest with instrumental variable.
+arXiv. https://doi.org/10.48550/arXiv.2609.18903.
+Olier, I., Zhan, Y., Liang, X., and Volovici, V. (2023). Causal inference and observational data.
+BMC Medical Research Methodology, 23(1).
+Oprescu, M., Syrgkanis, V., and Wu, Z. S. (2019). Orthogonal random forest for causal inference.
+In International Conference on Machine Learning, pages 4932–4941. PMLR.
+Posit team (2025). RStudio: Integrated Development Environment for R. Posit Software, PBC,
+Boston, MA. http://www.posit.co/.
+R Core Team (2025). R: A Language and Environment for Statistical Computing. R Foundation for
+Statistical Computing, Vienna, Austria. https://www.R-project.org/.
+Raita, Y., Camargo, C., Liang, L., and Hasegawa, K. (2021). Big data, data science, and causal
+inference: A primer for clinicians. Frontiers in Medicine, 8:678047.
+Robins, J. M. and Rotnitzky, A. (1995). Semiparametric efficiency in multivariate regression models
+with missing data. Journal of the American Statistical Association, 90(429):122–129.
+Robins, J. M., Rotnitzky, A., and Zhao, L. P. (1994). Estimation of regression coefficients when
+some regressors are not always observed.
+Journal of the American statistical Association,
+89(427):846–866.
+31
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Rosenbaum, P. and Rubin, D. (1983). The central role of the propensity score in observational
+studies for causal effects. Biometrika, 70:41–55.
+Rubin, D. B. (1974). Estimating causal effects of treatments in randomized and nonrandomized
+studies. Journal of Educational Psychology, 66(5):688–701.
+Rubin, D. B. (1978). Bayesian inference for causal effects: The role of randomization. The Annals
+of Statistics, 6(1):34–58.
+Singh, R., Sahani, M., and Gretton, A. (2019). Kernel instrumental variable regression. Advances
+in Neural Information Processing Systems, 32.
+Stoffi, F. J. B. and Gnecco, G. (2018). Estimating heterogeneous causal effects in the presence of
+irregular assignment mechanisms. In 2018 IEEE 5th International Conference on Data Science
+and Advanced Analytics (DSAA), pages 1–10. IEEE.
+Tibshirani, J., Athey, S., Friedberg, R., Hadad, V., Hirshberg, D., Miner, L., Sverdrup, E., Wa-
+ger, S., and Wright, M. (2025). grf: Generalized Random Forests. R package version 2.5.0,
+https://CRAN.R-project.org/package=grf.
+Wager, S. and Athey, S. (2018). Estimation and inference of heterogeneous treatment effects using
+random forests. Journal of the American Statistical Association, 113(523):1228–1242.
+Wang, G., Li, J., and Hopp, W. (2021). An instrumental variable forest approach for detecting
+heterogeneous treatment effects in observational studies. Management Science, 68.
+Wang, L. and Tchetgen Tchetgen, E. J. (2018). Bounded, efficient and multiply robust estimation of
+average treatment effects using instrumental variables. Journal of the Royal Statistical Society:
+Series B (Statistical Methodology), 80(3):531–550.
+Wooldridge, J. M. (2010). Econometric Analysis of Cross Section and Panel Data. The MIT Press.
+Zhong, W., Gao, Y., Zhou, W., and Fan, Q. (2021). Endogenous treatment effect estimation using
+high-dimensional instruments and double selection. Statistics & Probability Letters, 169:108967.
+32
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Appendix A. Additional Monte Carlo Results
+A.1. Evaluation Criteria for the Simulation Study
+We evaluate subgroup discovery by comparing true and predicted subgroup labels for each unit i.
+In settings with continuous covariates, exact split points and node numbering vary across methods
+and simulation replications. We therefore proceed in two steps. Each i ∈Iinf is assigned to both a
+true subgroup label, which is determined by the data-generating process, and a predicted subgroup
+label, determined by the estimated terminal-node rules. In particular, the true subgroup structure is
+determined by the partition of the covariate space induced by X1 and X2, depending on whether the
+heterogeneity setting is slight or strong. This yields the true labels L0, L1, . . . , L4.
+Second, each observation is assigned a predicted terminal node label according to the estimated
+decision tree fitted during the discovery step. Since the numbering of estimated leaves is arbitrary,
+predicted terminal nodes are aligned with the true subgroup labels by comparing the sign pattern
+of the estimated split rules with that of the true subgroup definition. For example, a predicted
+node defined by conditions of the form X1 < c1 and X2 < c2 is matched to the true subgroup
+whose definition also corresponds to the lower-threshold region in both covariates. Analogously,
+a predicted node with X1 > c1 and X2 > c2 is matched to the corresponding upper-threshold
+subgroup. Thus, the alignment is based on the directional structure of the terminal-node rules rather
+than on the exact numerical split values. After the matching step, each unit has both a true subgroup
+label and a predicted subgroup label. Based on these labels, we evaluate subgroup discovery with
+the confusion matrix in Table 1, treating each subgroup Lj in a one-versus-rest classification setting.
+For completness we also define the significance rate for the null group in the strong heterogeneity
+setting as
+SigRateL0 = P(detected significant | true label = L0).
+(21)
+Reported values are averages over the MC = 500 simulation runs.
+A.2. Additional Results and Figures
+33
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Table 3: Average subgroup discovery results under strong and slight heterogeneity.
+heterogeneity scenario
+strong
+slight
+Method
+k
+TPR
+TDR
+FPR
+FDR
+ODR
+SigRate
+SigRate0
+TPR
+TDR
+FPR
+FDR
+ODR
+SigRate
+BCF-IV
+0.5
+0.594
+0.786
+0.088
+0.150
+0.709
+0.519
+0.184
+0.825
+0.875
+0.015
+0.016
+0.876
+0.945
+1.0
+0.882
+0.898
+0.064
+0.073
+0.848
+0.956
+0.215
+0.982
+0.982
+0.006
+0.006
+0.982
+1.000
+1.5
+0.914
+0.924
+0.057
+0.059
+0.868
+0.967
+0.184
+0.988
+0.988
+0.004
+0.004
+0.988
+1.000
+2.0
+0.923
+0.931
+0.054
+0.054
+0.871
+0.976
+0.177
+0.990
+0.990
+0.003
+0.003
+0.990
+1.000
+2.5
+0.923
+0.934
+0.052
+0.053
+0.874
+0.979
+0.181
+0.991
+0.991
+0.003
+0.003
+0.991
+1.000
+3.0
+0.923
+0.936
+0.051
+0.052
+0.875
+0.981
+0.190
+0.992
+0.992
+0.003
+0.003
+0.992
+1.000
+3.5
+0.930
+0.939
+0.050
+0.050
+0.876
+0.984
+0.174
+0.992
+0.992
+0.003
+0.003
+0.992
+1.000
+4.0
+0.927
+0.939
+0.050
+0.050
+0.876
+0.984
+0.183
+0.992
+0.992
+0.003
+0.003
+0.992
+1.000
+DRRF-IV
+0.5
+0.518
+0.632
+0.155
+0.202
+0.793
+0.427
+0.141
+0.356
+0.381
+0.012
+0.012
+0.381
+0.958
+1.0
+0.848
+0.871
+0.057
+0.084
+0.857
+0.958
+0.215
+0.889
+0.889
+0.013
+0.013
+0.889
+0.999
+1.5
+0.908
+0.920
+0.051
+0.059
+0.875
+0.976
+0.178
+0.981
+0.981
+0.006
+0.006
+0.981
+1.000
+2.0
+0.924
+0.933
+0.049
+0.052
+0.878
+0.981
+0.171
+0.988
+0.988
+0.004
+0.004
+0.988
+1.000
+2.5
+0.928
+0.939
+0.049
+0.049
+0.879
+0.983
+0.178
+0.991
+0.991
+0.003
+0.003
+0.991
+1.000
+3.0
+0.933
+0.941
+0.048
+0.049
+0.880
+0.985
+0.167
+0.993
+0.993
+0.002
+0.002
+0.993
+1.000
+3.5
+0.934
+0.942
+0.048
+0.048
+0.880
+0.985
+0.167
+0.994
+0.994
+0.002
+0.002
+0.994
+1.000
+4.0
+0.931
+0.942
+0.048
+0.048
+0.880
+0.986
+0.178
+0.994
+0.994
+0.002
+0.002
+0.994
+1.000
+GRF-IV
+0.5
+0.499
+0.643
+0.144
+0.201
+0.779
+0.415
+0.149
+0.245
+0.262
+0.007
+0.007
+0.262
+0.956
+1.0
+0.833
+0.859
+0.055
+0.090
+0.855
+0.965
+0.222
+0.866
+0.866
+0.010
+0.010
+0.866
+0.999
+1.5
+0.905
+0.919
+0.048
+0.059
+0.876
+0.981
+0.181
+0.982
+0.982
+0.006
+0.006
+0.982
+1.000
+2.0
+0.928
+0.936
+0.048
+0.051
+0.879
+0.984
+0.167
+0.990
+0.990
+0.003
+0.003
+0.990
+1.000
+2.5
+0.933
+0.942
+0.048
+0.048
+0.879
+0.988
+0.172
+0.993
+0.993
+0.002
+0.002
+0.993
+1.000
+3.0
+0.936
+0.943
+0.047
+0.048
+0.880
+0.987
+0.165
+0.995
+0.995
+0.002
+0.002
+0.995
+1.000
+3.5
+0.933
+0.943
+0.047
+0.048
+0.880
+0.988
+0.174
+0.995
+0.995
+0.002
+0.002
+0.995
+1.000
+4.0
+0.933
+0.943
+0.047
+0.047
+0.881
+0.988
+0.178
+0.996
+0.996
+0.001
+0.001
+0.996
+1.000
+Notes: Entries report average subgroup discovery measures across simulation replications for N = 10000. Higher
+values of TPR, TDR, ODR, and SigRate indicate better performance, while lower values of FPR, FDR, and SigRate0 are
+preferred.
+34
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+SMALL SAMPLE SIZE
+In addition to the large-sample design discussed in Section 3, we also consider a smaller sample
+size of N = 2000. Figures 6–7 and Table 4 report the corresponding subgroup discovery results.
+In the slight heterogeneity scenario, BCF-IV dominates even at a low effect size (k = 1),
+achieving TDR = 0.790 and TPR = 0.713 with a FDR and FPR below 0.02. As k increases to 4,
+both TDR and TPR improve by approximately 25% (to 0.982), while false rates decrease by 65%
+(to 0.006). DRRF-IV and GRF-IV start weaker (TDR = 0.233 and 0.173 at k = 1), but improve
+rapidly, with TDR and TPR increasing by over 300% and converging to the BCF-IV benchmark at
+higher effect sizes. Significance rates are already high (above 0.90) and reach 1.0 for all methods,
+indicating that each approach correctly identifies the subgroups with significant treatment effects.
+Under strong heterogeneity, performance gaps are more pronounced.
+At k = 1, BCF-IV
+achieves the best performance, with TDR = 0.737 and TPR = 0.501, and FDR = 0.169, out-
+performing DRRF-IV and GRF-IV by roughly 25%. With larger effect sizes (k = 4), all methods
+perform better: TPR increases by about 78% for BCF-IV (to 0.890) and by over 110% for DRRF-
+IV and GRF-IV (to 0.853 and 0.873, respectively). False rates decrease by more than 60%, while
+significance rates increase from 0.256 and 0.274 to above 0.93.
+Figure 6: TDR and TPR under strong and slight heterogeneity
+Notes: Results are averaged over 500 Monte Carlo replications with N = 2000. Rows distinguish the strong and slight heterogeneity
+scenarios, and the horizontal axis shows the treatment effect size k. Higher values indicate better performance.
+Table 5 reports the estimation performance of the local CCACE. BCF-IV achieves the lowest
+MSE at small effect sizes (for k = 0.5, 0.041 under slight heterogeneity vs. 0.043 and 0.045 for
+DRRF-IV and GRF-IV). However, as k increases, DRRF-IV and GRF-IV close the gap and achieve
+similar accuracy. The bias remains small across methods (ranging from −0.006 and 0.002), with
+BCF-IV showing a slightly larger bias at small k under strong heterogeneity.
+35
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Figure 7: FDR and FPR under strong and slight heterogeneity
+Notes: Results are averaged over 500 Monte Carlo replications with N = 2000. Rows distinguish the strong and slight heterogeneity
+scenarios, and the horizontal axis shows the treatment effect size k. Lower values indicate better performance.
+Figure 8: ODR and significance rates for strong and slight heterogeneity
+Notes: Results are averaged over 500 Monte Carlo replications with N = 2000. Rows distinguish the strong and slight heterogeneity
+scenarios, and the horizontal axis shows the treatment effect size k. Higher values indicate better performance; values close to one
+indicate better detection of significant subgroup effects.
+Overall, consistent with the large-sample results, DRRF-IV and GRF-IV perform worse than
+BCF-IV when the effect size is small. However, the effect size required for the methods to perform
+36
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+on par depends on the sample size. While for N = 10000 a moderate effect size is sufficient, with
+the methods becoming comparable from about k = 1.5 onward, for N = 2000 this only occurs
+at substantially larger effect sizes, around k = 3.5. One possible explanation is the use of honesty
+in GRF-IV and DRRF-IV. Due to the sample splitting, only about one quarter of the sample is
+available for tree construction. The data is first divided into discovery and inference samples, and
+then the discovery sample is split again into a training and an estimation sample. In smaller sets,
+this may not be enough information to detect reliable subgroups. We refer the reader to Hou and
+Fern´andez-Lor´ıa (2025) for a detailed comparison of adaptive and honest splitting.
+Table 4: Subgroup discovery results under strong and slight heterogeneity.
+heterogeneity scenario
+strong
+slight
+Method
+k
+TPR
+TDR
+FPR
+FDR
+ODR
+SigRate
+SigRate0
+TPR
+TDR
+FPR
+FDR
+ODR
+SigRate
+BCF-IV
+0.5
+0.337
+0.445
+0.260
+0.288
+0.781
+0.030
+0.019
+0.149
+0.366
+0.009
+0.018
+0.366
+0.440
+1.0
+0.501
+0.737
+0.099
+0.169
+0.720
+0.348
+0.117
+0.713
+0.790
+0.018
+0.019
+0.790
+0.911
+1.5
+0.732
+0.838
+0.080
+0.122
+0.733
+0.746
+0.232
+0.934
+0.939
+0.013
+0.013
+0.939
+0.995
+2.0
+0.832
+0.868
+0.074
+0.094
+0.814
+0.907
+0.236
+0.967
+0.967
+0.009
+0.009
+0.967
+1.000
+2.5
+0.870
+0.893
+0.064
+0.074
+0.857
+0.938
+0.209
+0.975
+0.975
+0.008
+0.008
+0.975
+1.000
+3.0
+0.879
+0.897
+0.060
+0.071
+0.867
+0.948
+0.198
+0.980
+0.980
+0.007
+0.007
+0.980
+1.000
+3.5
+0.877
+0.897
+0.061
+0.071
+0.867
+0.947
+0.203
+0.980
+0.980
+0.007
+0.007
+0.980
+1.000
+4.0
+0.890
+0.909
+0.060
+0.065
+0.868
+0.951
+0.203
+0.982
+0.982
+0.006
+0.006
+0.982
+1.000
+DRRF-IV
+0.5
+0.334
+0.381
+0.298
+0.314
+0.796
+0.026
+0.016
+0.067
+0.176
+0.005
+0.013
+0.176
+0.429
+1.0
+0.421
+0.556
+0.191
+0.239
+0.781
+0.256
+0.106
+0.207
+0.233
+0.010
+0.010
+0.234
+0.932
+1.5
+0.631
+0.727
+0.104
+0.159
+0.802
+0.670
+0.216
+0.403
+0.405
+0.012
+0.012
+0.406
+0.981
+2.0
+0.762
+0.811
+0.073
+0.115
+0.834
+0.877
+0.240
+0.640
+0.640
+0.013
+0.013
+0.640
+0.995
+2.5
+0.813
+0.845
+0.064
+0.096
+0.855
+0.926
+0.230
+0.816
+0.816
+0.013
+0.013
+0.816
+0.998
+3.0
+0.839
+0.865
+0.060
+0.085
+0.865
+0.939
+0.212
+0.900
+0.900
+0.013
+0.013
+0.900
+0.999
+3.5
+0.853
+0.876
+0.060
+0.080
+0.869
+0.938
+0.201
+0.941
+0.941
+0.011
+0.011
+0.942
+1.000
+4.0
+0.853
+0.878
+0.060
+0.079
+0.872
+0.937
+0.204
+0.961
+0.961
+0.010
+0.010
+0.961
+1.000
+GRF-IV
+0.5
+0.328
+0.385
+0.292
+0.313
+0.797
+0.034
+0.027
+0.060
+0.141
+0.003
+0.006
+0.141
+0.487
+1.0
+0.420
+0.558
+0.186
+0.239
+0.775
+0.274
+0.121
+0.153
+0.173
+0.005
+0.005
+0.174
+0.931
+1.5
+0.626
+0.726
+0.104
+0.161
+0.789
+0.675
+0.227
+0.342
+0.344
+0.008
+0.008
+0.345
+0.978
+2.0
+0.760
+0.808
+0.072
+0.118
+0.827
+0.888
+0.249
+0.613
+0.613
+0.010
+0.010
+0.613
+0.993
+2.5
+0.827
+0.857
+0.059
+0.091
+0.851
+0.949
+0.229
+0.836
+0.836
+0.011
+0.011
+0.836
+0.998
+3.0
+0.849
+0.875
+0.056
+0.081
+0.864
+0.955
+0.216
+0.934
+0.934
+0.009
+0.009
+0.934
+0.999
+3.5
+0.867
+0.888
+0.056
+0.074
+0.871
+0.954
+0.199
+0.966
+0.966
+0.008
+0.008
+0.966
+1.000
+4.0
+0.873
+0.892
+0.057
+0.072
+0.872
+0.952
+0.195
+0.977
+0.977
+0.007
+0.007
+0.977
+1.000
+Notes: Entries report average subgroup discovery measures across simulation replications for N = 2000. Higher values
+of TPR, TDR, ODR, and SigRate indicate better performance, while lower values of FPR, FDR, and SigRate0 are pre-
+ferred.
+37
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Table 5: MSE, Bias, and MAE under strong and slight heterogeneity.
+heterogeneity scenario
+strong
+slight
+Method
+k
+MSE
+Bias
+MAE
+MSE
+Bias
+MAE
+BCF-IV
+0.5
+0.046
+-0.006
+0.159
+0.041
+-0.002
+0.149
+1.0
+0.041
+-0.006
+0.153
+0.038
+-0.003
+0.146
+1.5
+0.041
+-0.002
+0.157
+0.030
+-0.001
+0.138
+2.0
+0.042
+0.001
+0.158
+0.030
+-0.006
+0.138
+2.5
+0.049
+-0.002
+0.168
+0.033
+0.002
+0.139
+3.0
+0.049
+-0.003
+0.171
+0.031
+-0.003
+0.141
+3.5
+0.054
+-0.000
+0.176
+0.029
+-0.004
+0.134
+4.0
+0.059
+-0.008
+0.183
+0.031
+-0.002
+0.141
+DRRF-IV
+0.5
+0.064
+-0.003
+0.176
+0.043
+-0.005
+0.153
+1.0
+0.049
+0.002
+0.162
+0.068
+-0.002
+0.182
+1.5
+0.042
+-0.002
+0.159
+0.122
+-0.015
+0.210
+2.0
+0.046
+-0.002
+0.166
+0.103
+-0.012
+0.191
+2.5
+0.048
+-0.003
+0.170
+0.082
+-0.011
+0.168
+3.0
+0.051
+-0.003
+0.174
+0.054
+-0.004
+0.157
+3.5
+0.054
+0.001
+0.179
+0.054
+-0.003
+0.155
+4.0
+0.057
+-0.000
+0.183
+0.037
+-0.004
+0.147
+GRF-IV
+0.5
+0.037
+0.000
+0.148
+0.045
+0.002
+0.155
+1.0
+0.045
+0.002
+0.159
+0.084
+-0.005
+0.193
+1.5
+0.040
+-0.000
+0.156
+0.137
+-0.012
+0.223
+2.0
+0.043
+-0.002
+0.161
+0.129
+-0.005
+0.207
+2.5
+0.047
+-0.002
+0.168
+0.082
+-0.003
+0.172
+3.0
+0.050
+-0.002
+0.173
+0.047
+-0.004
+0.152
+3.5
+0.053
+0.001
+0.178
+0.035
+-0.004
+0.144
+4.0
+0.058
+0.000
+0.183
+0.033
+-0.001
+0.143
+Notes: Entries report average estimation accuracy measures across simulation replications for N = 2000. For MSE and
+MAE, lower values indicate better performance; for Bias, values closer to zero are preferred.
+38
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+A.3. Additional Application Results
+39
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Table 6: Leaf-level DRRF-IV estimates and weak-IV diagnostics
+Subgroup rule
+CCACE
+p-value
+Weak-IV p-value
+bπC
+SE
+icnarc score ≥24.5, v cc r4 ≥0.5
+0.0418
+0.8918
+0.0002
+0.1898
+0.3068
+icnarc score ≥24.5, v cc r4 < 0.5, sofa score ≥6.5
+-5.2000
+0.8311
+0.8271
+0.0162
+24.3376
+icnarc score ≥24.5, v cc r4 < 0.5, sofa score < 6.5
+0.5648
+0.1310
+0.0019
+0.1847
+0.3729
+icnarc score < 24.5, age ≥76.5, icnarc score ≥20.5, v cc r2
+≥0.5
+-0.9256
+0.3548
+0.1043
+-0.1048
+0.9966
+icnarc score < 24.5, age ≥76.5, icnarc score ≥20.5, v cc r2
+< 0.5
+-57.0000
+0.9971
+0.9971
+-0.0003
+15826.3335
+icnarc score < 24.5, age < 76.5, icnarc score ≥15.5, v cc r4
+≥0.5
+0.1045
+0.5480
+0.0000
+0.2328
+0.1738
+icnarc score < 24.5, age ≥76.5, icnarc score < 20.5, news score
+< 3.5, v cc r2 ≥0.5
+8.6044
+0.6367
+0.6499
+-0.0177
+18.1969
+icnarc score < 24.5, age ≥76.5, icnarc score < 20.5, news score
+< 3.5, v cc r2 < 0.5
+-0.1887
+0.3221
+0.0000
+0.4539
+0.1897
+icnarc score < 24.5, age ≥76.5, icnarc score < 20.5, news score
+≥3.5, sepsis dx < 0.5
+-2.0919
+0.1714
+0.1204
+0.0594
+1.5272
+icnarc score < 24.5, age ≥76.5, icnarc score < 20.5, news score
+≥3.5, sepsis dx ≥0.5
+-0.0848
+0.8833
+0.0644
+0.0660
+0.5774
+icnarc score < 24.5, age < 76.5, icnarc score < 15.5, age < 62.5,
+age ≥53.5
+-1.8443
+0.5028
+0.4424
+0.0323
+2.7505
+icnarc score < 24.5, age < 76.5, icnarc score < 15.5, age < 62.5,
+age < 53.5
+-0.0341
+0.8655
+0.0052
+0.0806
+0.2013
+icnarc score < 24.5, age < 76.5, icnarc score < 15.5, age ≥62.5,
+age ≥70.5
+0.2276
+0.4439
+0.0032
+0.1405
+0.2969
+icnarc score < 24.5, age < 76.5, icnarc score < 15.5, age ≥62.5,
+age < 70.5
+0.8526
+0.5674
+0.4779
+0.0272
+1.4900
+icnarc score < 24.5, age < 76.5, icnarc score ≥15.5, v cc r4
+< 0.5, news score ≥7.5
+-0.2104
+0.5746
+0.0109
+0.1254
+0.3746
+icnarc score < 24.5, age < 76.5, icnarc score ≥15.5, v cc r4
+< 0.5, news score < 7.5
+3.6916
+0.8754
+0.8750
+0.0067
+23.5262
+Notes: The table reports leaf-level DRRF-IV estimates for the empirical application. The weak-IV p-value is the first-stage relevance diagnostic from the leaf-level IV regression. Large weak-IV
+p-values indicate weak evidence of first-stage relevance. bπC denotes the estimated compliance rate within the leaf. Adjusted p-values are omitted because they are equal to 1 for all leaves.
+40
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Table 7: Leaf-level GRF-IV estimates and weak-IV diagnostics
+Subgroup rule
+CCACE
+p-value
+Weak-IV p-value
+bπC
+SE
+23.5 ≤icnarc score < 24.5, age ≥71.5
+-0.2749
+0.6598
+0.1040
+0.6071
+0.6209
+icnarc score ≥23.5, age < 71.5, v cc r4 ≥0.5
+1.2678
+0.3433
+0.2134
+0.5685
+1.3335
+icnarc score ≥24.5, age ≥71.5, news score < 10.5
+0.3462
+0.2210
+0.0002
+0.6173
+0.2823
+icnarc score ≥24.5, age ≥71.5, news score ≥10.5
+-0.4633
+0.3665
+0.0253
+0.6091
+0.5109
+icnarc score ≥23.5, age < 71.5, v cc r4 < 0.5, news score ≥7.5
+-0.0577
+0.9035
+0.0152
+0.5915
+0.4746
+icnarc score ≥23.5, age < 71.5, v cc r4 < 0.5, news score < 7.5
+0.6420
+0.6968
+0.5197
+0.5300
+1.6427
+icnarc score < 13.5, sepsis dx < 0.5, age ≥77.5, news score
+< 5.5
+-1.6189
+0.1499
+0.0800
+0.5451
+1.1206
+icnarc score < 13.5, sepsis dx < 0.5, age ≥77.5, news score
+≥5.5
+-1.4668
+0.2855
+0.2091
+0.5294
+1.3678
+icnarc score < 13.5, sepsis dx < 0.5, age < 59.5
+-0.1607
+0.5878
+0.0477
+0.5184
+0.2963
+icnarc score < 13.5, sepsis dx < 0.5, 59.5 ≤age < 77.5
+-1.4095
+0.2804
+0.1587
+0.5320
+1.3042
+icnarc score < 13.5, sepsis dx ≥0.5, v cc1 ≥0.5, v cc r2 ≥0.5
+-1.4384
+0.4611
+0.3909
+0.5581
+1.9427
+icnarc score < 13.5, sepsis dx ≥0.5, v cc1 ≥0.5, v cc r2 < 0.5
+0.1352
+0.5547
+0.0004
+0.6641
+0.2282
+icnarc score < 13.5, sepsis dx ≥0.5, v cc1 < 0.5, sofa score
+< 1.5
+1.0277
+0.5413
+0.4674
+0.4710
+1.6812
+icnarc score < 13.5, sepsis dx ≥0.5, v cc1 < 0.5, sofa score
+≥1.5
+0.2031
+0.7952
+0.2826
+0.5042
+0.7824
+13.5 ≤icnarc score < 23.5, age ≥82.5, sofa score < 2.5
+6.6055
+0.5493
+0.5528
+0.4214
+11.0072
+13.5 ≤icnarc score < 23.5, 73.5 ≤age < 82.5, sofa score < 2.5
+-0.0612
+0.9305
+0.1511
+0.5204
+0.7010
+13.5 ≤icnarc score < 23.5, age ≥73.5, sofa score ≥2.5, v cc1
+≥0.5
+-0.5286
+0.7791
+0.4941
+0.4787
+1.8785
+13.5 ≤icnarc score < 23.5, age ≥73.5, sofa score ≥2.5, v cc1
+< 0.5
+0.3220
+0.1779
+0.0000
+0.5714
+0.2388
+13.5 ≤icnarc score < 23.5, age < 73.5, v cc r2 < 0.5, v cc r5
+< 0.5
+0.1677
+0.3031
+0.0000
+0.6010
+0.1627
+13.5 ≤icnarc score < 23.5, age < 73.5, v cc r2 < 0.5, v cc r5
+≥0.5
+-0.9552
+0.8977
+0.6476
+0.4706
+7.4198
+13.5 ≤icnarc score < 23.5, age < 73.5, v cc r2 ≥0.5, news score
+≥7.5
+-0.4871
+0.2797
+0.0167
+0.5532
+0.4497
+13.5 ≤icnarc score < 23.5, age < 73.5, v cc r2 ≥0.5, news score
+< 7.5
+0.1922
+0.8072
+0.2735
+0.5054
+0.7869
+Notes: The table reports leaf-level GRF-IV estimates for the empirical application. Redundant split conditions are omitted from the subgroup rules for readability. Adjusted p-values are omitted
+because they are equal to 1 for all leaves.
+41
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Table 8: Leaf-level BCF-IV estimates and weak-IV diagnostics
+Subgroup rule
+CCACE
+p-value
+Weak-IV p-value
+bπC
+SE
+v cc r5 ≥0.5, age < 63.5
+0.0453
+0.9789
+0.1363
+0.0325
+1.7103
+v cc r5 ≥0.5, age ≥63.5, sofa score ≥5.5
+0.9044
+0.3226
+0.0088
+0.1051
+0.9109
+v cc r5 ≥0.5, age ≥63.5, sofa score < 5.5
+-0.2830
+0.9359
+0.4867
+0.0199
+3.5129
+Notes: The table reports leaf-level BCF-IV estimates for the empirical application. Diagnostics were available for three of the four
+terminal leaves in the displayed BCF-IV tree. Adjusted p-values are omitted because they are equal to 1 for all evaluated leaves.
+Additional Figures and Statistics
+Table 9: Summary statistics for continuous variables for the ICU dataset
+Statistic
+N
+Mean
+St. Dev.
+Min
+Max
+Age
+12,903
+64.96
+17.71
+18
+93
+ICNARC physiological score
+12,903
+15.10
+7.34
+0
+53
+National Early Warning Score (NEWS)
+12,903
+6.24
+3.10
+0
+20
+SOFA score
+12,903
+3.14
+2.18
+0
+14
+Notes: The ICNARC physiological score measures acute illness severity using criteria from the Intensive Care National
+Audit and Research Centre. The National Early Warning Score (NEWS) summarizes early signs of clinical deterioration
+based on routinely measured physiological variables. The SOFA score, or Sequential Organ Failure Assessment score,
+measures the extent of organ dysfunction.
+42
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Table 10: Summary statistics for categorical variables fot the ICU dataset.
+Variable
+No
+Yes
+Less than 4 ICU beds available
+6026
+6877
+Admitted to an ICU bed
+7890
+5013
+Male
+5894
+7009
+Sepsis diagnosis
+5018
+7885
+Peri-arrest diagnosis
+12256
+647
+Level of care at assessment: Level 0 (normal ward care)
+11210
+1693
+Level of care at assessment: Level 1 (ward care with support)
+4061
+8842
+Level of care at assessment: Level 2 (high dependency unit)
+10738
+2165
+Level of care at assessment: Level 3 (ICU care)
+12774
+129
+Recommended level of care: Level 0 (normal ward care)
+12024
+879
+Recommended level of care: Level 1 (ward care with support)
+5909
+6994
+Recommended level of care: Level 2 (high dependency unit)
+9194
+3709
+Recommended level of care: Level 3 (ICU care)
+11689
+1214
+Notes: Values report counts by category. For binary indicators, “Yes” denotes category 1 and “No” denotes category 0.
+43
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Figure 9: Variable importance plots for the DRRF-IV, GRF-IV and BCF-IV.
+(a) DRRF-IV
+(b) GRF-IV
+(c) BCF-IV
+Notes: The figures display the variables that appear most frequently in subgroup construction. Because the number of
+identified subgroups varies across methods, the total number of variable occurrences over 100 simulation runs differs
+accordingly.
+44
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Analysis with site included
+In the dataset of Keele et al. (2020), site indicates the hospital the patient attended. The authors
+addressed hospital-level differences at the design stage by imposing balance on hospital across
+treatment groups through their matching procedure. Since matching is not the focus of our study,
+we instead account for site-level heterogeneity by including one-hot-encoded hospital indicators
+as additional covariates. Thus, in addition to the 18 variables from the main analysis, we include
+47 site dummy variables, yielding a total of 65 variables. As in the main analysis, we restrict to
+observations with ˆpZ(Xi) ∈[0.1, 0.9]. This avoids observations with very limited overlap in the
+probability of prompt ICU admission. We conduct the same analysis as in Section 4 using a CART
+tree with cp = 0.001 in the discovery step. Unlike in the Monte Carlo simulation study, however,
+we set minbucket = 65 and maxdepth = 5 to avoid subgroups that are too small. Since the
+discovery sample contains half of the full data, this implies that each terminal node contains at least
+about 1% of the observations in the discovery set.
+The overall CCACE is −0.1, which is similar to the result reported by Keele et al. (2020) for
+the strong IV setting with refined covariate balance (−0.189). More generally, including site
+appears to produce smaller trees with fewer terminal nodes. Possible explanations are that the same
+tuning parameters as in the main analysis may be too restrictive once site indicators are added or
+that hospital effects may also absorb variation that would otherwise be captured by additional sub-
+group splits. All methods use the site indicators as additional covariates for subgroup construction,
+although their relative importance differs across methods, as illustrated in Figures 12 and 13. In
+DRRF-IV, the first site indicator appears only in sixth position in the variable-frequency ranking,
+while in BCF-IV it appears in fourth position. In GRF-IV, the first site indicator appears only in
+tenth position, but site indicators are used most frequently overall. Thus, hospital-level variation
+appears to contribute to subgroup construction in all three methods, although the extent and form of
+this contribution differ across approaches.
+45
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Figure 10: Decision trees generated by GRF-IV and BCF-IV with hospital indicators included
+(a) GRF-IV
+(b) BCF-IV
+Notes: The figure compares the subgroup trees obtained from GRF-IV and BCF-IV when hospital indicators are included
+in the analysis. GRF-IV identifies 5 terminal subgroups, while BCF-IV identifies 3 terminal subgroups.
+46
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Figure 11: Decision tree generated by DRRF-IV with hospital indicators included
+Notes: The figure shows the subgroup tree obtained from DRRF-IV when hospital indicators are included in the analysis. Terminal
+nodes correspond to discovered patient subgroups, with subgroup-specific CCACE estimates reported in the leaves. DRRF-IV identifies
+5 terminal subgroups.
+47
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Figure 12: Variable importance plots for DRRF-IV and GRF-IV with hospital indicators included.
+(a) DRRF-IV
+(b) GRF-IV
+Notes: The figures display the variables that appear most frequently in subgroup construction.
+48
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Figure 13: Variable importance plot for BCF-IV with hospital indicators included
+BCF-IV
+Notes: The figure displays the variables that appear most frequently in subgroup construction.
+A.4. Additional Theory
+Doubly Robust Estimation
+The DRRF-IV estimator proposed in Section 2.2 is based on a transformed outcome Y ⋆IV
+i
+, which
+satisfies Neyman orthogonality with respect to m(·). It is, however, not doubly robust in the usual
+augmented inverse-probability weighted (AIPW) sense. Doubly robust estimators (Robins and Rot-
+nitzky, 1995; Robins et al., 1994; Bang and Robins, 2006; Funk et al., 2011) combine outcome
+modeling and propensity score weighting (Rosenbaum and Rubin, 1983) and remain consistent if at
+least one of the two nuisance components is correctly specified. In this section, we quickly outline a
+doubly robust extension as an alternative to DRRF-IV for estimating ITT(x). We adapt the notation
+of Battocchi et al. (2019) to our IV setting, and define the nuisance functions
+mz(x) := E[Yi | Zi = z, Xi = x],
+z ∈{0, 1}.
+With these nuisance functions and pZ(Xi), we construct the instrumental augmented pseudo-outcome,
+which is an IV version of the doubly robust estimators from (Robins and Rotnitzky, 1995; Robins
+et al., 1994)
+Y AIPW-IV
+i
+:= m1(Xi) −m0(Xi) +
+Zi
+pZ(Xi)
+ Yi −m1(Xi)
+
+−
+1 −Zi
+1 −pZ(Xi)
+ Yi −m0(Xi)
+
+.
+Theorem 5. Under Assumption 8, Y AIPW-IV
+i
+satisfies
+E
+
+Y AIPW-IV
+i
+| Xi = x
+
+= ITT(x)
+49
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Proof. See Appendix B
+As indicated by Battocchi et al. (2019), there is a trade-off between double/debiased and doubly
+robust estimators. In general, doubly robust methods tend to have higher variance, especially when
+pZ(Xi) is close to 0 or 1. By contrast, double/debiased estimators rely on orthogonalization with
+respect to nuisance functions and may be more sensitive when these nuisance components are poorly
+estimated.
+Two-step pragmatic subgroup discovery
+The pragmatic two-step subgroup discovery approach (Komura et al., 2025) separates treatment ef-
+fect estimation from subgroup identification to improve interpretability. In the first step, any flexible
+CATE estimator is fitted on the full covariate set to capture potentially complex heterogeneity. In
+the second step, the estimated unit-level treatment effects are used as the outcome in a CART model
+based on a reduced set of interpretable covariates, yielding subgroups described by simple decision
+rules. Optionally, subgroup-specific treatment effects can be summarized within the resulting leaves
+to facilitate interpretation and comparison across groups. Algorithm 4 summarizes the procedure.
+Note that, the choice Xinterp
+i
+is not formally determined, but instead relies on researcher judgment
+and considerations. In particular, Komura et al. (2025) motivates this choice in terms of practical
+relevance and interpretability, rather than providing a quantified selection criterion.
+Algorithm 4 Pragmatic Two-Step Subgroup Discovery
+Input: N training observations (Xi, Di, Zi, Yi)
+Output: Interpretable partition {Lj}J
+j=1 and subgroup summaries
+Step 1: Fit any CATE estimator on the full covariate vector Xi to obtain unit-level treatment effect
+predictions ˆτ(Xi)
+Step 2: Using the interpretable covariates Xinterp
+i
+, fit a CART model, where ˆτ(Xi) are used as the
+response variable to obtain a partition
+bΠ = {L1, . . . , LJ}
+of the covariate space.
+Post-estimation (Optional):
+For each subgroup Lj ∈bΠ compute
+ˆτLj =
+1
+|{i : Di = 1, Xi ∈Lj}|
+X
+{i:Di=1,Xi∈Lj}
+Y obs
+i
+−
+1
+|{i : Di = 0, Xi ∈Lj}|
+X
+{i:Di=0,Xi∈Lj}
+Y obs
+i
+.
+50
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+GRF-IV
+Algorithm 5 summarizes the implementation of the GRF-IV procedure. The method extends the
+generalized random forest framework to instrumental variable settings by separating tree construc-
+tion from estimation under an honest sample-splitting scheme. Tree splits are guided by pseudo-
+outcomes based on local IV effects, and the resulting forest weights are used to solve local IV
+moment conditions for a target point x, yielding an estimate of ˆτCCACE(x). For simplicity, we skip
+the local-centering step in the algorithmic presentation, but grf::instrumental forest()
+estimates these quantities internally and uses them for local centering.
+51
+
+
+GLISZCZY ´NSKA-SCHROEDER
+Algorithm 5 GRF-IV
+Input: N training observations (Xi, Di, Zi, Yi)
+Output: Estimated treatment effect ˆτCCACE(x)
+for b = 1 to B do
+Draw a random subsample of size s without replacement, and partition it into two disjoint sets: a training
+set I of size ⌊s/2⌋and an estimation set J of size ⌈s/2⌉.
+1. Step: Tree Growing (on I)
+• At each parent node P, estimate the local plug-in IV effect:
+ˆτP =
+d
+Cov(Yi, Zi | Xi ∈P)
+d
+Cov(Di, Zi | Xi ∈P)
+• Construct pseudo-outcomes:
+ρi = (Zi −¯ZP )
+
+(Yi −¯YP ) −ˆτP (Di −¯DP )
+
+where ¯ZP , ¯DP , and ¯YP denote the sample means of Zi, Di, and Yi within the current node P. The
+splits are then chosen to maximize variation in ρi.
+2. Step: Weighting (on J )
+• For each test point x, find the leaf Lb(x) such that Xi ∈Lb(x). Then assign weights
+αbi(x) = 1(Xi ∈Lb(x))
+|Lb(x)|
+.
+end
+Step 3: Aggregation and Final Estimation
+• Compute aggregated weights:
+αi(x) = 1
+B
+B
+X
+b=1
+αbi(x).
+• Solve the local moment conditions to obtain ˆτCCACE(x) and ˆη(x):
+N
+X
+i=1
+αi(x) · Zi · (Yi −ˆη(x) −ˆτCCACE(x) · Di) = 0
+N
+X
+i=1
+αi(x) · (Yi −ˆη(x) −ˆτCCACE(x) · Di) = 0
+52
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+Appendix B. Proofs
+This section provides the proofs of the theoretical results stated in the main text. We proceed in the
+order in which the results are introduced. First, we prove Theorem 2, showing that the transformed
+outcome Y ⋆IV
+i
+has conditional expectation equal to the conditional intention-to-treat effect ITT(x).
+We then establish the Neyman orthogonality of the corresponding conditional moment with respect
+to the nuisance function m(·).
+Proof of Theorem 2. First, by definition of Y ⋆IV
+i
+we can rewrite
+E[Y ⋆IV
+i
+| Xi = x] = E
+(Zi −pZ(x))(Yi −m(x))
+pZ(x)(1 −pZ(x))
+ Xi = x
+
+=
+1
+pZ(x)(1 −pZ(x))E
+h
+(Zi −pZ(x))(Yi −m(x)) | Xi = x
+i
+.
+(22)
+Since
+E
+h
+(Zi −pZ(x))(Yi −m(x)) | Xi = x
+i
+= E[Zi(Yi −m(x)) | Xi = x]
+−pZ(x) E[Yi −m(x) | Xi = x]
+|
+{z
+}
+= 0
+,
+it follows that
+E
+h
+(Zi −pZ(x))(Yi −m(x)) | Xi = x
+i
+= E[Zi(Yi −m(x)) | Xi = x]
+= E[ZiYi | Xi = x] −m(x)E[Zi | Xi = x].
+Since Zi is binary we can rewrite E[ZiYi | Xi = x] as follows
+E[ZiYi | Xi = x] = 1 · E[Yi | Zi = 1, Xi = x] · P(Zi = 1 | Xi = x)
++ 0 · E[Yi | Zi = 0, Xi = x] · P(Zi = 0 | Xi = x)
+= E[Yi | Zi = 1, Xi = x] · pZ(x).
+And therefore
+E
+h
+(Zi −pZ(x))(Yi −m(x)) | Xi = x
+i
+= pZ(x) E[Yi | Zi = 1, Xi = x] −pZ(x)m(x)
+= pZ(x)
+
+E[Yi | Zi = 1, Xi = x] −m(x)
+
+.
+Substituting this into (22), we obtain
+E[Y ⋆IV
+i
+| Xi = x] = E[Yi | Zi = 1, Xi = x] −m(x)
+1 −pZ(x)
+.
+(23)
+Using
+m(x) = pZ(x)E[Yi | Zi = 1, Xi = x] + (1 −pZ(x))E[Yi | Zi = 0, Xi = x],
+53
+
+
+GLISZCZY ´NSKA-SCHROEDER
+we can rewrite the numerator of (23)
+E[Yi | Zi = 1, Xi = x]−m(x) = (1−pZ(x))
+
+E[Yi | Zi = 1, Xi = x]−E[Yi | Zi = 0, Xi = x]
+
+.
+Finally,
+E[Y ⋆IV
+i
+| Xi = x] = E[Yi | Zi = 1, Xi = x] −E[Yi | Zi = 0, Xi = x] = ITT(x),
+which completes the proof.
+Proof of Lemma 3. Let x be a fixed test point and mλ(·) a perturbation given by
+mλ(·) = m(·) + λh(·),
+where h(·) is an arbitrary perturbation. Then
+ψi(θ(x), mλ, pZ) = (Zi −pZ(Xi))(Yi −m(Xi) −λh(Xi))
+pZ(Xi)(1 −pZ(Xi))
+−θ(x).
+The corresponding conditional moment is
+Ψ(θ(x), mλ, pZ) = E
+(Zi −pZ(Xi))(Yi −m(Xi) −λh(Xi))
+pZ(Xi)(1 −pZ(Xi))
+ Xi = x
+
+−θ(x).
+Since we condition on Xi = x, the functions pZ(Xi), m(Xi), and h(Xi) become pZ(x), m(x), and
+h(x), respectively. Hence,
+Ψ(θ(x), mλ, pZ) = E
+(Zi −pZ(x))(Yi −m(x) −λh(x))
+pZ(x)(1 −pZ(x))
+ Xi = x
+
+−θ(x).
+Differentiating with respect to λ gives
+∂
+∂λΨ(θ(x), mλ, pZ) = −E
+(Zi −pZ(x))h(x)
+pZ(x)(1 −pZ(x))
+ Xi = x
+
+.
+(24)
+Evaluating at λ = 0 does not change (24), since it does not depend on λ. Because h(x), pZ(x), and
+1 −pZ(x) are fixed conditional on Xi = x and by definition of pZ(x) it follows that
+−E
+(Zi −pZ(x))h(x)
+pZ(x)(1 −pZ(x))
+ Xi = x
+
+= 0.
+Therefore,
+∂
+∂λΨ(θ(x), m + λh, pZ)
+
+λ=0
+= 0.
+Thus, the conditional moment functional is Neyman–orthogonal with respect to m(·).
+Proof of Theorem 5. We obtain
+E
+
+Y AIPW-IV
+i
+| Xi = x
+
+= m1(x) −m0(x) + E
+
+Zi
+pZ(x)
+ Yi −m1(x)
+
+| Xi = x
+
+−E
+
+1 −Zi
+1 −pZ(x)
+ Yi −m0(x)
+
+| Xi = x
+
+.
+(25)
+54
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+If pZ(x) is correctly specified, then for the third term in Equation (25) we have
+E
+
+Zi
+pZ(x)
+ Yi −m1(x)
+
+| Xi = x
+
+= E
+ ZiYi
+pZ(x) | Xi = x
+
+−E
+Zim1(x)
+pZ(x)
+| Xi = x
+
+,
+=
+1
+pZ(x)E[YiZi | Xi = x] −m1(x)E[Zi | Xi = x]
+pZ(x)
+,
+= E[Yi | Zi = 1, Xi = x] −m1(x).
+Analogously, for the last term in (25) we have
+E
+
+1 −Zi
+1 −pZ(x)
+ Yi −m0(x)
+
+| Xi = x
+
+= E[Yi | Zi = 0, Xi = x] −m0(x).
+Substituting these into Equation (25) yields
+E
+
+Y AIPW-IV
+i
+| Xi = x
+
+= E[Yi | Zi = 1, Xi = x] −E[Yi | Zi = 0, Xi = x] = ITT(x).
+If instead m1(x) and m0(x) are correctly specified, then the residual terms satisfy
+E[Yi −m1(x) | Zi = 1, Xi = x] = 0,
+E[Yi −m0(x) | Zi = 0, Xi = x] = 0.
+Therefore, the third term in (25) becomes
+1
+pZ(x)E
+
+Zi
+ Yi −m1(x)
+
+| Xi = x
+
+=
+1
+pZ(x)pZ(x) E[Yi −m1(x) | Zi = 1, Xi = x] = 0.
+Analogously, the last term in (25) also vanishes. Hence,
+E
+
+Y AIPW-IV
+i
+| Xi = x
+
+= m1(x) −m0(x) = ITT(x).
+Therefore, the Y AIPW-IV
+i
+is doubly robust in the sense that it identifies ITT(x) if either the propen-
+sity score or the outcome regressions are correctly specified.
+Appendix C. Algorithmic and Implementation Details
+C.1. Implementation in R
+All simulations were performed in R using RStudio (R Core Team, 2025; Posit team, 2025). The cor-
+responding implementation is available at https://github.com/karo93/TwoStepForestIV.
+For the simulation study we used the packages grf (Tibshirani et al., 2025), bartCause
+(Dorie and Hill, 2025), and SparseBCF (Caron et al., 2022). Across methods, the only differ-
+ence lies in the estimation of ˆτ dis
+CCACE(x). The benchmark BCF-IV algorithm builds on the imple-
+mentation of Bargagli-Stoffi et al. (2022), however, we modified the bcf iv-function to improve
+computational efficiency and add several numerical safeguards, as the original implementation oc-
+casionally failed at these steps or returned missing values.
+First, observations with propensity scores close to zero and one are excluded to ensure overlap,
+similar to Stoffi and Gnecco (2018). Second, in the discovery step, we exclude observations for
+55
+
+
+GLISZCZY ´NSKA-SCHROEDER
+which the estimated compliance rate is not finite or is smaller than a threshold ε = 0.001. The
+discovery-stage CCACE is therefore computed only for observations satisfying
+bπC(Xi) > ε,
+for
+bτ dis
+CCACE(Xi) =
+d
+ITT(Xi)
+bπC(Xi) .
+This avoids using unstable ratios generated by zero or near-zero estimated compliance rates dur-
+ing subgroup discovery. Third, node-wise IV regressions are conducted only when the correspond-
+ing subgroup contains a sufficient number of observations that show variation in both treatment re-
+ceipt and instrument assignment. In addition, regressions with rank-deficient model matrices or zero
+residual degrees of freedom are skipped. In each Monte Carlo replication, all methods use a 50/50
+split to construct discovery and inference subsamples. The subgroup tree is estimated with rpart
+at a complexity parameter cp = 0.001, to construct a sufficiently deep tree. For the forest-based
+procedures, we use num.trees = 2000. In the BCF-IV implementation, Bayesian first-stage
+estimators are run with 500 burn-in draws and 500 posterior draws for continuous outcomes. All
+remaining tuning parameters are left at their default values, as a parameter tuning analysis is be-
+yond the scope of this paper. Furthermore, in our BCF-IV implementation, ITT(x) is estimated
+using SparseBCF::SparseBCF(). Setting sparse = FALSE produces the same results as
+bartCause::bartc, but with lower computational cost. A runtime comparison is reported be-
+low in Section C.3.
+C.2. Estimation of Nuisance Functions
+The nuisance functions are estimated on the discovery sample. Specifically, we estimate
+m(x) = E[Yi | Xi = x]
+using a regression forest via the randomForest::randomForest() function, and
+pZ(x) = Pr(Zi = 1 | Xi = x)
+using logistic regression via glm(). Let bm(Xi) and bpZ(Xi) denote the corresponding fitted values.
+These estimates are then used to construct the transformed outcome
+Y ⋆IV
+i
+= (Zi −bpZ(Xi))(Yi −bm(Xi))
+bpZ(Xi)
+ 1 −bpZ(Xi)
+
+,
+i ∈Idis.
+Note that in the implementation, bm(Xi) and bpZ(Xi) are obtained by in-sample prediction on Idis.
+We also considered to estimate m(x) using the grf::regression forest() function with
+honest splitting to mitigate overfitting. This yielded very similar results, suggesting that the effect
+of this modification is negligible in our setting. Nevertheless, the resulting pseudo-outcome may still
+be affected by bias from nuisance estimation. Cross-fitting or out-of-bag prediction could further
+reduce this bias, but incorporating these refinements is beyond the scope of this work. In addition,
+we estimate the conditional compliance rate
+πC(x) = E[Di | Zi = 1, Xi = x] −E[Di | Zi = 0, Xi = x],
+56
+
+
+ESTIMATING HETEROGENEOUS CAUSAL EFFECTS WITH TREE-BASED METHODS UNDER IMPERFECT COMPLIANCE
+using an honest causal forest via grf::causal forest() with Di as the outcome, Zi as the
+treatment indicator, and Xi as covariates. Let bπC(x) denote the resulting estimate. The estimated
+conditional complier average causal effect is then given by
+bτCCACE(x) =
+d
+ITT(x)
+bπC(x) .
+C.3. Computational Runtime
+To assess computational performance, we benchmark runtime in each Monte Carlo simulation by
+recording elapsed wall-clock time for the full end-to-end procedure using proc.time() in R.
+All computations were conducted on a Mac mini with 32GB RAM, an Apple M2 Pro chip, and
+macOS 14.5. For each replicate, we store both the total runtime and the subroutine (sample splitting,
+propensity score estimation, first-stage estimation, tree construction, and node-wise IV regressions)
+runtimes. Furthermore, runtime is evaluated on a subset of the simulation designs introduced in
+Section 3, focusing on sample sizes N ∈{2000, 5000, 10000}, MC = 100 and effect size k ∈
+{0.5, 4}, for both slight and strong heterogeneity settings.
+We first compare the original BCF-IV algorithm with our modified implementation based on
+SparseBCF. Since runtime optimization is not the main contribution of this paper, this compar-
+ison is restricted to a single representative design, the strong heterogeneity setting with k = 0.5
+and N = 2000. Figure 14 shows that the modified version achieves lower runtime and markedly re-
+duced dispersion, suggesting that it is both computationally faster and more stable across simulation
+replications. In all subsequent runtime comparisons with the non-Bayesian methods, we therefore
+use the modified BCF-IV implementation.
+Figure 14: Runtime comparison between the original and the modified BCF-IV.
+Notes: Runtime is measured in seconds. The orange boxplot is the BCF-IV algorithm, whereas the red boxplot shows the
+modified implementation. Lower values indicate better computational performance.
+Figure 15 summarizes the runtime comparison results. Across all scenarios, the runtime com-
+parison yields broadly similar results. Despite using the modified BCF-IV, it still remains by far the
+slowest method, with runtimes approximately ten times higher compared to GRF-IV. In contrast,
+GRF-IV is not only the fastest approach, but also exhibits the smallest increase in runtime as the
+57
+
+
+GLISZCZY ´NSKA-SCHROEDER
+sample size grows. For BCF-IV, the main driver of the high computational cost is the Bayesian
+estimation of ITT(x), whereas for DRRF-IV, the higher runtime is mainly driven by the modified
+splitting rule.
+Figure 15: Runtime comparison between for different dataset sizes.
+Notes: Average runtime is measured in seconds. Lower values indicate better computational performance.
+Table 11: Average runtime comparison across methods.
+heterogeneity scenario
+strong
+slight
+Method
+k
+N = 2000
+N = 5000
+N = 10000
+N = 2000
+N = 5000
+N = 10000
+BCF-IV
+0.5
+5.839 (0.084)
+12.427 (0.097)
+23.610 (0.806)
+5.911 (0.104)
+12.458 (0.091)
+23.810 (1.042)
+4.0
+5.861 (0.072)
+12.413 (0.148)
+23.603 (0.275)
+5.911 (0.094)
+12.426 (0.127)
+23.511 (0.572)
+DRRF-IV
+0.5
+1.745 (0.085)
+5.857 (0.157)
+15.198 (0.353)
+1.684 (0.059)
+5.556 (0.122)
+14.654 (0.247)
+4.0
+1.667 (0.079)
+5.562 (0.147)
+14.487 (0.723)
+1.602 (0.066)
+5.307 (0.099)
+14.312 (0.521)
+GRF-IV
+0.5
+0.375 (0.026)
+1.095 (0.046)
+2.817 (0.067)
+0.369 (0.022)
+1.048 (0.031)
+2.660 (0.106)
+4.0
+0.374 (0.023)
+1.058 (0.044)
+2.697 (0.029)
+0.368 (0.026)
+1.035 (0.039)
+2.631 (0.074)
+Notes: Entries report mean total runtime in seconds, with standard deviations in parentheses, over MC = 100 simulation
+replications. Lower values indicate better computational performance.
+58

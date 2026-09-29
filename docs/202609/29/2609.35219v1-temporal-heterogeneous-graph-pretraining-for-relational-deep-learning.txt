@@ -1,0 +1,8312 @@
+TEMPORAL HETEROGENEOUS GRAPH PRETRAINING
+FOR RELATIONAL DEEP LEARNING
+Yixin Peng1⋆, Er Jin1, Diego Collarana2, and Stefan Decker1,2
+1 RWTH Aachen University, Aachen, Germany
+{peng,jin,decker}@dbis.rwth-aachen.de
+2 Fraunhofer FIT, Sankt Augustin, Germany
+diego.collarana.vargas@fit.fraunhofer.de
+ABSTRACT
+Relational deep learning represents database rows and foreign-key links as a het-
+erogeneous graph, enabling prediction from record attributes and relational context.
+Two forms of temporal signals play distinct roles in these graphs: record age
+changes as the prediction cutoff advances, whereas the interval between two ob-
+served records remains fixed. Prior work has explored temporal modeling and
+temporal pretraining for heterogeneous graphs, but typically treats time as a single
+source of information or focuses on either representation or supervision in isolation.
+We investigate how explicitly representing both temporal signals affects the benefits
+of temporal pretraining on downstream tasks. Our framework pairs two comple-
+mentary temporal encodings: Multi-scale Time Encoding, which captures record
+age through learnable time scales and type-specific projections, and Rotary Time
+Encoding, which encodes signed time differences between linked records through
+rotary transformations during graph propagation. Rather than treating these encod-
+ings as architectural additions alone, we train them through three self-supervised
+objectives: recovering historical relations, forecasting horizon-dependent future
+relation activity, and contrasting temporally valid historical subgraphs. All model
+inputs are restricted to information available at their observation cutoffs. We further
+structure pretraining into two stages: learning neighborhood representations via
+subgraph contrastive learning, followed by refining these representations through
+either relation recovery or future activity prediction. We evaluate across five Rel-
+Bench datasets and 11 classification and regression tasks using representative
+heterogeneous graph neural network (GNN) and Graph Transformer (GT) back-
+bones. With both temporal encodings, the best evaluated staged schedules for the
+two backbones outperform direct supervised training using the same encodings by
+3.02% and 1.06%, respectively, and controls without pretraining or encodings by
+3.24% and 2.37%, respectively.
+1
+INTRODUCTION
+Relational databases store records in linked tables, with predictive signals distributed across both
+record attributes and relationships. For example, predicting whether a customer will buy again may
+require combining customer details, product information, and purchase times from several tables.
+Conventional pipelines assemble these signals through task-specific joins and aggregations (Kanter
+& Veeramachaneni, 2015). Relational deep learning (RDL) instead represents rows as nodes and
+foreign-key links as typed edges, allowing graph models to learn directly from attributes and relational
+neighborhoods (Fey et al., 2024).
+Learning from relational graphs requires modeling both heterogeneity and time. Customer and
+product records describe distinct entity types, while purchase records capture interactions between
+them. Together, they form a heterogeneous graph with type-specific node attributes and multiple
+relation types. Time provides two complementary signals about these records and their relationships.
+Record age measures the time elapsed between a record’s observation and the prediction cutoff. A
+⋆Corresponding author: Yixin Peng (peng@dbis.rwth-aachen.de).
+1
+arXiv:2609.35219v1  [cs.LG]  28 Sep 2026
+
+
+signed inter-record interval measures the difference between the observation times of two linked
+records, capturing their temporal order and distance. For example, as the prediction cutoff advances,
+a purchase record becomes older, while the interval between the customer’s registration and that
+purchase remains fixed.
+Temporal encodings make record age and inter-record intervals explicit in model representations
+(Xu et al., 2020; Hu et al., 2020c; Yu et al., 2023; Cong et al., 2023; Li et al., 2023; Robinson et al.,
+2024; Dwivedi et al., 2026). Pretraining guides models to integrate these temporal signals with
+record attributes and graph structure before adaptation to downstream tasks. Existing pretraining
+approaches use heterogeneous reconstruction and relation- or schema-based contrastive learning (Hu
+et al., 2020b; Jiang et al., 2021; Sun et al., 2025), while temporal objectives further target interaction
+timing or statistics of future records (Ma et al., 2026; Truong et al., 2026). Temporal encodings and
+pretraining objectives thus serve complementary roles: the former specify how time is represented,
+and the latter guide what and how the model learns from these representations. This motivates us to
+study how temporal heterogeneity-aware pretraining can be combined with explicit encodings of both
+temporal signals. Figure 2 summarizes these design choices across prior methods and our framework.
+We address this challenge with a framework that integrates temporal encodings with staged pretraining.
+Our temporal encodings capture both record age and relative timing: Multi-scale time encoding
+(TIMEMIX) incorporates record-age information into node inputs through learnable time scales and
+type-specific projections, while Rotary time encoding (TIMEROPE) adapts prior temporal rotary
+attention (Peng et al., 2026) to use bounded, signed log-intervals and extends it to GNN message
+construction.
+Building on these encodings, we introduce three complementary pretraining objectives. Temporal
+Subgraph Contrast (TEMP-SUB) aligns corrupted views of historical neighborhoods through type-
+aware pooling and relation-preserving augmentations, encouraging representations to remain stable
+under missing attributes or links. Historical Relation Recovery (REL-HIST) recovers hidden typed
+links using only the context available when those links were observed, whereas Horizon-aware
+Relation Activity Prediction (REL-FUTURE) predicts whether an entity will receive links of a
+specified relation and how many events will occur within a future window. We organize these
+objectives into a staged pretraining scheme: TEMP-SUB first learns neighborhood representations,
+which are then refined using either REL-HIST or REL-FUTURE. All model inputs respect their
+observation cutoffs throughout pretraining. The resulting pretrained model is subsequently fine-tuned
+for individual tasks within the same database.
+We evaluate our framework on five RelBench databases (Robinson et al., 2024) across 11 tasks span-
+ning binary classification, multiclass classification, and regression using representative heterogeneous
+GNN and GT backbones. Controlled ablations assess the complementary benefits of the temporal
+encodings and the effectiveness of staged pretraining (Figure 4).
+Our contributions are:
+• Complementary temporal representations. We establish that jointly encoding record
+age and inter-record intervals improves aggregate performance over either alone on both
+backbones, with record age contributing more in component ablations.
+• Effective staged pretraining. Our two staged schedules yield positive aggregate transfer
+in all four backbone–encoding settings. With both encodings, the best schedule on each
+backbone outperforms either constituent objective alone, demonstrating the value of staging
+complementary supervision.
+• Gains beyond temporal encoding alone. Matched comparisons establish additional mean
+type gains of 3.02% on the GNN and 1.06% on the GT over supervised training with both
+encodings. Our best schedules also outperform the evaluated pretraining baselines, including
+their staged variants.
+2
+
+
+(a) Relational tables
+(b) Temporal heterogeneous
+     graph
+(c) Historical subgraph
+Customers
+id
+name
+C1
+Alice
+C2
+Bob
+Products
+id
+category
+P1
+Books
+P2
+Shoes
+Purchases
+id
+c_id
+p_id
+time
+S1
+C1
+P1
+day 1
+S2
+C1
+P2
+day 4
+S3
+C2
+P1
+day 3
+S4
+C1
+P2
+day 7
+id: PK   ·   c_id, p_id: FK
+Customer
+Purchase
+Product
+C1
+C2
+S1
+S2
+S3
+S4
+P1
+P2
+day 1
+day 4
+day 3
+day 7
+c_id
+p_id
++ reverse
+Seed C1   ·   cutoff τ = day 5
+C1
+S1
+day 1
+S2
+day 4
+P1
+P2
+2-hop sample
+S4: day 7 > τ  →  excluded
+Table → node type     Row → node     Attributes → features     FK → typed links     Time → tv
+Figure 1: From relational tables to historical subgraphs for RDL. (a) Customer, purchase, and
+product tables: id denotes primary keys, c id and p id denote foreign keys, and time records
+purchase observation times. (b) Rows become nodes whose types follow their source tables; foreign-
+key references become typed edges with corresponding reverse relations for bidirectional message
+passing. Purchase nodes carry timestamps tv. (c) An illustrative two-hop sample around seed C1,
+using only information available by cutoff τ = day 5. S4 is excluded because its timestamp exceeds
+τ; S3 and C2 lie outside the two-hop neighborhood.
+2
+BACKGROUND AND RELATED WORK
+2.1
+RELATIONAL DEEP LEARNING
+RDL provides an end-to-end framework for learning from linked database records (Fey et al., 2024;
+Dwivedi et al., 2025). It combines multimodal attributes, schema-defined relationships, and temporal
+observations in a graph representation. RelBench supplies predictive tasks with chronological splits
+(Robinson et al., 2024).
+Definitions.
+Let D = (T , R) be a database with tables T = {T1, . . . , Tn} and foreign-key relations
+R. Each row is identified by a primary key and contains attributes and, where applicable, foreign
+keys referencing other rows. A timestamp, when present, records its observation time. Following
+the relational entity graph formulation (Fey et al., 2024), we construct G = (V, E, ϕ, ψ, t), where
+V contains the rows, E contains their foreign-key links, ϕ : V →T assigns node types by source
+table, and ψ : E →R assigns relation types. The timestamp function t is defined on timestamped
+nodes, with tv = t(v). We include reverse edges and corresponding relation types in E and R for
+message passing. Figure 1(a,b) illustrates this mapping: customer, purchase, and product tables
+become distinct node types, and the two foreign keys in each purchase define its links to a customer
+and a product.
+2.2
+GRAPH MODELS AND TEMPORAL ENCODING FOR RDL
+We consider two encoder families for RDL: GNNs based on relational message aggregation, in-
+cluding HETEROGNN and RelGNN (Robinson et al., 2024; Chen et al., 2025), and GTs based on
+heterogeneous attention, including HGT, RelGT, and Dual-Branch Temporal Heterogeneous Graph
+Fusion Model (THGFM) (Hu et al., 2020c; Dwivedi et al., 2026; Peng et al., 2026).
+Viewed in the RDL setting, existing methods incorporate record age through temporal features added
+to node inputs or included in attention and sequence representations. These features use positional
+encodings with trainable projections in HETEROGNN, learnable trigonometric functions in TGAT,
+THAN, and DyGFormer, and fixed-frequency cosine functions in GraphMixer (Robinson et al., 2024;
+Xu et al., 2020; Li et al., 2023; Yu et al., 2023; Cong et al., 2023). RelGT incorporates seed-relative
+age features during record tokenization (Dwivedi et al., 2026). For inter-record intervals, HGT
+adds projected sinusoidal encodings of source–target time differences to source representations,
+while THGFM applies interval-dependent query–key rotations (Hu et al., 2020c; Peng et al., 2026).
+Additionally, record-age distributions and time scales vary across the evaluated RelBench databases
+(Appendix B.2). Motivated by these observations and the complementary roles of these two forms of
+temporal information, we develop two encodings and integrate both into the GNN and GT backbones.
+3
+
+
+Evaluated graph
+models
+Pretraining
+strategy
+Pretraining granularity
+Temporal encoding
+Schedule
+Node;
+Heterogeneity
+Relation;
+Heterogeneity
+(Sub-)Graph;
+Heterogeneity
+Recency
+Interval
+Staged
+TVE
+GNN
+;
+– ; –
+;
+B
+–
+–
+TGPM
+GT
+– ; –
+; –
+; –
+–
+CTRL
+GNN
+– ; –
+;
+;
+–
+–
+Un-SAGE
+GNN
+; –
+; –
+– ; –
+–
+–
+–
+AttrMasking
+GNN
+; –
+; –
+– ; –
+–
+–
+ContextPred
+GNN
+; –
+– ; –
+; –
+–
+–
+GPT-GNN
+GNN & GT
+;
+;
+– ; –
+–
+B
+–
+PHE
+GNN & GT
+;
+;
+;
+–
+B
+–
+PT-HGNN
+GT (HGT)
+;
+;
+;
+–
+B
+–
+Our staged schedules
+GNN & GT
+;
+;
+;
+Direct
+Indirect/limited coverage
+B Backbone-dependent
+– Not explicit
+Figure 2: Comparison of representative graph pretraining strategies. In each of the first three columns,
+paired symbols indicate coverage of the supervision granularity and explicit use of node or relation
+types at that granularity, respectively. Filled and half-filled circles denote direct and indirect or limited
+coverage; B denotes backbone-dependent encoding, and a dash denotes no explicit coverage.
+2.3
+GRAPH PRETRAINING: HETEROGENEITY, TIME, AND STAGING
+Graph pretraining provides supervision over nodes, relations, and subgraphs, but coverage of these
+granularities does not by itself imply explicit use of heterogeneous types or schema (Figure 2).
+AttrMasking and GraphMAE learn through attribute reconstruction (Hu et al., 2020a; Hou et al., 2022;
+2023); Un-SAGE and ContextPred learn from proximity and neighborhood context (Hamilton et al.,
+2017; Hu et al., 2020a), while GCC and GraphCL contrast subgraph or graph views (Qiu et al., 2020;
+You et al., 2020). Heterogeneous pretraining makes schema structure explicit in the supervision: GPT-
+GNN uses type-specific attribute and link generation, PT-HGNN combines relation-wise sampling
+with schema-instance agreement, and PHE incorporates type-aware schema representations and
+semantic neighbors (Hu et al., 2020b; Jiang et al., 2021; Sun et al., 2025). HGMAE and MUG
+alternatively use metapaths in reconstruction or alignment (Tian et al., 2023; Shan et al., 2026). For
+RDL, this distinction matters because table and relation types determine which entities and links a
+pretraining target describe. These methods establish ways to learn from typed structure; temporal
+encoding and temporally defined targets introduce additional design choices.
+Time can condition the representation of observed history or define what the model must predict.
+TGPM combines masked patch reconstruction with next-time prediction (Ma et al., 2026), while
+CTRL models temporal influence through heterogeneous event-subgraph and edge prediction (Li
+et al., 2026). In relational databases, Griffin uses completion pretraining and supervised training,
+while RelPrism constructs attribute-based pseudo-tasks (Wang et al., 2025; Yang et al., 2026). TVE
+directly targets future relational information: it predicts statistics, including counts, of records reached
+through schema traversals (Truong et al., 2026). These targets differ in what they predict: interaction
+timing, event structure, or aggregated relational statistics.
+How these objectives are organized is a further question. Hu et al. (2020a) stage node-level and
+graph-level pretraining, whereas TGPM jointly trains temporal objectives and TVE supports weighted
+combinations of losses (Ma et al., 2026; Truong et al., 2026). Our schedules study a different transi-
+tion: first learn stable historical representations through contrastive learning, then refine them through
+relation recovery or future activity prediction, evaluating these schedules with explicit temporal en-
+codings across heterogeneous GNN and GT backbones. Together, seed-node and historical-subgraph
+contrast, typed relation recovery, and activity prediction cover node, relation, and subgraph supervi-
+sion, with heterogeneous types explicitly used in pooling, sampling, decoding, and augmentation.
+3
+METHOD
+For seed node s and prediction cutoff τ, let Gs,≤τ denote a sampled neighborhood containing only
+information available by τ. We refer to this input as a historical neighborhood or subgraph. We use
+s to identify its seed and u, v to denote general nodes or edge endpoints. Temporal encoding and
+graph propagation operate on nodes and edges throughout the sampled neighborhood. In Figure 1(c),
+S4 is excluded by time, while S3 lies outside C1’s two-hop neighborhood. Static tables contribute
+attributes available at the cutoff even when they have no timestamp column. The model produces the
+seed representation hs = fθ(Gs,≤τ) ∈Rd, where d is the hidden dimension.
+4
+
+
+3.1
+TEMPORAL ENCODING
+Record age: TIMEMIX.
+TIMEMIX represents how old a record is at the prediction cutoff, allowing
+the model to learn how recency matters for each table type. For each timestamped node v in the
+sampled neighborhood, we compute its age relative to the same cutoff τ:
+av = max(0, τ −tv),
+ξv,k = log
+
+1 + av
+sk
+
+,
+(1)
+where av is the record age and ξv,k is its feature at learned positive time scale sk, for k = 1, . . . , Ktime.
+We parameterize sk = clip(exp(ηk), smin, smax), where ηk ∈R is trainable and 0 < smin < smax
+are fixed bounds. Here Ktime is the number of scales, and ages and scales use the same time unit.
+The logarithm preserves variation among recent records while compressing large ages. Future records
+are excluded by sampling before this encoding is applied.
+Let xv ∈Rd be the table encoder’s representation of record attributes. For node type a = ϕ(v), we
+add a mixture of projected age features:
+etime
+v
+=
+Ktime
+X
+k=1
+πkga,k(ξv,k),
+exv = xv + etime
+v
+.
+(2)
+Here ga,k : R →Rd is a learned linear projection for type a and scale k, and πk is a learned
+nonnegative mixture weight, with P
+k πk = 1. The time embedding etime
+v
+augments the attribute
+representation, giving exv as the input to graph propagation. Scales and weights are shared across
+node types; type-specific projections allow the same age to have different effects in different tables.
+For records without timestamps, we use exv = xv. Appendix D gives more details.
+Time differences: TIMEROPE.
+TIMEROPE captures the order and spacing of linked records. For
+a directed edge u →v in the sampled neighborhood, u is the source and v is the destination. When
+both endpoints have timestamps, define ∆tuv = tv −tu as the signed time difference. We convert it
+to a rotation phase:
+ρuv = clip
+
+sign(∆tuv) log
+
+1 + |∆tuv|
+sR
+
+, −ρmax, ρmax
+
+,
+(3)
+where sR is a fixed positive time scale and ρmax > 0 is a fixed hyperparameter that bounds the
+magnitude of the rotation phase. The sign distinguishes temporal order; the logarithm and clipping
+limit the effect of long gaps. Edges with an untimestamped endpoint use the backbone’s message or
+attention operation without rotation.
+For each node v, let yv ∈Rd denote its input to the current graph layer; in the first layer, yv = exv.
+Let R(ρ) rotate the j-th consecutive pair of feature dimensions by angle ωjρ, where ωj is the
+corresponding RoPE frequency (Su et al., 2023). Our GNN backbone constructs messages using
+opposite half-phase rotations and aggregates them by relation:
+mu→v = 1
+2 [R(−ρuv/2)yu + R(+ρuv/2)yv] ,
+h(r)
+v
+= W (r)
+neigh
+
+
+1
+|Nr(v)|
+X
+u∈Nr(v)
+mu→v
+
++ W (r)
+selfyv.
+(4)
+Here Nr(v) contains incoming neighbors under relation r, and h(r)
+v
+is the relation’s output. The
+learned matrices W (r)
+neigh and W (r)
+self transform averaged messages and node inputs, respectively.
+For our GT backbone, we adapt the query–key rotation mechanism of THGFM’s Rotary Temporal
+Attention (Peng et al., 2026), using the bounded, signed log-interval ρuv defined above as the temporal
+phase. Thus, TIMEROPE incorporates inter-record timing into GNN message construction and GT
+attention weighting. Appendix D provides the rotation convention and backbone implementation
+details.
+5
+
+
+3.2
+TEMPORAL PRETRAINING OBJECTIVES
+Historical link recovery: REL-HIST.
+REL-HIST asks whether two records were linked, given the
+context available when the link was observed. We sample an observed link u →v of relation r and
+use its assigned observation time as cutoff τ. We then sample Kneg negative destinations of the same
+type as v that are available at τ and are not known destinations of u under r in the pretraining data.
+We encode historical neighborhoods centered on the source and on each candidate destination at the
+same cutoff τ, obtaining their node representations. We remove the target edge and its reverse from
+every input so that the encoder cannot directly observe the answer. For endpoint representations
+hu and hv, a relation-specific bilinear decoder assigns the score shist(u, v, r) = h⊤
+u Wrhv, where
+Wr ∈Rd×d is a learned matrix for relation r. The mean softplus ranking loss LRel-Hist encourages
+the observed destination to score above the sampled negatives. Appendix E gives the timestamp
+assignment and full loss.
+Future relation activity: REL-FUTURE.
+REL-FUTURE predicts whether a seed node s will receive
+links of relation r in a future window and how many. Each forward foreign-key link e = (u →s)
+represents an event, with time te = tu given by the source record’s timestamp. Let Er(s) be the set
+of these events. For cutoff τ and horizon δ, we define the event count and prediction targets as
+cr(s; τ, δ) =
+X
+e∈Er(s)
+1{τ < te ≤τ + δ},
+yact = 1{cr(s; τ, δ) > 0},
+ycount = log
+ 1 + cr(s; τ, δ)
+
+.
+(5)
+To construct a positive example, we uniformly sample an eligible relation and then an eligible event
+of that relation. Let s+ be its destination and tevt its time. We choose a candidate horizon δ and set
+τ = tevt −δ, requiring tfirst(s+) ≤τ, where tfirst denotes the entity’s first observation time. This
+ensures that the seed is available at the cutoff and the window contains at least the sampled event. For
+the same (r, τ, δ), we sample negative seeds s−of the same type as s+ that are available at τ and
+have no events in the window.
+For each seed s, the encoder uses only Gs,≤τ to compute hs. Two decoders, conditioned on r and δ,
+map hs to an occurrence logit and a nonnegative log-count prediction. We optimize
+LRel-Future = Lact + λcountLcount,
+(6)
+where Lact is the binary occurrence loss, Lcount is the Smooth L1 loss on log-count targets, and
+λcount weights the count loss. Each loss gives equal weight to the positive example and the mean
+over negatives. Appendix E provides the timestamp assignment, sampling rules, and full losses.
+Temporal subgraph contrast: TEMP-SUB.
+TEMP-SUB learns representations that remain con-
+sistent when some features or links are missing from a historical neighborhood. Let τpre be the
+global pretraining cutoff, set to the dataset’s validation timestamp. For timestamped seeds, we require
+ts ≤τpre and set τ = ts; for seeds without timestamps, we set τ = τpre. For each input Gs,≤τ, we
+create two independently corrupted views sharing the same seed node s and cutoff τ by randomly
+masking input embedding entries and dropping edges. We either keep or drop each edge together
+with its corresponding reverse edge, and each view retains at least one edge per represented forward
+relation.
+To summarize each view, we first pool nodes within each type, then combine the type summaries.
+Let H be an augmented subgraph, T (H) its set of node types, and Va(H) its nodes of type a. We
+compute
+µH,a =
+1
+|Va(H)|
+X
+u∈Va(H)
+hu,
+cH,a = tanh(PaµH,a + ea) ,
+(7)
+where hu is computed within H, µH,a is the mean representation of type a, and cH,a is its type
+summary. The learned projection Pa ∈Rd×d and type embedding ea ∈Rd adapt the summary to its
+table type. A shared learned linear scoring function gpool : Rd →R then assigns attention weights
+βH,a to combine the summaries into zH:
+βH,a =
+exp(gpool(cH,a))
+P
+b∈T (H) exp(gpool(cH,b)),
+zH =
+X
+a∈T (H)
+βH,acH,a.
+(8)
+6
+
+
+Averaging within types prevents larger tables from dominating solely through their node counts,
+while attention learns how much each type contributes to the neighborhood representation.
+We apply contrastive learning at two levels: the whole neighborhood and its seed node s. For
+neighborhood-level contrast, we map the pooled representations of both views through the same
+projection head. Each neighborhood in the first view is trained to match its counterpart in the
+second view, with other neighborhoods in the batch serving as negatives. We compute an InfoNCE
+loss (van den Oord et al., 2019) using cosine similarity divided by temperature T. We then repeat the
+matching from the second view to the first and average the two losses to obtain Lgraph. For seed-level
+contrast, we take the representation of s from each view and apply the same matching procedure
+through a separate projection head, obtaining Lseed. To complement contrastive learning in the
+projection space, we additionally regularize the seed representations with a VICReg penalty (Bardes
+et al., 2022) that discourages collapse by maintaining variance across seeds and reduces redundancy
+across feature dimensions. This penalty acts directly on the encoder outputs before the seed projection
+head and is averaged over the two views, giving Rreg. The full objective is
+LTemp-Sub = Lgraph + Lseed + Rreg.
+(9)
+Appendix C and Appendix E provide more details.
+4
+EXPERIMENTS AND RESULTS
+4.1
+EXPERIMENTAL SETUP
+Datasets and evaluation.
+We evaluate on 11 tasks from five RelBench databases, Arxiv, Avito, F1,
+H&M, and Event (Robinson et al., 2024), using the original chronological training, validation, and
+test splits. We report accuracy for multiclass classification, ROC–AUC for binary classification, and
+MAE for regression. All experiments are repeated with four random seeds, {42, 43, 44, 45}; reported
+task metrics are the means and standard deviations across these runs, with each run evaluated at its
+best validation checkpoint. Appendix A provides dataset and task details.
+Backbones and baselines.
+We benchmark five backbones: two GNNs, HETEROGNN and RelGNN,
+and three GTs, HGT, RelGT, and THGFM. The controlled encoding and pretraining study focuses
+on HETEROGNN and THGFM, selected as the best-performing representatives of their respective
+families by mean validation rank across the 11 tasks (Appendix B.1). Selecting one backbone per
+family is a trade-off between architectural coverage and computational cost. All backbones use three
+layers with hidden dimension 128, and GTs use eight attention heads. We compare against nine
+pretraining baselines: ATTRMASKING, CONTEXTPRED, Un-SAGE, GPT-GNN, PT-HGNN, PHE,
+CTRL, TGPM, and TVE. Single-stage pretraining and downstream fine-tuning each use 10 epochs
+with 10,000 steps per epoch. Two-stage pretraining uses 10 epochs with 5,000 steps per epoch in each
+stage, matching the total single-stage pretraining budget of 100,000 steps. Models trained without
+pretraining use the same downstream budget. Appendix C provides the full architecture and training
+configuration.
+4.2
+MAIN RESULTS
+Aggregate performance across backbones.
+We denote the fixed day-based single-scale record-
+age encoding used by HETEROGNN (Robinson et al., 2024) as DAYPE and use it as the baseline
+for multi-scale TIMEMIX on both backbones (Appendix B.2). Figure 3 uses the same-backbone
+supervised control with only DAYPE and without TIMEROPE or pretraining as its reference (A0)
+throughout, measuring the effects of pretraining and, where enabled, our temporal encodings. In
+each of the four backbone–encoding settings, one of our two proposed staged schedules achieves the
+highest mean type gain among the evaluated methods. With both encodings, TS→REL-HIST leads on
+the GNN at +3.24%, and TS→REL-FUTURE leads on the GT at +2.37%. The strongest baselines,
+including TS-initialized variants, reach +2.96% on the GNN (ATTRMASKING) and +1.15% on the
+GT (TS→PT-HGNN). Without our encodings, TS→REL-FUTURE leads on the GNN (+2.51%),
+while TS→REL-HIST leads on the GT (+1.58%).
+Performance under task-balanced aggregation.
+The benchmark contains one multiclass, six
+binary, and four regression tasks, so equal weighting of task types gives individual tasks different
+7
+
+
+Un-SAGE
+GPT-GNN
+PT-HGNN
+PHE
+AttrMasking
+ContextPred
+CTRL
+TGPM
+TVE
+Rel-Hist
+Rel-Future
+Temp-Sub
+TS → AttrMasking
+TS → ContextPred
+TS → PT-HGNN
+TS → CTRL
+TS → TGPM
+TS → TVE
+TS → Rel-Hist
+TS → Rel-Future
+Baselines
+Ours:
+single-stage
+TEMP-SUB →
+baselines
+Ours:
+two-stage
+-0.56
+-0.21
++0.26
+-1.06
++0.88
+-0.67
++0.82
+-0.05
++1.08
++1.75
++1.34
+-0.88
++0.80
+-0.68
++1.48
++1.62
++0.94
++1.42
++2.01
++2.51
+Mean type
+gain (%)
+13.64
+14.91
+8.64
+14.82
+10.14
+13.27
+11.41
+11.45
+11.91
+9.95
+9.68
+12.27
+8.55
+12.64
+5.82
+8.27
+7.59
+12.14
+8.18
+4.73
+Avg. rank
+↓
+Multiclass
+classification
+Binary
+classification
+Regression
+(a) HeteroGNN · without our time encodings
+-1.33
+-0.47
++0.71
+-0.84
++2.96
++1.13
++1.16
++1.79
++1.62
++1.32
++3.22
++0.34
++2.45
++2.10
++2.09
++2.93
++2.60
++2.46
++3.24
++3.07
+Mean type
+gain (%)
+14.91
+12.68
+12.41
+12.86
+10.50
+10.73
+9.36
+13.18
+10.45
+9.95
+8.14
+11.68
+10.14
+10.73
+10.23
+7.32
+10.41
+9.91
+7.14
+7.27
+Avg. rank
+↓
+Multiclass
+classification
+Binary
+classification
+Regression
+(b) HeteroGNN · with our time encodings
+arxiv / Author
+arxiv / Citation
+rel-event / Ignore
+f1 / DNF
+hm / Churn
+avito / Clicks
+avito / Visits
+rel-event / Attend.
+f1 / Position
+hm / Sales
+avito / CTR
+Un-SAGE
+GPT-GNN
+PT-HGNN
+PHE
+AttrMasking
+ContextPred
+CTRL
+TGPM
+TVE
+Rel-Hist
+Rel-Future
+Temp-Sub
+TS → AttrMasking
+TS → ContextPred
+TS → PT-HGNN
+TS → CTRL
+TS → TGPM
+TS → TVE
+TS → Rel-Hist
+TS → Rel-Future
+Baselines
+Ours:
+single-stage
+TEMP-SUB →
+baselines
+Ours:
+two-stage
+-1.92
+-3.28
++0.85
+-4.63
+-1.52
+-3.70
+-0.78
+-1.03
+-1.76
+-0.24
++0.98
+-2.25
+-1.31
+-5.00
++1.16
++0.04
+-0.58
+-1.02
++1.58
++1.43
+Mean type
+gain (%)
+12.64
+13.82
+7.55
+12.91
+11.77
+12.05
+12.18
+12.73
+12.14
+9.95
+7.36
+12.41
+9.32
+12.82
+6.82
+9.64
+12.91
+10.91
+5.14
+4.95
+Avg. rank
+↓
+Multiclass
+classification
+Binary
+classification
+Regression
+(c) THGFM · without our time encodings
+arxiv / Author
+arxiv / Citation
+rel-event / Ignore
+f1 / DNF
+hm / Churn
+avito / Clicks
+avito / Visits
+rel-event / Attend.
+f1 / Position
+hm / Sales
+avito / CTR
+-5.46
+-2.97
+-0.54
+-3.46
+-4.79
+-6.18
+-0.24
+-0.13
++0.72
++0.59
++0.80
+-0.09
+-3.52
+-3.69
++1.15
++0.82
+-0.11
++1.26
++1.94
++2.37
+Mean type
+gain (%)
+16.68
+14.45
+10.73
+12.95
+14.32
+12.91
+9.68
+9.00
+10.91
+7.55
+7.82
+8.64
+11.45
+12.23
+8.27
+8.86
+10.59
+10.00
+6.50
+6.45
+Avg. rank
+↓
+Multiclass
+classification
+Binary
+classification
+Regression
+(d) THGFM · with our time encodings
+−10
+−5
+0
+5
+10
+Figure 3: Relative test-performance gains (%) across 11 tasks, computed from task metrics averaged
+over four random seeds. All panels use the same-backbone supervised control without our time
+encodings (only with DayPE) or pretraining as reference (A0). Mean type gain averages gains within
+each task type and then equally across types; average rank weights all tasks equally (lower is better).
+Colors saturate at ±10%; white dots mark values beyond this range. TS denotes TEMP-SUB; outlined
+rows identify our two-stage schedules, and bold summary values mark the best result in each panel.
+weights. We therefore also report average ranks with all 11 tasks weighted equally. Our staged
+schedules rank best in all four panels, with average ranks of 4.73, 7.14, 4.95, and 6.45, respectively.
+TS→REL-HIST leads on the GNN with both encodings, and TS→REL-FUTURE leads in the other
+three panels; with both encodings, our two staged schedules occupy the top two positions on each
+backbone. Thus, the aggregate advantage is supported by both gain and rank summaries.
+Task coverage and sources of improvement.
+With both encodings, the best staged configuration
+for each backbone improves over A0 on 8 of the 11 tasks for the GNN and 7 for the GT, including all
+four regression tasks on both backbones. Regression provides the largest task-type gains: +5.12%
+on the GNN and +8.55% on the GT. On the latter, gains span driver position (+8.74%), item
+sales (+7.54%), and ad CTR (+17.76%). Classification gains are less uniform: the GNN schedule
+improves author-category accuracy by 3.40% and binary classification by 1.21% on average; the GT
+schedule gains 0.26% on binary classification but loses 1.70% on author-category accuracy. The
+positive aggregates therefore reflect benefits across several regression targets alongside more variable
+classification transfer. Appendix B.3 reports detailed test results and standard deviations.
+4.3
+ABLATION STUDIES
+Contributions of the temporal encodings.
+Removing TIMEMIX restores DAYPE, the single-scale
+baseline introduced in Section 4.2, regardless of whether TIMEROPE is enabled. In Figure 4a,
+removing TIMEMIX reduces mean type gain by 0.59 percentage points on the GNN and 1.18 on the
+GT, compared with 0.28 and 0.46 points from disabling TIMEROPE. Removing both lowers gains
+by 0.46 and 1.29 points, respectively. The combined configuration therefore achieves the highest
+mean type gain on both backbones, with removing TIMEMIX causing the larger decrease. Effects
+vary across task types: disabling TIMEROPE slightly improves multiclass performance but reduces
+binary and regression gains on both backbones.
+Effect of staged pretraining.
+Figure 4b measures pretraining gains over supervised controls with
+the same backbone and temporal encodings. Both proposed schedules yield positive mean type gains
+8
+
+
+−3
+−2
+−1
+0
+1
+Multiclass
+Binary
+Regression
+Mean type
+gain
+-1.78
++0.32
+-0.31
+-0.59
++0.32
+-0.38
+-0.80
+-0.28
+-2.02
++0.46
++0.18
+-0.46
+HeteroGNN
+−3
+−2
+−1
+0
+1
+-2.67
+-0.46
+-0.41
+-1.18
++0.08
+-1.24
+-0.23
+-0.46
+-2.43
++0.05
+-1.49
+-1.29
+THGFM
+−6
+−3
+0
+3
+AttrMasking
+ContextPred
+PT-HGNN
+CTRL
+TGPM
+TVE
+Rel-Hist
+Rel-Future
+HeteroGNN
+DayPE · A0
++0.88
++0.80
+-0.67
+-0.68
++0.26
++1.48
++0.82
++1.62
+-0.05
++0.94
++1.08
++1.42
++1.75
++2.01
++1.34
++2.51
+−6
+−3
+0
+3
+HeteroGNN
+TimeMix + TimeRoPE · B0
++2.64
++2.19
++0.80
++1.73
++0.53
++1.89
++0.93
++2.71
++1.53
++2.34
++1.36
++2.22
++1.14
++3.02
++3.00
++2.83
+−6
+−3
+0
+3
+THGFM
+DayPE · A0
+-1.52
+-1.31
+-3.70
+-5.00
++0.85
++1.16
+-0.78
++0.04
+-1.03
+-0.58
+-1.76
+-1.02
+-0.24
++1.58
++0.98
++1.43
+−6
+−3
+0
+3
+THGFM
+TimeMix + TimeRoPE · B0
+-5.94
+-4.67
+-7.26
+-4.79
+-1.78
+-0.13
+-1.50
+-0.45
+-1.37
+-1.37
+-0.54
+-0.02
+-0.69
++0.67
+-0.52
++1.06
+(a) Encoding ablation
+Gain difference (%); zero = ours (TimeMix + TimeRoPE)
+(b) Pretraining ablation
+Mean type gain (%) over matched no-pretraining control; TS = Temp-Sub
+DayPE + TimeRoPE
+TimeMix
+DayPE
+Single objective
+TS → objective
+Figure 4: Contributions of temporal encoding and staged pretraining. (a) Gain differences from ours
+(TIMEMIX+TIMEROPE), without pretraining. DAYPE is the single-scale baseline for TIMEMIX.
+(b) Pretraining gains over matched supervised controls (A0: DAYPE; B0: TIMEMIX+TIMEROPE).
+Arrows connect single- and two-stage results with equal total pretraining steps.
+in all four settings. With both encodings, TS→REL-HIST achieves +3.02% on the GNN, while
+TS→REL-FUTURE achieves +1.06% on the GT, demonstrating benefits beyond temporal encoding
+alone. Under the same total pretraining budget, adding an initial TEMP-SUB stage improves over the
+corresponding single objective in seven of the eight comparisons for REL-HIST and REL-FUTURE.
+Notably, on the GT with both encodings, staging turns negative transfer into positive gains for
+both objectives, whereas all six TS-initialized baselines shown remain below the supervised control.
+The benefit nevertheless depends on the configuration: REL-FUTURE alone slightly outperforms
+its staged counterpart on the GNN with both encodings (+3.00% versus +2.83%). Among the
+baselines, staging improves PT-HGNN, CTRL, TGPM and TVE in all four settings, while its
+effects on AttrMasking and ContextPred are mixed. One possible explanation is that the type-
+aware representations learned by TEMP-SUB better support relation- and schema-based supervision
+(Figure 2).
+4.4
+DISCUSSION AND LIMITATIONS
+Temporal scales and horizon design.
+The statistics in Appendix B.2 reveal substantial variation in
+record-age distributions across databases. Avito includes records observed within one day before the
+prediction cutoff, with age variation at second, minute, and hour scales. Record ages in Event and
+H&M are concentrated at scales of days to months, whereas Arxiv and F1 include records dating
+back years. These differences motivate the multi-scale record-age representation in TIMEMIX.
+The supported prediction horizons also vary across databases. Avito supports only 1- and 7-day
+horizons, while Event and H&M also support windows spanning weeks to months. In Arxiv and
+F1, 67.7% and 87.1% of eligible events, respectively, support a 365-day horizon. These differences
+motivate using multiple horizons for REL-FUTURE: short windows provide training examples where
+history is limited, while longer windows provide supervision on relation activity over months or a
+year where sufficient history is available. We therefore use candidate horizons from one day to one
+year.
+Limitations.
+Our framework focuses on within-database training; transfer to unseen databases
+remains to be explored. Single- and two-stage pretraining use the same total number of training
+steps, although computational cost per step can vary across objectives. Comparisons under matched
+computational costs and with alternative stage orders would further clarify the contributions of
+objective composition and stage order.
+5
+CONCLUSION
+We present an RDL framework that encodes record age and inter-record intervals and stages subgraph
+contrast before historical relation recovery or future activity prediction. Across five RelBench
+9
+
+
+databases and 11 tasks, the two encodings together outperform either alone in aggregate on both
+backbones, and staged pretraining yields additional gains over supervised controls with the same
+encodings on both GNN and GT backbones. These results support combining explicit temporal
+representations with staged self-supervision for within-database prediction. Generalization to unseen
+databases and comparisons of stage orders under matched computational budgets remain directions
+for future work.
+AI USE STATEMENT
+Generative AI tools assisted with language editing and polishing. The authors are responsible for the
+final content, claims, and artifacts in this work.
+REPRODUCIBILITY STATEMENT
+To facilitate reproducibility, Section 2.1 specifies the graph construction and observation rule, and
+Section 3 describes the encodings, objectives, and training schedule. Appendix A documents database
+statistics, task definitions, and temporal splits; Appendix B reports task-level metrics and their
+variation; Appendix C specifies the architecture, optimization, and four-seed evaluation settings;
+Appendix D provides temporal implementation details; Appendix E specifies the decoders, losses,
+and sampling details for the pretraining objectives; and Appendix F presents the optimization curves.
+The appendix will be provided as a separate PDF in the Supplementary Materials. All code needed
+to reproduce the reported results will be provided as supplementary code in the Supplementary
+Materials, including instructions for downloading and processing the publicly available RelBench
+datasets (Robinson et al., 2024) used in our experiments.
+REFERENCES
+Adrien Bardes, Jean Ponce, and Yann LeCun. VICReg: Variance-invariance-covariance regularization
+for self-supervised learning. In International Conference on Learning Representations, 2022.
+Tianlang Chen, Charilaos Kanatsoulis, and Jure Leskovec. RelGNN: Composite message passing for
+relational deep learning, 2025. URL https://arxiv.org/abs/2502.06784.
+Weilin Cong, Si Zhang, Jian Kang, Baichuan Yuan, Hao Wu, Xin Zhou, Hanghang Tong, and
+Mehrdad Mahdavi. Do we really need complicated model architectures for temporal networks?,
+2023. URL https://arxiv.org/abs/2302.11636.
+Vijay Prakash Dwivedi, Charilaos Kanatsoulis, Shenyang Huang, and Jure Leskovec. Relational deep
+learning: Challenges, foundations and next-generation architectures. In Proceedings of the 31st
+ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2, pp. 5999–6009, 2025.
+Vijay Prakash Dwivedi, Sri Jaladi, Yangyi Shen, Federico L´opez, Charilaos Kanatsoulis, Rishi Puri,
+Matthias Fey, and Jure Leskovec. Relational graph transformer. In International Conference on
+Learning Representations, volume 2026, pp. 154348–154369, 2026.
+Matthias Fey, Weihua Hu, Kexin Huang, Jan Eric Lenssen, Rishabh Ranjan, Joshua Robinson, Rex
+Ying, Jiaxuan You, and Jure Leskovec. Position: Relational deep learning – graph representation
+learning on relational databases. In Proceedings of the 41st International Conference on Machine
+Learning, volume 235 of Proceedings of Machine Learning Research, pp. 13592–13607, 2024.
+Will Hamilton, Zhitao Ying, and Jure Leskovec. Inductive representation learning on large graphs.
+Advances in neural information processing systems, 30, 2017.
+Zhenyu Hou, Xiao Liu, Yukuo Cen, Yuxiao Dong, Hongxia Yang, Chunjie Wang, and Jie Tang.
+GraphMAE: Self-supervised masked graph autoencoders.
+In Proceedings of the 28th ACM
+SIGKDD conference on knowledge discovery and data mining, pp. 594–604, 2022.
+Zhenyu Hou, Yufei He, Yukuo Cen, Xiao Liu, Yuxiao Dong, Evgeny Kharlamov, and Jie Tang.
+GraphMAE2: A decoding-enhanced masked self-supervised graph learner. In Proceedings of the
+ACM web conference 2023, pp. 737–746, 2023.
+10
+
+
+Weihua Hu, Bowen Liu, Joseph Gomes, Marinka Zitnik, Percy Liang, Vijay Pande, and Jure Leskovec.
+Strategies for pre-training graph neural networks. In International Conference on Learning
+Representations, 2020a.
+Ziniu Hu, Yuxiao Dong, Kuansan Wang, Kai-Wei Chang, and Yizhou Sun. GPT-GNN: Generative
+pre-training of graph neural networks. In Proceedings of the 26th ACM SIGKDD international
+conference on knowledge discovery & data mining, pp. 1857–1867, 2020b.
+Ziniu Hu, Yuxiao Dong, Kuansan Wang, and Yizhou Sun. Heterogeneous graph transformer. In
+Proceedings of the web conference 2020, pp. 2704–2710, 2020c.
+Xunqiang Jiang, Tianrui Jia, Yuan Fang, Chuan Shi, Zhe Lin, and Hui Wang. Pre-training on large-
+scale heterogeneous graph. In Proceedings of the 27th ACM SIGKDD conference on knowledge
+discovery & data mining, pp. 756–766, 2021.
+James Max Kanter and Kalyan Veeramachaneni. Deep feature synthesis: Towards automating data
+science endeavors. In 2015 IEEE international conference on data science and advanced analytics
+(DSAA), pp. 1–10. IEEE, 2015.
+Chenglin Li, Yuanzhen Xie, Chenyun Yu, Junfeng Zhao, Yu Xia, Beibei Kong, Zang Li, and Di Niu.
+CTRL: Continuous-time representation learning on temporal heterogeneous information network.
+Know.-Based Syst., 339(C), June 2026. ISSN 0950-7051. doi: 10.1016/j.knosys.2026.115514.
+URL https://doi.org/10.1016/j.knosys.2026.115514.
+Longhai Li, Lei Duan, Junchen Wang, Chengxin He, Zihao Chen, Guicai Xie, Song Deng, and Zhao-
+hang Luo. Memory-enhanced transformer for representation learning on temporal heterogeneous
+graphs. Data Science and Engineering, 8:98–111, 2023.
+Yijun Ma, Zehong Wang, Weixiang Sun, and Yanfang Ye. Temporal graph pattern machine, 2026.
+URL https://arxiv.org/abs/2601.22454.
+Yixin Peng, Diego Collarana, Er Jin, and Stefan Decker. THGFM: Dual-branch temporal heteroge-
+neous graph fusion model, 2026. URL https://arxiv.org/abs/2607.27303.
+Jiezhong Qiu, Qibin Chen, Yuxiao Dong, Jing Zhang, Hongxia Yang, Ming Ding, Kuansan Wang, and
+Jie Tang. GCC: Graph contrastive coding for graph neural network pre-training. In Proceedings
+of the 26th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining,
+KDD ’20, pp. 1150–1160. ACM, August 2020. doi: 10.1145/3394486.3403168. URL http:
+//dx.doi.org/10.1145/3394486.3403168.
+Joshua Robinson, Rishabh Ranjan, Weihua Hu, Kexin Huang, Jiaqi Han, Alejandro Dobles, Matthias
+Fey, Jan E Lenssen, Yiwen Yuan, Zecheng Zhang, et al. RelBench: A benchmark for deep learning
+on relational databases. Advances in Neural Information Processing Systems, 37:21330–21341,
+2024.
+Lianze Shan, Jitao Zhao, Dongxiao He, Yongqi Huang, Zhiyong Feng, and Weixiong Zhang. MUG:
+Meta-path-aware universal heterogeneous graph pre-training. In Proceedings of the AAAI Confer-
+ence on Artificial Intelligence, volume 40, pp. 25260–25268, 2026.
+Jianlin Su, Yu Lu, Shengfeng Pan, Ahmed Murtadha, Bo Wen, and Yunfeng Liu. RoFormer: Enhanced
+transformer with rotary position embedding, 2023. URL https://arxiv.org/abs/2104.09864.
+Shengyin Sun, Chen Ma, and Jiehao Chen. PHE: Structure and semantic enhanced pre-training of
+graph neural networks for large-scale heterogeneous graphs. ACM Transactions on Knowledge
+Discovery from Data, 20(1):1–26, 2025.
+Yijun Tian, Kaiwen Dong, Chunhui Zhang, Chuxu Zhang, and Nitesh V Chawla. Heterogeneous
+graph masked autoencoders. In Proceedings of the AAAI conference on artificial intelligence,
+volume 37, pp. 9997–10005, 2023.
+Quang Truong, Zhikai Chen, Mingxuan Ju, Tong Zhao, Neil Shah, and Jiliang Tang.
+A pre-
+training framework for relational data with information-theoretic principles. Advances in Neural
+Information Processing Systems, 38:8122–8153, 2026.
+11
+
+
+Aaron van den Oord, Yazhe Li, and Oriol Vinyals. Representation learning with contrastive predictive
+coding, 2019. URL https://arxiv.org/abs/1807.03748.
+Yanbo Wang, Xiyuan Wang, Quan Gan, Minjie Wang, Qibin Yang, David Wipf, and Muhan Zhang.
+Griffin: Towards a graph-centric relational database foundation model, 2025. URL https://arxiv.or
+g/abs/2505.05568.
+Da Xu, Chuanwei Ruan, Evren Korpeoglu, Sushant Kumar, and Kannan Achan. Inductive repre-
+sentation learning on temporal graphs. In International Conference on Learning Representations,
+2020.
+Jinyu Yang, Cheng Yang, Junze Chen, Zedi Liu, Muhan Zhang, Hanyang Peng, and Chuan Shi.
+RelPrism: A multi-faceted pre-training framework with self-generated tasks for relational databases,
+2026. URL https://arxiv.org/abs/2605.23241.
+Yuning You, Tianlong Chen, Yongduo Sui, Ting Chen, Zhangyang Wang, and Yang Shen. Graph
+contrastive learning with augmentations. Advances in neural information processing systems, 33:
+5812–5823, 2020.
+Le Yu, Leilei Sun, Bowen Du, and Weifeng Lv. Towards better dynamic graph learning: New
+architecture and unified library. In A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and
+S. Levine (eds.), Advances in Neural Information Processing Systems, volume 36, pp. 67686–
+67700. Curran Associates, Inc., 2023. doi: 10.52202/075280-2960. URL https://proceedings.neur
+ips.cc/paper files/paper/2023/file/d611019afba70d547bd595e8a4158f55-Paper-Conference.pdf.
+12
+
+
+CONTENTS OF THE APPENDIX
+A
+Datasets and Prediction Tasks
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+14
+A.1
+Database Statistics
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+14
+A.2
+Task Statistics and Temporal Splits . . . . . . . . . . . . . . . . . . . . . . . . .
+14
+A.3
+Database Details and Prediction Targets . . . . . . . . . . . . . . . . . . . . . .
+14
+B
+Detailed Results
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+15
+B.1
+Backbone Selection: GNNs and GTs . . . . . . . . . . . . . . . . . . . . . . . .
+15
+B.2
+Temporal Encoding and Temporal Information Distributions
+. . . . . . . . . . .
+16
+B.3
+Pretraining Detailed Results
+. . . . . . . . . . . . . . . . . . . . . . . . . . . .
+18
+C
+Architecture and Training Configuration . . . . . . . . . . . . . . . . . . . . . . . . .
+20
+D
+Temporal Encoding Details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+22
+E
+Pretraining Objective Details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+23
+F
+Pretraining and Fine-Tuning Curves . . . . . . . . . . . . . . . . . . . . . . . . . . .
+25
+13
+
+
+A
+DATASETS AND PREDICTION TASKS
+The five RelBench databases (Robinson et al., 2024) provide one multiclass classification task, six
+binary classification tasks, and four regression tasks. The tables below give their sizes; the task
+definitions specify prediction windows and eligibility rules.
+A.1
+DATABASE STATISTICS
+Table 1 counts records before temporal filtering, excluding downstream task tables and reverse edges.
+Each declared foreign-key column counts as one directed schema relation, including separate columns
+that reference the same table.
+Table 1: Stored database statistics. FK denotes foreign-key columns; Tasks counts the tasks evaluated
+here.
+Database
+Domain
+Tables
+Rows
+FK relations
+Tasks
+Arxiv
+Scholarly publications
+6
+2,733,846
+6
+2
+Avito
+Online advertising
+8
+24,653,915
+11
+3
+F1
+Motor racing
+9
+97,606
+13
+2
+H&M
+Fashion retail
+3
+16,931,173
+2
+2
+Event
+Social events
+5
+44,822,992
+7
+2
+A.2
+TASK STATISTICS AND TEMPORAL SPLITS
+In Table 2, a sample is an (entity, prediction time) pair; an entity can therefore appear more than once.
+“Entities” counts distinct target identifiers across all three splits.
+Table 2: Task sizes in the stored splits. Entities are counted once across training, validation, and test.
+Database Task
+Type
+Train Validation
+Test
+Entities
+Arxiv
+author-category Multiclass classification
+210,769
+39,015
+39,655 126,219
+paper-citation
+Binary classification
+534,233
+155,845 193,696 193,696
+Avito
+user-clicks
+Binary classification
+59,454
+21,183
+47,996
+66,449
+user-visits
+Binary classification
+86,619
+29,979
+36,129
+63,405
+ad-ctr
+Regression
+5,100
+1,766
+1,816
+4,997
+F1
+driver-dnf
+Binary classification
+11,411
+566
+702
+821
+driver-position
+Regression
+7,453
+499
+760
+826
+H&M
+user-churn
+Binary classification
+3,832,692
+76,556
+74,575 999,345
+item-sales
+Regression
+5,488,184
+105,542 105,542 105,542
+Event
+user-ignore
+Binary classification
+19,239
+2,013
+1,958
+9,694
+user-attendance Regression
+19,239
+2,013
+1,958
+9,694
+We use the cached chronological splits. Validation and test cutoffs are 2022-01-01 and 2023-01-
+01 for Arxiv; 2015-05-08 and 2015-05-14 for Avito; 2020-09-07 and 2020-09-14 for H&M; and
+2012-11-21 and 2012-11-29 for Event. F1 uses several prediction times. For driver-dnf, validation
+spans 2005-03-02 to 2008-03-16 and test spans 2010-03-02 to 2013-03-16. For driver-position, the
+corresponding spans are 2005-03-02 to 2009-10-07 and 2010-03-02 to 2016-05-29. Targets cover
+(t, t + ∆] after cutoff t, with the task-specific horizons below.
+A.3
+DATABASE DETAILS AND PREDICTION TARGETS
+The task definitions follow the task-construction code used in this study.
+Arxiv (rel-arxiv) contains 222,769 papers, 143,691 authors, 53 categories, 616,585 authorship
+rows, 155,061 paper–category rows, and 1,595,687 citation rows. Submission dates timestamp papers
+and associated relation records. author-category predicts an author’s most frequent primary
+14
+
+
+research category over the next 182 days, among 53 classes, and includes only authors who publish
+in that window. paper-citation predicts whether a paper submitted by the cutoff receives a
+citation in the next 182 days.
+Avito (rel-avito) links 5,960,558 advertisements and 98,250 users to 2,579,289 searches,
+9,254,702 search-stream records, 6,454,562 visits, and 302,974 phone requests, with location and
+category tables as context. All three tasks use a four-day prediction window. user-clicks predicts
+whether a user records more than one ad click, counting repeated clicks separately. user-visits
+predicts visits to more than one distinct advertisement. ad-ctr predicts clicks divided by search-
+stream impressions for advertisements with at least one click in the window.
+F1 (rel-f1) records drivers, constructors, circuits, races, qualifying sessions, results, and standings.
+Its nine tables include 857 drivers, 211 constructors, 77 circuits, 1,101 races, and 26,080 race results;
+race dates timestamp competition records. driver-dnf predicts whether a driver has a result
+with statusId̸ = 1 in the next 30 days, following the benchmark rule that any status other than
+Finished receives a did not finish (DNF) label. driver-position predicts mean finishing
+order (positionOrder) over the next 60 days.
+H&M (rel-hm) contains 1,371,980 customers, 105,542 articles, and 15,453,651 transactions. Dated
+purchases link customers to articles and record prices; customer attributes and product descriptions
+provide additional features. user-churn includes customers who purchased in the previous seven
+days and predicts no purchase in the next seven days. item-sales predicts the sum of an article’s
+transaction prices over the next seven days, using the database’s price scale and assigning zero when
+there are no sales.
+Event (rel-event) contains 38,209 users, 3,137,972 events, 30,386,403 friendship rows,
+11,245,010 attendance rows, and 15,398 interest rows.
+Event start times, user join times,
+and interest timestamps provide temporal context. For events starting in the next seven days,
+user-ignore predicts whether more than two of a user’s attendance records remain invited,
+and user-attendance counts that user’s yes or maybe records. These targets describe recorded
+responses rather than verified attendance.
+B
+DETAILED RESULTS
+This section reports the full backbone comparison, temporal encoding ablation, and pretraining results,
+together with record-age and horizon statistics that supplement Section 4.2. Task metrics are reported
+as the mean ± standard deviation across four independent runs with seeds {42, 43, 44, 45}. Relative
+gains and their aggregates are computed from these task means. Table 3 reports validation performance
+for backbone selection; the encoding and pretraining comparisons report test performance.
+B.1
+BACKBONE SELECTION: GNNS AND GTS
+Table 3 compares validation performance for five backbones under the same RDL pipeline: HET-
+EROGNN, RelGNN, HGT, RelGT, and THGFM (Robinson et al., 2024; Chen et al., 2025; Hu et al.,
+2020c; Dwivedi et al., 2026; Peng et al., 2026). For each task, we rank all five backbones by their
+mean validation metric, using higher accuracy or ROC–AUC and lower MAE as better performance.
+We average these ranks equally across all 11 tasks, then select the backbone with the lowest mean
+rank within each family. Among GNNs, HETEROGNN has a lower mean validation rank than
+RelGNN (3.18 versus 3.36), with two and three task wins, respectively. Among GTs, THGFM has
+the lowest mean validation rank (2.27), followed by HGT (2.55) and RelGT (3.64), with four, two,
+and zero task wins, respectively. We therefore select HETEROGNN and THGFM for the controlled
+encoding and pretraining study. Task wins are descriptive; mean validation rank determines the
+family representatives.
+Selecting one representative per family is a deliberate trade-off to reduce computational cost: running
+all encoding ablations, pretraining objectives, and staged schedules on all five backbones would
+substantially increase the training budget. The subsequent comparisons therefore assess effects on
+these two selected backbones, and do not establish that the effects extend to RelGNN, HGT, or
+RelGT. Backbone selection uses validation performance only; test performance is reserved for final
+15
+
+
+Table 3: Backbone validation performance (mean ± standard deviation) used to select one representa-
+tive per family. Ranks are computed across all five models for each task and averaged equally over
+all 11 tasks. Bold marks the best task mean, the highest task-win count, and the lowest mean rank
+within each family; arrows indicate the preferred direction.
+GNN
+GT
+Task
+Metric
+HETEROGNN
+RelGNN
+HGT
+RelGT
+THGFM
+arxiv/author-category
+Acc.↑
+0.1311±0.0020
+0.1298±0.0010
+0.1331±0.0017 0.1037±0.0050
+0.1324±0.0027
+arxiv/paper-citation
+AUC↑
+0.6495±0.0069
+0.6216±0.0095
+0.6583±0.0074
+0.6550±0.0027 0.6652±0.0019
+avito/user-clicks
+AUC↑
+0.6435±0.0021
+0.6496±0.0336
+0.6369±0.0032
+0.6298±0.0185
+0.6405±0.0008
+avito/user-visits
+AUC↑
+0.6938±0.0012
+0.6735±0.0014
+0.6763±0.0095
+0.6899±0.0186
+0.6830±0.0075
+f1/driver-dnf
+AUC↑
+0.7442±0.0042
+0.8020±0.0042
+0.7978±0.0064
+0.7830±0.0117
+0.7999±0.0068
+hm/user-churn
+AUC↑
+0.7025±0.0005
+0.7011±0.0108
+0.7042±0.0006
+0.6970±0.0012 0.7064±0.0015
+event/user-ignore
+AUC↑
+0.8570±0.0022
+0.8618±0.0275
+0.8638±0.0275
+0.8593±0.0297 0.8661±0.0094
+hm/item-sales
+MAE↓
+0.0656±0.0003
+0.0640±0.0007
+0.0692±0.0021
+0.0662±0.0004
+0.0670±0.0002
+avito/ad-ctr
+MAE↓0.0355±0.0004
+0.0398±0.0000
+0.0368±0.0012
+0.0372±0.0014
+0.0380±0.0000
+f1/driver-position
+MAE↓
+3.8399±0.0078
+3.8703±0.0079
+3.0344±0.2518 3.1994±0.0656
+3.5500±0.0034
+event/user-attendance
+MAE↓
+0.2570±0.0006
+0.2490±0.0015
+0.2470±0.0001
+0.2530±0.0015 0.2420±0.0022
+No. of task-wise best results ↑
+2
+3
+2
+0
+4
+Mean rank ↓
+3.18
+3.36
+2.55
+3.64
+2.27
+Table 4: Temporal encoding ablation (mean ± standard deviation over four runs). Gains are relative to
+the same backbone with DAYPE (Equation (10)) and without TIMEROPE or pretraining in each panel.
+TIMEMIX replaces DAYPE; TIMEROPE adds rotary interval encoding to the specified record-age
+encoder. Mean type gain weights the three task types equally. Bold marks the best entry per panel
+and column.
+Multiclass classification
+Binary classification
+Regression
+Encoding
+Author
+Mean task gain
+Citation
+Ignore
+DNF
+Churn
+Clicks
+Visits
+Mean task gain
+Attend.
+Position
+Sales
+CTR
+Mean task gain Mean type gain
+Acc.↑
+∆% ↑
+AUC↑
+AUC↑
+AUC↑
+AUC↑
+AUC↑
+AUC↑
+∆% ↑
+MAE↓
+MAE↓
+MAE↓
+MAE↓
+∆% ↑
+∆% ↑
+Panel A: HETEROGNN (GNN backbone)
+DAYPE (reference)
+0.1236±0.0005
++0.00%
+0.6450±0.0047
+0.8031±0.0157
+0.7101±0.0105
+0.6961±0.0019 0.6474±0.0164 0.6627±0.0008
++0.00%
+0.2620±0.0013
+4.3596±0.0168
+0.0604±0.0001 0.0403±0.0003
++0.00%
++0.00%
+TIMEMIX
+0.1265±0.0028
++2.35%
+0.6430±0.0043
+0.8083±0.0095
+0.7316±0.0043
+0.6868±0.0028
+0.6282±0.0042
+0.6355±0.0090
+−0.84%
+0.2577±0.0083
+4.3178±0.0382
+0.0638±0.0015
+0.0408±0.0006
+−0.98%
++0.18%
+DAYPE+TIMEROPE
+0.1239±0.0017
++0.24%
+0.6527±0.0036
+0.8202±0.0051
+0.7227±0.0099
+0.6896±0.0052
+0.6318±0.0022
+0.6454±0.0050
+−0.14%
+0.2616±0.0021
+4.1803±0.1225
+0.0617±0.0006
+0.0421±0.0001
+−0.49%
+−0.13%
+TIMEMIX+TIMEROPE
+0.1261±0.0026
++2.02%
+0.6469±0.0031
+0.8789±0.0073
+0.6967±0.0231
+0.6920±0.0011
+0.6174±0.0070
+0.6269±0.0080
+−0.46%
+0.2566±0.0090 4.0603±0.0988
+0.0660±0.0002
+0.0410±0.0005
+−0.18%
++0.46%
+Panel B: THGFM (GT backbone)
+DAYPE (reference)
+0.1235±0.0020
++0.00%
+0.6603±0.0012
+0.8194±0.0326
+0.7396±0.0068 0.6969±0.0041 0.6346±0.0023
+0.6369±0.0033
++0.00%
+0.2439±0.0009
+4.3693±0.0132
+0.0613±0.0006
+0.0431±0.0001
++0.00%
++0.00%
+TIMEMIX
+0.1266±0.0034
++2.51%
+0.6482±0.0035
+0.8308±0.0195
+0.7210±0.0051
+0.6913±0.0016
+0.6195±0.0021
+0.6269±0.0117
+−1.28%
+0.2422±0.0039
+4.2098±0.1526
+0.0639±0.0017
+0.0412±0.0006
++1.26%
++0.83%
+DAYPE+TIMEROPE
+0.1232±0.0022
+−0.24%
+0.6543±0.0019
+0.8196±0.0250
+0.7213±0.0137
+0.6926±0.0020
+0.6311±0.0019
+0.6465±0.0036
+−0.50%
+0.2415±0.0016
+4.3080±0.1579
+0.0616±0.0004
+0.0421±0.0000
++1.08%
++0.11%
+TIMEMIX+TIMEROPE
+0.1265±0.0045
++2.43%
+0.6515±0.0053
+0.8393±0.0167
+0.7255±0.0204
+0.6940±0.0007
+0.6321±0.0077
+0.6454±0.0118
+−0.05%
+0.2456±0.0039
+4.2606±0.2064
+0.0621±0.0025
+0.0409±0.0010
++1.49%
++1.29%
+evaluation. Downstream checkpoints are also selected using validation metrics, while pretraining
+checkpoints follow the objective-specific criteria in Appendix C.
+B.2
+TEMPORAL ENCODING AND TEMPORAL INFORMATION DISTRIBUTIONS
+Reference encoding and configurations.
+As introduced in Section 4.2, DAYPE (day-based po-
+sitional encoding) is the fixed day-based single-scale record-age encoding used by HETEROGNN
+(Robinson et al., 2024). It serves as the baseline for multi-scale TIMEMIX on both backbones and is
+defined as
+ebase
+v
+= Wϕ(v) PE(av/sday) + bϕ(v),
+sday = 86400 seconds.
+(10)
+Here av is measured in seconds, PE is sinusoidal positional encoding with fixed frequencies, and
+Wϕ(v) and bϕ(v) are type-specific trainable parameters. The term single-scale refers to the fixed
+day-based normalization; the sinusoidal positional encoding itself contains multiple frequencies.
+Thus, “without our encodings” retains DAYPE and disables TIMEROPE; it still provides record-
+age information. In contrast, TIMEMIX uses multiple learned time scales and mixes type-specific
+projections of log-transformed record ages (Section 3.1; Appendix D).
+Aggregate and task-level effects.
+Relative to DAYPE, replacing the age encoder with TIMEMIX
+yields mean type gains of +0.18% on HETEROGNN and +0.83% on THGFM, while adding
+TIMEROPE to DAYPE yields −0.13% and +0.11%, respectively. Combining TIMEMIX and
+TIMEROPE gives the highest mean type gain on both backbones, +0.46% and +1.29%. Accordingly,
+Figure 4a shows mean type gain differences of −0.59, −0.28, and −0.46 percentage points on HET-
+EROGNN, and −1.18, −0.46, and −1.29 points on THGFM, for DAYPE+TIMEROPE, TIMEMIX,
+and DAYPE, respectively. The combined gains by task type are +2.02%, −0.46%, and −0.18%
+on HETEROGNN, and +2.43%, −0.05%, and +1.49% on THGFM, for multiclass classification,
+binary classification, and regression, respectively. Thus, the positive overall gains do not imply
+16
+
+
+0
+20
+40
+60
+80
+100
+Share of lags (%)
+arxiv / author-category
+arxiv / paper-citation
+avito / user-clicks
+avito / user-visits
+avito / ad-ctr
+f1 / driver-dnf
+f1 / driver-position
+hm / user-churn
+hm / item-sales
+event / user-ignore
+event / user-attendance
+(a) Complete distribution
+0
+5
+10
+15
+20
+Share of all lags (%)
+0.23
+0.28
+20.24
+19.73
+20.64
+0.21
+0.19
+5.31
+0.95
+1.16
+1.16
+(b) Lags within one day (magnified)
+≤1 s
+(1 s, 1 min]
+(1 min, 1 h]
+(1 h, 1 day]
+(1, 7] d
+(7, 30] d
+(30, 90] d
+(90, 365] d
+> 365 d
+Figure 5: Record-age distributions by task: (a) all nine intervals and (b) a magnified view of ages up
+to one day, on the original percentage scale.
+improvements in every task type. In particular, TIMEMIX alone gives slightly higher multiclass gains
+than the combined configuration on both backbones, while the combination gives higher regression
+gains than either encoding change alone.
+Task-level effects also vary. With both encodings, HETEROGNN improves author classification
+by 2.02%, user-ignore AUC by 9.44%, and MAE by 7.37% for driver position and 2.10% for user
+attendance, but loses performance on both Avito binary tasks and item sales. On THGFM, the
+combined encodings improve ad-CTR MAE by 5.38% and also help author classification, user visits,
+user ignore, and driver position; citation and driver-dnf performance decrease.
+Distribution of record ages.
+Figure 5 summarizes the ages of records available to each task. We
+first deduplicate the training (entity, cutoff) pairs and sample up to 20,000 pairs per task using seed
+42. For each pair, we collect the seed row, if timestamped, and directly linked timestamped rows
+observed by the cutoff. We convert timestamps to integer Unix seconds and compute record ages as
+defined in Section 3.1. These statistics cover the seed and its direct neighbors; the model samples
+neighborhoods that may extend to additional hops. We group ages into nine bins with boundaries at 1
+second, 1 minute, 1 hour, 1 day, and 7, 30, 90, and 365 days. The first four boundaries match the
+initial TIMEMIX scales. Panel (b) enlarges the bins up to one day while retaining their percentages of
+all observations; bar-end labels show their combined share.
+The observed histories span different time scales across databases. In Avito, all sampled record
+ages fall within 30 days, and 19.7–20.6% of the records are at most one day old. Avito also shows
+variation at second, minute, and hour scales; minute-scale variation is largely absent from the other
+databases under integer-second preprocessing. Event records are concentrated between 1 and 90
+days, while H&M records mostly fall between 7 and 365 days. Arxiv and F1 contain much older
+records: fewer than 0.3% are at most one day old, and about 78% of F1 records are more than a year
+old. These differences provide descriptive motivation for the multi-scale design of TIMEMIX. The
+distributions alone do not establish its predictive advantage over a single-scale variant or determine
+the optimal number or initialization of scales. The encoding ablations evaluate TIMEMIX as a
+complete replacement for DAYPE; a controlled comparison of Ktime = 1 and Ktime > 1 within the
+same TIMEMIX formulation remains to be evaluated.
+17
+
+
+Arxiv
+Avito
+F1
+H&M
+Event
+0
+20
+40
+60
+80
+100
+Feasible relation events (%)
+(a) Events supporting each horizon
+Arxiv
+Avito
+F1
+H&M
+Event
+0
+20
+40
+60
+80
+100
+Sampled training instances (%)
+13.6
+17.4
+(b) Expected horizon sampling distribution
+1 day
+7 days
+30 days
+90 days
+365 days
+Figure 6: Support for REL-FUTURE horizons: (a) the relation-balanced percentage of eligible events
+supporting each horizon and (b) the resulting horizon sampling distribution.
+Support for future horizons.
+Figure 6 shows which of the candidate horizons {1, 7, 30, 90, 365}
+days can be used for REL-FUTURE. A horizon is eligible when the entity is already observed at the
+input cutoff, as specified in Equation (17). We compute these statistics from timestamped forward
+foreign-key relations up to each database’s validation cutoff, excluding static relations and events
+with no eligible horizon. Panel (a) reports the percentage of eligible events supporting each horizon,
+computed within each relation and then averaged equally across relations. An event may support
+several horizons. Panel (b) shows the expected share of training examples assigned to each horizon
+when we uniformly sample a relation, an eligible event within it, and an eligible horizon for that
+event.
+Support for longer horizons varies substantially across databases. Avito supports only 1- and 7-day
+windows. In Event, support falls from 62.6% at 7 days to 31.3% at 30 days and 9.1% at 90 days, with
+no support at 365 days. H&M supports windows through 90 days, but only 0.05% of eligible events
+support a 365-day window. By comparison, the 365-day horizon is eligible for 67.7% of Arxiv and
+87.1% of F1 events under the same averaging scheme. A shared set of multiple horizons therefore
+provides short-window supervision in databases with limited history and longer-window supervision
+where the history permits it.
+The sampling distribution reflects these differences. In Avito, 80.5% of training examples are expected
+to use the 1-day horizon and 19.5% the 7-day horizon; unsupported horizons receive no samples.
+Thus, using the same candidate set does not imply sampling horizons equally across databases. These
+statistics describe the availability and frequency of supervision, rather than the predictive value of
+each horizon.
+B.3
+PRETRAINING DETAILED RESULTS
+Tables 5 and 6 provide the full results underlying the pretraining comparisons, including task metrics
+and results for TEMP-SUB alone. Each panel uses a supervised control with the same backbone
+and temporal encoding configuration: A0 uses DAYPE without TIMEROPE, whereas B0 replaces
+DAYPE with TIMEMIX and enables TIMEROPE. Both controls are trained directly on downstream
+tasks without pretraining. The reported gains therefore measure the additional effect of pretraining,
+matching Figure 4b. The main-results heatmap in Figure 3 instead uses A0 throughout, measuring the
+effects of pretraining and, where enabled, our temporal encodings. Rows with TEMP-SUB followed
+by a second-stage objective can be compared with either objective alone. Each panel contains 20
+pretraining strategies and one supervised control: nine single-stage baselines, our three single-stage
+objectives, and eight two-stage schedules. The latter comprise TS followed by ATTRMASKING,
+CONTEXTPRED, PT-HGNN, CTRL, TGPM, TVE, REL-HIST, or REL-FUTURE. The six baseline
+pairs and our two proposed pairs are shown in Figure 4b.
+18
+
+
+Table 5: Pretraining transfer on HETEROGNN (mean ± standard deviation over four runs). Panel A
+uses DAYPE without TIMEROPE; Panel B uses TIMEMIX with TIMEROPE. Gains are relative to
+the marked reference within each panel. Bold marks the best value per panel and column.
+Pretraining strategy
+Multiclass classification
+Binary classification
+Regression
+Temporal Graph-level Local stage
+Author
+Task gain
+Citation
+Ignore
+DNF
+Churn
+Clicks
+Visits
+Mean task gain
+Attend.
+Position
+Sales
+CTR
+Mean task gain Mean type gain
+Acc.↑
+∆% ↑
+AUC↑
+AUC↑
+AUC↑
+AUC↑
+AUC↑
+AUC↑
+∆% ↑
+MAE↓
+MAE↓
+MAE↓
+MAE↓
+∆% ↑
+∆% ↑
+Panel A: DAYPE without TIMEROPE. All ∆columns use Ref. A0 below.
+w/o
+No pretraining (Ref. A0)
+0.1236±0.0005
++0.00%
+0.6450±0.0047
+0.8031±0.0157
+0.7101±0.0105
+0.6961±0.0019
+0.6474±0.0164
+0.6627±0.0008
++0.00%
+0.2620±0.0013
+4.3596±0.0168
+0.0604±0.0001
+0.0403±0.0003
++0.00%
++0.00%
+Baseline pretraining strategies
+w/o
+–
+Un-SAGE
+0.1209±0.0039
+−2.18%
+0.5023±0.0053
+0.8206±0.0286
+0.7038±0.0284
+0.6902±0.0011
+0.6482±0.0096
+0.6570±0.0032
+−3.74%
+0.2632±0.0059
+4.3955±0.0202
+0.0565±0.0008
+0.0362±0.0002
++4.24%
+−0.56%
+w/o
+–
+GPT-GNN
+0.1203±0.0008
+−2.67%
+0.6226±0.0174
+0.8658±0.0139
+0.7007±0.0012
+0.6895±0.0008
+0.6470±0.0123
+0.6582±0.0042
++0.22%
+0.2655±0.0016
+4.3884±0.0273
+0.0566±0.0018
+0.0393±0.0012
++1.82%
+−0.21%
+w/o
+–
+PT-HGNN
+0.1176±0.0060
+−4.85%
+0.6494±0.0580
+0.8182±0.0549
+0.7589±0.0009
+0.6971±0.0043
+0.6579±0.0087
+0.6625±0.0096
++1.86%
+0.2638±0.0029
+4.3516±0.1148
+0.0557±0.0007
+0.0376±0.0006
++3.78%
++0.26%
+w/o
+–
+PHE
+0.1225±0.0010
+−0.89%
+0.6412±0.0014
+0.8540±0.0200
+0.6801±0.0204
+0.6948±0.0010
+0.6323±0.0049
+0.6548±0.0063
+−0.36%
+0.2635±0.0092
+5.3604±0.0053
+0.0568±0.0001
+0.0383±0.0004
+−1.92%
+−1.06%
+w/o
+–
+ATTRMASKING
+0.1214±0.0019
+−1.78%
+0.6382±0.0207
+0.8352±0.0131
+0.7103±0.0008
+0.6998±0.0017
+0.6424±0.0077
+0.6591±0.0057
++0.36%
+0.2618±0.0079
+4.2791±0.1757
+0.0558±0.0011
+0.0380±0.0009
++4.06%
++0.88%
+w/o
+–
+CONTEXTPRED
+0.1240±0.0017
++0.32%
+0.5399±0.0744
+0.8274±0.0219
+0.6675±0.0370
+0.6962±0.0031
+0.6386±0.0117
+0.6538±0.0010
+−3.66%
+0.2626±0.0045
+3.9744±0.0422
+0.0563±0.0008
+0.0455±0.0001
++1.33%
+−0.67%
+w/o
+–
+CTRL
+0.1238±0.0025
++0.16%
+0.6441±0.0161
+0.8124±0.0193
+0.6969±0.0026
+0.6961±0.0007
+0.6534±0.0140
+0.6594±0.0029
+−0.07%
+0.2548±0.0056
+4.4945±0.0180
+0.0560±0.0015
+0.0396±0.0011
++2.36%
++0.82%
+w/o
+–
+TGPM
+0.1223±0.0019
+−1.05%
+0.6436±0.0036
+0.6870±0.0220
+0.7217±0.0030
+0.6957±0.0025
+0.6536±0.0071
+0.6623±0.0047
+−2.03%
+0.2578±0.0038
+4.2298±0.0307
+0.0563±0.0020
+0.0404±0.0003
++2.93%
+−0.05%
+w/o
+–
+TVE
+0.1240±0.0007
++0.32%
+0.6344±0.0110
+0.8189±0.0083
+0.7081±0.0126
+0.6953±0.0045
+0.6460±0.0095
+0.6554±0.0029
+−0.23%
+0.2582±0.0012
+4.3304±0.0951
+0.0561±0.0007
+0.0392±0.0002
++3.15%
++1.08%
+Our pretraining strategies
+w/o
+–
+REL-HIST
+0.1260±0.0019 +1.94%
+0.6494±0.0011
+0.7798±0.0276
+0.6951±0.0052
+0.6891±0.0044
+0.6542±0.0067
+0.6632±0.0026
+−0.70%
+0.2634±0.0099
+4.3409±0.0113
+0.0559±0.0008
+0.0373±0.0017
++4.00%
++1.75%
+w/o
+–
+REL-FUTURE
+0.1233±0.0027
+−0.24%
+0.6410±0.0060
+0.8464±0.0332
+0.7027±0.0451
+0.6951±0.0039
+0.6469±0.0159
+0.6613±0.0009
++0.55%
+0.2543±0.0118
+4.3560±0.0052
+0.0556±0.0005
+0.0391±0.0009
++3.70%
++1.34%
+w/o
+TEMP-SUB –
+0.1178±0.0029
+−4.69% 0.6576±0.0065
+0.7961±0.0426
+0.6861±0.0146
+0.6963±0.0037
+0.6405±0.0101
+0.6597±0.0026
+−0.63%
+0.2660±0.0059
+4.1975±0.1987
+0.0556±0.0002
+0.0404±0.0009
++2.69%
+−0.88%
+w/o
+TEMP-SUB ATTRMASKING
+0.1232±0.0037
+−0.32%
+0.6461±0.0060
+0.8227±0.0694
+0.6834±0.0108
+0.6982±0.0037
+0.6600±0.0122
+0.6607±0.0008
++0.13%
+0.2548±0.0048
+4.0122±0.1722
+0.0560±0.0009
+0.0443±0.0005
++2.58%
++0.80%
+w/o
+TEMP-SUB CONTEXTPRED
+0.1241±0.0022
++0.40%
+0.6366±0.0021
+0.7895±0.0456
+0.6821±0.0280
+0.6976±0.0054
+0.6511±0.0163
+0.6536±0.0035
+−1.25%
+0.2583±0.0056
+4.1695±0.2314
+0.0560±0.0001
+0.0495±0.0011
+−1.18%
+−0.68%
+w/o
+TEMP-SUB PT-HGNN
+0.1208±0.0037
+−2.27%
+0.6535±0.0133
+0.8122±0.0448
+0.7377±0.0020
+0.6985±0.0021
+0.6579±0.0099
+0.6635±0.0044
++1.40%
+0.2542±0.0028
+4.1614±0.0564
+0.0554±0.0005
+0.0386±0.0005
++5.32%
++1.48%
+w/o
+TEMP-SUB CTRL
+0.1235±0.0009
+−0.08%
+0.6462±0.0009
+0.8027±0.0096
+0.7037±0.0091
+0.6977±0.0030
+0.6565±0.0111
+0.6594±0.0021
++0.06%
+0.2516±0.0028
+4.3849±0.1361
+0.0558±0.0002
+0.0374±0.0002
++4.89%
++1.62%
+w/o
+TEMP-SUB TGPM
+0.1220±0.0054
+−1.29%
+0.6460±0.0088
+0.6776±0.0353
+0.7287±0.0204
+0.6976±0.0017
+0.6571±0.0073
+0.6625±0.0050
+−1.86%
+0.2544±0.0032
+4.1520±0.0724
+0.0557±0.0004
+0.0375±0.0002
++5.97%
++0.94%
+w/o
+TEMP-SUB TVE
+0.1230±0.0040
+−0.49%
+0.6327±0.0015
+0.8044±0.0308
+0.7106±0.0096
+0.6928±0.0054
+0.6452±0.0057
+0.6514±0.0018
+−0.70%
+0.2563±0.0045
+4.2533±0.0597
+0.0560±0.0011
+0.0369±0.0007
++5.45%
++1.42%
+w/o
+TEMP-SUB REL-HIST
+0.1242±0.0009
++0.49%
+0.6455±0.0052
+0.7633±0.0244
+0.7162±0.0225
+0.6937±0.0060
+0.6610±0.0070
+0.6596±0.0009
+−0.46%
+0.2527±0.0092
+4.1328±0.1100
+0.0561±0.0012
+0.0376±0.0004
++6.00%
++2.01%
+w/o
+TEMP-SUB REL-FUTURE
+0.1234±0.0035
+−0.16%
+0.6569±0.0032
+0.8073±0.0369
+0.7203±0.0062
+0.6997±0.0017
+0.6579±0.0143
+0.6644±0.0032
++1.03%
+0.2464±0.0035
+4.0057±0.0239
+0.0552±0.0002
+0.0395±0.0004
++6.65%
++2.51%
+Panel B: TIMEMIX with TIMEROPE. All ∆columns use Ref. B0 below.
+w/
+No pretraining (Ref. B0)
+0.1261±0.0026
++0.00%
+0.6469±0.0031
+0.8789±0.0073
+0.6967±0.0231
+0.6920±0.0011
+0.6174±0.0070
+0.6269±0.0080
++0.00%
+0.2566±0.0090
+4.0603±0.0988
+0.0660±0.0002
+0.0410±0.0005
++0.00%
++0.00%
+Baseline pretraining strategies
+w/
+–
+Un-SAGE
+0.1235±0.0016
+−2.06%
+0.5011±0.0504
+0.8058±0.0046
+0.6734±0.0012
+0.6756±0.0018
+0.6538±0.0088
+0.6625±0.0025
+−4.17%
+0.2637±0.0079
+4.3595±0.0482
+0.0565±0.0004
+0.0413±0.0003
++1.63%
+−1.53%
+w/
+–
+GPT-GNN
+0.1279±0.0013
++1.43%
+0.6172±0.0047
+0.8540±0.0089
+0.6867±0.0013
+0.6893±0.0023
+0.6484±0.0076
+0.6638±0.0075
++0.28%
+0.2645±0.0032
+4.5646±0.0259
+0.0564±0.0019
+0.0503±0.0001
+−3.88%
+−0.72%
+w/
+–
+PT-HGNN
+0.1238±0.0013
+−1.82%
+0.6081±0.0052
+0.8047±0.0524
+0.6864±0.0009
+0.6900±0.0015
+0.6537±0.0130
+0.6614±0.0028
+−0.80%
+0.2637±0.0035
+4.3801±0.0386
+0.0556±0.0006
+0.0379±0.0002
++4.22%
++0.53%
+w/
+–
+PHE
+0.1208±0.0042
+−4.20%
+0.6133±0.0045
+0.8185±0.0410
+0.7335±0.0109
+0.6857±0.0022
+0.6588±0.0026
+0.6581±0.0006
++0.66%
+0.2637±0.0016
+5.1706±0.2662
+0.0564±0.0020
+0.0372±0.0004
++0.77%
+−0.92%
+w/
+–
+ATTRMASKING
+0.1289±0.0019
++2.22%
+0.6579±0.0197
+0.8280±0.0140
+0.6355±0.0007
+0.6936±0.0012
+0.6367±0.0059
+0.6588±0.0115
+−0.74%
+0.2504±0.0081
+3.9469±0.1745
+0.0565±0.0011
+0.0396±0.0014
++6.42%
++2.64%
+w/
+–
+CONTEXTPRED
+0.1294±0.0019
++2.62%
+0.6465±0.0713
+0.8219±0.0223
+0.6635±0.0334
+0.6971±0.0023
+0.6471±0.0082
+0.6507±0.0034
+−0.33%
+0.2502±0.0048
+4.0847±0.0396
+0.0565±0.0009
+0.0502±0.0002
++0.11%
++0.80%
+w/
+–
+CTRL
+0.1282±0.0022
++1.67%
+0.6499±0.0209
+0.8625±0.0086
+0.7162±0.0078
+0.7043±0.0035
+0.6395±0.0078
+0.6470±0.0131
++1.66%
+0.2487±0.0044
+4.8580±0.0187
+0.0563±0.0012
+0.0437±0.0004
+−0.55%
++0.93%
+w/
+–
+TGPM
+0.1274±0.0022
++1.03%
+0.6290±0.0099
+0.8344±0.0117
+0.6974±0.0077
+0.6854±0.0022
+0.6320±0.0048
+0.6387±0.0052
+−0.74%
+0.2505±0.0036
+4.3612±0.0073
+0.0561±0.0003
+0.0394±0.0008
++4.31%
++1.53%
+w/
+–
+TVE
+0.1277±0.0016
++1.27%
+0.6299±0.0070
+0.8446±0.0040
+0.6856±0.0039
+0.7049±0.0035
+0.6457±0.0048
+0.6507±0.0093
++0.35%
+0.2504±0.0100
+4.3869±0.0354
+0.0560±0.0003
+0.0423±0.0016
++2.45%
++1.36%
+Our pretraining strategies
+w/
+–
+REL-HIST
+0.1228±0.0022
+−2.62%
+0.6434±0.0012
+0.8149±0.0313
+0.7141±0.0058
+0.6925±0.0058
+0.6682±0.0090
+0.6637±0.0006
++1.47%
+0.2577±0.0102
+4.3594±0.0104
+0.0561±0.0008
+0.0380±0.0011
++4.56%
++1.14%
+w/
+–
+REL-FUTURE
+0.1275±0.0026
++1.11%
+0.6267±0.0065
+0.8229±0.0336
+0.6652±0.0425
+0.6967±0.0029
+0.6515±0.0108
+0.6623±0.0031
+−0.36%
+0.2415±0.0112
+4.3637±0.0048
+0.0557±0.0005
+0.0356±0.0013
++8.24%
++3.00%
+w/
+TEMP-SUB –
+0.1265±0.0033
++0.32%
+0.6513±0.0062
+0.7440±0.0438
+0.7074±0.0159
+0.6918±0.0028
+0.6343±0.0073
+0.6615±0.0062
+−0.82%
+0.2518±0.0064
+4.2311±0.2199
+0.0560±0.0002
+0.0468±0.0014
++0.83%
++0.11%
+w/
+TEMP-SUB ATTRMASKING
+0.1277±0.0042
++1.27% 0.6596±0.0064
+0.8144±0.0681
+0.6604±0.0101
+0.6955±0.0028
+0.6508±0.0086
+0.6613±0.0030
++0.14%
+0.2517±0.0054
+4.1791±0.1681
+0.0563±0.0009
+0.0393±0.0009
++5.16%
++2.19%
+w/
+TEMP-SUB CONTEXTPRED 0.1316±0.0025 +4.36%
+0.6096±0.0022
+0.8515±0.0449
+0.6770±0.0264
+0.6947±0.0040
+0.6511±0.0110
+0.6521±0.0078
+−0.31%
+0.2526±0.0063
+4.0034±0.2255
+0.0563±0.0002
+0.0486±0.0017
++1.15%
++1.73%
+w/
+TEMP-SUB PT-HGNN
+0.1260±0.0009
+−0.08%
+0.6261±0.0057
+0.8118±0.0343
+0.7095±0.0050
+0.6927±0.0029
+0.6642±0.0076
+0.6611±0.0023
++0.69%
+0.2560±0.0048
+4.3282±0.0624
+0.0558±0.0010
+0.0380±0.0003
++5.05%
++1.89%
+w/
+TEMP-SUB CTRL
+0.1290±0.0016
++2.30%
+0.6535±0.0056
+0.8576±0.0278
+0.7222±0.0041
+0.7039±0.0008
+0.6416±0.0076
+0.6461±0.0034
++1.83%
+0.2486±0.0037
+4.7789±0.1797
+0.0561±0.0002
+0.0372±0.0001
++4.01%
++2.71%
+w/
+TEMP-SUB TGPM
+0.1281±0.0014
++1.59%
+0.6330±0.0063
+0.8303±0.0075
+0.7039±0.0016
+0.6857±0.0015
+0.6346±0.0072
+0.6384±0.0018
+−0.49%
+0.2502±0.0095
+4.2937±0.0887
+0.0560±0.0003
+0.0377±0.0008
++5.93%
++2.34%
+w/
+TEMP-SUB TVE
+0.1275±0.0060
++1.11%
+0.6294±0.0056
+0.8342±0.0260
+0.6872±0.0214
+0.7003±0.0011
+0.6439±0.0097
+0.6458±0.0069
+−0.11%
+0.2519±0.0047
+4.3515±0.1175
+0.0559±0.0006
+0.0375±0.0003
++5.64%
++2.22%
+w/
+TEMP-SUB REL-HIST
+0.1278±0.0010
++1.35%
+0.6409±0.0055
+0.8176±0.0239
+0.7284±0.0212
+0.6950±0.0045
+0.6728±0.0055
+0.6609±0.0033
++1.91%
+0.2497±0.0103
+4.2858±0.1076
+0.0559±0.0012
+0.0381±0.0006
++5.80%
++3.02%
+w/
+TEMP-SUB REL-FUTURE
+0.1267±0.0040
++0.48%
+0.6522±0.0034
+0.7962±0.0363
+0.6880±0.0059
+0.6958±0.0012
+0.6616±0.0098
+0.6630±0.0071
++0.60%
+0.2472±0.0039
+4.0695±0.0234
+0.0560±0.0003
+0.0379±0.0007
++7.40%
++2.83%
+Table 6: Pretraining transfer on THGFM (mean ± standard deviation over four runs). Panel A uses
+DAYPE without TIMEROPE; Panel B uses TIMEMIX with TIMEROPE. Gains are relative to the
+marked reference within each panel. Bold marks the best value per panel and column.
+Pretraining strategy
+Multiclass classification
+Binary classification
+Regression
+Temporal Graph-level Local stage
+Author
+Task gain
+Citation
+Ignore
+DNF
+Churn
+Clicks
+Visits
+Mean task gain
+Attend.
+Position
+Sales
+CTR
+Mean task gain Mean type gain
+Acc.↑
+∆% ↑
+AUC↑
+AUC↑
+AUC↑
+AUC↑
+AUC↑
+AUC↑
+∆% ↑
+MAE↓
+MAE↓
+MAE↓
+MAE↓
+∆% ↑
+∆% ↑
+Panel A: DAYPE without TIMEROPE. All ∆columns use Ref. A0 below.
+w/o
+No pretraining (Ref. A0)
+0.1235±0.0020 +0.00%
+0.6603±0.0012
+0.8194±0.0326
+0.7396±0.0068
+0.6969±0.0041
+0.6346±0.0023
+0.6369±0.0033
++0.00%
+0.2439±0.0009
+4.3693±0.0132
+0.0613±0.0006
+0.0431±0.0001
++0.00%
++0.00%
+Baseline pretraining strategies
+w/o
+–
+Un-SAGE
+0.1194±0.0009
+−3.32% 0.6644±0.0054
+0.8631±0.0352
+0.7052±0.0348
+0.6944±0.0014
+0.6297±0.0087
+0.6228±0.0046
+−0.34%
+0.2635±0.0032
+4.6955±0.0240
+0.0581±0.0005
+0.0429±0.0002
+−2.10%
+−1.92%
+w/o
+–
+GPT-GNN
+0.1197±0.0015
+−3.08%
+0.6568±0.0058
+0.7367±0.0405
+0.6558±0.0045
+0.6962±0.0022
+0.6513±0.0040
+0.6455±0.0229
+−3.01%
+0.2635±0.0093
+4.3773±0.2472
+0.0640±0.0002
+0.0445±0.0024
+−3.75%
+−3.28%
+w/o
+–
+PT-HGNN
+0.1234±0.0011
+−0.08%
+0.6493±0.0333
+0.8698±0.0129 0.7563±0.0010
+0.6998±0.0018
+0.6737±0.0024
+0.6370±0.0009
++2.22%
+0.2631±0.0111
+4.3530±0.0658
+0.0597±0.0003
+0.0407±0.0005
++0.41%
++0.85%
+w/o
+–
+PHE
+0.1177±0.0009
+−4.70%
+0.6464±0.0305
+0.8376±0.0057
+0.7219±0.0496
+0.6965±0.0013
+0.6273±0.0037
+0.6514±0.0017
+−0.20%
+0.2636±0.0070
+5.8698±0.0560
+0.0646±0.0003
+0.0422±0.0011
+−9.00%
+−4.63%
+w/o
+–
+ATTRMASKING
+0.1203±0.0045
+−2.59%
+0.6502±0.0094
+0.8027±0.0640
+0.6809±0.0151
+0.6939±0.0023
+0.6414±0.0029
+0.6577±0.0014
+−1.27%
+0.2583±0.0101
+4.4562±0.0466
+0.0588±0.0007
+0.0429±0.0003
+−0.70%
+−1.52%
+w/o
+–
+CONTEXTPRED
+0.1169±0.0014
+−5.34%
+0.6506±0.0086
+0.7907±0.0327
+0.6480±0.0095
+0.7007±0.0043
+0.6482±0.0105
+0.6525±0.0029
+−2.04%
+0.2608±0.0108
+4.3993±0.2041
+0.0579±0.0001
+0.0499±0.0004
+−3.73%
+−3.70%
+w/o
+–
+CTRL
+0.1213±0.0008
+−1.78%
+0.6440±0.0244
+0.7958±0.0104
+0.6822±0.0186
+0.6766±0.0011
+0.6446±0.0043
+0.6385±0.0022
+−2.37%
+0.2496±0.0014
+4.2604±0.0554
+0.0605±0.0009
+0.0408±0.0003
++1.81%
+−0.78%
+w/o
+–
+TGPM
+0.1218±0.0054
+−1.38%
+0.6375±0.0093
+0.8017±0.0071
+0.6760±0.0101
+0.6755±0.0011
+0.6342±0.0030
+0.6299±0.0085
+−3.07%
+0.2455±0.0093
+4.2300±0.1372
+0.0606±0.0007
+0.0424±0.0002
++1.36%
+−1.03%
+w/o
+–
+TVE
+0.1157±0.0018
+−6.32%
+0.6409±0.0023
+0.7701±0.0312
+0.7451±0.0014
+0.6962±0.0049
+0.6436±0.0029
+0.6437±0.0070
+−0.97%
+0.2545±0.0069
+4.2856±0.0534
+0.0576±0.0006
+0.0415±0.0004
++2.02%
+−1.76%
+Our pretraining strategies
+w/o
+–
+REL-HIST
+0.1225±0.0008
+−0.81%
+0.6533±0.0042
+0.7932±0.0032
+0.7118±0.0556
+0.6997±0.0024
+0.6263±0.0070
+0.6459±0.0030
+−1.25%
+0.2423±0.0048
+4.4595±0.0945
+0.0605±0.0006
+0.0409±0.0010
++1.33%
+−0.24%
+w/o
+–
+REL-FUTURE
+0.1233±0.0044
+−0.16%
+0.6452±0.0010
+0.8203±0.0141
+0.6751±0.0407
+0.7020±0.0032
+0.6619±0.0062
+0.6540±0.0016
+−0.53%
+0.2447±0.0079
+4.3661±0.0148
+0.0612±0.0007
+0.0376±0.0003
++3.63%
++0.98%
+w/o
+TEMP-SUB –
+0.1194±0.0043
+−3.32%
+0.6156±0.0559
+0.7996±0.0211
+0.6857±0.0345
+0.6973±0.0036
+0.6203±0.0171
+0.6463±0.0028
+−2.87%
+0.2474±0.0004
+4.3392±0.1328
+0.0569±0.0001
+0.0475±0.0007
+−0.56%
+−2.25%
+w/o
+TEMP-SUB ATTRMASKING
+0.1212±0.0051
+−1.86%
+0.6462±0.0107
+0.8095±0.0162
+0.6872±0.0202
+0.7010±0.0030
+0.6411±0.0063
+0.6523±0.0032
+−1.07%
+0.2503±0.0063
+4.3736±0.0351
+0.0563±0.0010
+0.0480±0.0008
+−1.00%
+−1.31%
+w/o
+TEMP-SUB CONTEXTPRED
+0.1138±0.0067
+−7.85%
+0.5573±0.0814
+0.7770±0.0256
+0.6519±0.0326
+0.6977±0.0055
+0.6652±0.0164
+0.6486±0.0045
+−4.31%
+0.2618±0.0038
+4.2555±0.3372
+0.0567±0.0009
+0.0509±0.0002
+−2.84%
+−5.00%
+w/o
+TEMP-SUB PT-HGNN
+0.1230±0.0013
+−0.40%
+0.6481±0.0122
+0.8465±0.0180
+0.7330±0.0055
+0.6991±0.0010
+0.6660±0.0030
+0.6437±0.0028
++1.15%
+0.2521±0.0049
+4.2452±0.0648
+0.0583±0.0005
+0.0406±0.0003
++2.74%
++1.16%
+w/o
+TEMP-SUB CTRL
+0.1212±0.0020
+−1.86%
+0.6440±0.0147
+0.8011±0.0275
+0.6841±0.0188
+0.6767±0.0029
+0.6491±0.0108
+0.6404±0.0077
+−2.05%
+0.2492±0.0015
+4.1967±0.0299
+0.0568±0.0013
+0.0406±0.0024
++4.02%
++0.04%
+w/o
+TEMP-SUB TGPM
+0.1209±0.0031
+−2.11%
+0.6326±0.0055
+0.8008±0.0367
+0.6723±0.0294
+0.6702±0.0009
+0.6339±0.0063
+0.6270±0.0010
+−3.51%
+0.2469±0.0029
+4.2224±0.0673
+0.0607±0.0016
+0.0384±0.0004
++3.87%
+−0.58%
+w/o
+TEMP-SUB TVE
+0.1157±0.0034
+−6.32%
+0.6407±0.0184
+0.7751±0.0377
+0.7467±0.0043
+0.6960±0.0022
+0.6479±0.0045
+0.6454±0.0130
+−0.69%
+0.2541±0.0039
+4.2228±0.0664
+0.0581±0.0005
+0.0389±0.0001
++3.94%
+−1.02%
+w/o
+TEMP-SUB REL-HIST
+0.1227±0.0028
+−0.65%
+0.6468±0.0033
+0.8231±0.0233
+0.7097±0.0248
+0.6985±0.0007
+0.6582±0.0050
+0.6503±0.0094
++0.07%
+0.2412±0.0020 4.1374±0.0560
+0.0568±0.0007
+0.0404±0.0002
++5.33%
++1.58%
+w/o
+TEMP-SUB REL-FUTURE
+0.1228±0.0016
+−0.57%
+0.6506±0.0021
+0.8195±0.0130
+0.6862±0.0092
+0.7022±0.0054
+0.6546±0.0071
+0.6593±0.0265
+−0.21%
+0.2440±0.0029
+4.3201±0.1085
+0.0575±0.0002
+0.0383±0.0053
++5.06%
++1.43%
+Panel B: TIMEMIX with TIMEROPE. All ∆columns use Ref. B0 below.
+w/
+No pretraining (Ref. B0)
+0.1265±0.0045 +0.00%
+0.6515±0.0053
+0.8393±0.0167
+0.7255±0.0204
+0.6940±0.0007
+0.6321±0.0077
+0.6454±0.0118
++0.00%
+0.2456±0.0039
+4.2606±0.2064
+0.0621±0.0025
+0.0409±0.0011
++0.00%
++0.00%
+Baseline pretraining strategies
+w/
+–
+Un-SAGE
+0.1239±0.0045
+−2.06%
+0.5074±0.0059
+0.8037±0.0219
+0.6043±0.0038
+0.6831±0.0008
+0.6334±0.0026
+0.6223±0.0066
+−8.00%
+0.2635±0.0102
+4.7512±0.0520
+0.0761±0.0005
+0.0431±0.0003
+−10.16%
+−6.74%
+w/
+–
+GPT-GNN
+0.1209±0.0032
+−4.43%
+0.6382±0.0027
+0.7958±0.0165
+0.6893±0.0031
+0.6936±0.0038
+0.6595±0.0043
+0.6471±0.0153
+−1.28%
+0.2635±0.0017
+4.5845±0.1405
+0.0658±0.0001
+0.0444±0.0004
+−6.84%
+−4.18%
+w/
+–
+PT-HGNN
+0.1218±0.0016
+−3.72%
+0.6479±0.0038
+0.8189±0.0086
+0.6813±0.0078
+0.6991±0.0013
+0.6559±0.0023
+0.6475±0.0179
+−0.71%
+0.2626±0.0100
+4.4162±0.0216
+0.0575±0.0021
+0.0416±0.0008
+−0.92%
+−1.78%
+w/
+–
+PHE
+0.1149±0.0012
+−9.17% 0.6720±0.0050
+0.8079±0.0354
+0.7147±0.0022
+0.6957±0.0011
+0.6361±0.0029
+0.6431±0.0252
+−0.26%
+0.2634±0.0110
+4.7078±0.3323
+0.0633±0.0011
+0.0409±0.0004
+−4.54%
+−4.66%
+w/
+–
+ATTRMASKING
+0.1129±0.0045
+−10.75%
+0.6664±0.0100
+0.7494±0.0622
+0.6539±0.0134
+0.6966±0.0017
+0.6346±0.0076
+0.6402±0.0064
+−3.05%
+0.2442±0.0090
+4.7057±0.0524
+0.0633±0.0007
+0.0432±0.0006
+−4.03%
+−5.94%
+w/
+–
+CONTEXTPRED
+0.1059±0.0014
+−16.28%
+0.6611±0.0087
+0.7912±0.0371
+0.6764±0.0098
+0.6977±0.0032
+0.6521±0.0115
+0.6530±0.0056
+−1.03%
+0.2617±0.0096
+4.1297±0.2134
+0.0601±0.0002
+0.0500±0.0006
+−4.46%
+−7.26%
+w/
+–
+CTRL
+0.1209±0.0036
+−4.43%
+0.6613±0.0018
+0.7951±0.0220
+0.7286±0.0055
+0.6884±0.0040
+0.6563±0.0062
+0.6600±0.0012
++0.32%
+0.2488±0.0100
+4.0945±0.1010
+0.0641±0.0002
+0.0414±0.0007
+−0.39%
+−1.50%
+w/
+–
+TGPM
+0.1212±0.0057
+−4.19%
+0.6643±0.0128
+0.8518±0.0151
+0.7378±0.0237
+0.6789±0.0016
+0.6453±0.0049
+0.6557±0.0039
++1.11%
+0.2423±0.0062
+4.2733±0.1752
+0.0636±0.0001
+0.0421±0.0011
+−1.04%
+−1.37%
+w/
+–
+TVE
+0.1228±0.0013
+−2.92%
+0.6440±0.0046
+0.8362±0.0214
+0.7233±0.0038
+0.6868±0.0015
+0.6299±0.0040
+0.6464±0.0072
+−0.51%
+0.2467±0.0045
+4.1943±0.0682
+0.0577±0.0009
+0.0415±0.0008
++1.83%
+−0.54%
+Our pretraining strategies
+w/
+–
+REL-HIST
+0.1223±0.0008
+−3.32%
+0.6613±0.0047
+0.8495±0.0036
+0.7092±0.0480
+0.6999±0.0018
+0.6637±0.0050
+0.6504±0.0041
++1.18%
+0.2373±0.0051
+4.3395±0.1002
+0.0657±0.0007
+0.0393±0.0016
++0.07%
+−0.69%
+w/
+–
+REL-FUTURE
+0.1230±0.0041
+−2.77%
+0.6308±0.0009
+0.8137±0.0145
+0.7240±0.0424
+0.7019±0.0024
+0.6536±0.0030
+0.6607±0.0066
++0.08%
+0.2407±0.0085
+4.3989±0.0157
+0.0655±0.0008
+0.0369±0.0006
++1.14%
+−0.52%
+w/
+TEMP-SUB –
+0.1210±0.0047
+−4.35%
+0.6704±0.0532
+0.8109±0.0193
+0.7107±0.0366
+0.6924±0.0027
+0.6570±0.0108
+0.6535±0.0071
++0.41%
+0.2434±0.0004
+4.2107±0.1301
+0.0573±0.0002
+0.0455±0.0011
++0.09%
+−1.28%
+w/
+TEMP-SUB ATTRMASKING
+0.1109±0.0053
+−12.33%
+0.6168±0.0102
+0.8457±0.0174
+0.7030±0.0182
+0.6963±0.0022
+0.6565±0.0067
+0.6523±0.0027
+−0.40%
+0.2470±0.0071
+4.5481±0.0305
+0.0576±0.0010
+0.0435±0.0004
+−1.26%
+−4.67%
+w/
+TEMP-SUB CONTEXTPRED
+0.1169±0.0069
+−7.59%
+0.6650±0.0771
+0.8162±0.0274
+0.6885±0.0297
+0.6927±0.0041
+0.6389±0.0044
+0.6509±0.0110
+−0.67%
+0.2659±0.0043
+4.2899±0.2954
+0.0562±0.0009
+0.0557±0.0008
+−6.10%
+−4.79%
+w/
+TEMP-SUB PT-HGNN
+0.1216±0.0018
+−3.87%
+0.6442±0.0034
+0.8122±0.0136
+0.7106±0.0075
+0.7007±0.0023
+0.6552±0.0041
+0.6534±0.0127
+−0.09%
+0.2511±0.0061
+4.1773±0.0415
+0.0572±0.0006
+0.0386±0.0010
++3.58%
+−0.13%
+w/
+TEMP-SUB CTRL
+0.1206±0.0052
+−4.66%
+0.6624±0.0542
+0.7842±0.0497
+0.7352±0.0039
+0.6884±0.0027
+0.6554±0.0095
+0.6598±0.0135
++0.26%
+0.2498±0.0042
+4.0577±0.0812
+0.0597±0.0003
+0.0390±0.0005
++3.05%
+−0.45%
+w/
+TEMP-SUB TGPM
+0.1198±0.0012
+−5.30%
+0.6598±0.0035
+0.8337±0.0104
+0.7381±0.0163
+0.6728±0.0021
+0.6389±0.0040
+0.6498±0.0086
++0.17%
+0.2454±0.0028
+4.2054±0.1254
+0.0622±0.0005
+0.0398±0.0007
++1.00%
+−1.37%
+w/
+TEMP-SUB TVE
+0.1226±0.0020
+−3.08%
+0.6456±0.0029
+0.8261±0.0231
+0.7304±0.0023
+0.6872±0.0015
+0.6294±0.0090
+0.6467±0.0060
+−0.50%
+0.2475±0.0028
+4.0914±0.1265
+0.0578±0.0008
+0.0396±0.0008
++3.52%
+−0.02%
+w/
+TEMP-SUB REL-HIST
+0.1224±0.0027
+−3.24%
+0.6554±0.0035
+0.7925±0.0217
+0.7397±0.0274
+0.6988±0.0010
+0.6562±0.0160
+0.6511±0.0023
++0.39%
+0.2405±0.0018
+4.1372±0.0644
+0.0563±0.0006
+0.0393±0.0001
++4.87%
++0.67%
+w/
+TEMP-SUB REL-FUTURE
+0.1214±0.0017
+−4.03%
+0.6418±0.0020
+0.8077±0.0140
+0.7301±0.0083
+0.7017±0.0040
+0.6548±0.0111
+0.6574±0.0108
++0.32%
+0.2435±0.0033
+4.0181±0.0943
+0.0570±0.0002
+0.0366±0.0012
++6.90%
++1.06%
+Mean type gain weights the multiclass, binary, and regression task types equally, using the gain
+definition in Appendix B.2. We aggregate before rounding and compute differences from the
+unrounded gains. The average ranks in Figure 3 rank all 20 pretraining strategies within each
+backbone–encoding setting, excluding the supervised control. Tied task means receive the average of
+their ranks, and the 11 task ranks are weighted equally.
+Comparison with constituent objectives.
+Using the matched reference within each panel of
+Tables 5 and 6, the best staged schedule in each backbone–encoding setting achieves a higher mean
+type gain than either of its constituent objectives alone. With both encodings, TS→REL-HIST reaches
++3.02% on HETEROGNN, compared with +0.11% for TEMP-SUB and +1.14% for REL-HIST alone.
+On THGFM, TS→REL-FUTURE reaches +1.06%, compared with −1.28% for TEMP-SUB and
+19
+
+
+−0.52% for REL-FUTURE alone. Without our encodings, TS→REL-FUTURE leads on HETEROGNN
+at +2.51%, compared with −0.88% for TEMP-SUB and +1.34% for REL-FUTURE alone. TS→REL-
+HIST leads on THGFM at +1.58%, compared with −2.25% for TEMP-SUB and −0.24% for
+REL-HIST alone. The gains over the stronger constituent are thus 1.88 and 1.58 percentage points
+with our encodings, and 1.17 and 1.83 percentage points without our encodings, for HETEROGNN
+and THGFM, respectively.
+Comparison with baseline pretraining.
+Under the matched A0/B0 references, TS→CTRL is the
+strongest baseline by mean type gain on HETEROGNN in both panels, reaching +1.62% without
+our encodings and +2.71% with both encodings. On THGFM, TS→PT-HGNN leads the baselines
+without our encodings at +1.16%, while TS→TVE leads with both encodings at −0.02%. Our best
+schedules exceed these baseline gains by 0.88 and 0.31 percentage points on HETEROGNN, and 0.42
+and 1.08 points on THGFM, respectively. All six TS-initialized baselines remain below the matched
+supervised control on THGFM with both encodings, whereas both of our proposed schedules exceed
+it.
+Dependence on the second-stage objective.
+Staging does not improve every objective. On HET-
+EROGNN with both encodings, the mean type gain of REL-FUTURE decreases from +3.00% alone
+to +2.83% after TEMP-SUB, and that of ATTRMASKING decreases from +2.64% to +2.19%. In the
+same panel, REL-HIST improves from +1.14% to +3.02%, while PT-HGNN improves from +0.53%
+to +1.89%. The effect also varies across backbones: with both encodings on THGFM, REL-FUTURE
+improves from −0.52% alone to +1.06% after TEMP-SUB, unlike the decrease on HETEROGNN.
+The temporal baselines show the same dependence on the backbone and encoding configuration.
+With both encodings on HETEROGNN, CTRL, TGPM, and TVE improve from +0.93%, +1.53%,
+and +1.36% alone to +2.71%, +2.34%, and +2.22% after TEMP-SUB, respectively. On THGFM
+with both encodings, staging improves CTRL from −1.50% to −0.45% and TVE from −0.54%
+to −0.02%, while TGPM is nearly unchanged at −1.37% in both cases at the reported precision.
+These comparisons show that the benefit of TEMP-SUB initialization depends on both the subsequent
+objective and the backbone, consistent with the variation observed in the main ablation study.
+C
+ARCHITECTURE AND TRAINING CONFIGURATION
+All five backbones use three graph layers with hidden dimension 128; the GTs use eight attention
+heads. Tables 8 and 9 list the detailed settings for HETEROGNN and THGFM in the controlled
+study. Both use the same materialized table features and temporally sampled neighborhoods. We
+sample three hops with fanouts of 128, 64, and 32 at the first, second, and third hops, respectively.
+Attribute processing.
+Primary and foreign keys define graph structure and are excluded from
+attribute features. The PyTorch Frame encoders in Table 7 map each remaining column to 128
+dimensions. Parameters are specific to each table, with separate embeddings or maps for its columns.
+Tables without attributes receive a constant numerical feature. Text vectors are precomputed with
+average word embeddings glove.6B.300d and remain fixed; the column-specific maps
+from 300 to 128 dimensions are trainable. Timestamp attributes encode year, month, day, day of week,
+hour, minute, and second, with median-timestamp imputation for missing values. These calendar
+features are separate from the record-age encoding in TIMEMIX.
+For a row v in table a = ϕ(v) with ma attribute columns, let bv,j ∈R128 be the embedding of
+column j. We concatenate these embeddings in a fixed column order and apply the table’s ResNet:
+bv = [bv,1∥· · · ∥bv,ma] ∈R128ma,
+xv = ResNeta(bv) ∈R128,
+(11)
+where ∥denotes concatenation. Each table uses a four-layer ResNet with hidden dimension 128 to
+produce its row representations. The column encoders, ResNets, graph layers, and enabled temporal
+modules are trained jointly with the current objective’s head.
+Training and evaluation.
+We optimize all models using AdamW at the constant learning rate and
+weight decay in Table 9. Single-stage pretraining uses 10 epochs with 10,000 sampled steps per
+epoch, for a total budget of 100,000 steps. Two-stage pretraining allocates 10 epochs with 5,000
+sampled steps per epoch to each stage, giving 50,000 steps per stage and the same total budget of
+20
+
+
+Table 7: Column encoders used by both backbones. Only types present in a table are instantiated; all
+outputs have dimension 128.
+Attribute type
+PyTorch Frame encoder
+Operation
+Categorical
+EmbeddingEncoder
+Learned category lookup.
+Numerical
+LinearEncoder
+Standardize using column statistics, then
+apply a learned affine map. Missing values
+are imputed with the column mean.
+Multicategorical
+MultiCategorical
+EmbeddingEncoder
+Average learned embeddings of the
+categories in a cell.
+Vector / text
+embedding
+LinearEmbeddingEncoder
+Apply a learned affine map to the input
+vector.
+Timestamp
+TimestampEncoder
+Encode the year positionally and other
+calendar fields cyclically, then apply a
+learned linear map with bias.
+Table 8: Architecture settings for the selected GNN and GT. Temporal settings apply when the
+corresponding proposed encoding is enabled.
+Setting
+GNN (HETEROGNN)
+GT (THGFM)
+Graph layers / hidden width
+3 / 128
+3 / 128
+Table feature encoder
+4-layer ResNet, width 128
+4-layer ResNet, width 128
+Table-encoder dropout
+0.2
+0.2
+Text embedding / learned mapping
+Fixed GloVe / 300 →128
+Fixed GloVe / 300 →128
+Heads per attention branch
+Not applicable
+8 (16 dimensions each)
+Graph-operator dropout
+None
+0.05
+Across-relation aggregation
+Sum
+Sum
+Post-layer normalization / activation
+Node-wise LayerNorm / ReLU
+Node-wise LayerNorm / ReLU
+Downstream head
+Linear, 128 →C
+Linear, 128 →C
+Temporal sampling / hop fanouts
+Uniform / (128, 64, 32)
+Uniform / (128, 64, 32)
+TIMEMIX dimension / fusion
+128 / addition
+128 / addition
+TIMEROPE mode / time unit / phase
+cap
+Symmetric / 1 hour / 16
+Symmetric / 1 hour / 16
+C is the number of classes for multiclass classification and 1 for binary classification or regression. Graph-
+operator dropout refers to the graph module, separately from the table encoder. The temporal operators are
+detailed in Appendix D.
+Table 9: Training settings shared by the selected GNN and GT. Single- and two-stage pretraining
+each receive 100,000 steps in total.
+Setting
+GNN and GT
+Optimizer / learning rate / weight decay
+AdamW / 2 × 10−3 / 10−5
+Learning-rate schedule
+Constant; no warmup or decay
+Single-stage pretraining epochs / steps per
+epoch
+10 / 10,000
+Two-stage pretraining epochs / steps per epoch
+(each stage)
+10 / 5,000
+Total pretraining steps (either schedule)
+100,000
+Pretraining batch size
+256; 512 for the H&M curricula
+Downstream epochs / steps per epoch
+10 / 10,000
+Downstream batch size
+1,024 for Arxiv and F1; 512 for Avito, H&M, and
+Event
+Fine-tuning scope
+Full encoder and newly initialized task head
+Downstream losses
+Cross-entropy (multiclass), binary cross-entropy
+with logits (binary), L1 (regression)
+Validation frequency
+Every downstream epoch
+Downstream checkpoint criterion
+Maximum validation accuracy or ROC–AUC;
+minimum validation MAE
+Random seeds
+42, 43, 44, 45
+Reported task statistics
+Mean and standard deviation across four runs
+21
+
+
+100,000 steps. These budgets apply to both our objectives and the pretraining baselines, including
+their staged variants. Each downstream fine-tuning run uses 10 epochs with 10,000 steps per epoch,
+totaling 100,000 steps; models trained directly on downstream tasks without pretraining use the
+same budget. There is no patience-based early stopping. For all pretraining strategies, we select the
+checkpoint with the lowest training loss. The next stage loads the selected encoder and initializes its
+objective-specific modules and AdamW optimizer afresh. For each seed in {42, 43, 44, 45}, we run
+pretraining where applicable, fine-tuning, validation-based checkpoint selection, and test evaluation
+independently, using the same chronological splits. The mean validation ranks used to choose one
+study backbone per family, as a trade-off to reduce computational cost, are described in Appendix B.1.
+Reported means and standard deviations summarize these runs; relative gains are computed from the
+task means.
+Objective settings.
+REL-HIST uses Kneg = 4 negative destinations per positive link. REL-
+FUTURE uses Kfut = 2 negatives, candidate horizons H = {1, 7, 30, 90, 365} days, count-loss
+weight λcount = 0.25, and Smooth L1 transition threshold βSL = 1. TEMP-SUB uses edge-drop
+probability pedge = 0.2, feature-mask probability pmask = 0.2, and contrastive temperature T = 0.2.
+Its graph and seed contrastive losses both have unit weight. The seed regularizer uses variance
+weight λvar = 1, covariance weight λcov = 0.01, target standard deviation γ = 1, and variance
+stabilizer ϵvar = 10−4; its full definition is in Appendix E. These settings are shared across backbones
+and stages. We performed no hyperparameter search; the values here and in Appendix D are fixed
+experimental choices, and their optimality has not been evaluated.
+Horizon eligibility and window boundaries.
+A horizon δ is eligible only if the seed is available at
+τ = tevt −δ. Events at τ belong to the history and are excluded from the target count; events at τ + δ
+are included. A negative seed must be available at τ and have no events of the selected relation in
+this window. An event at the seed’s first observation cannot define a positive example for any positive
+horizon.
+D
+TEMPORAL ENCODING DETAILS
+TIMEMIX parameterization.
+TIMEMIX uses Ktime = 4 trainable log-scales ηk, initialized so
+that the scales exp(ηk) equal 1 second, 1 minute, 1 hour, and 1 day, respectively. Durations are
+represented in seconds, with positive scales sk = clip(exp(ηk), smin, smax), where smin = 1 second
+and smax = 2592000 seconds (30 days). The bounds constrain the scales, not the record ages. The
+mixture weights are
+πk =
+exp(γk)
+PKtime
+j=1
+exp(γj)
+,
+(12)
+where γk is a trainable logit, initialized equally across scales to give uniform weights. Parameter
+sharing and missing-timestamp handling follow Section 3.1.
+TIMEROPE implementation.
+TIMEROPE computes the bounded, signed log-interval ρuv defined
+in Section 3.1, with time scale sR = 3600 seconds (1 hour) and phase cap ρmax = 16. For a feature
+dimension d, let deven be the largest even integer no greater than d. Consecutive dimension pairs are
+rotated with frequencies ωj = 10000−2j/deven, j = 0, . . . , deven/2 −1. For pair (x2j, x2j+1),
+Rj(ρ)
+
+x2j
+x2j+1
+
+=
+
+cos(ωjρ)
+−sin(ωjρ)
+sin(ωjρ)
+cos(ωjρ)
+ 
+x2j
+x2j+1
+
+.
+(13)
+An unmatched final dimension is unchanged. GNN messages use the feature width; GT rotations use
+the attention-head width.
+GNN message construction.
+This message construction extends temporal rotation to GNN aggre-
+gation without query–key attention.
+GT attention weighting.
+We retain the query–key rotation mechanism of THGFM’s Rotary Tem-
+poral Attention (Peng et al., 2026), using our bounded, signed log-interval ρuv as its phase input.
+For a fixed relation r and attention head, let qv, ku, pu ∈Rdh be the query, key, and value projected
+22
+
+
+from the current layer inputs yv and yu, with any branch-specific endpoint adapters applied before
+projection. Relation, branch, and head indices are omitted for clarity. The symmetric qk mode
+computes
+bquv = R(+ρuv/2)qv,
+bkuv = R(−ρuv/2)ku,
+αuv = softmaxu∈Nr(v)
+ 
+bq⊤
+uvbkuv
+√dh
+!
+.
+(14)
+Here Nr(v) contains incoming neighbors under relation r. Values remain unrotated, and the head
+output is P
+u∈Nr(v) αuvpu. For THGFM, rotation is applied separately in the relation-specific
+attention branch and the shared-space branch with endpoint adapters. Their outputs are then combined
+by the backbone’s type-conditioned gated sum.
+E
+PRETRAINING OBJECTIVE DETAILS
+This section specifies the decoders, losses, and sampling details for Section 3.2. We retain the main
+text’s notation, including historical node representations hv ∈Rd. Hyperparameter values are in
+Appendix C.
+Historical link recovery.
+A link’s observation time is the timestamp of the row containing the
+foreign key, or the other endpoint’s timestamp if the first is missing. Links with no timestamped
+endpoint use the pretraining cutoff. For each positive link, we draw Kneg negative destinations under
+the constraints in Section 3.2. The bilinear score is
+shist(u, v, r) = h⊤
+u Wrhv,
+(15)
+where Wr ∈Rd×d is learned for relation r. The ranking loss is
+LRel-Hist =
+1
+Kneg
+Kneg
+X
+k=1
+softplus
+
+shist(u, v−
+k , r) −shist(u, v, r)
+
+,
+(16)
+where v−
+k is the k-th negative destination and softplus(x) = log(1 + ex).
+Future relation activity.
+Each forward foreign-key link e = (u →s) contributes one event of
+relation r to Er(s); reverse edges are not counted again. The timestamp assignment uses te = tu
+when the source table has a timestamp field, and otherwise uses ts when the destination table has one.
+Relations between two tables without timestamps are excluded. We retain only events at or before the
+pretraining cutoff whose timestamped endpoints are available by te.
+For a timestamped seed, tfirst(s) = ts. Otherwise, availability is estimated from its earliest incident
+relation time within the cutoff. Seeds without an assigned availability time are excluded.
+We use candidate horizons H = {1, 7, 30, 90, 365} days, converted to the same unit as the timestamps.
+For an event involving s at tevt, the eligible horizons are
+D(s, tevt) = {δ ∈H : tfirst(s) ≤tevt −δ}.
+(17)
+If time assignment falls back to ts, then te = tfirst(s), so no positive horizon is eligible. Thus,
+relations retained for this objective use source timestamps, as described in Section 3.2. The eligible
+event and relation sets are
+E+
+r = {(s, e) : e ∈Er(s), D(s, te)̸ = ∅},
+Rfut = {r : E+
+r̸ = ∅}.
+(18)
+We sample a relation, an event, and a horizon uniformly from these sets:
+r ∼Unif(Rfut),
+(s+, e+) ∼Unif(E+
+r ),
+δ ∼Unif(D(s+, te+)),
+τ = te+ −δ.
+(19)
+Here Unif denotes uniform sampling and te+ = tevt in the main text. Event sampling uses replace-
+ment. For the same relation and window, negative seeds are drawn from
+V−(s+, r, τ, δ) = {s : ϕ(s) = ϕ(s+), tfirst(s) ≤τ, cr(s; τ, δ) = 0}.
+(20)
+23
+
+
+We draw Kfut negatives, using distinct seeds when possible and reusing valid draws if necessary.
+Attempts without valid negatives are skipped. Targets follow Equation (5); window boundaries are
+specified in Appendix C.
+The occurrence and count decoders share a horizon encoder and layer normalization, but use separate
+relation embeddings and biases. The occurrence logit is
+wr,δ = wr + ghor(log(1 + δday)),
+sact(s, r, δ) = LN(hs)⊤ wr,δ/∥wr,δ∥2
+
+√
+d
++ br,
+(21)
+where wr ∈Rd and br are learned relation parameters, ghor : R →Rd is the horizon encoder,
+δday is the horizon in days, LN is layer normalization, and ∥· ∥2 is the Euclidean norm. The count
+score scount(s, r, δ) uses the same form with its own relation embedding and bias. Its nonnegative
+prediction is
+bycount = softplus(scount(s, r, δ)).
+(22)
+Using the targets in Equation (5), the losses for a positive s+ and negatives s−
+k at fixed (r, τ, δ) are
+Lact = 1
+2
+"
+softplus(−sact(s+, r, δ)) +
+1
+Kfut
+Kfut
+X
+k=1
+softplus(sact(s−
+k , r, δ))
+#
+,
+Lcount = 1
+2
+"
+SmoothL1(by+
+count, y+
+count) +
+1
+Kfut
+Kfut
+X
+k=1
+SmoothL1(by−
+count,k, 0)
+#
+,
+LRel-Future = Lact + λcountLcount.
+(23)
+Superscripts + and −identify positive and negative examples; negative count targets are zero.
+SmoothL1 uses threshold βSL. Each loss equally weights the positive example and the mean over
+negatives, and λcount weights the count loss.
+Symmetric subgraph contrast.
+For each minibatch, we sample seeds of one node type without
+replacement. For its B historical neighborhoods, let z(1)
+i
+and z(2)
+i
+be neighborhood i’s two pooled
+views after the shared projection head. The symmetric InfoNCE loss is
+Sij =
+cos(z(1)
+i
+, z(2)
+j )
+T
+,
+Lgraph =
+1
+2B
+B
+X
+i=1
+[CE(Si,:, i) + CE(S:,i, i)],
+(24)
+where Sij is cosine similarity scaled by temperature T, CE(·, i) is cross-entropy with positive index
+i, and Si,: and S:,i are row i and column i of the score matrix. The same loss applied to seed
+representations through a separate projection head gives Lseed. Both projection heads have the
+architecture Linear(d, d) →LayerNorm(d) →GELU →Linear(d, d). Each head is shared across
+the two views; the graph and seed heads have separate parameters.
+Seed representation regularization.
+Let X(v) ∈RB×d contain the encoder’s seed representations
+in view v ∈{1, 2} before the seed projection head. We apply the variance and covariance components
+of VICReg (Bardes et al., 2022) to these representations, with cross-view agreement provided by
+Lseed. For a single view X, define
+¯Xj = 1
+B
+B
+X
+i=1
+Xij,
+σj(X) =
+v
+u
+u
+t 1
+B
+B
+X
+i=1
+(Xij −¯Xj)2 + ϵvar,
+V(X) = 1
+d
+d
+X
+j=1
+max(0, γ −σj(X)) .
+(25)
+The variance uses divisor B and is computed on the unnormalized encoder outputs. This hinge
+penalizes feature dimensions whose standard deviation across seeds falls below γ.
+For the covariance term, we first apply LayerNorm independently to each row of X, without
+learnable scale or bias and with numerical stabilizer ϵLN = 10−5. Let Y = LayerNorm(X) and
+24
+
+
+¯Yj = B−1 PB
+i=1 Yij. We then compute
+Cjk(X) =
+1
+B −1
+B
+X
+i=1
+(Yij −¯Yj)(Yik −¯Yk),
+C(X) = 1
+d
+X
+j̸=k
+Cjk(X)2.
+(26)
+Thus, covariance is computed across seeds after normalization within each seed; its off-diagonal
+penalty reduces redundancy between feature dimensions. The sum includes all ordered pairs j̸ = k
+and is normalized by d. Both regularizers are set to zero when B < 2; the covariance term is also
+zero when d < 2.
+We average each term over the two views and form
+Rreg = 1
+2
+2
+X
+v=1
+h
+λvarV(X(v)) + λcovC(X(v))
+i
+,
+LTemp-Sub = Lgraph + Lseed + Rreg.
+(27)
+The weights and variance parameters are given in Appendix C.
+F
+PRETRAINING AND FINE-TUNING CURVES
+The curves cover both backbones under two settings: DAYPE without TIMEROPE, and TIMEMIX
+with TIMEROPE. These are the encoding configurations of the A0 and B0 controls, respectively.
+Pretraining panels are grouped by database; solid lines show single-objective training and dashed
+lines show stage 2 after TEMP-SUB (TS). Epoch counts restart at each stage. Each epoch comprises
+10,000 steps for single-stage pretraining and 5,000 steps for each stage of two-stage pretraining,
+so equal epoch counts do not indicate equal numbers of steps in these panels. Metrics should be
+compared within a row because objectives use different scales. Fine-tuning panels use 10,000 steps
+per epoch and are grouped by task and show validation accuracy or ROC–AUC (higher is better) and
+MAE (lower is better). Test results are in Tables 5 and 6.
+25
+
+
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+Un-SAGE
+Pair accuracy ↑
+rel-arxiv
+1
+3
+5
+7
+10
+0.00
+0.15
+0.30
+rel-event
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+rel-f1
+1
+3
+5
+7
+10
+0.05
+0.10
+0.15
+rel-hm
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+rel-avito
+1
+3
+5
+7
+10
+0.84
+0.90
+0.96
+GPT-GNN
+Edge accuracy ↑
+1
+3
+5
+7
+10
+0.9955
+0.9970
+0.9985
+1
+3
+5
+7
+10
+0.9940
+0.9955
+0.9970
+1
+3
+5
+7
+10
+0.9984
+0.9988
+0.9992
+0.9996
+1
+3
+5
+7
+10
+0.9880
+0.9895
+0.9910
+0.9925
+1
+3
+5
+7
+10
+0.54
+0.60
+0.66
+PHE
+Semantic top-1 ↑
+1
+3
+5
+7
+10
+0.24
+0.32
+0.40
+0.48
+1
+3
+5
+7
+10
+0.45
+0.60
+0.75
+0.90
+1
+3
+5
+7
+10
+0.60
+0.75
+0.90
+1
+3
+5
+7
+10
+0.45
+0.60
+1
+3
+5
+7
+10
+Epoch within stage
+0.960
+0.975
+0.990
+Temp-Sub
+Graph top-1 ↑
+1
+3
+5
+7
+10
+Epoch within stage
+0.925
+0.950
+0.975
+1
+3
+5
+7
+10
+Epoch within stage
+0.985
+0.990
+0.995
+1.000
+1
+3
+5
+7
+10
+Epoch within stage
+0.948
+0.954
+0.960
+1
+3
+5
+7
+10
+Epoch within stage
+0.930
+0.945
+0.960
+HeteroGNN · without TimeMix + TimeRoPE | Pretraining validation
+Single objective
+Figure 7: Pretraining metrics for HETEROGNN with DAYPE and without TIMEROPE: single
+objectives.
+1
+3
+5
+7
+10
+0.90
+0.92
+0.94
+PT-HGNN
+Node top-1 ↑
+rel-arxiv
+1
+3
+5
+7
+10
+0.94
+0.96
+0.98
+rel-event
+1
+3
+5
+7
+10
+0.92
+0.94
+0.96
+0.98
+rel-f1
+1
+3
+5
+7
+10
+0.900
+0.925
+0.950
+rel-hm
+1
+3
+5
+7
+10
+0.87
+0.90
+0.93
+0.96
+rel-avito
+1
+3
+5
+7
+10
+0.15
+0.30
+0.45
+AttrMasking
+Reconstruction MSE ↓
+1
+3
+5
+7
+10
+0.2
+0.4
+0.6
+1
+3
+5
+7
+10
+0.1
+0.2
+0.3
+1
+3
+5
+7
+10
+0.3
+0.6
+0.9
+1
+3
+5
+7
+10
+0.2
+0.4
+0.6
+1
+3
+5
+7
+10
+0.30
+0.45
+0.60
+ContextPred
+Context accuracy ↑
+1
+3
+5
+7
+10
+0.2
+0.3
+0.4
+0.5
+1
+3
+5
+7
+10
+0.15
+0.30
+0.45
+1
+3
+5
+7
+10
+0.3
+0.4
+0.5
+0.6
+1
+3
+5
+7
+10
+0.16
+0.24
+0.32
+1
+3
+5
+7
+10
+0.930
+0.945
+0.960
+Rel-Hist
+Pair accuracy ↑
+1
+3
+5
+7
+10
+0.984
+0.988
+0.992
+1
+3
+5
+7
+10
+0.984
+0.988
+0.992
+0.996
+1
+3
+5
+7
+10
+0.9775
+0.9800
+0.9825
+0.9850
+1
+3
+5
+7
+10
+0.930
+0.945
+0.960
+1
+3
+5
+7
+10
+Epoch within stage
+0.801
+0.804
+0.807
+0.810
+Rel-Future
+Activity accuracy ↑
+1
+3
+5
+7
+10
+Epoch within stage
+0.968
+0.976
+0.984
+1
+3
+5
+7
+10
+Epoch within stage
+0.992
+0.994
+0.996
+0.998
+1
+3
+5
+7
+10
+Epoch within stage
+0.867
+0.870
+0.873
+1
+3
+5
+7
+10
+Epoch within stage
+0.840
+0.848
+0.856
+HeteroGNN · without TimeMix + TimeRoPE | Pretraining validation
+Single objective
+After Temp-Sub (stage 2)
+Figure 8: Pretraining metrics for HETEROGNN with DAYPE and without TIMEROPE: single
+objectives and stage 2 after TEMP-SUB.
+26
+
+
+1
+3
+5
+7
+10
+Epoch
+0.105
+0.120
+0.135
+0.150
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Epoch
+0.50
+0.55
+0.60
+0.65
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Epoch
+0.75
+0.80
+0.85
+0.90
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Epoch
+0.5
+0.6
+0.7
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Epoch
+0.692
+0.696
+0.700
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Epoch
+0.58
+0.60
+0.62
+0.64
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Epoch
+0.688
+0.692
+0.696
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Epoch
+0.28
+0.32
+0.36
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Epoch
+4
+6
+8
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Epoch
+0.072
+0.080
+0.088
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Epoch
+0.04
+0.08
+0.12
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+HeteroGNN · without TimeMix + TimeRoPE | Downstream validation
+No pretraining
+Un-SAGE
+GPT-GNN
+PHE
+Solid: single objective or
+         no pretraining
+Dashed: after Temp-Sub
+Figure 9: Fine-tuning validation metrics for HETEROGNN with DAYPE and without TIMEROPE:
+single-stage baselines.
+1
+3
+5
+7
+10
+Epoch
+0.105
+0.120
+0.135
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Epoch
+0.56
+0.60
+0.64
+0.68
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Epoch
+0.81
+0.84
+0.87
+0.90
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Epoch
+0.45
+0.60
+0.75
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Epoch
+0.695
+0.700
+0.705
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Epoch
+0.62
+0.63
+0.64
+0.65
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Epoch
+0.68
+0.69
+0.70
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Epoch
+0.24
+0.28
+0.32
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Epoch
+4
+6
+8
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Epoch
+0.065
+0.070
+0.075
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Epoch
+0.05
+0.10
+0.15
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+HeteroGNN · without TimeMix + TimeRoPE | Downstream validation
+No pretraining
+Temp-Sub
+PT-HGNN
+AttrMasking
+ContextPred
+Rel-Hist
+Rel-Future
+TS → PT-HGNN
+TS → AttrMasking
+TS → ContextPred
+TS → Rel-Hist
+TS → Rel-Future
+Solid: single objective or
+         no pretraining
+Dashed: after Temp-Sub
+Figure 10: Fine-tuning validation metrics for HETEROGNN with DAYPE and without TIMEROPE:
+single and staged objectives.
+27
+
+
+1
+3
+5
+7
+10
+1.2
+1.6
+2.0
+Temp-Sub
+Training loss ↓
+rel-arxiv
+1
+3
+5
+7
+10
+1.2
+1.6
+2.0
+rel-event
+1
+3
+5
+7
+10
+1.00
+1.25
+1.50
+1.75
+rel-f1
+1
+3
+5
+7
+10
+1.0
+1.2
+1.4
+1.6
+rel-hm
+1
+3
+5
+7
+10
+1.2
+1.6
+2.0
+rel-avito
+1
+3
+5
+7
+10
+0.81
+0.84
+0.87
+0.90
+CTRL
+Training loss ↓
+1
+3
+5
+7
+10
+0.2
+0.3
+0.4
+0.5
+1
+3
+5
+7
+10
+0.15
+0.20
+0.25
+0.30
+1
+3
+5
+7
+10
+1.04
+1.12
+1.20
+1
+3
+5
+7
+10
+0.40
+0.48
+0.56
+0.64
+1
+3
+5
+7
+10
+0.315
+0.330
+0.345
+TGPM
+Training loss ↓
+1
+3
+5
+7
+10
+0.1
+0.2
+0.3
+0.4
+1
+3
+5
+7
+10
+0.45
+0.60
+0.75
+0.90
+1
+3
+5
+7
+10
+0.24
+0.30
+0.36
+0.42
+1
+3
+5
+7
+10
+0.09
+0.12
+0.15
+0.18
+1
+3
+5
+7
+10
+Epoch within stage
+0.000
+0.015
+0.030
+TVE
+Training loss ↓
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.03
+0.06
+0.09
+1
+3
+5
+7
+10
+Epoch within stage
+0.000
+0.005
+0.010
+0.015
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.03
+0.06
+0.09
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.02
+0.04
+0.06
+HeteroGNN · DayPE, without TimeRoPE | Pretraining loss (seed 43)
+Single objective / TS stage 1
+After TS (stage 2)
+Figure 11: Pretraining losses for HETEROGNN with DAYPE and without TIMEROPE: CTRL,
+TGPM, TVE, and the shared TEMP-SUB first stage.
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.090
+0.105
+0.120
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.60
+0.62
+0.64
+0.66
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.800
+0.825
+0.850
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.68
+0.72
+0.76
+0.80
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.696
+0.700
+0.704
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.60
+0.62
+0.64
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.64
+0.66
+0.68
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.24
+0.26
+0.28
+0.30
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Fine-tuning epoch
+2.8
+3.2
+3.6
+4.0
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.066
+0.072
+0.078
+0.084
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.03
+0.04
+0.05
+0.06
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+Solid: direct pretraining
+Dashed: TS → objective
+Seed 43; full transfer
+Raw epoch values
+No smoothing
+HeteroGNN · DayPE, without TimeRoPE | Downstream validation (seed 43)
+CTRL
+TS → CTRL
+TGPM
+TS → TGPM
+TVE
+TS → TVE
+Figure 12: Fine-tuning validation metrics for HETEROGNN with DAYPE and without TIMEROPE:
+CTRL, TGPM, TVE, and their TS-initialized variants.
+28
+
+
+1
+3
+5
+7
+10
+0.00
+0.15
+0.30
+Un-SAGE
+Pair accuracy ↑
+rel-arxiv
+1
+3
+5
+7
+10
+0.1
+0.2
+0.3
+rel-event
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+rel-f1
+1
+3
+5
+7
+10
+0.05
+0.10
+0.15
+rel-hm
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+rel-avito
+1
+3
+5
+7
+10
+0.7
+0.8
+0.9
+1.0
+GPT-GNN
+Edge accuracy ↑
+1
+3
+5
+7
+10
+0.9940
+0.9955
+0.9970
+0.9985
+1
+3
+5
+7
+10
+0.9940
+0.9955
+0.9970
+0.9985
+1
+3
+5
+7
+10
+0.9976
+0.9982
+0.9988
+0.9994
+1
+3
+5
+7
+10
+0.990
+0.992
+0.994
+1
+3
+5
+7
+10
+0.48
+0.56
+0.64
+PHE
+Semantic top-1 ↑
+1
+3
+5
+7
+10
+0.325
+0.350
+0.375
+1
+3
+5
+7
+10
+0.45
+0.60
+0.75
+1
+3
+5
+7
+10
+0.45
+0.60
+0.75
+0.90
+1
+3
+5
+7
+10
+0.30
+0.45
+0.60
+1
+3
+5
+7
+10
+Epoch within stage
+0.90
+0.93
+0.96
+0.99
+Temp-Sub
+Graph top-1 ↑
+1
+3
+5
+7
+10
+Epoch within stage
+0.945
+0.960
+0.975
+0.990
+1
+3
+5
+7
+10
+Epoch within stage
+0.960
+0.975
+0.990
+1
+3
+5
+7
+10
+Epoch within stage
+0.936
+0.944
+0.952
+0.960
+1
+3
+5
+7
+10
+Epoch within stage
+0.945
+0.960
+HeteroGNN · with TimeMix + TimeRoPE | Pretraining validation
+Single objective
+Figure 13: Pretraining metrics for HETEROGNN with TIMEMIX and TIMEROPE: single objectives.
+1
+3
+5
+7
+10
+0.900
+0.925
+0.950
+0.975
+PT-HGNN
+Node top-1 ↑
+rel-arxiv
+1
+3
+5
+7
+10
+0.94
+0.96
+0.98
+rel-event
+1
+3
+5
+7
+10
+0.900
+0.925
+0.950
+0.975
+rel-f1
+1
+3
+5
+7
+10
+0.900
+0.925
+0.950
+rel-hm
+1
+3
+5
+7
+10
+0.875
+0.900
+0.925
+0.950
+rel-avito
+1
+3
+5
+7
+10
+0.15
+0.30
+0.45
+AttrMasking
+Reconstruction MSE ↓
+1
+3
+5
+7
+10
+0.2
+0.4
+0.6
+1
+3
+5
+7
+10
+0.1
+0.2
+0.3
+0.4
+1
+3
+5
+7
+10
+0.25
+0.50
+0.75
+1.00
+1
+3
+5
+7
+10
+0.2
+0.4
+0.6
+1
+3
+5
+7
+10
+0.30
+0.45
+0.60
+ContextPred
+Context accuracy ↑
+1
+3
+5
+7
+10
+0.3
+0.4
+0.5
+1
+3
+5
+7
+10
+0.15
+0.30
+0.45
+1
+3
+5
+7
+10
+0.4
+0.5
+0.6
+1
+3
+5
+7
+10
+0.16
+0.24
+0.32
+1
+3
+5
+7
+10
+0.915
+0.930
+0.945
+0.960
+Rel-Hist
+Pair accuracy ↑
+1
+3
+5
+7
+10
+0.984
+0.988
+0.992
+1
+3
+5
+7
+10
+0.978
+0.984
+0.990
+0.996
+1
+3
+5
+7
+10
+0.9775
+0.9800
+0.9825
+0.9850
+1
+3
+5
+7
+10
+0.930
+0.945
+0.960
+1
+3
+5
+7
+10
+Epoch within stage
+0.800
+0.804
+0.808
+Rel-Future
+Activity accuracy ↑
+1
+3
+5
+7
+10
+Epoch within stage
+0.96
+0.97
+0.98
+0.99
+1
+3
+5
+7
+10
+Epoch within stage
+0.984
+0.988
+0.992
+0.996
+1
+3
+5
+7
+10
+Epoch within stage
+0.8650
+0.8675
+0.8700
+0.8725
+1
+3
+5
+7
+10
+Epoch within stage
+0.840
+0.846
+0.852
+0.858
+HeteroGNN · with TimeMix + TimeRoPE | Pretraining validation
+Single objective
+After Temp-Sub (stage 2)
+Figure 14: Pretraining metrics for HETEROGNN with TIMEMIX and TIMEROPE: single objectives
+and stage 2 after TEMP-SUB.
+29
+
+
+1
+3
+5
+7
+10
+Epoch
+0.10
+0.11
+0.12
+0.13
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Epoch
+0.50
+0.55
+0.60
+0.65
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Epoch
+0.75
+0.78
+0.81
+0.84
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Epoch
+0.5
+0.6
+0.7
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Epoch
+0.680
+0.688
+0.696
+0.704
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Epoch
+0.600
+0.625
+0.650
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Epoch
+0.64
+0.66
+0.68
+0.70
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Epoch
+0.26
+0.28
+0.30
+0.32
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Epoch
+4
+6
+8
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Epoch
+0.07
+0.08
+0.09
+0.10
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Epoch
+0.033
+0.036
+0.039
+0.042
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+HeteroGNN · with TimeMix + TimeRoPE | Downstream validation
+No pretraining
+Un-SAGE
+GPT-GNN
+PHE
+Solid: single objective or
+         no pretraining
+Dashed: after Temp-Sub
+Figure 15: Fine-tuning validation metrics for HETEROGNN with TIMEMIX and TIMEROPE: single-
+stage baselines.
+1
+3
+5
+7
+10
+Epoch
+0.050
+0.075
+0.100
+0.125
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Epoch
+0.56
+0.60
+0.64
+0.68
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Epoch
+0.80
+0.84
+0.88
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Epoch
+0.45
+0.60
+0.75
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Epoch
+0.675
+0.690
+0.705
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Epoch
+0.60
+0.63
+0.66
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Epoch
+0.64
+0.66
+0.68
+0.70
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Epoch
+0.24
+0.28
+0.32
+0.36
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Epoch
+4
+6
+8
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Epoch
+0.07
+0.08
+0.09
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Epoch
+0.04
+0.08
+0.12
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+HeteroGNN · with TimeMix + TimeRoPE | Downstream validation
+No pretraining
+Temp-Sub
+PT-HGNN
+AttrMasking
+ContextPred
+Rel-Hist
+Rel-Future
+TS → PT-HGNN
+TS → AttrMasking
+TS → ContextPred
+TS → Rel-Hist
+TS → Rel-Future
+Solid: single objective or
+         no pretraining
+Dashed: after Temp-Sub
+Figure 16: Fine-tuning validation metrics for HETEROGNN with TIMEMIX and TIMEROPE: single
+and staged objectives.
+30
+
+
+1
+3
+5
+7
+10
+1.0
+1.5
+2.0
+Temp-Sub
+Training loss ↓
+rel-arxiv
+1
+3
+5
+7
+10
+1.2
+1.5
+1.8
+rel-event
+1
+3
+5
+7
+10
+0.9
+1.2
+1.5
+1.8
+rel-f1
+1
+3
+5
+7
+10
+1.0
+1.2
+1.4
+1.6
+rel-hm
+1
+3
+5
+7
+10
+0.9
+1.2
+1.5
+1.8
+rel-avito
+1
+3
+5
+7
+10
+0.825
+0.850
+0.875
+CTRL
+Training loss ↓
+1
+3
+5
+7
+10
+0.24
+0.32
+0.40
+0.48
+1
+3
+5
+7
+10
+0.16
+0.24
+0.32
+0.40
+1
+3
+5
+7
+10
+1.04
+1.12
+1.20
+1
+3
+5
+7
+10
+0.48
+0.52
+0.56
+0.60
+1
+3
+5
+7
+10
+0.34
+0.35
+0.36
+TGPM
+Training loss ↓
+1
+3
+5
+7
+10
+0.10
+0.15
+0.20
+0.25
+1
+3
+5
+7
+10
+0.45
+0.60
+0.75
+1
+3
+5
+7
+10
+0.240
+0.255
+0.270
+0.285
+1
+3
+5
+7
+10
+0.08
+0.09
+0.10
+0.11
+1
+3
+5
+7
+10
+Epoch within stage
+0.015
+0.030
+TVE
+Training loss ↓
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.04
+0.08
+0.12
+1
+3
+5
+7
+10
+Epoch within stage
+0.000
+0.008
+0.016
+0.024
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.04
+0.08
+0.12
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.02
+0.04
+HeteroGNN · TimeMix + TimeRoPE | Pretraining loss (seed 43)
+Single objective / TS stage 1
+After TS (stage 2)
+Figure 17: Pretraining losses for HETEROGNN with TIMEMIX and TIMEROPE: CTRL, TGPM,
+TVE, and the shared TEMP-SUB first stage.
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.08
+0.10
+0.12
+0.14
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.56
+0.60
+0.64
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.80
+0.82
+0.84
+0.86
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.68
+0.72
+0.76
+0.80
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.680
+0.688
+0.696
+0.704
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.615
+0.630
+0.645
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.660
+0.675
+0.690
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.240
+0.255
+0.270
+0.285
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Fine-tuning epoch
+3.0
+3.5
+4.0
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.066
+0.069
+0.072
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.04
+0.05
+0.06
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+Solid: direct pretraining
+Dashed: TS → objective
+Seed 43; full transfer
+Raw epoch values
+No smoothing
+HeteroGNN · TimeMix + TimeRoPE | Downstream validation (seed 43)
+CTRL
+TS → CTRL
+TGPM
+TS → TGPM
+TVE
+TS → TVE
+Figure 18: Fine-tuning validation metrics for HETEROGNN with TIMEMIX and TIMEROPE: CTRL,
+TGPM, TVE, and their TS-initialized variants.
+31
+
+
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+Un-SAGE
+Pair accuracy ↑
+rel-arxiv
+1
+3
+5
+7
+10
+0.00
+0.08
+0.16
+0.24
+rel-event
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+rel-f1
+1
+3
+5
+7
+10
+0.00
+0.08
+0.16
+0.24
+rel-hm
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+rel-avito
+1
+3
+5
+7
+10
+0.9955
+0.9970
+0.9985
+GPT-GNN
+Edge accuracy ↑
+1
+3
+5
+7
+10
+0.9955
+0.9970
+0.9985
+1
+3
+5
+7
+10
+0.9955
+0.9970
+0.9985
+1
+3
+5
+7
+10
+0.9976
+0.9984
+0.9992
+1.0000
+1
+3
+5
+7
+10
+0.94
+0.96
+0.98
+1
+3
+5
+7
+10
+0.20
+0.24
+0.28
+PHE
+Semantic top-1 ↑
+1
+3
+5
+7
+10
+0.16
+0.18
+0.20
+0.22
+1
+3
+5
+7
+10
+0.24
+0.30
+0.36
+1
+3
+5
+7
+10
+0.08
+0.16
+0.24
+0.32
+1
+3
+5
+7
+10
+0.16
+0.24
+0.32
+1
+3
+5
+7
+10
+Epoch within stage
+0.92
+0.94
+0.96
+0.98
+Temp-Sub
+Graph top-1 ↑
+1
+3
+5
+7
+10
+Epoch within stage
+0.930
+0.945
+0.960
+0.975
+1
+3
+5
+7
+10
+Epoch within stage
+0.988
+0.992
+0.996
+1.000
+1
+3
+5
+7
+10
+Epoch within stage
+0.944
+0.952
+0.960
+1
+3
+5
+7
+10
+Epoch within stage
+0.92
+0.94
+0.96
+THGFM · without TimeMix + TimeRoPE | Pretraining validation
+Single objective
+Figure 19: Pretraining metrics for THGFM with DAYPE and without TIMEROPE: single objectives.
+1
+3
+5
+7
+10
+0.85
+0.90
+0.95
+1.00
+PT-HGNN
+Node top-1 ↑
+rel-arxiv
+1
+3
+5
+7
+10
+0.925
+0.950
+0.975
+rel-event
+1
+3
+5
+7
+10
+0.94
+0.96
+0.98
+rel-f1
+1
+3
+5
+7
+10
+0.94
+0.96
+0.98
+1.00
+rel-hm
+1
+3
+5
+7
+10
+0.80
+0.85
+0.90
+0.95
+rel-avito
+1
+3
+5
+7
+10
+0.1
+0.2
+0.3
+AttrMasking
+Reconstruction MSE ↓
+1
+3
+5
+7
+10
+0.25
+0.50
+0.75
+1
+3
+5
+7
+10
+0.1
+0.2
+0.3
+0.4
+1
+3
+5
+7
+10
+0.25
+0.50
+0.75
+1.00
+1
+3
+5
+7
+10
+0.15
+0.30
+0.45
+0.60
+1
+3
+5
+7
+10
+0.2
+0.3
+0.4
+0.5
+ContextPred
+Context accuracy ↑
+1
+3
+5
+7
+10
+0.30
+0.45
+1
+3
+5
+7
+10
+0.16
+0.24
+0.32
+0.40
+1
+3
+5
+7
+10
+0.32
+0.40
+0.48
+1
+3
+5
+7
+10
+0.12
+0.18
+0.24
+1
+3
+5
+7
+10
+0.87
+0.90
+0.93
+0.96
+Rel-Hist
+Pair accuracy ↑
+1
+3
+5
+7
+10
+0.984
+0.988
+0.992
+1
+3
+5
+7
+10
+0.9900
+0.9925
+0.9950
+0.9975
+1
+3
+5
+7
+10
+0.9820
+0.9835
+0.9850
+1
+3
+5
+7
+10
+0.93
+0.94
+0.95
+0.96
+1
+3
+5
+7
+10
+Epoch within stage
+0.790
+0.795
+0.800
+0.805
+Rel-Future
+Activity accuracy ↑
+1
+3
+5
+7
+10
+Epoch within stage
+0.96
+0.97
+0.98
+1
+3
+5
+7
+10
+Epoch within stage
+0.9925
+0.9950
+0.9975
+1
+3
+5
+7
+10
+Epoch within stage
+0.864
+0.868
+0.872
+1
+3
+5
+7
+10
+Epoch within stage
+0.83
+0.84
+0.85
+0.86
+THGFM · without TimeMix + TimeRoPE | Pretraining validation
+Single objective
+After Temp-Sub (stage 2)
+Figure 20: Pretraining metrics for THGFM with DAYPE and without TIMEROPE: single objectives
+and stage 2 after TEMP-SUB.
+32
+
+
+1
+3
+5
+7
+10
+Epoch
+0.11
+0.12
+0.13
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Epoch
+0.56
+0.60
+0.64
+0.68
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Epoch
+0.64
+0.72
+0.80
+0.88
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Epoch
+0.5
+0.6
+0.7
+0.8
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Epoch
+0.690
+0.696
+0.702
+0.708
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Epoch
+0.56
+0.58
+0.60
+0.62
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Epoch
+0.625
+0.650
+0.675
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Epoch
+0.24
+0.27
+0.30
+0.33
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Epoch
+4
+6
+8
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Epoch
+0.15
+0.30
+0.45
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Epoch
+0.08
+0.16
+0.24
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+THGFM · without TimeMix + TimeRoPE | Downstream validation
+No pretraining
+Un-SAGE
+GPT-GNN
+PHE
+Solid: single objective or
+         no pretraining
+Dashed: after Temp-Sub
+Figure 21: Fine-tuning validation metrics for THGFM with DAYPE and without TIMEROPE: single-
+stage baselines.
+1
+3
+5
+7
+10
+Epoch
+0.120
+0.135
+0.150
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Epoch
+0.50
+0.55
+0.60
+0.65
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Epoch
+0.75
+0.80
+0.85
+0.90
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Epoch
+0.5
+0.6
+0.7
+0.8
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Epoch
+0.700
+0.705
+0.710
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Epoch
+0.56
+0.60
+0.64
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Epoch
+0.600
+0.625
+0.650
+0.675
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Epoch
+0.250
+0.275
+0.300
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Epoch
+4
+6
+8
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Epoch
+0.060
+0.066
+0.072
+0.078
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Epoch
+0.04
+0.08
+0.12
+0.16
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+THGFM · without TimeMix + TimeRoPE | Downstream validation
+No pretraining
+Temp-Sub
+PT-HGNN
+AttrMasking
+ContextPred
+Rel-Hist
+Rel-Future
+TS → PT-HGNN
+TS → AttrMasking
+TS → ContextPred
+TS → Rel-Hist
+TS → Rel-Future
+Solid: single objective or
+         no pretraining
+Dashed: after Temp-Sub
+Figure 22: Fine-tuning validation metrics for THGFM with DAYPE and without TIMEROPE: single
+and staged objectives.
+33
+
+
+1
+3
+5
+7
+10
+1.5
+2.0
+2.5
+Temp-Sub
+Training loss ↓
+rel-arxiv
+1
+3
+5
+7
+10
+1.2
+1.6
+2.0
+2.4
+rel-event
+1
+3
+5
+7
+10
+1.2
+1.6
+2.0
+2.4
+rel-f1
+1
+3
+5
+7
+10
+1.00
+1.25
+1.50
+1.75
+rel-hm
+1
+3
+5
+7
+10
+1.2
+1.6
+2.0
+rel-avito
+1
+3
+5
+7
+10
+0.84
+0.87
+0.90
+0.93
+CTRL
+Training loss ↓
+1
+3
+5
+7
+10
+0.3
+0.4
+0.5
+1
+3
+5
+7
+10
+0.24
+0.28
+0.32
+1
+3
+5
+7
+10
+1.04
+1.12
+1.20
+1.28
+1
+3
+5
+7
+10
+0.48
+0.56
+0.64
+0.72
+Adam reset
+1
+3
+5
+7
+10
+0.330
+0.345
+0.360
+0.375
+TGPM
+Training loss ↓
+1
+3
+5
+7
+10
+0.12
+0.16
+0.20
+1
+3
+5
+7
+10
+0.40
+0.45
+0.50
+0.55
+1
+3
+5
+7
+10
+0.24
+0.28
+0.32
+1
+3
+5
+7
+10
+0.075
+0.090
+0.105
+0.120
+1
+3
+5
+7
+10
+Epoch within stage
+0.015
+0.030
+0.045
+TVE
+Training loss ↓
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.04
+0.08
+0.12
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.01
+0.02
+0.03
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.04
+0.08
+0.12
+1
+3
+5
+7
+10
+Epoch within stage
+0.02
+0.04
+0.06
+THGFM · DayPE, without TimeRoPE | Pretraining loss (seed 43)
+Single objective / TS stage 1
+After TS (stage 2)
+Figure 23: Pretraining losses for THGFM with DAYPE and without TIMEROPE: CTRL, TGPM,
+TVE, and the shared TEMP-SUB first stage.
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.10
+0.11
+0.12
+0.13
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.56
+0.60
+0.64
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.775
+0.800
+0.825
+0.850
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.64
+0.72
+0.80
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.64
+0.66
+0.68
+0.70
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.54
+0.57
+0.60
+0.63
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.62
+0.64
+0.66
+0.68
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.24
+0.26
+0.28
+0.30
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Fine-tuning epoch
+3.0
+3.5
+4.0
+4.5
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.068
+0.072
+0.076
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.04
+0.06
+0.08
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+Solid: direct pretraining
+Dashed: TS → objective
+Seed 43; full transfer
+Raw epoch values
+No smoothing
+THGFM · DayPE, without TimeRoPE | Downstream validation (seed 43)
+CTRL
+TS → CTRL
+TGPM
+TS → TGPM
+TVE
+TS → TVE
+Figure 24: Fine-tuning validation metrics for THGFM with DAYPE and without TIMEROPE: CTRL,
+TGPM, TVE, and their TS-initialized variants.
+34
+
+
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+Un-SAGE
+Pair accuracy ↑
+rel-arxiv
+1
+3
+5
+7
+10
+0.00
+0.06
+0.12
+0.18
+rel-event
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+rel-f1
+1
+3
+5
+7
+10
+0.00
+0.05
+0.10
+0.15
+rel-hm
+1
+3
+5
+7
+10
+0.0
+0.1
+0.2
+0.3
+rel-avito
+1
+3
+5
+7
+10
+0.992
+0.994
+0.996
+0.998
+GPT-GNN
+Edge accuracy ↑
+1
+3
+5
+7
+10
+0.9940
+0.9955
+0.9970
+1
+3
+5
+7
+10
+0.94
+0.96
+0.98
+1.00
+1
+3
+5
+7
+10
+0.9976
+0.9984
+0.9992
+1.0000
+1
+3
+5
+7
+10
+0.94
+0.96
+0.98
+1
+3
+5
+7
+10
+0.32
+0.40
+0.48
+PHE
+Semantic top-1 ↑
+1
+3
+5
+7
+10
+0.10
+0.15
+0.20
+0.25
+1
+3
+5
+7
+10
+0.20
+0.25
+0.30
+0.35
+1
+3
+5
+7
+10
+0.2
+0.3
+0.4
+0.5
+1
+3
+5
+7
+10
+0.15
+0.20
+0.25
+0.30
+1
+3
+5
+7
+10
+Epoch within stage
+0.84
+0.90
+0.96
+Temp-Sub
+Graph top-1 ↑
+1
+3
+5
+7
+10
+Epoch within stage
+0.945
+0.960
+0.975
+1
+3
+5
+7
+10
+Epoch within stage
+0.97
+0.98
+0.99
+1.00
+1
+3
+5
+7
+10
+Epoch within stage
+0.936
+0.944
+0.952
+0.960
+1
+3
+5
+7
+10
+Epoch within stage
+0.930
+0.945
+0.960
+THGFM · with TimeMix + TimeRoPE | Pretraining validation
+Single objective
+Figure 25: Pretraining metrics for THGFM with TIMEMIX and TIMEROPE: single objectives.
+1
+3
+5
+7
+10
+0.85
+0.90
+0.95
+1.00
+PT-HGNN
+Node top-1 ↑
+rel-arxiv
+1
+3
+5
+7
+10
+0.94
+0.96
+0.98
+1.00
+rel-event
+1
+3
+5
+7
+10
+0.94
+0.96
+0.98
+rel-f1
+1
+3
+5
+7
+10
+0.90
+0.93
+0.96
+0.99
+rel-hm
+1
+3
+5
+7
+10
+0.84
+0.90
+0.96
+rel-avito
+1
+3
+5
+7
+10
+0.15
+0.30
+0.45
+AttrMasking
+Reconstruction MSE ↓
+1
+3
+5
+7
+10
+0.25
+0.50
+0.75
+1
+3
+5
+7
+10
+0.1
+0.2
+0.3
+1
+3
+5
+7
+10
+0.25
+0.50
+0.75
+1.00
+1
+3
+5
+7
+10
+0.2
+0.4
+0.6
+1
+3
+5
+7
+10
+0.15
+0.30
+0.45
+ContextPred
+Context accuracy ↑
+1
+3
+5
+7
+10
+0.3
+0.4
+0.5
+1
+3
+5
+7
+10
+0.1
+0.2
+0.3
+0.4
+1
+3
+5
+7
+10
+0.32
+0.40
+0.48
+0.56
+1
+3
+5
+7
+10
+0.12
+0.18
+0.24
+0.30
+1
+3
+5
+7
+10
+0.90
+0.92
+0.94
+0.96
+Rel-Hist
+Pair accuracy ↑
+1
+3
+5
+7
+10
+0.984
+0.988
+0.992
+1
+3
+5
+7
+10
+0.980
+0.984
+0.988
+0.992
+1
+3
+5
+7
+10
+0.980
+0.982
+0.984
+1
+3
+5
+7
+10
+0.94
+0.95
+0.96
+1
+3
+5
+7
+10
+Epoch within stage
+0.792
+0.798
+0.804
+Rel-Future
+Activity accuracy ↑
+1
+3
+5
+7
+10
+Epoch within stage
+0.960
+0.968
+0.976
+0.984
+1
+3
+5
+7
+10
+Epoch within stage
+0.978
+0.984
+0.990
+1
+3
+5
+7
+10
+Epoch within stage
+0.864
+0.868
+0.872
+1
+3
+5
+7
+10
+Epoch within stage
+0.83
+0.84
+0.85
+0.86
+THGFM · with TimeMix + TimeRoPE | Pretraining validation
+Single objective
+After Temp-Sub (stage 2)
+Figure 26: Pretraining metrics for THGFM with TIMEMIX and TIMEROPE: single objectives and
+stage 2 after TEMP-SUB.
+35
+
+
+1
+3
+5
+7
+10
+Epoch
+0.10
+0.12
+0.14
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Epoch
+0.54
+0.60
+0.66
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Epoch
+0.64
+0.72
+0.80
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Epoch
+0.5
+0.6
+0.7
+0.8
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Epoch
+0.675
+0.690
+0.705
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Epoch
+0.525
+0.550
+0.575
+0.600
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Epoch
+0.62
+0.64
+0.66
+0.68
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Epoch
+0.24
+0.30
+0.36
+0.42
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Epoch
+4
+6
+8
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Epoch
+0.2
+0.4
+0.6
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Epoch
+0.050
+0.075
+0.100
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+THGFM · with TimeMix + TimeRoPE | Downstream validation
+No pretraining
+Un-SAGE
+GPT-GNN
+PHE
+Solid: single objective or
+         no pretraining
+Dashed: after Temp-Sub
+Figure 27: Fine-tuning validation metrics for THGFM with TIMEMIX and TIMEROPE: single-stage
+baselines.
+1
+3
+5
+7
+10
+Epoch
+0.105
+0.120
+0.135
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Epoch
+0.4
+0.5
+0.6
+0.7
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Epoch
+0.75
+0.80
+0.85
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Epoch
+0.5
+0.6
+0.7
+0.8
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Epoch
+0.69
+0.70
+0.71
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Epoch
+0.56
+0.60
+0.64
+0.68
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Epoch
+0.625
+0.650
+0.675
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Epoch
+0.20
+0.25
+0.30
+0.35
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Epoch
+4
+6
+8
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Epoch
+0.064
+0.072
+0.080
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Epoch
+0.06
+0.12
+0.18
+0.24
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+THGFM · with TimeMix + TimeRoPE | Downstream validation
+No pretraining
+Temp-Sub
+PT-HGNN
+AttrMasking
+ContextPred
+Rel-Hist
+Rel-Future
+TS → PT-HGNN
+TS → AttrMasking
+TS → ContextPred
+TS → Rel-Hist
+TS → Rel-Future
+Solid: single objective or
+         no pretraining
+Dashed: after Temp-Sub
+Figure 28: Fine-tuning validation metrics for THGFM with TIMEMIX and TIMEROPE: single and
+staged objectives.
+36
+
+
+1
+3
+5
+7
+10
+1.6
+2.4
+3.2
+Temp-Sub
+Training loss ↓
+rel-arxiv
+1
+3
+5
+7
+10
+1.2
+1.6
+2.0
+2.4
+rel-event
+1
+3
+5
+7
+10
+1.0
+1.5
+2.0
+2.5
+rel-f1
+1
+3
+5
+7
+10
+1.00
+1.25
+1.50
+rel-hm
+1
+3
+5
+7
+10
+1.2
+1.6
+2.0
+rel-avito
+1
+3
+5
+7
+10
+0.84
+0.88
+0.92
+0.96
+CTRL
+Training loss ↓
+1
+3
+5
+7
+10
+0.3
+0.4
+0.5
+1
+3
+5
+7
+10
+0.24
+0.30
+0.36
+0.42
+1
+3
+5
+7
+10
+1.1
+1.2
+1.3
+1
+3
+5
+7
+10
+0.45
+0.50
+0.55
+0.60
+1
+3
+5
+7
+10
+0.325
+0.350
+0.375
+0.400
+TGPM
+Training loss ↓
+1
+3
+5
+7
+10
+0.200
+0.225
+0.250
+0.275
+1
+3
+5
+7
+10
+0.48
+0.52
+0.56
+1
+3
+5
+7
+10
+0.3
+0.4
+0.5
+0.6
+1
+3
+5
+7
+10
+0.090
+0.105
+1
+3
+5
+7
+10
+Epoch within stage
+0.015
+0.030
+0.045
+TVE
+Training loss ↓
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.04
+0.08
+0.12
+1
+3
+5
+7
+10
+Epoch within stage
+0.01
+0.02
+0.03
+1
+3
+5
+7
+10
+Epoch within stage
+0.00
+0.04
+0.08
+0.12
+1
+3
+5
+7
+10
+Epoch within stage
+0.015
+0.030
+0.045
+0.060
+THGFM · TimeMix + TimeRoPE | Pretraining loss (seed 43)
+Single objective / TS stage 1
+After TS (stage 2)
+Figure 29: Pretraining losses for THGFM with TIMEMIX and TIMEROPE: CTRL, TGPM, TVE,
+and the shared TEMP-SUB first stage.
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.10
+0.11
+0.12
+0.13
+Accuracy ↑
+rel-arxiv /
+author-category
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.48
+0.56
+0.64
+ROC AUC ↑
+rel-arxiv /
+paper-citation
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.75
+0.78
+0.81
+0.84
+ROC AUC ↑
+rel-event /
+user-ignore
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.72
+0.76
+0.80
+ROC AUC ↑
+rel-f1 /
+driver-dnf
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.64
+0.66
+0.68
+0.70
+ROC AUC ↑
+rel-hm /
+user-churn
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.550
+0.575
+0.600
+0.625
+ROC AUC ↑
+rel-avito /
+user-clicks
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.62
+0.64
+0.66
+0.68
+ROC AUC ↑
+rel-avito /
+user-visits
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.255
+0.270
+0.285
+MAE ↓
+rel-event /
+user-attendance
+1
+3
+5
+7
+10
+Fine-tuning epoch
+3.0
+3.5
+4.0
+MAE ↓
+rel-f1 /
+driver-position
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.070
+0.075
+0.080
+MAE ↓
+rel-hm /
+item-sales
+1
+3
+5
+7
+10
+Fine-tuning epoch
+0.04
+0.06
+0.08
+MAE ↓
+rel-avito /
+ad-ctr
+TS: Temp-Sub
+Solid: direct pretraining
+Dashed: TS → objective
+Seed 43; full transfer
+Raw epoch values
+No smoothing
+THGFM · TimeMix + TimeRoPE | Downstream validation (seed 43)
+CTRL
+TS → CTRL
+TGPM
+TS → TGPM
+TVE
+TS → TVE
+Figure 30: Fine-tuning validation metrics for THGFM with TIMEMIX and TIMEROPE: CTRL,
+TGPM, TVE, and their TS-initialized variants.
+37
