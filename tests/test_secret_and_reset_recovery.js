@@ -26,7 +26,7 @@ function sandbox() {
 function secretSandbox() {
   const s = sandbox();
   const code = fs.readFileSync('app/secret.session.js', 'utf8')
-    .replace(/\}\)\(\);\s*$/, 'window.probe = {fetchStaticSecretPayload, pingChatModels, init, resolveRerankerConfig, RERANKER_PROFILES};})();');
+    .replace(/\}\)\(\);\s*$/, 'window.probe = {fetchStaticSecretPayload, putGithubSecret, pingChatModels, init, resolveRerankerConfig, RERANKER_PROFILES};})();');
   vm.runInContext(code, s.context);
   return s;
 }
@@ -70,6 +70,29 @@ async function testDeepSeekTimeoutAndHttpError() {
   assert.equal(timers.size, 0);
   context.fetch = async () => response(401);
   await assert.rejects(context.window.probe.pingChatModels(entries, null), /HTTP 401/);
+}
+
+async function testGithubSecretTransientWriteRecovery() {
+  const { context } = secretSandbox();
+  context.setTimeout = fn => { queueMicrotask(fn); return 1; };
+  const options = { method: 'PUT', body: '{"encrypted_value":"test-ciphertext"}' };
+  const writes = [];
+  context.fetch = async (url, request) => {
+    writes.push({ url, request });
+    if (writes.length === 1) throw new TypeError('Failed to fetch');
+    return response(writes.length === 2 ? 503 : 204);
+  };
+  await context.window.probe.putGithubSecret('https://api.github.com/test-secret', options, 'SUMMARY_BASE_URL');
+  assert.equal(writes.length, 3);
+  assert.ok(writes.every(write => write.request === options));
+  let calls = 0;
+  context.fetch = async () => { calls++; return response(401); };
+  await assert.rejects(context.window.probe.putGithubSecret('https://api.github.com/test-secret', options, 'SUMMARY_BASE_URL'), /HTTP 401/);
+  assert.equal(calls, 1);
+  calls = 0;
+  context.fetch = async () => { calls++; return response(500); };
+  await assert.rejects(context.window.probe.putGithubSecret('https://api.github.com/test-secret', options, 'SUMMARY_BASE_URL'), /HTTP 500/);
+  assert.equal(calls, 3);
 }
 
 async function testSecretErrorUiPreservesPasswordAndCanRetry() {
@@ -174,7 +197,7 @@ async function testLegacyLocalRerankerMovesToCloud() {
 }
 
 (async () => {
-  for (const test of [testLegacyLocalRerankerMovesToCloud, testSecretReadFailuresAndRetry, testDeepSeekTimeoutAndHttpError, testSecretErrorUiPreservesPasswordAndCanRetry,
+  for (const test of [testLegacyLocalRerankerMovesToCloud, testSecretReadFailuresAndRetry, testDeepSeekTimeoutAndHttpError, testGithubSecretTransientWriteRecovery, testSecretErrorUiPreservesPasswordAndCanRetry,
     testResetWaitsForAcknowledgement, testWorkflowReturnsDispatchResultBeforeMonitoring]) {
     await test();
     console.log(test.name + ' passed');
