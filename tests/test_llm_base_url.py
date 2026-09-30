@@ -7,10 +7,22 @@ from unittest.mock import MagicMock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from llm import LLMClient
+from llm import LLMClient, DeepSeekClient
 
 
 class LlmBaseUrlTest(unittest.TestCase):
+    @patch("llm.requests.post")
+    def test_paratera_uses_its_endpoint_and_case_sensitive_model_id(self, mock_post):
+        mock_post.return_value = self._mock_response()
+        client = DeepSeekClient(
+            api_key="test-only",
+            model="DeepSeek-V4-Flash",
+            base_url="https://llmapi.paratera.com/v1",
+        )
+        client.chat([{"role": "user", "content": "hello"}])
+        self.assertEqual(mock_post.call_args.args[0], "https://llmapi.paratera.com/v1/chat/completions")
+        self.assertEqual(mock_post.call_args.kwargs["json"]["model"], "DeepSeek-V4-Flash")
+
     def _mock_response(self):
         resp = MagicMock()
         resp.raise_for_status.return_value = None

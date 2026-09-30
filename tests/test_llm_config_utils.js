@@ -8,6 +8,7 @@ const {
   resolveSummaryLLM,
   inferProviderType,
   getDeepSeekPreset,
+  inferDeepSeekPreset,
   inferChatApiProfile,
   resolveJsonResponseMode,
   isDeepSeekV4Model,
@@ -111,6 +112,15 @@ function testGetDeepSeekPreset() {
   assert.equal(getDeepSeekPreset('other-b'), null);
   assert.equal(getDeepSeekPreset('other-c'), null);
   assert.equal(getDeepSeekPreset('other-d'), null);
+  assert.deepEqual(getDeepSeekPreset('paratera'), {
+    key: 'paratera', label: '并行科技',
+    baseUrl: 'https://llmapi.paratera.com/v1',
+    models: ['DeepSeek-V4-Flash', 'DeepSeek-V4-Pro'],
+  });
+  assert.equal(inferDeepSeekPreset('https://llmapi.paratera.com/v1/'), 'paratera');
+  assert.equal(inferDeepSeekPreset('https://llmapi.paratera.com'), 'paratera');
+  assert.equal(inferDeepSeekPreset('https://api.deepseek.com/v1'), 'deepseek');
+  assert.equal(inferDeepSeekPreset('https://llmapi.paratera.com.example.org/v1'), null);
 }
 
 function testInferChatApiProfile() {
@@ -185,6 +195,12 @@ function testShouldUseXApiKeyHeader() {
 }
 
 function testBuildStreamingChatPayload() {
+  assert.deepEqual(buildStreamingChatPayload({
+    baseUrl: 'https://llmapi.paratera.com/v1', model: 'DeepSeek-V4-Flash',
+    messages: [{ role: 'user', content: 'hi' }],
+  }), {
+    model: 'DeepSeek-V4-Flash', messages: [{ role: 'user', content: 'hi' }], stream: true,
+  });
   assert.deepEqual(
     buildStreamingChatPayload({
       baseUrl: 'https://api.deepseek.com',
@@ -216,6 +232,11 @@ function testBuildStreamingChatPayload() {
 }
 
 function testBuildConnectivityTestPayload() {
+  const parateraPayload = buildConnectivityTestPayload({
+    baseUrl: 'https://llmapi.paratera.com/v1', model: 'DeepSeek-V4-Flash',
+  });
+  assert.equal(parateraPayload.model, 'DeepSeek-V4-Flash');
+  assert.deepEqual(parateraPayload.thinking, { type: 'disabled' });
   assert.deepEqual(
     buildConnectivityTestPayload({
       baseUrl: 'https://api.deepseek.com',
