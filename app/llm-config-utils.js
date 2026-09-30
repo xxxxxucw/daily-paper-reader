@@ -20,6 +20,12 @@
       baseUrl: 'https://api.deepseek.com',
       models: Object.freeze(['deepseek-v4-flash', 'deepseek-v4-pro']),
     }),
+    paratera: Object.freeze({
+      key: 'paratera',
+      label: '并行科技',
+      baseUrl: 'https://llmapi.paratera.com/v1',
+      models: Object.freeze(['DeepSeek-V4-Flash', 'DeepSeek-V4-Pro']),
+    }),
   });
 
   const normalizeText = (value) => String(value || '').trim();
@@ -131,6 +137,14 @@
     };
   };
 
+  const inferDeepSeekPreset = (baseUrl) => {
+    const base = normalizeBaseUrlForStorage(baseUrl).replace(/\/v\d+$/i, '').toLowerCase();
+    const preset = Object.values(DEEPSEEK_PRESETS).find((item) => (
+      normalizeBaseUrlForStorage(item.baseUrl).replace(/\/v\d+$/i, '').toLowerCase() === base
+    ));
+    return preset ? preset.key : null;
+  };
+
   const inferChatApiProfile = (baseUrl, model) => {
     const normalizedBaseUrl = normalizeBaseUrlForStorage(baseUrl || '').toLowerCase();
     const normalizedModel = normalizeText(model || '').toLowerCase();
@@ -153,8 +167,7 @@
   };
 
   const resolveMaxOutputTokens = ({ baseUrl, model } = {}) => {
-    const profile = inferChatApiProfile(baseUrl, model);
-    if (profile === 'deepseek' && isDeepSeekV4Model(model)) {
+    if (inferDeepSeekPreset(baseUrl) === 'deepseek' && isDeepSeekV4Model(model)) {
       return DEEPSEEK_V4_MAX_OUTPUT_TOKENS;
     }
     return null;
@@ -179,7 +192,7 @@
 
   const buildConnectivityTestPayload = ({ baseUrl, model }) => {
     const normalizedModel = normalizeText(model);
-    return {
+    const payload = {
       model: normalizedModel,
       messages: [
         {
@@ -194,6 +207,10 @@
       temperature: 0,
       max_tokens: 256,
     };
+    if (inferDeepSeekPreset(baseUrl) === 'paratera') {
+      payload.thinking = { type: 'disabled' };
+    }
+    return payload;
   };
 
   return {
@@ -208,6 +225,7 @@
     resolveSummaryLLM,
     inferProviderType,
     getDeepSeekPreset,
+    inferDeepSeekPreset,
     inferChatApiProfile,
     resolveJsonResponseMode,
     isDeepSeekV4Model,
