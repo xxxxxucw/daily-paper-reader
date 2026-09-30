@@ -1,0 +1,1053 @@
+Title: QUARTET: Quad-branch cross-Attention and Random-walk Traces for Enhancing Transformers on Relational Graphs
+
+URL Source: https://arxiv.org/pdf/2609.26855v2
+
+Published Time: Fri, 25 Sep 2026 01:33:14 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# QUARTET : QUad-branch cross-Attention and Random-walk Traces for Enhancing Transformers on Relational Graphs 
+
+Kyaw Hpone Myint * Nan Jiang † Xiang Li †
+
+Zhe Wu † Alexandre G.R. Day Pranab Mohanty Giri Iyengar 
+
+Capital One 
+
+{kyaw.hponemyint, nan.jiang, xiang.li, zhe.wu alexandre.day, pranab.mohanty, giridharan.iyengar}@capitalone.com 
+
+## Abstract 
+
+Relational Deep Learning (RDL) models multi-table databases as heterogeneous temporal graphs, and graph transformers currently achieve state-of-the-art per-formance on benchmarks like R EL BENCH . However, the current leading model, RelGT, suffers from two key limitations: its random local sampler yields loosely connected subgraphs that hinder message passing, and its global attention module relies on a single, seed-feature-based memory that ignores broader macro-level dynamics. To overcome these limitations, we introduce Q UARTET , an expressive graph transformer architecture that applies full self-attention on local subgraphs while enriching global context through cross-attention branches. Specifically, QUARTET employs a Causal Random Walk (CRW) sampler based on recency-truncated Personalized PageRank (PPR) to extract compact, hub-robust, and densely connected local subgraphs without temporal leakage. Concurrently, a quad-branch cross-attention module integrates global context from four com-plementary perspectives: seed feature, seed topology, temporal dynamics, and collaborative dynamics. Across the R EL BENCH v1 classification tasks, Q UARTET 
+
+consistently matches or outperforms the current state-of-the-art graph transformer baselines (HGT and RelGT). Ablation studies confirm that the CRW sampler sig-nificantly enriches local neighborhood quality, while the global branches provide essential, task-specific predictive gains. 
+
+## 1 Introduction 
+
+Relational databases (RDBs) [1] form the backbone of industrial machine learning by archiving extensive real-world datasets, such as financial logs and medical records. Through their intercon-nected, multi-table architectures, RDBs leverage primary-foreign key dependencies to explicitly trace how different entities engage and change over time. Predictive tasks over these databases, such as churn, sales forecasting, and recommendation, are central to modern enterprise machine learning. Yet extracting predictive signal from this data has historically required flattening its multi-table structure into a single feature table through labor-intensive, error-prone feature engineering [2] before handing it to tabular learners such as gradient-boosted decision trees [3, 4]. 
+
+Relational Deep Learning (RDL) removes this bottleneck by treating an RDB as a heterogeneous temporal graph [5–7] (rows become nodes and primary-foreign-key links become edges) and learning end-to-end over the resulting relational entity graph (REG) [8–12]. The standard RDL model is a heterogeneous message-passing GNN with time-aware neighbor sampling and per-type tabular encoders [13–16]. While such models capture local structure well, they inherit the documented limitations of message passing: bounded expressiveness [17–19] and an inability to model long-range dependencies without oversquashing information through narrow bottlenecks [20]. These limits are acute on REGs, where two rows in the same table interact only through multi-hop paths that traverse 
+
+> *
+
+First and corresponding author. 
+
+> †
+
+Equal contribution second authors. arXiv:2609.26855v2 [cs.LG] 24 Sep 2026 Published as a conference paper at Learning on Graphs (LoG) 2026 
+
+shared parents: a shallow GNN cannot connect them, yet stacking layers to reach them induces over-smoothing. 
+
+Graph Transformers (GTs) circumvent these topological constraints by replacing fixed-hop message passing with attention that reasons across structurally distant parts of the sampled subgraph [21–32]. GTs have thus emerged as a leading supervised RDL model, topping the standardized R EL BENCH 
+
+benchmark [33, 34]. Notable architectures include the Heterogeneous Graph Transformer (HGT) [35], which accommodates relational data using meta-relation-dependent attention and relative temporal encodings. The Relational Graph Transformer (RelGT) [36] augments a local-subgraph transformer with a global module that queries learnable centroids maintained by an EMA K-Means clustering. Meanwhile, the Relational Graph Perceiver (RGP) [37] compresses structural and temporal context through a Perceiver cross-attention bottleneck, making time an active modeling signal rather than just a filtering constraint. Building upon these advances, our work addresses two specific limitations in the strongest GT baseline, RelGT. First, its local sampling yields a loosely connected subgraph: RelGT populates each seed’s neighborhood by drawing one- and two-hop nodes largely at random, so many sampled nodes end up with no edge to the seed (or to one another) inside the subgraph, leaving the local transformer to pass messages across a fragmented, sparsely linked set of nodes. Second, its global context is narrow: RelGT’s global module attends only over the seed’s features, with no view of the seed’s surrounding topology or of broader signals such as which entities are active at the same time (temporal context) or behave in similar ways (collaborative context), so relevant context that lives in structurally distant parts of the graph never reaches the model. The first gap motivates our Causal Random Walk sampler, which concentrates the local subgraph on structurally relevant neighbors; the second motivates our quad-branch global module, which integrates feature, topological, temporal, and collaborative contexts to enrich the graph representation. 
+
+Contributions. To address these challenges, we introduce Q UARTET , a unified architecture that overcomes the limitations of existing relational deep learning models by seamlessly integrating enriched, localized structural dynamics with global, structurally distant graph contexts. Concretely, our main contributions are: 1. A Causal Random Walk (CRW) Sampler for Enriching Local Subgraphs: We propose a causal graph sampler that ranks a node’s neighbors based on localized random-walk estimations rather than uniform expansion. By regularizing against high-degree hubs and strictly enforcing temporal constraints, this approach extracts highly relevant, densely connected local subgraphs, which improves local message passing. 2. Task-Optimized Global Memory via Differentiable Codebooks: We introduce dual memory banks that capture recurring tabular and structural patterns. Using branch-specific cross-attention, the model assigns each seed node a soft membership to these global archetypes, effectively generalizing across disconnected seeds that share similar features or local topology profiles. 3. Asymmetric Cross-Attention for Distant Relational Context: To capture long-range temporal and collaborative dynamics, we design two specialized global branches. A Perceiver-style bottleneck compresses sprawling sequences of distant neighbors into fixed-capacity latents, enabling efficient macro-level reasoning across structurally distant graph nodes. 
+
+## 2 Methodology 
+
+In this section, we introduce Q UARTET (QUad-branch cross-Attention and Random-walk Traces for Enhancing Transformers on relational graphs), a general-purpose Transformer architecture designed for representation learning on heterogeneous temporal relational graphs. By seamlessly integrating fine-grained, local structural dynamics with global, structurally distant graph contexts, Q UARTET 
+
+provides a highly expressive framework for complex relational data. Figure 1 gives an end-to-end overview of the Q UARTET pipeline (graph construction, causal local and global sampling, tokenization, and attention-based prediction), while Figure 2 details the model architecture. This architecture is driven by three core components: (1) a Causal Random-Walk (CRW) subgraph sampler, which constructs a localized subgraph by ranking neighbors according to their recency-truncated Personalized PageRank (PPR) [38–41] relative to the seed—accumulated over short restart walks so that only the most topologically relevant neighbors are retained; (2) 
+
+> 2
+
+Published as a conference paper at Learning on Graphs (LoG) 2026 (2) Sample Relevant Local &                             
+
+> Global Neighbors
+> (3) Tokenize Nodes for Transformers (4 ) Model Training & Prediction
+> s1
+> t2
+> c3
+> c1
+> t3
+> t1
+> c2
+> s3 t4
+> s2
+> t5 t6
+> QUARTET Module
+> Local Self-Attention
+> (Structural Signal)
+> Seed Feature Archetypes
+> Global Cross-Attention
+> Seed Topology Archetypes
+> Collaborative Signal
+> Temporal Signal
+> s1 t2 c1 t3
+> s1 s3 s2 _ _ _
+> t2 t3 t1 t4 t5 t6
+> c3 c2 c1 _ _ _
+> B1 B2
+> ... ...
+> C1 C2
+> ... ...
+> ... ...
+> A1 A2 A3 A4
+> ... ... ... ...
+> ... ... ... ...
+> ... ... ... ...
+> (1) Convert Relational Tables
+> into Relational Graph
+> Output Head
+> primary- foreign
+> key links
+> Causal Random Walk Sampler
+> (Local Neighbors)
+> Temporal Sampler
+> (Global Neighbors)
+> t1
+> Collaborative Sampler
+> (Global Neighbors)
+
+Figure 1: Overview of the Q UARTET pipeline. (1) Relational tables are converted into a heteroge-neous temporal graph (§2.1). (2) Three causal samplers extract complementary context: CRW draws a dense local subgraph, while temporal and collaborative samplers gather global node sequences (§2.2). (3) Nodes are tokenized into fixed-length sequences (§2.3). (4) Local subgraphs feed into self-attention, while global sequences pass through a quad-branch cross-attention module before final fusion (§2.5). 
+
+a Local Module , which processes this sampled subgraph with full self-attention to capture fine-grained structural and temporal dependencies; (3) a Global Module , which captures macro-level graph dynamics via a quad-branch design. Within this module, the feature and topology branches extract global archetypes for the seed nodes, while the temporal and collaborative branches identify similarities across structurally distant nodes. We structure this section as follows: §2.1 details graph construction, §2.2 introduces the causal samplers, §2.3 covers tokenization, §2.4 and §2.5 present the Local and Global Attention Modules, and §2.6 outlines their fusion. 
+
+2.1 Relational Entity Graphs (REG) 
+
+To enable end-to-end learning without manual feature engineering, we convert relational databases into Relational Entity Graphs (REGs), the first stage of the pipeline in Figure 1. Formally, we model a REG as a heterogeneous temporal graph G = ( V, E, ϕ, ψ, τ ), where V is the set of nodes (entities) and E ⊆ V × V is the set of edges (primary-foreign key relationships). The mapping functions 
+
+ϕ : V → T and ψ : E → R assign nodes and edges to their respective source tables (node types) and relation types, where T is the set of node types (with |T | their number) and R is the set of relation types. Finally, τ : V ∪ E → R assigns timestamps to temporal entities, treating atemporal nodes as universally available and inducing edge timestamps as the maximum of their endpoints, 
+
+τ (e) = max {τ (u), τ (v)} for e = ( u, v ) ∈ E.Given a seed node vi ∈ V and a prediction time tseed , the objective is to produce an embedding of 
+
+vi strictly conditioned on information available at or before tseed , thereby enforcing a strict causal constraint that prevents temporal leakage. We enforce this constraint uniformly across the three samplers of §2.2: every edge traversed during sampling satisfies τ (e) ≤ tseed .
+
+2.2 Causal Samplers for Local and Global Context 
+
+QUARTET utilizes three seed-rooted causal samplers: CRW, temporal, and collaborative [Figure 1, stage (2)]. The CRW sampler extracts the causal local subgraph via random walk with restart and also provides the structural sketch for the topological codebook branch. In parallel, the temporal and collaborative samplers generate the fixed-length global neighbor sequences required by their respective Perceiver cross-attention branches. Finally, to prevent runtime bottlenecks, all local and global subgraphs are generated once per seed and cached into a memory-mapped file, eliminating the need for graph traversals during training. 
+
+3Published as a conference paper at Learning on Graphs (LoG) 2026 
+
+2.2.1 Causal Random Walk (CRW) Local Subgraph Sampler 
+
+Most standard subgraph extractors fill a K-token context by uniform neighborhood sampling or rigid per-type budgeting [13, 35, 42]. On graphs with high-degree hubs these are both computationally prohibitive (scaling with hub degree) and structurally blind (treating all neighbors equally). Con-sequently, they exhaust the token budget on random, disconnected slices of massive hubs, yielding sparse subgraphs that severely bottleneck downstream message passing. To address this limitation, our CRW sampler performs short restart walks from the seed node, ranking neighbors based on a truncated Monte-Carlo estimate of their causal PPR [38–41]. At each step, the walk either teleports back to the seed with probability p, or transitions to one of up to M valid causal neighbors of the current node. By default, we restrict this transition to the M = 50 most recent neighbors, thereby injecting a strong temporal prior into the sampling process. Accumulating visit frequencies across W independent walks of length L yields an empirical estimate of the seed’s causal PPR, which converges to the exact distribution as M, W → ∞ (Appendix A.1.2). Crucially, this M -truncation serves as a structural regularizer. By capping the per-step branching factor, it bounds the sampling complexity independently of the maximum hub degree and prevents massive hubs from acting as probability sinks. Consequently, the highest-ranked nodes, sharing dense structural pathways with the seed, induce a highly connected and relevance-weighted local subgraph. Detailed derivations of the walk kernel, PPR equivalence, subgraph connectivity, and sparse-neighborhood fallback policies are provided in Appendix A.1.2. The exact per-seed procedure is detailed in Algorithm 1 (Appendix A.1.1), with a full computational cost analysis in Appendix A.2.1. 
+
+2.2.2 Temporal Global Subgraph Sampler 
+
+While the temporal branch requires a global view of recent graph activities, naively selecting the top-K most recent nodes causes high-frequency tables (e.g., transactions) to disproportionately bias the sample, thereby starving slower-moving dimension tables. To address this, the temporal sampler extracts the most recent causal nodes per node type under a uniform type-specific budget 
+
+B = Ktemp /|T | , strictly retaining nodes within a temporal lookback window [tseed − ∆t, t seed ]. By executing a single backward-in-time scan, which halts once the time window is exceeded or all per-type budgets are met, we obtain a fixed-length, type-balanced sequence of Ktemp IDs (Algorithm 2, Appendix A.1.1). We set Ktemp = 300 and ∆t = 365 days. 
+
+2.2.3 Collaborative Neighbor Sampler 
+
+Complementary to the proximity- and recency-biased samplers, the collaborative branch captures long-horizon “lookalike” peers—nodes that exhibit substantial neighborhood overlap with the seed across its full causal history, independent of recency. This affinity is estimated using a two-hop random probe. By first sampling M1 of the seed’s causal neighbors and subsequently drawing M2 peers from each, a peer’s accumulated hit count serves as a Monte Carlo estimate of shared intermediaries (representing the numerator of a Jaccard similarity coefficient). Peers corresponding to the seed, its direct causal neighbors, or previously sampled entities are discarded. The top Kcollab remaining peers by hit count are then considered as collaborative neighbors (Algorithm 3 in Appendix A.1.1; derivation in Appendix A.1.3). We set M1 = M2 = 50 and Kcollab = 300 .
+
+2.3 Graph Tokenization 
+
+With the local subgraph sampled, we tokenize it for Transformer consumption: for each seed vi
+
+the context is a fixed-size set of K tokens—the seed and the K − 1 neighbors ranked by CRW visit frequency (§2.2.1). Rather than compressing all structural information into a single positional encoding, we decompose the token representation to explicitly model the distinct characteristics of relational data. Each token vj is a 5-tuple fused into a single embedding (Figure 2). Components include: a PyTorch Frame [43] feature embedding hfeat (vj ); one-hot encodings for node type ϕ(vj )
+
+and hop distance p(vi, v j ); a linear projection of relative time τ (vj )−τ (vi); and a Graph Isomorphism Network (GIN)-based positional encoding [44, 45] over the sampled subgraph using stochastic random features [36]. These five components are concatenated and mixed via Wmix ∈ Rd×5d to form 
+
+htoken (vj ) (exact formulas in Appendix A.1.4). The resulting length-K sequence is then processed by the Local Attention Module (§2.4). 
+
+> 4
+
+Published as a conference paper at Learning on Graphs (LoG) 2026 Node/feature Encoder  Type Encoder  Hop Encoder  Time Encoder  Graph PE Encoder    
+
+> Concatenate
+> In-Mixture MLP
+> Output Head
+> QUARTET Module
+> LocalModule
+> (Self-Attention)
+> LayerNorm
+> Concatenate
+> GlobalModule
+> (Quad Cross-Attention)
+> LayerNorm
+> Split
+> x (seed) x_set (seed + neighbors)
+> Split
+> Learned Global
+> Features/Topological
+> Archetypes
+> Proj Q
+> Cross-Attention
+> (Q, K, V)
+> LayerNorm
+> Concatenate
+> seed
+> Feat/Topo
+> Proj Q
+> Cross-Attention
+> (Q, K, V)
+> LayerNorm
+> Learned Latent
+> Tokens
+> Cross-Attention
+> (Q, K, V)
+> Collaborative/Temporal
+> Neighbors
+> K,V
+> K,V
+> x (seed) Q
+> GlobalModule (quad- branch cross- attention)
+> K,V Latent
+> Self-Attention
+> s1
+> t2
+> c1
+> t3
+> t1
+
+Figure 2: The Q UARTET model. Local tokens fuse five encodings (feature, type, hop, time, positional) via an MLP. Then, the full neighbor set is fed into the Local Module (self-attention), while the seed token queries the Global Module . This global module cross-attends the seed over learned feature and topological codebooks (§2.5.1) and over Perceiver latents compressing temporal and collaborative neighbors (§2.5.2). Finally, local and global embeddings are concatenated for downstream prediction. 
+
+2.4 Local Attention Module 
+
+We process the tokenized subgraph using an L-layer standard Transformer, applying all-pair self-attention [46] across all K tokens of the CRW-sampled subgraph. This unconstrained all-pair attention circumvents the traditional GNN bottleneck of localized message passing along connected edges, directly capturing long-range dependencies. The final local representation is computed as: 
+
+hlocal (vi) = Pool(FFN(SelfAttn( vi, {vj }Kj=1 )) L) (1) where Pool aggregates the sequence via a learned linear combination. The CRW formulation ensures these local self-attention layers operate on structurally dense, strictly causal neighborhoods, maximizing the token budget. 
+
+2.5 Global Attention Module 
+
+The Global Attention Module captures long-range relational context beyond the localized subgraph’s receptive field—such as structurally disconnected seed archetypes, concurrently active entities, and behaviorally similar peers located multiple hops away. Architecturally, it consists of four seed-conditioned branches grouped into two functional families with complementary structural goals. The first family consists of two codebook branches that extract the seed’s intrinsic tabular and topological properties by querying learnable archetype matrices. The second family consists of two cross-attention branches that model extrinsic interactions by compressing global temporal and collaborative neighbor sequences via a Perceiver-style bottleneck [47, 48]. Unlike prior approaches, all global branches share a unified query-driven bottleneck and are optimized end-to-end. A compact, learnable query set reads over a context tensor, ensuring that the output dimensionality is strictly bounded by a fixed query budget rather than scaling with variable neighborhood sizes. Formally, for a query set Q ∈ Rd×nq and context C ∈ Rd×nc whose columns are tokens, with projection matrices 
+
+WQ, W K , W V across H heads ( dk = d/H ), the shared multi-head scaled dot-product cross-attention operator [46] applies each projection on the left and normalizes the softmax over the context axis: 
+
+CrossAttn( Q, C ) = ( WV C) softmax 
+
+ (WK C)⊤(WQQ)
+
+√dk
+
+
+
+. (2) 
+
+2.5.1 Feature and Topological Codebook Branches 
+
+Intuitively, the two codebook branches assign each seed a soft membership over a bank of global archetypes: learned prototypes that summarize recurring feature and structural profiles across the entire database. Because these archetypes are shared globally rather than read off the seed’s sampled neighborhood, they let the model relate structurally disconnected nodes that never co-occur in any subgraph. For example, low- versus high-spend customers are routed to different archetypes according to their tabular attributes (feature codebook) and their local connectivity signature (topological codebook), even when no path in the graph links them. 
+
+5Published as a conference paper at Learning on Graphs (LoG) 2026 
+
+Each codebook branch queries a learnable archetype matrix, denoted as Estruct or Efeat , using the cross-attention operator where the seed token serves as the query [Figure 2]. To maximize computational efficiency, the key and value projections for both matrices are cached and shared across the batch. For a given branch b ∈ { feat , struct }, we project a seed query qb through a two-layer GELU multi-layer perceptron (MLP) and compute the cross-attention against its corresponding archetype matrix Eb:
+
+Xb = CrossAttn  MLP b(qb), E b
+
+. (3) The feature query, qfeat = hfeat (vi), reuses the tabular embedding of the seed generated by the local module. This yields a soft readout of the semantic profile of the seed without introducing additional encoding overhead. Conversely, the structural query summarizes the causal one-hop neighborhood of the seed via a structural sketch Fsketch (vi). This sketch concatenates four scalar random-walk statistics with a per-type degree histogram c, formulated as: 
+
+Fsketch (vi) = log  1 + [ dc, s, ρ, π max , c ]. (4) Here dc is the causal degree (the number of one-hop neighbors with τ (e) ≤ tseed ), s the temporal span of those neighbors ( tmax − tmin ), ρ = dc/s their arrival density, and πmax the peak causal-PPR mass (the largest CRW visit count), while c ∈ R|T | is the per-type degree histogram counting causal neighbors of each node type. The elementwise log(1 + ·) compresses these heavy-tailed statistics and ensure empty neighborhoods are mapped to zero, yielding a compact, permutation-invariant fingerprint of the seed’s local connectivity: its size, temporal extent, interaction rate, dominant-neighbor concentration, and type mix. Applying Batch Normalization and an MLP projection to this sketch yields qstruct = BN  Fsketch (vi), which provides a soft summary over the global topological archetypes to capture structural homophily. 
+
+2.5.2 Temporal and Collaborative Cross-Attention Branches 
+
+To circumvent the quadratic cost of full self-attention over extended neighbor sequences, the temporal and collaborative branches each employ an asymmetric cross-attention bottleneck. Each track 
+
+b ∈ { temp , collab } (indexed as in §2.5.1) instantiates its own learnable latent set Zb 
+
+> 0
+
+∈ Rd×Lperc ;the two branches are separate bottlenecks and share no latent tokens. For branch b, these latents cross-attend over the branch context Cb—the featurized set of sampled temporal or collaborative neighbors (§2.2)—with a residual connection: 
+
+Zb = Zb 
+
+> 0
+
++ CrossAttn( Zb
+
+> 0
+
+, Cb), b ∈ { temp , collab }. (5) The temporal context Ctemp is constructed from recently active nodes to isolate transient global phenomena, such as transactional waves, independently of spatial topology. For instance, in the Formula-1 tasks (driver-top3, driver-dnf), a driver’s finishing outcome is shaped by conditions that act on the entire grid at once—such as weather or a safety-car period—signals that live in concurrently active nodes rather than in the driver’s own local neighborhood. In contrast, the collaborative context 
+
+Ccollab aggregates highly co-occurring, multi-hop peers to distill long-term behavioral affinities and shared archetypes while strictly bypassing recency bias. For instance, in e-commerce (rel-amazon) or fashion retail (rel-hm), two customers who never transact together may still be strong lookalikes if they repeatedly buy the same products, and their history is highly predictive for repeat-purchase and churn targets. Rather than pooling the two blocks in isolation, we let them exchange information before readout: the latent blocks are concatenated along the token axis, jointly reasoned over by a shared stack of Lsa 
+
+pre-LN self-attention layers ( Lsa = 4 ), and split back into per-branch halves, 
+
+[ ˜Zcollab ∥ ˜Ztemp ] = SelfAttn  [ Zcollab ∥ Ztemp ]. (6) This cross-branch reasoning step lets the temporal and collaborative latents attend to one another, so each track is refined in the context of the other rather than in isolation. Each refined block is then collapsed to a flat vector by a seed-conditioned cross-attention read that reuses the single-token query convention of §2.5.1, with the projected seed token qseed as the query: 
+
+hb = CrossAttn( qseed , ˜Zb), b ∈ { temp , collab }. (7) The resulting vectors htemp , h collab ∈ Rd are forwarded to the final fusion (§2.6). 
+
+> 6Published as a conference paper at Learning on Graphs (LoG) 2026
+
+2.6 Final Fusion 
+
+The outputs of the four global branches ( Xstruct , X feat , h collab , h temp ) are normalized via indepen-dent LayerNorm ( LN ) layers, concatenated with the local embedding hlocal , and linearly projected back to d dimensions: 
+
+hfused = Wproj 
+
+ hlocal ∥ LN( Xstruct ) ∥ LN( Xfeat ) ∥ LN( hcollab ) ∥ LN( htemp ) . (8) The prediction head subsequently computes the target output as yvi = head(FFN( hfused )) . By concatenating rather than summing these distinct channels, we preserve their semantic separability and enable Wproj to learn an expressive, per-branch mixing rule tailored for downstream tasks. 
+
+## 3 Experimental Setup 
+
+We evaluate our architecture across twelve binary-classification tasks derived from seven R EL BENCH 
+
+datasets [34], which span diverse real-world domains such as Formula-1 racing, event recommen-dation, clinical trials, online advertising, e-commerce, fashion retail, and Q&A communities. We use ROC-AUC as the primary evaluation metric and report test ROC-AUC for the model selected on the validation split. All models are trained end-to-end using the Adam optimizer. To accommodate varying computational demands, small tasks (<1M training nodes) are trained on a single A100 GPU, whereas large tasks (>1M training nodes) utilize four A100 GPUs. To eliminate runtime traversal overhead, every subgraph is pre-computed and cached offline prior to training. Following a similar hyperparameter tuning strategy to that described in the RelGT paper, we adjust the number of local layers ( Llocal ), dropout, and weight decay on a per-task basis. Specifically, we search 
+
+Llocal ∈ { 1, 4, 8} for small datasets, while compute constraints require us to fix Llocal = 4 for large datasets (detailed in Appendix A.3.3). Furthermore, the quad-branch capacity—specifically the Perceiver latent budget Lperc and codebook size Rstruct = Rfeat —is configured per task (see Appendix A.3.4), and the CRW local sampler alongside the collaborative and temporal branches each uses token budget of K = 300 . Full configuration grids, sampler settings, and infrastructure details are provided in Appendix A.3.1. While we retain the twelve classification tasks established in REL BENCH v1 to align with prior work, all data processing and feature tokenization are executed through the updated, more rigorous R EL BENCH v2 pipeline (using the most up-to-date datasets) [34]. To ensure a fair evaluation across all models, we reproduced both graph-transformer baselines (HGT and RelGT) from scratch under this shared v2 pipeline, utilizing the original authors’ reported hyper-parameters. Finally, to account for architectural stochasticity, all experiments for both the baselines and Q UARTET are averaged across n = 4 random seeds. 
+
+## 4 Results and Discussion 
+
+We evaluate Q UARTET in three stages. First, we isolate the performance improvements of the causal random-walk sampler (CRW) by swapping out the default 2-hop BFS sampler with CRW in the current state-of-the-art RelGT workflow (§4.1). Second, we benchmark the complete Q UARTET 
+
+model against previous SOTA baselines on the R EL BENCH v1 classification tasks (§4.2). Finally, we conduct a leave-one-out ablation study to determine the specific contributions of the local module, the CRW sampler, and each of the four global branches (§4.3). 
+
+4.1 Causal Random-Walk Sampling Allows Better Graph Representation Learning with Fewer Local Attention Layers 
+
+In this section, we test the hypothesis that ranking a seed’s neighbors by causal random walk, yields a more natural, better-connected subgraph than uniform neighbor selection, and that this structurally relevant local context lets the encoder learn substantially stronger graph representations. To isolate the sampler from every other design choice, we hold the base RelGT architecture [36] fixed and vary only the neighbor sampler. The baseline relies on RelGT’s native naive sampler, which draws neighbors uniformly at random from the seed’s one- and two-hop (BFS) neighborhood. Our system substitutes this with the PPR-ranked CRW sampler. To ensure a fair comparison, both configurations utilize the same local attention architecture and follow an identical restricted hyperparameter tuning protocol (optimizing for layers, dropout, and weight decay), as detailed in Appendix A.3.3. We report the test ROC-AUC for all classification tasks in R EL BENCH v1. 
+
+> 7
+
+Published as a conference paper at Learning on Graphs (LoG) 2026 rel-amazon item-churn rel-amazon user-churn rel-avito user-clicks rel-avito user-visits rel-event user-ignore rel-event user-repeat rel-f1 driver-dnf rel-f1 driver-top3 rel-hm user-churn rel-stack user-badge rel-stack user-engagement rel-trial study-outcome    
+
+> 0.60 0.65 0.70 0.75 0.80 0.85 0.90 Test AUC-ROC  L=4 L=4
+> L=8
+> L=8
+> L=8 L=8 L=4
+> L=4
+> L=4 L=4 L=4
+> L=8
+> L=4 L=4
+> L=1 L=8
+> L=1 L=4
+> L=4
+> L=1
+> L=4 L=4 L=4
+> L=1
+> BFS2 CRW
+
+Figure 3: Per-task test ROC-AUC on the R EL BENCH classification tasks for the PPR-ranked CRW sampler ( CRW , blue) against RelGT’s naive uniform one-/two-hop sampler ( BFS2 , orange) on a fixed RelGT architecture. Each bar is annotated with the selected number of local layers Llocal .
+
+Table 1: Test ROC-AUC (mean ± std) on the R EL BENCH classification suite. ∆% compares QUARTET with RelGT (positive = gain); bold marks the best mean in each row. 
+
+Dataset Task HGT RelGT QUARTET ∆% vs. RelGT rel-amazon item-churn 0.7758 ± 0.0075 0.8249 ± 0.0005 0.8262 ± 0.0010 +0 .2
+
+user-churn 0.6626 ± 0.0041 0.7024 ± 0.0015 0.7001 ± 0.0016 −0.3
+
+rel-avito user-clicks 0.6501 ± 0.0104 0.6425 ± 0.0159 0.6481 ± 0.0122 +0 .9
+
+user-visits 0.6410 ± 0.0068 0.6639 ± 0.0020 0.6508 ± 0.0050 −2.0
+
+rel-event user-ignore 0.7256 ± 0.0080 0.7348 ± 0.0183 0.7392 ± 0.0035 +0 .6
+
+user-repeat 0.7539 ± 0.0157 0.7160 ± 0.0316 0.7563 ± 0.0175 +5 .6
+
+rel-f1 driver-dnf 0.6595 ± 0.0627 0.7133 ± 0.0416 0.7044 ± 0.0180 −1.2
+
+driver-top3 0.7384 ± 0.0574 0.8067 ± 0.0402 0.8517 ± 0.0156 +5 .6
+
+rel-hm user-churn 0.6746 ± 0.0036 0.6975 ± 0.0016 0.6976 ± 0.0011 +0 .01 
+
+rel-stack user-badge 0.8688 ± 0.0025 0.8764 ± 0.0016 0.8528 ± 0.0094 −2.7
+
+user-engagement 0.8899 ± 0.0018 0.9047 ± 0.0009 0.9063 ± 0.0010 +0 .2
+
+rel-trial study-outcome 0.6345 ± 0.0251 0.6632 ± 0.0177 0.7059 ± 0.0044 +6 .4
+
+Figure 3 demonstrates that the CRW sampler matches or outperforms the RelGT baseline while requiring fewer local self-attention layers (annotated in green). By concentrating a seed’s most relevant neighbors into a compact, well-connected subgraph, CRW enables the local module to learn stronger representations with less depth. Ultimately, this sampler upgrade delivers both improved accuracy and a more efficient local module. A detailed subgraph connectivity analysis further confirming that CRW extracts denser, more connected subgraphs than the BFS2 baseline is provided in Appendix A.4.1. For the experiments in the next section, we reused the result of hyperparameter search from this section for number of local layers Llocal , dropout, and weight decay (see Appendix A.3.3). 
+
+4.2 QUARTET Outperforms RelGT on Most Classification Tasks 
+
+Table 1 compares Q UARTET against leading graph transformers (HGT [35] and RelGT [36]) on the REL BENCH v1 classification tasks. Compared directly to its base architecture, Q UARTET improves on or matches RelGT on eight of twelve tasks. RelGT primarily maintains an advantage on large, stationary tasks where dense local topology dominates the predictive signal, rendering additional global branches redundant. Overall, Q UARTET is competitive with the strongest graph-transformer baselines and lifts its RelGT starting point on the classification tasks; the following ablation section (§4.3) isolates where these predictive gains originate. 
+
+8Published as a conference paper at Learning on Graphs (LoG) 2026 
+
+Table 2: Leave-one-out ablation of Q UARTET : entries are the relative change in test ROC-AUC (%) vs. the full model. Cell color encodes the change (red = decrease, blue = increase; darker is larger in magnitude, with the diverging scale saturating at −10% and +1% ). Columns are grouped into attention variants (No Local, No Perceiver), sampler mechanisms (No CRW, No Hub Trunc., No Restart), and global branches (No Temp., No Collab., No Feat., No Struct.). For each task, the largest drop among the four global-branch columns is marked with a solid border .                                                                                                                                              
+
+> Dataset Task No No No No Hub No No No No No Local Perc. CRW Trunc. Restart Temp. Collab. Feat. Struct. rel-amazon item-churn −9.8−0.2−0.2−0.2−0.1−0.2−0.1−0.1−0.1
+> user-churn −5.3+0 .1−1.1−0.3−0.7−0.1+0 .1−0.4−0.6
+> rel-avito user-clicks −8.2−2.1+0 .8+0 .6−10 .1−1.1−4.0−5.7−1.8
+> user-visits −1.5−0.01 −1.2+0 .01 −0.9−1.1−3.3−0.8−2.7
+> rel-event user-ignore +4 .7−0.8−0.8+0 .01 −0.2−1.6−1.7−1.3+0 .2
+> user-repeat −25 .4−1.8−6.1−10 .4−2.3−3.7−1.5−2.7−1.6
+> rel-f1 driver-dnf −4.3−5.7−0.4+0 .8+0 .2−4.7−2.8−3.6−3.4
+> driver-top3 −16 .9−7.0−3.5−8.9−4.0−4.5−3.7−1.3−3.2
+> rel-hm user-churn −3.3−0.1−0.2+0 .2−0.2−0.4−0.1−0.3−0.3
+> rel-stack user-badge −4.1−7.8−2.2−3.1−4.8−4.3−4.4−3.0−2.5
+> user-engagement −4.6+0 .01 −0.1−0.01 −0.1−0.1−0.2−0.3−0.2
+> rel-trial study-outcome −1.9−0.6−3.6−0.3−1.8−1.8−0.2−1.2−2.4
+> Average −6.7−2.2−1.6−1.8−2.1−2.0−1.8−1.7−1.5
+
+4.3 CRW Enriches Local Context While Global Branches Add Complementary Gains 
+
+To rigorously isolate the individual contributions of each architectural component, we conduct a leave-one-out ablation study (Table 2). Starting from the full Q UARTET model, we systematically remove a single component and record the relative changes in test ROC-AUC. A performance degradation indicates that the ablated component provided essential predictive signals that the remaining architecture could not independently recover. Appendix Table 9 reports the full mean ± std values underlying these relative changes, with statistically significant drops highlighted. 
+
+Architecture ablation. Removing the local module and CRW sampler ("No Local" configuration) yields the steepest average performance drop ( 6.7% ), confirming local topology as the primary predictive signal. However, this is task-dependent; for example, removing local context actively improves performance on rel-event user-ignore. We also probe the design of the global module by replacing the Perceiver bottleneck with direct full self-attention between the seed and its global neighbor sequences (“No Perceiver”). This variant degrades performance by 2.2% on average, confirming that the latent bottleneck improves representation quality rather than serving as a mere efficiency shortcut. 
+
+Sampler ablation. Substituting CRW with a naive BFS2 expansion (“No CRW”) degrades per-formance by 1.6% on average. As expected, the tasks that suffer the steepest performance drops largely align with the tasks that saw the largest CRW-driven gains in our standalone sampler study (§4.1), confirming that the local encoder relies heavily on CRW’s structurally dense topology. To further dissect the CRW sampler, we ablate its two key mechanisms: hub-degree truncation (“No Hub Trunc.”) and the restart probability (“No Restart”). Disabling hub truncation degrades performance by 1.8% on average. This drop is especially severe in the rel-event user-repeat and rel-f1 driver-top3 tasks, where high-degree hub nodes will dominate walk distributions if left unchecked. Removing the restart mechanism yields a comparable average drop of 2.1% , most acutely on rel-avito user-clicks and rel-stack user-badge, indicating that restart-driven locality is important when the predictive signal concentrates near the seed node. Because these 1.8% and 2.1% drops exceed the 1.6% penalty of 
+
+> 9Published as a conference paper at Learning on Graphs (LoG) 2026
+
+dropping CRW entirely, this confirms both mechanisms are essential; without them, CRW actually underperforms a naive BFS2 sampler. 
+
+Quad-branch ablation. The four global branches (Temporal, Collaborative, Feature, and Struc-tural) act as complementary boosters, yielding average gains of 2.0% , 1.8% , 1.7% , and 1.5% ,respectively. No single branch is globally redundant, as the dominant component shifts dynamically across tasks (solid borders, Table 2), though the temporal branch sustains the largest drop on half of the evaluation tasks. Ultimately, this ablation suggests that Q UARTET ’s empirical strength stems from resolving hub-sensitivity via PPR-ranked sampling and augmenting the local signal with rich, complementary global context. 
+
+## 5 Conclusion 
+
+In this work, we introduced Q UARTET , a quad-branch architecture extending Relational Graph Transformer (RelGT) by augmenting local subgraphs with a Causal Random Walk (CRW) sampler and incorporating global context via Perceiver- and codebook-style cross-attention branches. Evaluated on the R EL BENCH v1 classification benchmark, Q UARTET achieves competitive performance against strong graph-transformer baselines, matching or outperforming the original RelGT model on eight of twelve tasks and securing top test ROC-AUC on seven. While RelGT retains an edge on a few large, stationary tasks, our ablations demonstrate the distinct utility of Q UARTET ’s individual components. Specifically, the CRW sampler ranks neighbors via a causal PPR estimate and serves as a compelling alternative to uniform BFS expansion, markedly improving test performance while requiring fewer attention layers. Furthermore, leave-one-out experiments confirm that global context complements rather than replaces local topology: removing the local module (and CRW sampler along with it) causes the most severe performance drop as expected, whereas the four global branches supply complementary and task-dependent signals. Together, these findings demonstrate that Q UARTET 
+
+provides a promising framework for enriching supervised RDL models with global relational context while preserving crucial local attention mechanisms. 
+
+## 6 Future Directions 
+
+While our current evaluation focuses on twelve binary classification tasks, future work will extend QUARTET to encompass regression modeling and pair-wise link prediction. For link prediction, the architecture can be readily adapted by treating candidate entities as independent seed nodes, extracting their enriched graph embeddings through our pipeline, and applying a shallow classifier to evaluate their relational affinity. Similarly, the model can natively support regression tasks by modifying the final prediction head to output continuous target variables. Furthermore, to validate the architecture’s scalability and generalizability in highly realistic enterprise resource planning (ERP) environments, we plan to comprehensively benchmark QUARTET on the SALT dataset. 
+
+## References 
+
+[1] Edgar F. Codd. A relational model of data for large shared data banks. Communications of the ACM , 13(6):377–387, 1970. doi: 10.1145/362384.362685. 1 [2] James Max Kanter and Kalyan Veeramachaneni. Deep feature synthesis: Towards automating data science endeavors. In 2015 IEEE International Conference on Data Science and Advanced Analytics , DSAA ’15, pages 1–10. IEEE, 2015. doi: 10.1109/DSAA.2015.7344858. 1 [3] Tianqi Chen and Carlos Guestrin. XGBoost: A scalable tree boosting system. In Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining ,KDD ’16, pages 785–794. Association for Computing Machinery, 2016. doi: 10.1145/2939672. 2939785. 1 [4] Guolin Ke, Qi Meng, Thomas Finley, Taifeng Wang, Wei Chen, Weidong Ma, Qiwei Ye, and Tie-Yan Liu. LightGBM: A highly efficient gradient boosting decision tree. In Advances in Neural Information Processing Systems , volume 30, pages 3146–3154, 2017. 1 
+
+> 10 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+[5] Rakshit Trivedi, Mehrdad Farajtabar, Prasenjeet Biswal, and Hongyuan Zha. DyRep: Learning representations over dynamic graphs. In International Conference on Learning Representations ,2019. 1 [6] Da Xu, Chuanwei Ruan, Evren Korpeoglu, Sushant Kumar, and Kannan Achan. Inductive repre-sentation learning on temporal graphs. In International Conference on Learning Representations ,2020. [7] Emanuele Rossi, Ben Chamberlain, Fabrizio Frasca, Davide Eynard, Federico Monti, and Michael Bronstein. Temporal graph networks for deep learning on dynamic graphs. In ICML 2020 Workshop on Graph Representation Learning , 2020. 1 [8] Matthias Fey, Weihua Hu, Kexin Huang, Jan Eric Lenssen, Rishabh Ranjan, Joshua Robinson, Rex Ying, Jiaxuan You, and Jure Leskovec. Position: Relational deep learning – graph representation learning on relational databases. In Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research ,pages 13592–13607. PMLR, 2024. 1 [9] Vijay Prakash Dwivedi, Charilaos Kanatsoulis, Shenyang Huang, and Jure Leskovec. Relational deep learning: Challenges, foundations and next-generation architectures. arXiv preprint arXiv:2506.16654 , 2025. [10] Tianlang Chen, Charilaos Kanatsoulis, and Jure Leskovec. RelGNN: Composite message passing for relational deep learning. In Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research , pages 8296–8312. PMLR, 2025. [11] Yiwen Yuan, Zecheng Zhang, Xinwei He, Akihiro Nitta, Weihua Hu, Dong Wang, Manan Shah, Shenyang Huang, Blaž Stojanoviˇ c, Alan Krumholz, Jan Eric Lenssen, Jure Leskovec, and Matthias Fey. ContextGNN: Beyond two-tower recommendation systems. arXiv preprint arXiv:2411.19513 , 2024. [12] Veronica Lachi, Antonio Longa, Beatrice Bevilacqua, Bruno Lepri, Andrea Passerini, and Bruno Ribeiro. Boosting relational deep learning with pretrained tabular models. arXiv preprint arXiv:2504.04934 , 2025. 1 [13] William L. Hamilton, Rex Ying, and Jure Leskovec. Inductive representation learning on large graphs. In Advances in Neural Information Processing Systems , volume 30, pages 1024–1034, 2017. 1, 4 [14] Thomas N. Kipf and Max Welling. Semi-supervised classification with graph convolutional networks. In International Conference on Learning Representations , 2017. [15] Michael Schlichtkrull, Thomas N. Kipf, Peter Bloem, Rianne van den Berg, Ivan Titov, and Max Welling. Modeling relational data with graph convolutional networks. In The Semantic Web , volume 10843 of Lecture Notes in Computer Science , pages 593–607. Springer, 2018. doi: 10.1007/978-3-319-93417-4_38. [16] Xiao Wang, Houye Ji, Chuan Shi, Bai Wang, Yanfang Ye, Peng Cui, and Philip S. Yu. Het-erogeneous graph attention network. In The World Wide Web Conference , WWW ’19, pages 2022–2032. Association for Computing Machinery, 2019. doi: 10.1145/3308558.3313562. 1 [17] Keyulu Xu, Weihua Hu, Jure Leskovec, and Stefanie Jegelka. How powerful are graph neural networks? In International Conference on Learning Representations , 2019. 1 [18] Christopher Morris, Martin Ritzert, Matthias Fey, William L. Hamilton, Jan Eric Lenssen, Gaurav Rattan, and Martin Grohe. Weisfeiler and Leman go neural: Higher-order graph neural networks. In Proceedings of the Thirty-Third AAAI Conference on Artificial Intelligence ,volume 33, pages 4602–4609. AAAI Press, 2019. doi: 10.1609/aaai.v33i01.33014602. [19] Andreas Loukas. What graph neural networks cannot learn: Depth vs width. In International Conference on Learning Representations , 2020. 1 [20] Uri Alon and Eran Yahav. On the bottleneck of graph neural networks and its practical implications. In International Conference on Learning Representations , 2021. 1 [21] Vijay Prakash Dwivedi and Xavier Bresson. A generalization of transformer networks to graphs. In AAAI Workshop on Deep Learning on Graphs: Methods and Applications , 2021. 2 
+
+> 11 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+[22] Chengxuan Ying, Tianle Cai, Shengjie Luo, Shuxin Zheng, Guolin Ke, Di He, Yanming Shen, and Tie-Yan Liu. Do transformers really perform badly for graph representation? In Advances in Neural Information Processing Systems , volume 34, pages 28877–28888, 2021. [23] Ladislav Rampasek, Mikhail Galkin, Vijay Prakash Dwivedi, Anh Tuan Luu, Guy Wolf, and Dominique Beaini. Recipe for a general, powerful, scalable graph transformer. In Advances in Neural Information Processing Systems , volume 35, pages 14501–14515, 2022. [24] Devin Kreuzer, Dominique Beaini, William L. Hamilton, Vincent Létourneau, and Pruden-cio Tossou. Rethinking graph transformers with spectral attention. In Advances in Neural Information Processing Systems , volume 34, pages 21618–21629, 2021. [25] Dexiong Chen, Leslie O’Bray, and Karsten Borgwardt. Structure-aware transformer for graph representation learning. In Proceedings of the 39th International Conference on Machine Learning , volume 162 of Proceedings of Machine Learning Research , pages 3469–3489. PMLR, 2022. [26] Jinsong Chen, Kaiyuan Gao, Gaichao Li, and Kun He. NAGphormer: A tokenized graph transformer for node classification in large graphs. In International Conference on Learning Representations , 2023. [27] Hamed Shirzad, Ameya Velingker, Balaji Venkatachalam, Danica J. Sutherland, and Ali Kemal Sinop. Exphormer: Sparse transformers for graphs. In Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research ,pages 31613–31632. PMLR, 2023. [28] Qitian Wu, Wentao Zhao, Chenxiao Yang, Hengrui Zhang, Fan Nie, Haitian Jiang, Yatao Bian, and Junchi Yan. SGFormer: Simplifying and empowering transformers for large-graph representations. In Advances in Neural Information Processing Systems , volume 36, pages 64753–64773, 2023. [29] Kezhi Kong, Jiuhai Chen, John Kirchenbauer, Renkun Ni, C. Bayan Bruss, and Tom Goldstein. GOAT: A global transformer on large-scale graphs. In Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research ,pages 17375–17390. PMLR, 2023. [30] Grégoire Mialon, Dexiong Chen, Margot Selosse, and Julien Mairal. GraphiT: Encoding graph structure in transformers. arXiv preprint arXiv:2106.05667 , 2021. [31] Qiheng Mao, Zemin Liu, Chenghao Liu, and Jianling Sun. HINormer: Representation learning on heterogeneous information networks with graph transformer. In Proceedings of the ACM Web Conference 2023 , pages 599–610, 2023. doi: 10.1145/3543507.3583493. [32] Petar Veliˇ ckovi´ c, Guillem Cucurull, Arantxa Casanova, Adriana Romero, Pietro Liò, and Yoshua Bengio. Graph attention networks. In International Conference on Learning Representations ,2018. 2 [33] Joshua Robinson, Rishabh Ranjan, Weihua Hu, Kexin Huang, Jiaqi Han, Alejandro Dobles, Matthias Fey, Jan Eric Lenssen, Yiwen Yuan, Zecheng Zhang, Xinwei He, and Jure Leskovec. RelBench: A benchmark for deep learning on relational databases. In Advances in Neural Information Processing Systems (NeurIPS) Datasets and Benchmarks Track , 2024. 2 [34] Justin Gu, Rishabh Ranjan, Charilaos Kanatsoulis, Haiming Tang, Martin Jurkovic, Valter Hudovernik, Mark Znidar, Pranshu Chaturvedi, Parth Shroff, Fengyu Li, and Jure Leskovec. RelBench v2: A large-scale benchmark and repository for relational data. arXiv preprint arXiv:2602.12606 , 2026. 2, 7 [35] Ziniu Hu, Yuxiao Dong, Kuansan Wang, and Yizhou Sun. Heterogeneous graph transformer. In Proceedings of The Web Conference 2020 , WWW ’20, pages 2704–2710, New York, NY, USA, 2020. Association for Computing Machinery. ISBN 978-1-4503-7023-3. doi: 10.1145/ 3366423.3380027. 2, 4, 8, 26 [36] Vijay Prakash Dwivedi, Sri Jaladi, Yangyi Shen, Federico López, Charilaos I. Kanatsoulis, Rishi Puri, Matthias Fey, and Jure Leskovec. Relational graph transformer. In International Conference on Learning Representations , 2026. 2, 4, 7, 8, 18, 20, 26 [37] Divyansha Lachi, Mahmoud Mohammadi, Joe Meyer, Vinam Arora, Tom Palczewski, and Eva L. Dyer. Integrating temporal and structural context in graph transformers for relational deep learning. arXiv preprint arXiv:2511.04557 , 2025. 2, 28 
+
+> 12 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+[38] Lawrence Page, Sergey Brin, Rajeev Motwani, and Terry Winograd. The PageRank citation ranking: Bringing order to the web. Technical Report 1999-66, Stanford InfoLab, 1999. 2, 4 [39] Johannes Klicpera, Aleksandar Bojchevski, and Stephan Guennemann. Predict then propagate: Graph neural networks meet personalized PageRank. In International Conference on Learning Representations , 2019. [40] Aleksandar Bojchevski, Johannes Klicpera, Bryan Perozzi, Amol Kapoor, Martin Blais, Benedek Rozemberczki, Michal Lukasik, and Stephan Guennemann. PPRGo: Scaling graph neural networks with approximate PageRank. In Proceedings of the 26th ACM SIGKDD Interna-tional Conference on Knowledge Discovery and Data Mining , KDD ’20, pages 2464–2473. Association for Computing Machinery, 2020. doi: 10.1145/3394486.3403296. [41] Rex Ying, Ruining He, Kaifeng Chen, Pong Eksombatchai, William L. Hamilton, and Jure Leskovec. Graph convolutional neural networks for web-scale recommender systems. In 
+
+Proceedings of the 24th ACM SIGKDD International Conference on Knowledge Discovery and Data Mining , KDD ’18, pages 974–983. Association for Computing Machinery, 2018. doi: 10.1145/3219819.3219890. 2, 4 [42] Hanqing Zeng, Hongkuan Zhou, Ajitesh Srivastava, Rajgopal Kannan, and Viktor Prasanna. GraphSAINT: Graph sampling based inductive learning method. In International Conference on Learning Representations , 2020. 4 [43] Weihua Hu, Yiwen Yuan, Zecheng Zhang, Akihiro Nitta, Kaidi Cao, Vid Kocijan, Jinu Sunil, Jure Leskovec, and Matthias Fey. PyTorch Frame: A modular framework for multi-modal tabular learning. arXiv preprint arXiv:2404.00776 , 2024. 4, 17 [44] Vijay Prakash Dwivedi, Anh Tuan Luu, Thomas Laurent, Yoshua Bengio, and Xavier Bresson. Graph neural networks with learnable structural and positional representations. In International Conference on Learning Representations , 2022. 4 [45] Derek Lim, Joshua Robinson, Lingxiao Zhao, Tess Smidt, Suvrit Sra, Haggai Maron, and Stefanie Jegelka. Sign and basis invariant networks for spectral graph representation learning. In International Conference on Learning Representations , 2023. 4 [46] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin. Attention is all you need. In Advances in Neural Informa-tion Processing Systems , volume 30, pages 5998–6008, 2017. 5 [47] Andrew Jaegle, Felix Gimeno, Andrew Brock, Oriol Vinyals, Andrew Zisserman, and João Carreira. Perceiver: General perception with iterative attention. In Proceedings of the 38th In-ternational Conference on Machine Learning , volume 139 of Proceedings of Machine Learning Research , pages 4651–4664. PMLR, 2021. 5 [48] Juho Lee, Yoonho Lee, Jungtaek Kim, Adam Kosiorek, Seungjin Choi, and Yee Whye Teh. Set transformer: A framework for attention-based permutation-invariant neural networks. In Pro-ceedings of the 36th International Conference on Machine Learning , volume 97 of Proceedings of Machine Learning Research , pages 3744–3753. PMLR, 2019. 5 [49] Yury Gorishniy, Ivan Rubachev, Valentin Khrulkov, and Artem Babenko. Revisiting deep learning models for tabular data. In Advances in Neural Information Processing Systems ,volume 34, pages 18932–18943, 2021. 17 [50] Noah Hollmann, Samuel Müller, Katharina Eggensperger, and Frank Hutter. TabPFN: A transformer that solves small tabular classification problems in a second. In International Conference on Learning Representations , 2023. [51] Myung Jun Kim, Léo Grinsztajn, and Gaël Varoquaux. CARTE: Pretraining and transfer for tabular learning. In Proceedings of the 41st International Conference on Machine Learning ,volume 235 of Proceedings of Machine Learning Research , pages 23843–23866. PMLR, 2024. 17 [52] Divyansha Lachi, Mehdi Azabou, Vinam Arora, and Eva Dyer. Graphfm: A generalist graph transformer that learns transferable representations across diverse domains, 2026. URL https: //arxiv.org/abs/2407.11907 . 28 
+
+> 13 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+## A Appendix 
+
+Table of Contents 
+
+§A.1 Model Details 
+
+§A.1.1 Neighbor Sampling Algorithms §A.1.2 CRW Sampler: Walk Kernel, PPR Equivalence, Connectivity, and Edge Cases §A.1.3 Collaborative Sampler: Two-Hop Probe as a Jaccard-Numerator Estimator §A.1.4 Token Encoder Details §A.2 Complexity Analysis 
+
+§A.2.1 Subgraph Sampler Time Complexity §A.2.2 Attention Module Time Complexity §A.2.3 Empirical Runtime, Memory, and Storage Comparison §A.3 Experiment Details 
+
+§A.3.1 Full Implementation and Training Details §A.3.2 Hyperparameter Tuning Strategy and Baseline Comparisons §A.3.3 Per-Task Hyperparameters §A.3.4 Quad-Branch Capacity Search §A.4 Additional Results 
+
+§A.4.1 Subgraph Connectivity Analysis §A.4.2 Validation and Test Scores for All Baselines §A.4.3 Full Ablation Results with Seed Variability §A.4.4 RGP Baseline Reproduction 
+
+A.1 Model Details A.1.1 Neighbor Sampling Algorithms 
+
+This appendix section provides the algorithms for the three seed-rooted causal samplers discussed in §2.2. The procedures are outlined as follows: Algorithm 1 presents the CRW local subgraph sampler (§2.2.1); Algorithm 2 outlines the temporal sampler’s single backward-in-time scan (§2.2.2); and Algorithm 3 illustrates the two-hop random probe used by the collaborative sampler (§2.2.3). 
+
+Algorithm 1 CRW local subgraph sampling for one seed. 
+
+Require: Graph G; seed s = ( vi, t seed ); walks W , length L, restart p, truncation M ; budget K.
+
+Ensure: Sampled neighbor list ( neighbors ), induced sub-adjacency ( AS ), hop labels ( h).  
+
+> 1:
+
+visit[ ·] ← 0; hwalk [·] ← ∞  
+
+> 2:
+
+for w = 1 to W do  
+
+> 3:
+
+u ← vi, k ← 0 
+
+> 4:
+
+for ℓ = 1 to L do  
+
+> 5:
+
+if Uniform(0 , 1) < p or NM (u; s) = ∅ then  
+
+> 6:
+
+u ← vi, k ← 0 
+
+> 7:
+
+else  
+
+> 8:
+
+u ∼ Uniform( NM (u; s)) ; k ← k + 1  
+
+> 9:
+
+visit[ u] += 1 ; hwalk [u] ← min( hwalk [u], k ) 
+
+> 10:
+
+end if  
+
+> 11:
+
+end for  
+
+> 12:
+
+end for  
+
+> 13:
+
+neighbors ← [ vi ] ∥ (top K − 1 visited non-seed neighbors)  
+
+> 14:
+
+AS ← causal edges of G induced on neighbors  
+
+> 15:
+
+hBFS ← BFS hop distance from vi within AS 
+
+> 16:
+
+h[v] ← min  hBFS [v], h walk [v] for each v ∈ neighbors ; h[vi] ← 0 
+
+> 17:
+
+return neighbors , A S , h 
+
+> 14 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+Algorithm 2 Temporal neighbor sampling for one seed. 
+
+Require: Seed s = ( vi, t seed ); per-type budget B; window ∆t; types T .
+
+Ensure: Fixed-length neighbor list Ntemp of size B · |T | . 
+
+> 1:
+
+ca ← 0 for all a ∈ T ; Ntemp ← [ ]  
+
+> 2:
+
+for all nodes (v, a, t ) in G with t ≤ tseed , in decreasing t do  
+
+> 3:
+
+if t < t seed − ∆t or ca = B for all a ∈ T then  
+
+> 4:
+
+break  
+
+> 5:
+
+end if  
+
+> 6:
+
+if ca < B and v / ∈ Ntemp then  
+
+> 7:
+
+append v to Ntemp ; ca ← ca + 1  
+
+> 8:
+
+end if  
+
+> 9:
+
+end for  
+
+> 10:
+
+pad Ntemp to size B · |T | via uniform fallback (see Edge Cases)  
+
+> 11:
+
+return Ntemp 
+
+Algorithm 3 Collaborative neighbor sampling for one seed. 
+
+Require: Seed s = ( vi, t seed ); fan-outs M1, M 2; output size Kcollab .
+
+Ensure: Fixed-length ID list Ncollab of size Kcollab with validity mask.  
+
+> 1:
+
+E ← M1 uniform samples from the causal neighbors of vi 
+
+> 2:
+
+multiplicity m ← ∅ 
+
+> 3:
+
+for each entity r ∈ E do  
+
+> 4:
+
+for each of M2 uniform samples p from the causal neighbors of r do  
+
+> 5:
+
+if p̸ = vi and p / ∈ E and p is not a 1-hop neighbor of vi then  
+
+> 6:
+
+m[p] ← m[p] + 1  
+
+> 7:
+
+end if  
+
+> 8:
+
+end for  
+
+> 9:
+
+end for  
+
+> 10:
+
+Ncollab ← top Kcollab peers by m; pad and mask as needed  
+
+> 11:
+
+return Ncollab 
+
+A.1.2 CRW Sampler: Walk Kernel, PPR Equivalence, Connectivity, and Edge Cases 
+
+This appendix expands the CRW local subgraph sampler of §2.2.1 (Algorithm 1): the walk kernel, its convergence to causal PPR, the connectivity of the induced subgraph, and the fixed-length padding used when a seed’s causal neighborhood is sparse. 
+
+Walk Kernel. Fix a seed s = ( vi, t seed ) and a restart probability p ∈ (0 , 1) . To mitigate the fan-out from high-degree hubs, we restrict a given node u to a subset of up to M causal neighbors. While this truncation can be performed randomly, we default to a recency-based approach to prioritize temporally relevant interactions. Specifically, let N (u; tseed ) be the set of all temporal neighbors of node u prior to the seed time: 
+
+N (u; tseed ) = {v ∈ V | (u, v ) ∈ E, τ (u, v ) ≤ tseed }
+
+We then define the sampled neighborhood NM (u; s) ⊆ N (u; tseed ) as the subset containing the 
+
+M nodes with the largest τ (u, v ) values (i.e., the most recent interactions). If |N (u; tseed )| < M ,all valid neighbors are kept. At each step, a walk currently at node u will restart to the seed with probability p, or otherwise transition uniformly to one of its M valid causal neighbors: 
+
+P (u → v | s) = 
+
+(I[v = vi], if NM (u; s) = ∅,p I[v = vi] + (1 − p) I[v∈N M (u;s)]   
+
+> |N M(u;s)|
+
+, otherwise. (9) If a dead end is reached where NM (u; s) = ∅, the walk automatically teleports back to vi. We execute W independent walks of length L from vi, recording the total visit count visit[ v] and the minimum discovery depth depth[ v] for every visited node. 
+
+> 15 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+Equivalence to Personalized PageRank. The Monte Carlo estimate of the visit distribution is governed by three parameters: the number of walks W , the maximum walk length L, and the branching truncation limit M . Normalizing the visit frequencies over these W walks yields an empirical distribution ˆπs(v) that asymptotically converges to the exact Personalized PageRank (PPR) vector πs(v) of the seed vi when all parameters approach infinity: 
+
+ˆπs(v) = visit [v]
+
+P 
+
+> u
+
+visit [u] 
+
+> W,L,M →∞
+
+−−−−−−−→ πs(v) (10) In this limit, L → ∞ eliminates the finite-horizon bias, W → ∞ suppresses the Monte Carlo variance, and M → ∞ recovers the exact transition probabilities of a standard random walk with restart. In practice, however, keeping M finite serves as a crucial regularizer: it bounds per-step complexity independently of hub degree, and our default recency-based truncation injects a valuable temporal prior for time-dependent tasks. 
+
+Token Selection and Hop Labels. The seed fills slot 0 and the remaining K − 1 tokens are the non-seed nodes of highest visit count—their truncated-PPR rank. If the walks yield fewer than K − 1
+
+unique nodes, each is kept once and the rest are resampled in proportion to visit count; a seed with no causal history instead draws uniformly from V into a dedicated fallback hop bin. Every non-fallback token is labeled min( hBFS , h walk ), the tighter of its BFS distance within the induced subgraph and its shallowest walk depth hwalk .
+
+Subgraph Connectivity. A natural concern with PageRank-based sampling on scale-free relational graphs is that high-degree hubs might act as probability sinks, dominating the token budget and inducing a topologically sparse or disconnected subgraph. Three properties of the walk kernel (9) rule this out. First, the restart probability p imposes an exponential decay on the visit distribution with respect to geodesic distance from the seed, so probability mass cannot accumulate at a multi-hop hub without proportionately weighting the one-hop nodes that bridge the seed to it. Second, the 
+
+M -truncation bounds the branching factor at every step: capping the effective degree traversed during a walk curbs the combinatorial path explosion that otherwise skews the stationary distribution toward global hubs. Third, whereas uniform BFS sampling at a high-degree node draws an essentially random subset of neighbors—typically inducing a disconnected, star-like subgraph with near-zero clustering—CRW aggregates visit frequencies across many short walks, a trace-based signal that intrinsically favors nodes sharing dense structural corridors with the seed. The top-ranked K − 1
+
+tokens therefore form a cohesive subgraph with substantially higher internal edge density, preserving the structural integrity that the Local Module’s self-attention (§2.4) relies on. 
+
+Handling Sparse Neighborhoods and Edge Cases. Because all three branches (struct, temp and collab) require fixed-length sequences, the samplers must gracefully handle structural sparsity. If a sampler extracts n unique valid nodes where 0 < n < K − 1, it first retains all n nodes and then fills the remaining K − 1 − n sequence slots via resampling (using visit-count weights for CRW, and uniform weights for the temporal and collaborative branches). In the extreme edge case where a seed possesses absolutely no valid causal history ( n = 0 ), the sequence is padded using nodes drawn uniformly from the entire graph V . To strictly prevent artificial topological leakage, these uniform fallback tokens are explicitly assigned to a dedicated fallback hop-embedding bin. 
+
+A.1.3 Collaborative Sampler: Two-Hop Probe as a Jaccard-Numerator Estimator 
+
+This appendix formalizes the claim of §2.2.3 that the collaborative sampler’s per-peer hit count (Algorithm 3) is a Monte Carlo estimate of the Jaccard-overlap numerator between the seed’s and a candidate peer’s causal neighborhoods. 
+
+Causal neighborhoods and target quantity. For any node u, its causal neighbor set at the seed time and the corresponding degree are 
+
+N (u; s) =  v : ( u, v ) ∈ E, τ (u, v ) ≤ tseed , du = N (u; s) .
+
+Writing S(vi, p ) = N (vi; s) ∩ N (p; s) for the shared-intermediary set of the seed vi and a candidate peer p, the collaborative affinity we target is the numerator of their neighborhood Jaccard coefficient: 
+
+J(vi, p ) = S(vi, p )
+
+N (vi; s) ∪ N (p; s) , num( vi, p ) = S(vi, p ) . (11) 
+
+> 16 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+Two-hop probe and hit count. Hop 1 draws a set E of M1 intermediaries uniformly without re-placement from N (vi; s), and for each r ∈ E, Hop 2 draws M2 peers uniformly without replacement from N (r; s). After discarding the seed, the Hop-1 set, and the seed’s one-hop neighbors, every surviving peer accumulates the hit count 
+
+m[p] = X
+
+> r∈E
+
+I p ∈ Hop2( r) , p / ∈ { vi} ∪ N (vi; s), (12) which is nonzero only for shared intermediaries r ∈ S (vi, p ), since p ∈ N (r; s) ⇔ r ∈ N (p; s).
+
+Expected hit count. Under simple random sampling without replacement the marginal inclusion probabilities are P (r ∈ E) = M1/d vi and P  p ∈ Hop2( r) | r ∈ E = M2/d r for p ∈ N (r; s), so for budgets M1 ≤ dvi and M2 ≤ dr
+
+Em[p] = X
+
+> r∈S (vi,p )
+
+M1
+
+dvi
+
+· M2
+
+dr
+
+= M1M2
+
+dvi
+
+X
+
+> r∈S (vi,p )
+
+1
+
+dr
+
+. (13) 
+
+Proportionality to the Jaccard numerator. Rescaling (13) by the peer-independent seed constant 
+
+dvi /(M1M2) yields an unbiased estimator of a degree-discounted common-neighbor count: 
+
+ˆc(p) = dvi
+
+M1M2
+
+m[p], Eˆc(p) = X
+
+> r∈S (vi,p )
+
+1
+
+dr
+
+. (14) When shared intermediaries have comparable degree dr ≈ ¯d, this collapses to a scaled Jaccard numerator, 
+
+Em[p] ≈ M1M2
+
+dvi
+
+¯d S(vi, p ) ∝ num( vi, p ). (15) Since dvi is fixed across all peers of a given seed, ranking candidates by m[p] and keeping the top 
+
+Kcollab (Algorithm 3) selects the peers of largest expected neighborhood overlap, with the 1/d r
+
+weighting additionally down-weighting popular high-degree intermediaries. 
+
+A.1.4 Token Encoder Details 
+
+This appendix gives the exact per-encoder formulas for the 5-tuple token construction summarized in §2.3. Each of the K sampled tokens vj is processed by the following specialized encoders before integration: 1. Node Feature Encoder: Raw columnar attributes xvj are encoded into a d-dimensional embed-ding [49–51] using a PyTorch Frame [43] multimodal encoder, which processes and aggregates numerical, categorical, and text modalities: 
+
+hfeat (vj ) = MultiModalEncoder( xvj ) ∈ Rd (16) 2. Node Type Encoder: Converts the table-specific entity type ϕ(vj ) into a learned representation to capture heterogeneous schema semantics: 
+
+htype (vj ) = Wtype · onehot( ϕ(vj )) ∈ Rd (17) where Wtype ∈ Rd×|T | is a learnable weight matrix. 3. Hop Encoder: Captures the structural proximity p(vi, v j ) between the seed node vi and its neighbor vj :
+
+hhop (vi, v j ) = Whop · onehot( p(vi, v j )) ∈ Rd (18) Rather than a single shortest-path distance, the label is the tighter of two causal upper bounds— the BFS distance within the induced K-token subgraph and the CRW walk depth: 
+
+p(vi, v j ) = min  hBFS (vi, v j ), h walk (vj ), (19) with a dedicated bin reserved for uniformly-drawn fallback tokens. 4. Time Encoder: Linearly transforms the relative temporal difference to ensure temporal align-ment: 
+
+htime (vi, v j ) = Wtime · (τ (vj ) − τ (vi)) ∈ Rd (20) where Wtime ∈ Rd is a learnable parameter. 
+
+> 17 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+Table 3: Per-seed time complexity of the three causal subgraph samplers (§2.2). Dmax : maximum node degree; T = |T | : number of node types; B = Ktemp /T : per-type temporal budget; |E|:number of REG edges.             
+
+> Sampler Per-seed cost Local (§2.2.1) O(W L log Dmax )
+> Collab. (§2.2.3) O(M1M2log Dmax )
+> Temporal (§2.2.2) O(Tlog |E|+T B )
+
+5. Subgraph Positional Encoder (PE): Captures local graph topology (e.g., cycles, parent-child relationships) by applying a lightweight GIN to the sampled local subgraph’s adjacency matrix 
+
+Alocal . To break structural symmetries while preserving permutation equivariance, we inject stochastically resampled random node features Zrandom at every training step following the convention in [36]: 
+
+hpe (vj ) = GIN( Alocal , Z random )j ∈ Rd (21) The final token representation is formed by concatenating the five encoded elements and mixing them via a learned projection matrix Wmix ∈ Rd×5d:
+
+htoken (vj ) = Wmix · [hfeat (vj ) ∥ htype (vj ) ∥ hhop (vi, v j ) ∥ htime (vi, v j ) ∥ hpe (vj )] (22) 
+
+A.2 Complexity Analysis A.2.1 Subgraph Sampler Time Complexity 
+
+Table 3 reports the per-seed cost of the three causal samplers of §2.2. The CRW sampler (§2.2.1) runs 
+
+W independent restart walks of length L from the seed, giving a per-seed cost of O(W L log Dmax ),where Dmax is the maximum node degree and the log Dmax factor is the per-step causal-neighbor lookup. Under the default parameters ( W = 100 , L = 10 , p = 0 .15 , M = 50 , K = 300 ) this avoids linear dependence on hub degree, since the recency-based M -truncation caps the per-step branching regardless of hub degree. The collaborative sampler (§2.2.3) draws M1 first-hop intermediaries and 
+
+M2 second-hop peers from each, for a per-seed cost of O(M1M2 log Dmax ). The temporal sampler (§2.2.2) scans a seed-independent, global time-sorted event stream with type-balanced budgets: for each of the T = |T | node types it binary-searches the stream to locate the causal window ( O(log |E|),with |E| the number of REG edges), then collects the B = Ktemp /T most-recent nodes per type, giving a per-seed cost of O(T log |E| + T B ). Because the candidate pool is global, this cost is independent of the seed’s degree. Crucially, because all extracted subgraphs and global neighbor sequences are pre-computed and cached offline, this cost is heavily amortized; it is paid exactly once prior to training, adding zero traversal overhead to the active training loop. 
+
+A.2.2 Attention Module Time Complexity 
+
+This appendix collects the per-seed costs of Q UARTET ’s attention modules: the local self-attention module of §2.4 and the four global branches of §2.5. 
+
+Local attention module. The local module applies Llocal layers of full self-attention over the fixed 
+
+K-token subgraph, costing O(Llocal K2d) per seed. Because the CRW sampler holds K constant regardless of hub degree (§2.2.1), this cost is fixed across seeds and datasets rather than scaling with local density. 
+
+Feature and topological codebook branches. Both codebook reads (§2.5.1) are inexpensive because the archetypes are batch-shared; let R = Rstruct = Rfeat denote the shared codebook size. The key and value projections WK Eb and WV Eb cost O(Rd 2) and are computed once per batch and reused across all seeds, rather than recomputed for every seed as in a naive codebook lookup; each seed then adds only an O(Rd ) query–archetype attention. The shared projections likewise cap the key/value activation memory at O(Rd ) instead of letting it grow linearly with the number of seeds—saving roughly 0.5 GB per codebook when the batch size, archetype count R, and width d
+
+are all 512 .
+
+> 18 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+Temporal and collaborative cross-attention branches. The temporal and collaborative branches (§2.5.2) replace the O(K2d) cost of full self-attention over their length-K context Cb (b ∈{temp , collab }) with an asymmetric Perceiver bottleneck: a fixed budget of Lperc ≪ K latents cross-attends over the context, reducing each branch’s cost to O(Lperc Kd )—linear in the context length. With Lperc = 32 and K = 300 this holds each branch’s compute and its fusion-input width constant regardless of how large the underlying temporal or collaborative neighborhood is. 
+
+A.2.3 Empirical Runtime, Memory, and Storage Comparison 
+
+To complement the asymptotic analysis above with a direct empirical measurement, we profile QUARTET against its RelGT base on the five larger classification tasks of §A.3.1 (Table 5), holding batch size, sampler token budgets, and local-layer depth fixed across both models and running each on a single A100 GPU per model to keep the comparison unconfounded by DDP world size. Table 4 reports, for every task, the ratio of Q UARTET ’s cost to RelGT’s along five axes: per-epoch train+val wall-clock, inference throughput, one-time offline precomputation, peak GPU memory, on-disk cache size, and parameter count. 
+
+Parameters and memory scale with the quad-branch capacity, as expected. Parameter count sits in a tight 2.17 –2.30 × band across every task, consistent with it being a fixed property of the four global branches’ added capacity (§2.5) rather than a task-dependent quantity. Peak GPU memory follows the same architectural source—the codebook and Perceiver branches’ batch-shared buffers (§A.2.2)—and is higher on every task, averaging 2.58 × RelGT’s. On-disk cache size is the largest relative cost, averaging 7.76 ×, because it accumulates the additional per-seed temporal and collaborative neighbor sequences that RelGT’s local-only sampler does not cache. 
+
+Runtime is favorable on average, but we do not attribute it primarily to the samplers’ asymptotic advantage. Per-epoch time is 1.39 × RelGT’s on average (as low as 0.84 × on 
+
+rel-amazon/user-churn ), and inference throughput favors Q UARTET on three of the five tasks, most on the tasks with the largest test sets. Offline precomputation is faster for Q UARTET on four of five tasks, by 1.3–9.7×. While §A.2.1 shows CRW’s per-seed cost is bounded independently of hub degree, we traced this specific empirical gap to our profiling harness and found it is driven substantially by implementation differences between the two reproduction pipelines—in particular, an unguarded multi-process precompute step in the RelGT baseline that re-derives its adjacency structure from scratch on every worker and every data chunk, rather than once per split. These differences are orthogonal to the sampling algorithm and would likely narrow this specific gap if fixed on the baseline side; we therefore report the measured numbers without treating them as direct validation of the asymptotic argument in §A.2.1. The inference-throughput advantage has a more direct architectural explanation: RelGT’s EMA-K-Means global module recomputes each centroid’s current occupancy via unique() on every forward pass, an operation whose output size is data-dependent and therefore forces a GPU–host synchronization on every batch, at both train and test time; Q UARTET ’s codebook and Perceiver branches (§2.5.1, §2.5.2) are static-shape tensor operations throughout and incur no equivalent stall. This cost is a small fraction of a backward-dominated training step but a much larger fraction of a short, forward-only inference step, which is consistent with the throughput advantage being largest on the tasks with the most test batches and narrowing on the smallest task in our set. 
+
+The added cost is a dial, not a fixed tax. GPU memory and cache storage are the costs we attribute with the most confidence to our architecture, and both scale specifically with the four global branches rather than with the local module or samplers. Crucially, Q UARTET is not a single fixed-cost model but a family of configurations—the full quad-branch model, or any subset of its branches—and the leave-one-out ablation of §4.3 already quantifies, per task, which branches are worth their share of this cost: no single branch is globally redundant, as the dominant branch shifts across tasks (§4.3). A practitioner can therefore pay only for the branch(es) that carry signal for their specific downstream task and recover most of RelGT’s memory and storage footprint elsewhere, rather than weighing the full-model cost against the full-model gain. 
+
+> 19 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+Table 4: Empirical runtime, memory, and storage of Q UARTET relative to RelGT (ratio Q UAR -
+
+> TET
+
+/RelGT), measured on the five larger classification tasks of §A.3.1 (Table 5), each run on a single A100 GPU per model for a matched, unconfounded comparison. Epoch time is mean per-epoch train+val wall-clock; throughput is test-set samples/sec at inference; precompute is the one-time offline sampling/caching pass; cache is total on-disk size of the pre-cached artefacts. For Epoch time, Precompute, Peak mem, Cache, and Params, > 1× means Q UARTET costs more; for Throughput, 
+
+> 1× means Q UARTET is faster.                                           
+
+> Task Epoch time Throughput Precompute Peak mem Cache Params rel-hm/user-churn 1.01 ×1.74 ×0.10 ×1.70 ×3.60 ×2.23 ×
+> rel-stack/user-engagement 1.83 ×1.09 ×1.04 ×3.07 ×8.02 ×2.17 ×
+> rel-amazon/user-churn 0.84 ×2.09 ×0.31 ×2.52 ×8.72 ×2.30 ×
+> rel-amazon/item-churn 1.51 ×1.29 ×0.36 ×2.54 ×8.75 ×2.30 ×
+> rel-stack/user-badge 1.77 ×0.96 ×0.75 ×3.06 ×9.69 ×2.17 ×
+> Mean 1.39 ×1.43 ×0.51 ×2.58 ×7.76 ×2.23 ×
+
+A.3 Experiment Details A.3.1 Full Implementation and Training Details 
+
+All models are trained end-to-end with Adam at a constant learning rate of 1×10 −4, batch size 512, and gradient clipping at 1.0; we apply no learning-rate warmup or decay schedule. The training budget is set per task: 100 epochs for the seven smaller tasks and 10 epochs for the five larger tasks. Local-transformer width follows the RelGT defaults [36] ( c = 512 channels, h = 4 heads). The number of local layers Llocal , dropout (tied across the feed-forward and attention paths), and weight decay are tuned per task: on the seven smaller tasks we search a 3×3×3 grid of Llocal ∈ { 1, 4, 8},dropout ∈ { 0.3, 0.4, 0.5}, and weight decay ∈ { 5×10 −5, 5×10 −4, 5×10 −3} (reproducing RelGT’s 
+
+L×dropout grid and adding a weight-decay axis), while on the five larger tasks we fix Llocal = 4 and search a 3×3 grid of dropout ∈ { 0.1, 0.3, 0.5} and weight decay ∈ { 1×10 −5, 5×10 −5, 5×10 −4}.The per-task best configurations are reported in Appendix A.3.3. These local hyperparameters were identified on the CRW-augmented RelGT base (§4.1) and held fixed during the subsequent quad-branch capacity search. CRW uses W = 100 walks, L = 10 steps, restart probability p = 0 .15 ,recent-M = 50 , and token budget K = 300 .Quad-branch capacity—Perceiver latents Lperc ∈ { 16 , 32 , 64 } and codebook archetypes Rstruct =
+
+Rfeat ∈ { 128 , 256 , 512 }—is configured per task, with the shared self-attention depth held fixed at 
+
+Lsa = 4 and the branch outputs fused by concatenation (the gate-free nogate_concat default of §2.6); the full per-arm capacity results are tabulated in Appendix A.3.4. The collaborative sampler uses (M1, M 2, K collab ) = (50 , 50 , 300) , and the temporal branch draws its Ktemp = 300 tokens using the type-balanced sampler of §2.2.2 (Algorithm 2) with per-type budget B = Ktemp /|T | over the ∆t = 365 -day causal window; the candidate pool is global (seed-independent), but the per-type budget ensures no single high-frequency node type dominates the sample. Both cross-attention branches thus operate at the same K = 300 token budget as the CRW local context. The pre-cache pipeline writes the four artifacts per seed to a single HDF5 file atomically ( tmp -file + os .rename )and is consumed at train time via an mmap -backed loader that performs no on-line graph traversal. Checkpoint selection is done by best validation ROC-AUC. 
+
+A.3.2 Hyperparameter Tuning Strategy and Baseline Comparisons 
+
+To ensure a fair and computationally realistic comparison, we adopted a deliberate hyperparameter tuning strategy across all evaluated models. We directly applied the published optimal hyperparame-ters for HGT and RelGT. Re-tuning was deemed unnecessary because the classification datasets in REL BENCH v2 are unchanged to the prior version, aside from a patch to rel-event user-ignore that resolved temporal leakage. For Q UARTET , we avoided a computationally prohibitive joint grid search by employing a constrained, decoupled two-stage approach: 
+
+Stage 1 (Local Parameters). We first optimized the local module’s parameters ( Llocal , dropout, and weight decay). Weight decay was included as an additional dimension specifically because the 
+
+> 20 Published as a conference paper at Learning on Graphs (LoG) 2026
+
+Table 5: Per-task best hyperparameters selected by the per-task tuning of §A.3.1: number of local layers Llocal , dropout, and weight decay. Dropout is applied identically to the feed-forward and attention paths. The seven smaller tasks search Llocal ∈ { 1, 4, 8}; the five larger tasks fix Llocal = 4 .                                                     
+
+> Dataset Task Llocal Dropout Weight decay
+> Smaller tasks (3×3×3grid) rel-avito user-clicks 10.4 5×10 −3
+> user-visits 80.5 5×10 −5
+> rel-event user-ignore 10.3 5×10 −5
+> user-repeat 40.5 5×10 −3
+> rel-f1 driver-dnf 40.4 5×10 −5
+> driver-top3 10.5 5×10 −3
+> rel-trial study-outcome 10.5 5×10 −4
+> Larger tasks (3×3grid, Llocal fixed) rel-amazon item-churn 40.1 5×10 −5
+> user-churn 40.5 5×10 −5
+> rel-hm user-churn 40.3 1×10 −5
+> rel-stack user-badge 40.5 1×10 −5
+> user-engagement 40.1 1×10 −5
+
+CRW sampler extracts denser, more highly connected subgraphs, which occasionally necessitated additional regularization to prevent overfitting. 
+
+Stage 2 (Global Parameters). Once the optimal local parameters were identified and frozen, we conducted a separate, limited search over the global branch capacities (Perceiver latents Lperc and codebook size R). This decoupled strategy significantly restricted Q UARTET ’s total search budget compared to an exhaustive combinatorial grid, ensuring a fair and equitable comparison against the author-optimized baselines from the literature. 
+
+A.3.3 Per-Task Hyperparameters 
+
+Table 5 lists the best per-task configuration of the three tuned local hyperparameters—number of local layers Llocal , dropout, and weight decay—for all twelve classification tasks, selected over the grids described in §A.3.1. All remaining local hyperparameters are shared across tasks (§A.3.1). 
+
+A.3.4 Quad-Branch Capacity Search 
+
+Table 6 reports validation and test ROC-AUC for every arm of the quad-branch capacity grid of §A.3.1—Perceiver latent budget Lperc ∈ { 16 , 32 , 64 } crossed with codebook size Rstruct = Rfeat ∈{128 , 256 , 512 }—on all twelve classification tasks, averaged over n = 4 seeds. For each task the bold entry marks the configuration reported in the Q UARTET column of Table 1, with validation scores listed alongside. 
+
+A.4 Additional Results A.4.1 Subgraph Connectivity Analysis: CRW extracts denser, more connected subgraphs compared to BFS2 
+
+In this section, we provide further evidence to support the claim that Causal Random Walk (CRW) sampler yields denser and tightly connected subgraphs compared to the BFS2 baseline in RelGT. We start with (I) a visual comparison of the two samplers, then (II) break down the graph-level statistics for the induced K-token subgraphs ( K = 300 , retaining causal edges) across all 12 classification tasks and training seeds. 
+
+> 21
+
+Published as a conference paper at Learning on Graphs (LoG) 2026 
+
+Table 6: Quad-branch capacity search (companion to §A.3.1): validation and test ROC-AUC on the twelve R EL BENCH classification tasks across the Lperc × R capacity grid. Column groups index the Perceiver latent budget Lperc ∈ { 16 , 32 , 64 }; sub-columns (128/256/512) index the codebook size R = Rstruct = Rfeat . Each arm is averaged over n = 4 seeds. Bold marks the configuration reported in the Q UARTET column of Table 1; validation scores are listed alongside for completeness.                                                                                                                                                                                                                                                             
+
+> Dataset Task AUC ↑Lperc = 16 Lperc = 32 Lperc = 64
+> 128 256 512 128 256 512 128 256 512 rel-amazon item-churn Test 0.8252 0.8246 0.8259 0.8244 0.8255 0.8262 0.8256 0.8249 0.8248 Val 0.8217 0.8215 0.8221 0.8211 0.8221 0.8227 0.8219 0.8214 0.8213 user-churn Test 0.6995 0.6983 0.6976 0.6969 0.6988 0.7001 0.6962 0.6977 0.6983 Val 0.7005 0.6999 0.6987 0.6985 0.6998 0.7003 0.6980 0.6989 0.6992 rel-avito user-clicks Test 0.5624 0.6268 0.6367 0.6481 0.6298 0.6072 0.6209 0.6089 0.6365 Val 0.5591 0.6148 0.6055 0.6087 0.6110 0.5988 0.6115 0.5935 0.6065 user-visits Test 0.6291 0.6305 0.6245 0.6378 0.6307 0.6402 0.6422 0.6391 0.6508
+> Val 0.6738 0.6792 0.6769 0.6818 0.6783 0.6851 0.6821 0.6834 0.6892 rel-event user-ignore Test 0.7296 0.7392 0.7345 0.7330 0.7245 0.7339 0.7337 0.7270 0.7282 Val 0.8092 0.8176 0.8061 0.8086 0.8076 0.8119 0.8143 0.8066 0.8111 user-repeat Test 0.7563 0.7493 0.7496 0.7401 0.7438 0.7387 0.7311 0.7492 0.7356 Val 0.7292 0.7323 0.7228 0.7319 0.7337 0.7399 0.7327 0.7267 0.7323 rel-f1 driver-dnf Test 0.6798 0.6717 0.6779 0.6753 0.6773 0.6941 0.7044 0.6711 0.6809 Val 0.8104 0.8091 0.8040 0.8084 0.8060 0.8088 0.8040 0.8067 0.8074 driver-top3 Test 0.7855 0.8042 0.8427 0.8391 0.8348 0.8265 0.8188 0.8517 0.8180 Val 0.8733 0.8756 0.8835 0.8791 0.8697 0.8704 0.8735 0.8741 0.8715 rel-hm user-churn Test 0.6967 0.6949 0.6960 0.6956 0.6957 0.6960 0.6947 0.6976 0.6957 Val 0.7029 0.7011 0.7023 0.7022 0.7023 0.7017 0.7015 0.7033 0.7018 rel-stack user-badge Test 0.8287 0.8093 0.8201 0.8159 0.8213 0.8300 0.8199 0.8344 0.8528
+> Val 0.8342 0.8097 0.8234 0.8184 0.8282 0.8340 0.8265 0.8413 0.8580 user-engagement Test 0.9053 0.9058 0.9050 0.9053 0.9054 0.9050 0.9057 0.9063 0.9057 Val 0.9019 0.9020 0.9023 0.9020 0.9021 0.9017 0.9025 0.9029 0.9028 rel-trial study-outcome Test 0.6963 0.6995 0.7059 0.6986 0.6959 0.6962 0.6783 0.7015 0.6975 Val 0.6756 0.6686 0.6746 0.6755 0.6732 0.6716 0.6687 0.6772 0.6738
+
+(I) Visual intuition. Figure 4 contrasts CRW and BFS2 subgraphs on two representative seeds that illustrate complementary regimes. Panel (a) shows a sparse-neighborhood seed, with low causal degree. Because the seed possesses a low causal degree, BFS2 exhausts its two-hop frontier after isolating only 5 distinct nodes. This leaves 295 of the 300 allocated budget slots wasted on duplicates and padding. Conversely, CRW’s restart-walk mechanism successfully explores beyond this shallow frontier to extract 27 distinct nodes, forming a single connected component with an average degree of ¯d = 1 .9 and 100% seed connectivity. Panel (b) shows a dense-neighborhood seed. While both samplers successfully draw 300 distinct nodes, the resulting structural topologies are drastically different. CRW builds a dense, seed-anchored cluster comprising only 2 components ( ¯d = 3 .4, ≈ 100% seed-connected, with only one disconnected node). In contrast, BFS2 fragments the neighborhood into 90 disconnected components and leaves 88 nodes orphaned, resulting in a mere 70% seed connectivity. This severe fragmentation occurs because the BFS2 sampler selects two-hop neighbors but omits the crucial one-hop bridging nodes needed to connect them to the seed. The disconnected grey nodes in the BFS2 panel in Figure 4(b) are unreachable from the seed, representing a wasted token budget that cannot directly contribute to local message passing. This structural fragmentation creates two distinct downstream bottlenecks. First, it directly degrades the GIN-based positional encoder (Eq.21; §2.3). Because GIN propagates information strictly along the edges of the subgraph adjacency matrix Alocal , these orphan nodes receive no neighborhood signals and collapse into identical positional encodings, eliminating the structural disambiguation the encoder is meant to provide. Second, this collapse severely handicaps the Local Attention Module in Figure 2. Even though the module applies full all-pair self-attention and can theoretically route information between any two tokens, the degraded positional encodings strip away crucial structural priors. To compensate for the topological context lost during BFS2 sampling, the Transformer is forced to rely on additional self-attention layers just to infer the basic structural relationships between these disconnected nodes. 
+
+22 Published as a conference paper at Learning on Graphs (LoG) 2026 rel-amazon / item-churn seed 28968 
+
+CRW 
+
+(a) distinct_nodes=27 edges=26 avg degree=1.9 seed-connected 100% components=1 orphans=0 
+
+BFS2     
+
+> distinct_nodes=5 edges=4 avg degree=1.6 seed-connected 100% components=1 orphans=0
+> rel-avito / user-clicks seed 29310
+
+(b) distinct_nodes=300 edges=504 avg degree=3.4 seed-connected 100% components=2 orphans=1 distinct_nodes=300 edges=224 avg degree=1.5 seed-connected 70% components=90 orphans=88   
+
+> seed node reachable from seed disconnected / orphan
+
+Figure 4: Subgraph visualizations comparing CRW and BFS2 across two representative seeds: (a) Asparse-neighborhood seed. (b) A dense-neighborhood seed. Red stars mark the seed node; blue nodes are reachable from the seed within the subgraph; grey nodes are disconnected orphans. Note that the disconnected grey nodes in (b) for BFS2 receive degenerate GIN positional encodings (Eq. 21), as no message-passing paths exist to differentiate them structurally. 
+
+(II) Aggregate Graph Metrics. Figure 5 visualizes four key connectivity metrics across all twelve tasks to illustrate the structural differences between the samplers. Panel (a) demonstrates that CRW consistently achieves a higher average degree, meaning each sampled node maintains more connections to others within the subgraph. Panel (b) shows that CRW outperforms the BFS2 in seed-connected ratio across the board, meaning more nodes in the subgraph are structurally connected to the seed node. Panel (c) shows that CRW achieves a substantially larger average component size across most tasks, indicating that its sampled nodes coalesce into fewer, more cohesive clusters rather than scattering across many small fragments. Finally, panel (d) illustrates token-budget efficiency, where CRW proves far more effective at packing distinct, structurally relevant nodes into the fixed context window on the vast majority of tasks. The only exceptions to this efficiency trend are the rel-event tasks, where extreme seed fan-out overwhelms the BFS2 subgraph with a large number of 1-hop neighbors; in contrast, CRW’s hub truncation actively prevents this over-sampling. Even in these edge cases, CRW still matches BFS2 in core connectivity metrics such as average degree and seed-connected ratio, Figure 5(a)(b). Table 7 provides the complete per-task numerical breakdown of these metrics, alongside raw edge density and clustering coefficients. Notably, raw edge density is a confounded and unreliable 
+
+23 Published as a conference paper at Learning on Graphs (LoG) 2026 1.0 1.5 2.0 2.5 3.0 3.5     
+
+> Average Degree
+> (a) Average Degree
+> BFS2 CRW
+> 0.5 0.6 0.7 0.8 0.9 1.0
+> Seed-Connected Ratio
+> (b) Seed-Connected Ratio
+> BFS2 CRW f1/top3 f1/dnf event/repeat event/ignore trial/outcome avito/clicks avito/visits amazon/i-churn amazon/u-churn hm/churn stack/badge stack/engage
+> 050 100 150 200 250
+> Avg Component Size
+> (c) Average Component Size
+> BFS2 CRW f1/top3 f1/dnf event/repeat event/ignore trial/outcome avito/clicks avito/visits amazon/i-churn amazon/u-churn hm/churn stack/badge stack/engage
+> 0.0 0.2 0.4 0.6 0.8
+> Efficiency (distinct / K)
+> (d) Token Budget Efficiency
+> BFS2 CRW
+
+CRW vs. BFS Subgraph Structure 12 tasks, K = 300, causal edges 
+
+Figure 5: CRW vs. BFS2 subgraph structure across all 12 R EL BENCH classification tasks ( K=300 ,causal edges).Error bars show ±1 standard deviation across training seeds. (a) Average degree: CRW wins on all 12 tasks. (b) Seed-connected ratio: CRW wins on all 12 tasks. (c) Average component size: CRW produces larger components on all 12 tasks, reflecting greater structural cohesion. (d) Token-budget efficiency: CRW is more efficient on 10 of 12 tasks; the two rel-event exceptions are explained by extreme seed fan-out. comparison metric in this context. While it mathematically appears to favor BFS2, this is simply an artifact of BFS2 generating smaller subgraphs. For a subgraph with n unique nodes and M edges, edge density and average degree are defined as edge_density = Mn(n − 1) /2 , (23) avg_degree = 2Mn . (24) Substituting (24) into (23) reveals the direct relationship: edge_density = avg_degree 
+
+n − 1 . (25) By effectively dividing the average degree by n − 1, the quadratic denominator in (23) unfairly penalizes the CRW sampler for successfully extracting a much larger number of unique nodes. Consequently, average degree (24) provides the correct, size-invariant alternative for measuring structural density, ensuring the sampler isn’t penalized simply for recovering a larger number of relevant nodes. The clustering coefficient is not an appropriate measure of local cohesion for these graphs. The standard clustering coefficient counts closed triangles among a node’s neighbors, but in most of the heterogeneous relational graphs underlying these benchmarks, closed triangles are structurally impossible under the predefined relational schema. Accordingly, clustering is identically zero for both samplers on 10 of the 12 tasks. The appropriate size-invariant measures of local cohesion—average 
+
+24 Published as a conference paper at Learning on Graphs (LoG) 2026 
+
+Table 7: Per-task subgraph statistics for CRW vs. BFS ( K=300 , causal edges, all training seeds). Each cell reports CRW | BFS means. Avg. Degree, Seed-Conn. Ratio, # Components, and Distinct Nodes are the structurally informative metrics. Edge Density ( |E|/ n
+
+> 2
+
+) is inflated for BFS by its smaller subgraphs (see text), and Clustering Coefficient is near-zero on 10/12 tasks due to the realational structure of the underlying graphs.                                                                                                                                                                                      
+
+> Avg. Degree Seed-Conn. Ratio # Comp. Distinct Nodes Edge Density Clust. Coeff. Dataset Task CRW BFS CRW BFS CRW BFS CRW BFS CRW BFS CRW BFS rel-amazon item-churn 1.99 1.80 1.000 0.988 1.1 3.3 162.2 38.3 0.032 0.181 0.000 0.000 user-churn 2.00 1.70 1.000 0.998 1.0 1.4 167.4 16.5 0.024 0.298 0.000 0.000 rel-avito user-clicks 1.98 1.50 0.646 0.595 107.2 120.2 254.2 191.6 0.009 0.049 0.000 0.000 user-visits 1.83 1.39 0.605 0.564 119.6 129.9 252.1 193.4 0.009 0.050 0.000 0.000 rel-event user-ignore 1.29 1.29 0.649 0.642 106.4 101.3 177.1 273.7 0.016 0.008 0.000 0.000 user-repeat 1.52 1.49 0.762 0.743 72.5 73.5 172.9 278.0 0.015 0.007 0.000 0.000 rel-f1 driver-dnf 2.97 2.60 0.930 0.918 22.1 24.5 269.8 136.8 0.011 0.060 0.000 0.000 driver-top3 3.49 2.97 0.964 0.949 11.8 15.5 263.1 164.3 0.014 0.055 0.000 0.000 rel-hm user-churn 2.04 1.92 0.999 0.996 1.3 1.5 235.4 32.1 0.010 0.175 0.000 0.000 rel-stack user-badge 1.29 1.26 0.652 0.648 105.5 106.3 130.9 118.5 0.235 0.289 0.108 0.119 user-engage 2.49 2.41 0.999 0.990 1.4 3.2 61.8 32.4 0.065 0.188 0.260 0.288 rel-trial study-outcome 2.33 2.17 1.000 0.989 1.0 3.2 157.1 49.4 0.017 0.107 0.003 0.000
+> Average (12 tasks) 2.10 1.87 0.850 0.835 45.9 48.7 190.0 126.1 0.038 0.122 0.031 0.034
+
+degree and seed-connected ratio, both reported in Table 7—show clear CRW advantages across all tasks. On the two rel-stack tasks whose relational schema contains 3-cycles and therefore allows closed triangles, the gap between CRW and BFS2 is minimal ( |d| ≤ 0.24 ), confirming that CRW’s broader exploration does not sacrifice local cohesion. 
+
+Summary and downstream impact. Ultimately, CRW provides a fundamentally denser and more seed-connected topology than the uniform BFS2 baseline. This dense connectivity directly improves the expressiveness of the GIN positional encoder and ensures the Local Attention Module attends over a cohesive neighborhood rather than a disjointed set of redundant orphan tokens. Consequently, QUARTET, leveraging CRW, can effectively propagate seed-relevant information while requiring fewer local self-attention layers compared to RelGT (as demonstrated in Figure 3). 
+
+A.4.2 Validation and Test Scores for All Baselines 
+
+Table 8 reports both validation and test ROC-AUC (mean ± std) for HGT, RelGT, and Q UARTET on all twelve classification tasks, complementing the test-only summary of Table 1. All four columns are averaged over n = 4 seeds; the three baseline columns are our own reproductions, and the Q UARTET 
+
+column’s test rows coincide with Table 1. 
+
+A.4.3 Full Ablation Results with Seed Variability 
+
+Table 9 reports the absolute test ROC-AUC (mean ± std over n=4 seeds) for every leave-one-out ablation arm, complementing the relative-change summary of Table 2. 
+
+25 Published as a conference paper at Learning on Graphs (LoG) 2026 
+
+Table 8: Validation and test ROC-AUC (mean ± std) on the twelve R EL BENCH entity-classification tasks for the two reproduced graph-transformer baselines—HGT [35] and RelGT [36]—and Q UAR -
+
+TET . All three columns are averaged over n = 4 seeds under a shared protocol; HGT and RelGT are our own reproductions. The test rows coincide with Table 1. Bold marks the best value in each (task, split) row across the three models. 
+
+Dataset Task AUC ↑ HGT RelGT QUARTET 
+
+rel-amazon item-churn Test 0.7758 ± 0.0075 0.8249 ± 0.0005 0.8262 ± 0.0010 
+
+Val 0.7776 ± 0.0054 0.8218 ± 0.0004 0.8227 ± 0.0007 
+
+user-churn Test 0.6626 ± 0.0041 0.7024 ± 0.0015 0.7001 ± 0.0016 
+
+Val 0.6664 ± 0.0034 0.7023 ± 0.0013 0.7003 ± 0.0008 
+
+rel-avito user-clicks Test 0.6501 ± 0.0104 0.6425 ± 0.0159 0.6481 ± 0.0122 
+
+Val 0.5882 ± 0.0189 0.6614 ± 0.0043 0.6087 ± 0.0023 
+
+user-visits Test 0.6410 ± 0.0068 0.6639 ± 0.0020 0.6508 ± 0.0050 
+
+Val 0.6578 ± 0.0085 0.6986 ± 0.0021 0.6892 ± 0.0032 
+
+rel-event user-ignore Test 0.7256 ± 0.0080 0.7348 ± 0.0183 0.7392 ± 0.0035 
+
+Val 0.7564 ± 0.0024 0.7691 ± 0.0051 0.8176 ± 0.0055 
+
+user-repeat Test 0.7539 ± 0.0157 0.7160 ± 0.0316 0.7563 ± 0.0175 
+
+Val 0.6679 ± 0.0013 0.7101 ± 0.0121 0.7292 ± 0.0141 
+
+rel-f1 driver-dnf Test 0.6595 ± 0.0627 0.7133 ± 0.0416 0.7044 ± 0.0180 
+
+Val 0.7756 ± 0.0348 0.8029 ± 0.0086 0.8040 ± 0.0041 
+
+driver-top3 Test 0.7384 ± 0.0574 0.8067 ± 0.0402 0.8517 ± 0.0156 
+
+Val 0.7620 ± 0.0633 0.8843 ± 0.0118 0.8741 ± 0.0080 
+
+rel-hm user-churn Test 0.6746 ± 0.0036 0.6975 ± 0.0016 0.6976 ± 0.0011 
+
+Val 0.6807 ± 0.0041 0.7049 ± 0.0012 0.7033 ± 0.0011 
+
+rel-stack user-badge Test 0.8688 ± 0.0025 0.8764 ± 0.0016 0.8528 ± 0.0094 
+
+Val 0.8818 ± 0.0018 0.8884 ± 0.0010 0.8580 ± 0.0115 
+
+user-engagement Test 0.8899 ± 0.0018 0.9047 ± 0.0009 0.9063 ± 0.0010 
+
+Val 0.8897 ± 0.0012 0.9010 ± 0.0008 0.9029 ± 0.0005 
+
+rel-trial study-outcome Test 0.6345 ± 0.0251 0.6632 ± 0.0177 0.7059 ± 0.0044 
+
+Val 0.6207 ± 0.0303 0.6751 ± 0.0073 0.6746 ± 0.0067 
+
+26 Published as a conference paper at Learning on Graphs (LoG) 2026 
+
+> Table 9:  Full ablation results: test ROC-AUC (mean  ± std,  n=4  seeds) for each leave-one-out ablation of Q UARTET . Column groups match Table 2.  Red cells denote a statistically significant drop relative to the full Q UARTET  model (i.e., the ablation’s upper confidence bound  μabl  + σabl  falls below the full model’s lower bound  μfull  − σfull ). Bold marks the full Q UARTET  (reference) column.
+> Dataset  Task  QUARTET  No  No  No  No Hub  No  No  No  No  No
+> (Full)  Local  Perceiver  CRW  Trunc.  Restart  Temp.  Collab.  Feat.  Struct. rel-amazon item-churn  .8262  ± .0010  .7451  ± .0017  .8242  ± .0007  .8244  ± .0008  .8249  ± .0008  .8253  ± .0011  .8245  ± .0009  .8257  ± .0008  .8254  ± .0009  .8251  ± .0013
+> user-churn  .7001  ± .0016  .6629  ± .0008  .7011  ± .0008  .6923  ± .0032  .6981  ± .0016  .6954  ± .0006  .6996  ± .0017  .7007  ± .0011  .6976  ± .0025  .6962  ± .0022
+> rel-avito  user-clicks  .6481  ± .0122  .5952  ± .0243  .6348  ± .0299  .6534  ± .0034  .6522  ± .0068  .5826  ± .0847  .6410  ± .0081  .6224  ± .0128  .6111  ± .0460  .6367  ± .0231
+> user-visits  .6508  ± .0050  .6409  ± .0046  .6506  ± .0032  .6428  ± .0136  .6508  ± .0034  .6450  ± .0097  .6435  ± .0062  .6293  ± .0157  .6458  ± .0160  .6333  ± .0202
+> rel-event  user-ignore  .7392  ± .0035  .7740  ± .0107  .7334  ± .0050  .7336  ± .0279  .7392  ± .0139  .7380  ± .0048  .7272  ± .0100  .7270  ± .0075  .7295  ± .0151  .7410  ± .0098
+> user-repeat  .7563  ± .0175  .5642  ± .0664  .7425  ± .0168  .7099  ± .0615  .6780  ± .1072  .7388  ± .0104  .7283  ± .0228  .7450  ± .0235  .7359  ± .0327  .7442  ± .0244
+> rel-f1  driver-dnf  .7044  ± .0180  .6743  ± .0105  .6641  ± .0337  .7015  ± .0169  .7103  ± .0119  .7059  ± .0155  .6714  ± .0292  .6847  ± .0183  .6789  ± .0236  .6803  ± .0086
+> driver-top3  .8517  ± .0156  .7074  ± .0161  .7925  ± .0175  .8223  ± .0039  .7758  ± .0241  .8176  ± .0177  .8130  ± .0200  .8201  ± .0479  .8403  ± .0182  .8247  ± .0288
+> rel-hm  user-churn  .6976  ± .0011  .6748  ± .0053  .6970  ± .0028  .6961  ± .0021  .6988  ± .0014  .6964  ± .0012  .6949  ± .0013  .6967  ± .0018  .6957  ± .0012  .6953  ± .0018
+> rel-stack  user-badge  .8528  ± .0094  .8182  ± .0707  .7859  ± .0147  .8339  ± .0170  .8262  ± .0194  .8122  ± .0185  .8163  ± .0182  .8157  ± .0258  .8275  ± .0292  .8319  ± .0137
+> user-engagement  .9063  ± .0010  .8644  ± .0024  .9064  ± .0007  .9056  ± .0011  .9059  ± .0010  .9051  ± .0012  .9054  ± .0004  .9043  ± .0023  .9038  ± .0018  .9047  ± .0025
+> rel-trial  study-outcome  .7059  ± .0044  .6925  ± .0094  .7014  ± .0100  .6804  ± .0191  .7038  ± .0057  .6930  ± .0076  .6931  ± .0041  .7045  ± .0204  .6974  ± .0085  .6889  ± .0034
+
+27 Published as a conference paper at Learning on Graphs (LoG) 2026 
+
+Table 10: RGP reproduction: test ROC-AUC (mean ± std) on the twelve R EL BENCH classification tasks. RGP is reproduced following direct guidance from the original authors (§A.4.4); HGT and RelGT results are from Table 1. All results are averaged over n = 4 seeds. Bold marks the best mean in each row. 
+
+Dataset Task RGP HGT RelGT QUARTET 
+
+rel-amazon item-churn 0.7641 ± 0.0093 0.7758 ± 0.0075 0.8249 ± 0.0005 0.8262 ± 0.0004 
+
+user-churn 0.6283 ± 0.0041 0.6626 ± 0.0041 0.7024 ± 0.0015 0.7008 ± 0.0010 
+
+rel-avito user-clicks 0.6515 ± 0.0033 0.6501 ± 0.0104 0.6425 ± 0.0159 0.6482 ± 0.0128 
+
+user-visits 0.6534 ± 0.0009 0.6410 ± 0.0068 0.6639 ± 0.0020 0.6508 ± 0.0076 
+
+rel-event user-ignore 0.7765 ± 0.0312 0.7278 ± 0.0061 0.7348 ± 0.0183 0.7397 ± 0.0037 
+
+user-repeat 0.6849 ± 0.0520 0.7581 ± 0.0120 0.7160 ± 0.0316 0.7603 ± 0.0351 
+
+rel-f1 driver-dnf 0.7071 ± 0.0184 0.6595 ± 0.0627 0.7133 ± 0.0416 0.7045 ± 0.0131 
+
+driver-top3 0.7815 ± 0.0415 0.7384 ± 0.0574 0.8067 ± 0.0402 0.8522 ± 0.0242 
+
+rel-hm user-churn 0.6777 ± 0.0004 0.6746 ± 0.0036 0.6975 ± 0.0016 0.6976 ± 0.0017 
+
+rel-stack user-badge 0.8284 ± 0.0064 0.8703 ± 0.0025 0.8764 ± 0.0016 0.8561 ± 0.0131 
+
+user-engagement 0.8535 ± 0.0153 0.8899 ± 0.0018 0.9047 ± 0.0009 0.9064 ± 0.0003 
+
+rel-trial study-outcome 0.6814 ± 0.0092 0.6345 ± 0.0251 0.6632 ± 0.0177 0.7058 ± 0.0054 
+
+A.4.4 RGP Baseline Reproduction 
+
+The Relational Graph Perceiver (RGP) [37] is the most architecturally related prior work to Q UARTET ,as both compress structural and temporal context through Perceiver-style cross-attention. Because RGP does not have publicly available code for running benchmark comparisons, we performed a ground-up reproduction following direct guidance from the original authors. Our reproduction assembles RGP’s full forward path from three verified sources: • Tokenization: RelGT’s structural tokenizer (feature encoding via NeighborTfsEncoder )combined with the RGP paper’s own positional-encoding formula (type + centrality + hop +
+
+time), which the author confirmed differs from RelGT’s. • Perceiver core: GraphFM [52]’s memory-efficient cross-attention and feed-forward blocks (from the same research group as the RGP authors) reused as the dual-branch encoder backbone, as confirmed by the author. • Temporal sampler: Implemented from scratch following the paper’s Algorithm 1 pseudocode. We use the selection rule (per-edge-type top-k=10 , strictly causal, no time-window mode) as confirmed by the author. Because the original paper omitted per-task hyperparameters, we performed a grid search over Perceiver layers L ∈ { 2, 4, 6} and latent tokens n ∈ { 8, 16 , 32 } for each task. Table 10 presents the completed reproduction results across all twelve R EL BENCH classification tasks. Overall, Q UARTET maintains highly competitive performance in this expanded baseline set, achieving the highest mean ROC-AUC on six tasks, compared to four for RelGT and two for RGP. We restrict these results to the appendix rather than incorporating them into the main text (Table 1) due to remaining methodological ambiguities that prevent a guaranteed apples-to-apples comparison. Specifically, without access to the original codebase, we cannot definitively rule out the use of undocumented mechanisms such as temporal decay, nor can we guarantee that the Perceiver architecture ported from GraphFM is strictly identical to the proprietary RGP model. Given these constraints, the results in Table 10 are provided as a transparent, best-effort reproduction. 
+
+28
