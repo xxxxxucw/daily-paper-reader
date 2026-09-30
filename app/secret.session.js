@@ -599,6 +599,25 @@
     return { owner: repoOwner, repo: repoName };
   }
 
+  async function putGithubSecret(url, options, name) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let res;
+      try {
+        res = await fetch(url, options);
+      } catch (error) {
+        if (attempt === 2) throw error;
+      }
+      if (res && res.ok) return;
+      if (res && (![408, 429, 500, 502, 503, 504].includes(res.status) || attempt === 2)) {
+        const txt = await res.text().catch(() => '');
+        throw new Error(
+          `写入 GitHub Secret ${name} 失败：HTTP ${res.status} ${res.statusText} - ${txt}`,
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+    }
+  }
+
   // 将总结模型 / workflow 所需的大模型配置写入 GitHub Secrets
   // 可选 progress 回调用于在 UI 中展示上传进度：progress(currentIndex, total, secretName)
   async function saveSummarizeSecretsToGithub(token, options, progress) {
@@ -724,7 +743,7 @@
           encrypted_value: encrypted,
           key_id: keyId,
         };
-        const res = await fetch(
+        await putGithubSecret(
           `https://api.github.com/repos/${owner}/${repo}/actions/secrets/${encodeURIComponent(
             name,
           )}`,
@@ -737,13 +756,8 @@
             },
             body: JSON.stringify(body),
           },
+          name,
         );
-        if (!res.ok) {
-          const txt = await res.text().catch(() => '');
-          throw new Error(
-            `写入 GitHub Secret ${name} 失败：HTTP ${res.status} ${res.statusText} - ${txt}`,
-          );
-        }
       };
 
       const secrets = [
