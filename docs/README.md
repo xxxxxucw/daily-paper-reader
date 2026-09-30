@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-29</span>
+      <span class="dpr-home-dashboard-kicker">2026-09-30</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 17 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 4 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>8</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>1</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>3</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-29 11:36:34 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-30 10:52:53 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-09-29 日报精选17篇AI论文，精读9篇速读8篇。最值得关注表格基础模型能否摊销统计推断与合成标签改善共形预测的条件覆盖，两篇均获9.0分。普通读者可先读这两篇精读，再扫速读中的因果发现与解码风险定位。</p>
+<p>今日扫读4篇大模型相关论文，精读1篇、速读3篇，重点落在推理模型的置信度校准与不确定性量化上。</p>
+<p>最值得看的是精读9.0分的《On the Pitfalls of Verbalized Confidence Priors for Calibrating Large Reasoning Models》，它提醒&quot;语言化置信度先验&quot;在推理模型校准中可能存在陷阱；速读中《Jailbreaks for Black-Box Uncertainty Quantification in Large Reasoning Models》（7.0）与《When Less Compute Is More: Adaptive Early Exit Improves Pretrained Outlier Detection》（7.0）也分别从黑箱不确定性和早退省算力角度值得一读。</p>
+<p>普通读者若关注模型可信度，可先看精读这篇校准陷阱的结论，再顺带了解黑箱不确定性量化那篇，判断模型&quot;说自己有多确定&quot;是否可信。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -78,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">9 篇</strong>
+    <strong class="dpr-home-dashboard-count">1 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Can Tabular Foundation Models Amortize Statistical Inference?">Can Tabular Foundation Models Amortize Statistical Inference?</span></li><li><span class="dpr-home-dashboard-paper-title" title="How Synthetic Labels Improve Conformal Prediction: A Perspective on Conditional Coverage">How Synthetic Labels Improve Conformal Prediction: A Perspective on Conditional Coverage</span></li><li><span class="dpr-home-dashboard-paper-title" title="Conformal Coverage of Time Series: Validity and Inference">Conformal Coverage of Time Series: Validity and Inference</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="On the Pitfalls of Verbalized Confidence Priors for Calibrating Large Reasoning Models">On the Pitfalls of Verbalized Confidence Priors for Calibrating Large Reasoning Models</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>3</strong></span><span class="dpr-home-dashboard-tag">cp <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -91,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">8 篇</strong>
+    <strong class="dpr-home-dashboard-count">3 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Nonnegative DAG Learning via Concomitant Estimation">Nonnegative DAG Learning via Concomitant Estimation</span></li><li><span class="dpr-home-dashboard-paper-title" title="TRACE: Single-Pass Decoding-Trace Risk Localization for Generation Calibration">TRACE: Single-Pass Decoding-Trace Risk Localization for Generation Calibration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Uncertainty Quantification of Next Generation Reservoir Computing with Applications to Memory-Driven Dynamical Systems">Uncertainty Quantification of Next Generation Reservoir Computing with Applications to Memory-Driven Dynamical Systems</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="When Less Compute Is More: Adaptive Early Exit Improves Pretrained Outlier Detection">When Less Compute Is More: Adaptive Early Exit Improves Pretrained Outlier Detection</span></li><li><span class="dpr-home-dashboard-paper-title" title="Jailbreaks for Black-Box Uncertainty Quantification in Large Reasoning Models">Jailbreaks for Black-Box Uncertainty Quantification in Large Reasoning Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="DIAL: Position-Debiased LLM Judges with Adaptive Human Preference Calibration">DIAL: Position-Debiased LLM Judges with Adaptive Human Preference Calibration</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>4</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">llm-calib <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 </div>
 
