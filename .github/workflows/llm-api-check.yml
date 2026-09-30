@@ -1,0 +1,71 @@
+name: Verify LLM API configuration
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_api:
+        description: Send one small JSON request using the configured API
+        type: boolean
+        default: false
+  push:
+    paths:
+      - 'app/llm-config-utils.js'
+      - 'app/secret.session.js'
+      - 'src/llm.py'
+      - 'tests/test_llm*'
+      - '.github/workflows/llm-api-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install LLM client dependency
+        run: python -m pip install requests
+      - name: LLM and secret configuration regressions
+        run: |
+          node tests/test_llm_config_utils.js
+          node tests/test_secret_and_reset_recovery.js
+          python -m unittest discover -s tests -p 'test_llm_base_url.py'
+          python -m unittest discover -s tests -p 'test_llm_structured_output.py'
+      - name: Test configured API with a small JSON request
+        if: github.event_name == 'workflow_dispatch' && inputs.test_api
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
+          SUMMARY_API_KEY: ${{ secrets.SUMMARY_API_KEY }}
+          SUMMARY_BASE_URL: ${{ secrets.SUMMARY_BASE_URL }}
+          SUMMARY_MODEL: ${{ secrets.SUMMARY_MODEL }}
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from llm import DeepSeekClient
+
+          key = os.getenv('SUMMARY_API_KEY') or os.getenv('DEEPSEEK_API_KEY')
+          base = os.getenv('SUMMARY_BASE_URL') or os.getenv('DEEPSEEK_BASE_URL')
+          model = os.getenv('SUMMARY_MODEL') or os.getenv('DEEPSEEK_MODEL')
+          if not all((key, base, model)):
+              raise SystemExit('Configure API key, base URL and model Secrets before testing.')
+          client = DeepSeekClient(api_key=key, model=model, base_url=base)
+          client.kwargs.update({'temperature': 0, 'max_tokens': 256, 'thinking': {'type': 'disabled'}})
+          result = client.chat(
+              messages=[
+                  {'role': 'system', 'content': 'Return only valid JSON.'},
+                  {'role': 'user', 'content': 'Return exactly this JSON: {"ok": true}'},
+              ],
+              response_format={'type': 'json_object'},
+          )
+          if json.loads(result['content']).get('ok') is not True:
+              raise SystemExit('The API did not return the expected JSON.')
+          print(json.dumps({'api_test': 'passed', 'base_url': base, 'model': model, 'tokens': result['tokens']}))
+          PY
