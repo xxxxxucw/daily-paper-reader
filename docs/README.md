@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-21 ~ 2026-09-30</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-01</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 6 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 2 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>1</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>5</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>1</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-30 12:02:23 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-01 11:33:01 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-09-21至09-30共处理6篇论文，精读1篇、速读5篇，聚焦表格基础模型与关系图、联邦插补等方向。最值得看的是精读9.0分的《Conformal Prediction and Conditional Coverage for Tabular Foundation Models》，它直击表格基础模型的不确定性量化；速读中关系图增强Transformer的QUARTET（7.0分）也值得关注。普通读者可优先了解保形预测如何为表格模型提供更可靠的条件覆盖率，再按需跟进图关系与联邦学习场景。</p>
+<p>今日日报：2篇论文，1篇精读、1篇速读，主线聚焦基准暴露的因果效应与异构表格证据检索。</p>
+<p>最值得看的是8.0分精读《Beyond Overlap: Estimating the Causal Effect of Benchmark Exposure》，速读可补看6.0分的《TableSeek: Structure-Preserving Agentic Evidence Seeking over Heterogeneous Table Corpora》。</p>
+<p>普通读者若时间有限，先读精读篇把握“基准暴露因果效应”的评估思路，再按需浏览表格检索篇。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -81,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">1 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Conformal Prediction and Conditional Coverage for Tabular Foundation Models">Conformal Prediction and Conditional Coverage for Tabular Foundation Models</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Beyond Overlap: Estimating the Causal Effect of Benchmark Exposure">Beyond Overlap: Estimating the Causal Effect of Benchmark Exposure</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -91,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">5 篇</strong>
+    <strong class="dpr-home-dashboard-count">1 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="QUARTET: Quad-branch cross-Attention and Random-walk Traces for Enhancing Transformers on Relational Graphs">QUARTET: Quad-branch cross-Attention and Random-walk Traces for Enhancing Transformers on Relational Graphs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Fed-ReMasker: Federated Tabular Imputation under Feature-Level Missingness">Fed-ReMasker: Federated Tabular Imputation under Feature-Level Missingness</span></li><li><span class="dpr-home-dashboard-paper-title" title="Learning Through Game: Skewed Transfer of Tabular Knowledge to Strengthen Image Model">Learning Through Game: Skewed Transfer of Tabular Knowledge to Strengthen Image Model</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="TableSeek: Structure-Preserving Agentic Evidence Seeking over Heterogeneous Table Corpora">TableSeek: Structure-Preserving Agentic Evidence Seeking over Heterogeneous Table Corpora</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>4</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 </div>
 
