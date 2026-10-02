@@ -61,7 +61,10 @@ class FakeSession:
             }
         )
         if self.responses:
-            return self.responses.pop(0)
+            response = self.responses.pop(0)
+            if isinstance(response, Exception):
+                raise response
+            return response
         return FakeResponse()
 
 
@@ -138,6 +141,27 @@ class RerankerApiTest(unittest.TestCase):
 
     def test_siliconflow_reranker_retries_rpm_limit(self):
         session = FakeSession([FakeRateLimitedResponse(), FakeResponse()])
+        reranker = self.api_mod.SiliconFlowReranker(
+            api_key="test-key",
+            base_url="https://example.test/v1/rerank",
+            max_retries=1,
+            retry_delay_seconds=0,
+            session=session,
+        )
+
+        result = reranker.rerank(
+            query="graph neural networks",
+            documents=["doc a", "doc b"],
+            top_n=2,
+            model="Qwen/Qwen3-Reranker-0.6B",
+        )
+
+        self.assertEqual(result["results"][0]["index"], 1)
+        self.assertEqual(len(session.calls), 2)
+        self.assertEqual(reranker.stats("Qwen/Qwen3-Reranker-0.6B")["api_calls"], 2)
+
+    def test_siliconflow_reranker_retries_timeout(self):
+        session = FakeSession([requests.ReadTimeout("read timeout"), FakeResponse()])
         reranker = self.api_mod.SiliconFlowReranker(
             api_key="test-key",
             base_url="https://example.test/v1/rerank",
