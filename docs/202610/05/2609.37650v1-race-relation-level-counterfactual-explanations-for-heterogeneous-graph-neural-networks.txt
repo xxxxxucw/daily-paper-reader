@@ -1,0 +1,1478 @@
+Preprint
+RACE: RELATION-LEVEL COUNTERFACTUAL EXPLA-
+NATIONS FOR HETEROGENEOUS GRAPH NEURAL NET-
+WORKS
+Yuxiang Yao1∗
+Zijun Zhao2∗†
+1Project Management Department, Research Center, China Life Insurance Company Ltd.
+2School of Computer Science and Technology, Beijing Institute of Technology
+yaoyuxiangyyx2023@e-chinalife.com
+zhaozijun@bit.edu.cn
+ABSTRACT
+Counterfactual explanations of graph neural networks identify edge deletions that
+flip a prediction. On heterogeneous graphs, however, existing methods first col-
+lapse the graph into untyped edges, so they cannot answer the question a domain
+expert actually asks: which relation type drives this prediction? We present RACE
+(Relation-Aware Counterfactual Explanations), which gives this question an ex-
+act, per-instance answer. For every explained instance, an exhaustive search over
+relation subsets returns the certified minimum relation-deletion set that flips the
+prediction—or an explicit report that no such deletion exists; each relation-level
+answer is then refined into a typed edge set within the attributed relations, verified
+on the discrete model by single-edge restoration. The relation-level answer is ex-
+act and deterministic given the frozen backbone, whereas soft-mask baselines vary
+by 6–8 pp in success rate across runs differing only in random ordering. On ACM,
+a Cora-derived graph, and ogbn-mag, RACE improves counterfactual success rate
+over the strongest baseline by up to +2.7 pp while deleting fewer edges, and at-
+tains the highest success rate among all same-task baselines on every dataset; the
+advantage reproduces across four backbones on ogbn-arXiv and on DBLP, with
+cross-seed relation-set agreement up to 0.89. A synthetic study with known gener-
+ating mechanisms confirms that the search recovers the relation the trained model
+actually relies on—and reports infeasibility rather than fabricating an attribution
+when the model has learned none—so the explanations stay trustworthy exactly
+where explanations matter.
+1
+INTRODUCTION
+Graph neural networks (GNNs) are the workhorse for learning on graph-structured data, yet their
+predictions remain opaque. Counterfactual explanations address opacity by identifying the minimal
+input perturbation that flips the prediction: CF-GNNExplainer Lucic et al. (2022), CF2 Tan et al.
+(2022), and RCExplainer Bajaj et al. (2021) delete edges until the prediction changes, and recent
+work keeps extending this line Zhang et al. (2026). Real-world graphs, however, are rarely ho-
+mogeneous: academic networks, knowledge graphs, and e-commerce platforms are heterogeneous
+information networks in which co-authorship, citation, and shared-subject links coexist Shi et al.
+(2017). On such data the existing methods have two defects. First, they collapse the heterogeneous
+graph into a pairwise graph, discarding relation-type semantics, so the resulting explanation cannot
+answer “which relation type drives the prediction”—the question a domain expert asks of a hetero-
+geneous model. Second, even in their native regime, their edge-level outputs are a scattered set
+of individual edges whose semantics are not aggregable into a human-readable statement such as
+“co-authorship is what this prediction relies on”.
+We close this gap with RACE, a framework that (i) preserves relation-type semantics in the ex-
+plained model, (ii) computes instance-level minimal relation-deletion sets by exact search, (iii) re-
+∗Equal contribution.
+†Corresponding author.
+1
+arXiv:2609.37650v1  [cs.LG]  29 Sep 2026
+
+
+Preprint
+fines them into verified, single-edge-restoration-irreducible edge deletions inside the attributed re-
+lations (a relation-to-edge hierarchy), and (iv) evaluates everything with deletion- and sufficiency-
+fidelity metrics plus explicit coverage, cost, and stability reporting. We make three contributions:
+• Instance-level relation counterfactuals by exact search. For each explained instance v
+we solve S∗
+v = arg minS Cv(S) subject to the prediction flipping (a margin constraint),
+with a lexicographic cost (number of relations, then local edge fraction, then margin).
+Because K is small, enumeration over the 2K subsets is exact, deterministic, and cheap
+(≤10 s at K=10); every instance receives either this certified answer or an explicit infea-
+sibility report—no force-attribution—and the resulting coverage is disclosed. A budgeted
+branch-and-bound search extends the same contract to larger K (RQ6). We further doc-
+ument non-monotonicity: some predictions flip under a relation subset but not under full
+removal, evidence that aggregate flip-rate searches cannot substitute for the instance-level
+problem.
+• A verified hierarchical relation-to-edge pipeline. The edge-level stage deletes the at-
+tributed relations and then verifies the intervention on the discrete model by restoring edges
+one at a time along the saliency order while the flip persists, repeated to a fixpoint—so
+the reported set carries a single-edge-restoration irreducibility certificate (or an explicit
+budget-limited status), evaluated on the instance’s exact local computation subgraph. Un-
+der a strict same-frozen-typed-backbone, instance-targeted protocol, the hierarchical ex-
+plainer beats the strongest baseline (CF2-hetero) on both success rate (+0.8/+2.7/+1.4 pp
+on ACM/Cora/ogbn-mag, p = 0.002 raw, Holm-corrected ≤0.062, ten seeds) and edge
+cost (−1.9/−1.0/−2.7 pp), reproduces on ogbn-arXiv across four backbones and on DBLP,
+yields cross-seed relation-set agreement of 0.78–0.89 on the separable datasets, and at-
+tains the highest success rate among the same-task counterfactual baselines under the same
+frozen checkpoint.
+• A fidelity framework and an identifiability characterization.
+We adopt the dele-
+tion/sufficiency statistics as descriptive fidelity metrics—Necessity Fidelity (NF) and Suf-
+ficiency Fidelity (SF)—reserving causal language for settings with an explicit generating
+mechanism; we characterize when relation-level attribution is identifiable (causally sepa-
+rable relations), and—via a five-mechanism synthetic study separating model-dependence
+from data-causal recovery—show that the search recovers the relation the trained model
+actually relies on and reports infeasibility instead of fabricating an attribution when the
+model has not learned a mechanism.
+2
+RELATED WORK
+Explaining GNNs. GNNExplainer Ying et al. (2019) learns a mask over edges and features that
+preserves the prediction, and PGExplainer Luo et al. (2020) amortizes this into a generator; both
+are factual and cannot answer counterfactual queries. Gradient attributions—Saliency Baldassarre
+& Azizpour (2019), GradCAM Pope et al. (2019), Integrated Gradients Sundararajan et al. (2017)—
+and SubgraphX Yuan et al. (2021) score inputs without a flip guarantee. None provides relation-type
+granularity.
+Counterfactual explanations on graphs. CF-GNNExplainer Lucic et al. (2022) formalizes the
+counterfactual explanation as a minimal set of edge deletions that flips the prediction; CF2 Tan
+et al. (2022) adds factual reasoning and a validity term; RCExplainer Bajaj et al. (2021) uses a
+hinge objective; MEG Numeroso & Bacciu (2021) searches binary masks with a genetic algorithm;
+NSEG Cai et al. (2025) optimizes a necessity-plus-sufficiency lower bound; InduCE Verma et al.
+(2024) amortizes the counterfactual objective into an inductive generator; C2Explainer Ma et al.
+(2025) makes the counterfactual customizable through prior constraints. All operate on homoge-
+neous pairwise graphs: none attributes an explanation to a relation type, because the graph they
+consume no longer contains types. What this line lacks is not post-hoc evaluation—prior methods
+do evaluate their final counterfactual on the discrete model when reporting validity—but a selec-
+tion procedure that consults the discrete model at every step, per instance, and reports infeasibility
+instead of force-attributing—the ingredients RACE contributes.
+Probabilities of causation and heterogeneous GNNs. Pearl introduced necessity, sufficiency, and
+their conjunction as counterfactual interpretations of causation Pearl (1999); Tian & Pearl (2000);
+2
+
+
+Preprint
+Cai et al. (2025) brought this framework to graph explanations. We adopt their evaluation conven-
+tions as descriptive fidelity metrics (NF/SF) and reserve causal language for synthetic data with
+an explicit generating mechanism.
+HAN Wang et al. (2019), HGT Hu et al. (2020b), and R-
+GCN Schlichtkrull et al. (2018) organize heterogeneous message passing; type-aware attribution
+methods remain factual and post-hoc. Heterogeneous explainability has not been combined with
+(i) minimal instance-level counterfactual interventions, (ii) relation-type-level intervention units
+with explicit coverage, and (iii) per-instance verification on the discrete model—the three ingre-
+dients RACE contributes.
+3
+METHODOLOGY
+3.1
+PRELIMINARIES AND PROBLEM FORMULATION
+A heterogeneous graph is a tuple G = (V, {Er}K
+r=1, X) with relation edge sets Er ⊆V × V, K
+relation types (K ≤10 in our benchmarks), and node features X ∈RN×d. A frozen graph neural
+classifier f maps G to class probabilities f(G) ∈[0, 1]N×C. For an instance v with prediction
+ˆyv = arg maxc f(G)v,c, we write the margin
+Mv(G) = f(G)v,ˆyv −max
+c̸=ˆyv f(G)v,c,
+(1)
+so a flip means Mv ≤−κ for a target confidence κ ≥0. We study two intervention granularities:
+relation-type-level (delete every edge of one or more relations, written G\S for S ⊆{1, . . . , K}) and
+edge-level (delete a typed edge subset, written G ⊙m for per-relation keep-masks mr ∈[0, 1]|Er|).
+Throughout, NL(v) denotes the backward ball of radius L around v (the receptive field of an L-layer
+backbone), and EL(v) the edges of the L-layer computation subgraph of v.
+3.2
+RELATION-AWARE HETEROGENEOUS BACKBONE
+The explained model preserves relation semantics through a simplified heterogeneous graph trans-
+former. For each relation r, source features are projected by a dedicated matrix and edges are scored
+by additive attention:
+hr
+v = Wrxv,
+er
+uv = LeakyReLU
+ a⊤
+r
+
+Wrxu ∥Wrxv
+
+,
+αr
+uv = softmaxv∈Nr(u)(er
+uv) ,
+(2)
+and the layer update combines relations with learnable relation weights λr:
+x′
+u = ReLU
+
+LayerNorm
+
+Wself xu +
+K
+X
+r=1
+λr
+X
+v∈Nr(u)
+αr
+uv Wrxv
+
+
+
+.
+(3)
+Stacking L such layers and a linear head yields f. On ACM this backbone attains 0.560 ± 0.007
+accuracy, +3.4 pp over a collapsed pairwise backbone trained identically; HAN, HGT, and the RACE
+backbone tie at 0.56–0.57 under the shared protocol, while residual-free GCN/GAT attain 0.23—the
+accuracy edge is a property of the typed residual design.
+3.3
+EDGE-LEVEL VERIFIED COUNTERFACTUAL
+Per-relation typed masks. For each relation r we learn a keep-mask mr ∈[0, 1]|Er| (Gumbel-
+Sigmoid relaxation Jang et al. (2017); Maddison et al. (2017)); gradients flow through the relation-
+specific projections, so interventions remain typed.
+Margin objective. With the backbone frozen and the targets restricted to the instances being ex-
+plained, we minimize
+L = Ev[max(0, Mv(G ⊙m) + κ)]
+|
+{z
+}
+flip term
++ λsp 1
+E
+P
+r,e(1 −mr
+e)
+|
+{z
+}
+minimality
++ β 1
+E
+P
+r,e mr
+e(1 −mr
+e)
+|
+{z
+}
+binary pressure
+,
+(4)
+3
+
+
+Preprint
+replacing the soft-probability objective used by prior work: the hinge exerts no gradient on already-
+flipped instances, concentrating optimization on those near the boundary.
+Discrete verification and backward pruning. The relaxed masks are not the explanation. We
+(1) order every edge by its learned keep-score and greedily delete in batches, evaluating the discrete
+model after each batch and keeping the deletion point that maximizes validity minus λsp-weighted
+cost; (2) backward-prune: restore deleted edges in descending keep-score while the satisfied set
+is preserved. The reported masks are therefore verified on the discrete model: unlike a threshold
+applied once after optimization, the selection itself consults the discrete model at every batch, so
+the flip status of the reported intervention is a measured property of that intervention rather than an
+implication of the relaxation.
+3.4
+INSTANCE-LEVEL RELATION DELETION SEARCH
+For each explained instance v, the relation-level counterfactual is the minimum-cost relation set
+whose deletion flips v:
+S∗
+v = arg
+min
+S⊆{1,...,K} Cv(S)
+s.t.
+Mv(G \ S) ≤−κ,
+(5)
+with the lexicographic cost
+Cv(S) =
+
+|S|,
+1
+|EL(v)|
+P
+r∈S |Er ∩EL(v)|, Mv(G \ S)
+
+,
+(6)
+i.e., fewest relation types first, then the smallest fraction of the instance’s receptive-field edges, then
+the strongest flip. Because K is small, we enumerate all 2K subsets in increasing size; one forward
+pass per subset evaluates every instance simultaneously, so the total cost is 2K+1 forwards (0.1 s at
+K=3, 10.3 s at K=10). The procedure is deterministic and returns the exact minimum under the
+frozen predictor and the stated cost. Instances with no feasible subset are marked infeasible, and
+the fraction of feasible instances is reported as coverage: every instance receives either the certified
+minimum or an explicit infeasibility report, never a force-attributed relation. For larger vocabularies
+the budgeted branch-and-bound search of Sec. 4.2 provides the same output contract. Two properties
+follow from the instance-level formulation and are measured in Sec. 4.2: (i) the output contract—per
+instance, the certified answer or an explicit infeasibility report, with coverage disclosed (0.17–0.33
+on our benchmarks); (ii) non-monotonicity—some instances flip under a subset S but not under full
+removal, so the aggregate “70% of the full-removal effect” criterion of prior work can both miss and
+misattribute instances.
+3.5
+HIERARCHICAL RELATION-TO-EDGE REFINEMENT
+For every feasible instance, the relation-level answer is refined into a certified typed edge set inside
+S∗
+v: starting from G \ S∗
+v (already flipped), we restore edges of S∗
+v one at a time in descending
+keep-importance order (gradient saliency of the original prediction), accepting a restoration iff v
+stays flipped, and repeat full passes until a complete pass changes nothing—the returned set is then
+single-edge-restoration irreducible. If the per-instance forward budget is exhausted first, the answer
+is reported as a verified flip with the irreducibility check incomplete; the two statuses are reported
+separately, and a budget-exhausted answer is not marked optimal. The certificate is single-edge-
+restoration irreducibility rather than global minimality; the gap to the true minimum is measured
+exactly on enumerable subgraphs (Appendix I). Each check runs on the exact local computation
+subgraph of v—the backward ball of radius L with renumbered nodes, which reproduces the full-
+graph logits of v exactly—so a check costs a tiny forward instead of a full-graph pass. Instances
+without a feasible relation set keep the flat verified edge explanation of Sec. 3.3 as a fallback, so
+overall success is never below the flat method. The output is the hierarchy: “delete relation S∗
+v;
+within it, these edges.”
+3.6
+FIDELITY METRICS AND OVERALL PIPELINE
+Following the deletion/sufficiency evaluation convention of Cai et al. (2025) but without claiming
+causal probabilities, we report per instance and in aggregate:
+NFv(S) = 1[f(G \ S)v̸ = ˆyv],
+SFv(S) = 1[f(S)v = ˆyv],
+(7)
+4
+
+
+Preprint
+Figure 1: Pipeline of RACE. Stage 1 builds the relation-aware backbone and freezes it. Stage 2
+solves the instance-level exact search, returning the certified minimum relation deletion set S∗
+v or
+an explicit infeasibility report. Stage 3 refines each feasible answer into a certified, single-edge-
+restoration-irreducible typed edge set (or an explicit budget-limited status); relation-infeasible in-
+stances keep the flat verified explanation as a fallback. Stage 4 evaluates NF/SF, coverage, cost,
+stability, and runtime.
+Necessity Fidelity (does the deletion flip?) and Sufficiency Fidelity (does the kept set alone pre-
+serve the prediction?). Aggregates are instance averages; we additionally report coverage, relation
+cost |S∗
+v|, edge cost, the post-intervention margin, cross-seed stability, and runtime, and we never
+present NF × SF as a causal joint probability. Fig. 1 depicts the pipeline: Stage 1 builds the
+relation-aware backbone (Sec. 3.2); Stage 2 freezes it and solves the instance-level relation search
+of Eq. (5), recording S∗
+v and feasibility; Stage 3 refines each feasible answer into a certified, single-
+edge-restoration-irreducible typed edge set (Sec. 3.5), with infeasible instances keeping the flat ver-
+ified edge explanation; Stage 4 evaluates both granularities with NF/SF, coverage, cost, margin,
+stability, and runtime.
+4
+EXPERIMENTS
+We organize the study around six questions. RQ1 (main comparison): on one frozen typed back-
+bone, does the hierarchical RACE improve over edge-level baselines on validity, cost, and stabil-
+ity? RQ2 (mechanism): is the relation phase the source of the advantage, and what does dis-
+crete verification add? RQ3 (output contract): does the instance-level search return the minimum
+valid relation deletion, with feasibility reported? RQ4 (generality): does the advantage transfer
+across backbones and datasets? RQ5 (determinism and robustness): how deterministic, stable,
+and perturbation-robust are the explanations, and what does verification cost? RQ6 (scalability):
+how do exact and approximate search trade quality against cost as K grows?
+4.1
+EXPERIMENTAL SETUP
+Datasets. ACM (HAN version): a paper network whose relations are meta-path-derived—relation 0:
+PAP (co-authorship), relation 1: PTP (shared keywords)—1,903-dim bag-of-words features, venue
+labels. ogbn-mag (subsample) Hu et al. (2020a): 30,000 papers of the top-20 venues, relations PAP
+and citation. Cora-derived: citation plus a common-neighbor relation. ogbn-arXiv (subsample) Hu
+et al. (2020a): 30,000 papers of the top-20 subject areas, relations direct citation and co-citation.
+DBLP: an author network (co-authorship plus a shared-term meta-path relation; 4,057 authors, 4
+areas). Synthetic SCM: a five-mechanism generator (causal, spurious with environment shift, re-
+dundant, noise, and a synergistic variant). All four primary real benchmarks have K = 2 relation
+types; a four-relation ogbn-mag variant and the synthetic K-scan probe larger vocabularies. Dataset
+statistics are summarized in Appendix A.
+5
+
+
+Preprint
+Table 1: Same-frozen-typed-backbone, instance-targeted comparison (10 seeds, mean±std across
+seeds; CSR = success rate, cost = mean local deleted fraction over all targets). Paired sign-flip tests
+of the hierarchical method against each baseline; †: p = 0.002 before Holm correction (≤0.062
+after). Bold: best value in each column; underlined: second best.
+ACM
+Cora
+ogbn-mag
+Method
+CSR↑
+cost↓
+CSR↑
+cost↓
+CSR↑
+cost↓
+flat
+RACE-per-edge
+0.216±0.072
+0.159±0.062
+0.452±0.111
+0.305±0.031
+0.168±0.008
+0.378±0.011
+PNS-hetero
+0.216±0.072
+0.159±0.063
+0.450±0.110
+0.306±0.031
+0.168±0.008
+0.378±0.010
+CF2-hetero
+0.216±0.072
+0.195±0.088
+0.458±0.110
+0.342±0.024
+0.168±0.008
+0.434±0.013
+RACE-hier
+0.224±0.077†
+0.176±0.067†
+0.484±0.122†
+0.332±0.024†
+0.182±0.009†
+0.407±0.011†
+vs. CF2-hetero
++0.8 pp
+−1.9 pp
++2.7 pp
+−1.0 pp
++1.4 pp
+−2.7 pp
+Metrics. We report backbone accuracy; counterfactual success rate (CSR), the fraction of explained
+instances whose prediction flips, equal to mean NF, with any non-intervention counted as failure;
+edge cost, the fraction of the instance’s receptive-field edges deleted, under labeled aggregation
+conventions; NF/SF of Eq. (7) separately; coverage; cross-seed stability (relation-set agreement and
+edge-set Jaccard); and runtime. Synthetic studies add two separate hit rates: model-dependence
+recovery and data-causal recovery. Full definitions are in Appendix C.
+Baselines and protocol. One typed backbone is trained per seed and frozen; every explainer con-
+sumes the same checkpoint, the same explained instances (the correctly-classified test nodes), the
+same operation (edge deletion), and the same budget; objectives are restricted to the explained in-
+stances (“targeted”). Baselines: GNNExplainer-hetero, RACE-per-edge, PNS-hetero, CF2-hetero,
+and the NSEG Cai et al. (2025), InduCE Verma et al. (2024), and C2Explainer Ma et al. (2025)
+objectives, all operating on the typed graph with per-relation masks—the typed counterparts of the
+published methods, isolating the explanation objective from the architecture. We additionally com-
+pare the flat verified pipeline (Sec. 3.3 without the relation phase) against the same baselines to
+isolate the hierarchical contribution (RQ2). HAN Wang et al. (2019), HGT Hu et al. (2020b), and
+R-GCN Schlichtkrull et al. (2018) serve as the explained models in the cross-backbone study. In-
+tervention semantics are fixed across every evaluation (deletion zeroes masked edge entries before
+aggregation; the attention softmax is not renormalized; node features and the residual self-projection
+are never modified). Statistics. Ten seeds on ACM/Cora/ogbn-mag (five for cross-backbone and
+additional-dataset studies); every comparison is a paired test over the same checkpoints and target
+instances; the primary comparisons are fixed in advance; p-values are exact two-sided sign-flip per-
+mutation tests (minimum attainable p = 0.002 with ten seeds, 0.0625 with five), supplemented by
+paired bootstrap 95% CIs and paired Cohen’s d; Holm correction is applied across the full family of
+12 primary tests. Full hyperparameters and settings are in Appendix B.
+4.2
+RESULTS
+RQ1: main comparison. Table 1 reports the same-frozen-backbone, targeted comparison over
+ten seeds.
+At the edge level the flat explainers tie: RACE-per-edge and PNS-hetero are sta-
+tistically identical on all three datasets (p ≥0.38), and the multi-term CF2-hetero is at most
++0.1 pp higher while deleting substantially more edges. The hierarchical method breaks the tie:
+against the strongest baseline (CF2-hetero) it improves CSR by +0.8/+2.7/+1.4 pp (p = 0.002;
+Holm-corrected ≤0.062 across the full test family) while deleting −1.9/−1.0/−2.7 pp fewer edges
+(p = 0.002), and its CSR gains over RACE-per-edge and PNS-hetero are significant on all three
+datasets (p = 0.002). Prior methods trade success rate against deletion cost; the hierarchy im-
+proves both at once. Stability follows the same direction: pairwise cross-seed relation-set agree-
+ment is 0.779±0.058/0.641±0.096/0.894±0.020 (ACM/Cora/mag), and the certified edge-set Jac-
+card is 0.436±0.041/0.483±0.072/0.654±0.032—the separable datasets show the highest relation-
+set agreement; on Cora the relation sets vary more across seeds, an identifiability effect analyzed
+under RQ3 and Sec. 4.2.
+Comprehensive comparison. Table 2 compares all same-task counterfactual methods on the same
+frozen checkpoints with per-method RNG control.
+RACE-hier attains the highest CSR on ev-
+ery dataset (0.224/0.484/0.182), ahead of the strongest baseline by +0.8/+2.6/+1.4 pp. NSEG’s
+necessity-sufficiency objective essentially never flips (CSR ≤0.01), confirming that flip success
+6
+
+
+Preprint
+Table 2: Same-task comprehensive comparison under one frozen checkpoint family (10 seeds,
+mean±std). Cost annotations are restricted to the CSR columns, because a method that rarely flips
+can trivially attain low cost; the paper’s cost claim is the paired comparison against CF2-hetero (Ta-
+ble 1). RACE-hier additionally certifies every reported flip, provides relation-type attribution, and
+reports infeasibility per instance. Bold: best value; underlined: second best.
+ACM
+Cora
+ogbn-mag
+Method
+CSR↑
+cost↓
+CSR↑
+cost↓
+CSR↑
+cost↓
+counterfactual
+CF-GNNExplainer 0.216±0.072 0.159±0.063 0.452±0.110 0.305±0.031 0.168±0.008 0.379±0.011
+RC
+0.148±0.049 0.145±0.059 0.400±0.100 0.245±0.013 0.088±0.007 0.314±0.012
+NSEG
+0.000±0.001 0.139±0.041 0.001±0.001 0.224±0.021 0.002±0.001 0.192±0.014
+CF2
+0.216±0.072 0.195±0.088 0.458±0.110 0.342±0.024 0.168±0.008 0.434±0.013
+C2
+0.190±0.069 0.406±0.023 0.448±0.113 0.518±0.024 0.123±0.007 0.275±0.013
+INDUCE
+0.099±0.091 0.449±0.438 0.195±0.052 0.673±0.348 0.083±0.069 0.519±0.438
+search
+MEG
+0.072±0.017 0.342±0.004 0.115±0.030 0.342±0.010 0.061±0.006 0.348±0.007
+RACE-hier (ours)
+0.224±0.077 0.176±0.067 0.484±0.122 0.332±0.024 0.182±0.009 0.407±0.011
+is not what it optimizes; INDUCE is unstable at this scale (std up to 0.44); C2 pays the highest
+deletion cost among the counterfactual objectives on ACM and Cora. The factual, gradient, and
+random diagnostics are reported separately in Appendix D: factual objectives do not optimize flips
+by construction, and the gradient attributions use an instance-blind global budget, so they are not
+same-task comparisons and are excluded from win claims. The comparison also isolates a property
+that only the exact search offers: the soft baselines’ CSR varies substantially across runs that differ
+only in random ordering (CF2: 0.216 vs. 0.276 on ACM, 0.452 vs. 0.687 on Cora), while RACE’s
+relation-level answer is deterministic given the frozen backbone. On the nodes where both CF2 and
+RACE-hier flip, the hierarchical edge set is cheaper in 66%/44%/65% of cases (ACM/Cora/ogbn-
+mag), and RACE-hier flips 109/85/394 more nodes than CF2 while CF2 flips none that RACE-hier
+misses (Pareto frontier in Fig. 2, Appendix D).
+RQ2: the relation phase is the mechanism. Two controlled comparisons isolate where the advan-
+tage comes from. Flat verified pipeline. Removing only the relation phase (greedy saliency deletion
+plus the same single-edge scan and budget, no relation search) leaves CSR at 0.174/0.246/0.165 on
+ACM/Cora/ogbn-mag—below the strongest baseline and far below the hierarchy—at a lower edge
+cost (Table 3); adding the relation phase converts this deficit into the significant CSR gains of Ta-
+ble 1. Relation-only explanations (no edge refinement) reach only the coverage bound (0.17–0.34,
+Table 4); the hierarchy strictly dominates both ends. Where the success comes from. Table 8 de-
+composes the ten-seed success rate: on ACM the relation phase contributes 18.2 of the 22.4 pp CSR
+at a mean cost of 0.105—half the strongest baseline’s cost (0.195); on ogbn-mag it delivers 16.7
+of 18.2 pp at 0.273 vs. 0.434; on Cora it still delivers 33.7 of 48.4 pp at 0.311 vs. 0.342. Relation
+switch. Table 3 runs the two pipelines under identical machinery and budgets—the only difference
+is the relation phase. The switch attributes +5.0/+23.8/+1.7 pp of CSR to the relation phase on
+ACM/Cora/ogbn-mag (all p = 0.002) and +5.2/+5.7 pp on ogbn-arXiv/DBLP (p = 0.0625, five
+seeds). On the nodes where both flip, the flat path deletes fewer edges (e.g., ACM 0.033 vs. 0.107),
+so the relation phase buys the significant CSR gain and the relation-type attribution at a higher
+per-explanation edge cost, while the pipeline-level cost advantage over CF2-hetero is the separate,
+all-targets claim of Table 1. Verification. Every reported flip is certified on the discrete model; the
+scan costs 1.5–6 min per seed against 2–5 s for the soft-mask baselines—an inference-only cost that
+buys a per-instance certificate, attained for 35–83% of the successful explanations (the remainder
+are reported as verified with the irreducibility check budget-limited). Budget curves and component
+ablations are in Appendix E.
+RQ3: exactness and the output contract. Table 4 reports the instance-level relation search. Cov-
+erage is 0.18 (ACM), 0.34 (Cora), and 0.17 (ogbn-mag): for most correctly-classified instances no
+relation deletion flips the prediction, and RACE says so per instance instead of force-attributing a
+relation. Where a deletion exists, it is cheap in relation count (1.07–1.14 relations on average) and
+strong (mean post-flip margin −0.20 to −0.46), with sufficiency fidelity 0.86–0.96. The attribu-
+tion is dataset-consistent: PAP on ACM (flip 0.150 vs. 0.033), citation on ogbn-mag (0.130 vs.
+7
+
+
+Preprint
+Table 3: Relation switch (same machinery, scan budget, and target nodes; the only difference is the
+relation phase). CSR and feasible-success cost, mean±std over seeds; p: exact paired sign-flip. The
+relation phase buys a significant CSR gain at a higher per-explanation edge cost; the pipeline-level
+cost advantage over CF2-hetero is the separate claim of Table 1.
+Dataset
+hier CSR↑
+flat CSR
+p
+hier cost↓flat cost↓
+ACM
+0.224±0.077 0.174±0.046
+0.002
+0.105
+0.033
+Cora
+0.484±0.122 0.246±0.071
+0.002
+0.311
+0.080
+ogbn-mag
+0.182±0.009 0.165±0.009
+0.002
+0.273
+0.220
+ogbn-arXiv 0.283±0.005 0.230±0.003 0.0625
+0.287
+0.139
+DBLP
+0.161±0.035 0.104±0.013 0.0625
+0.157
+0.030
+Table 4: Instance-level relation search (10 seeds, mean±std). Coverage = fraction of correctly-
+classified test instances with any feasible relation deletion.
+ACM
+Cora
+ogbn-mag
+coverage ↑
+0.182±0.048
+0.337±0.096
+0.167±0.009
+relation cost ↓
+1.07±0.03
+1.14±0.02
+1.07±0.01
+edge cost ↓
+0.574±0.013
+0.605±0.044
+0.838±0.014
+margin
+−0.263±0.033
+−0.459±0.042
+−0.197±0.015
+SF ↑
+0.918±0.031
+0.858±0.028
+0.959±0.009
+attribution
+PAP (10/10)
+common-nbr (10/10) citation (10/10)
+0.032), and common-neighbor on Cora (0.208 vs. 0.130, a consistent winner across all ten seeds);
+it also varies by class, recovering per-class relation semantics that a dataset-level rate cannot (Ap-
+pendix F). Non-monotonicity is measurable: on ACM, coverage (0.18) exceeds the full-removal
+flip rate (0.14)—instances flip under a subset but not under full deletion, evidence that dataset-level
+flip-rate searches cannot substitute for the instance-level problem. Four archetypes recur across the
+explained nodes (single-relation flip, two-relation flip, explicit refusal, flat-fallback success; Ap-
+pendix F), and bucketing by prediction margin shows the hierarchical CSR is highest exactly where
+predictions are closest to the decision boundary.
+RQ4: generality across backbones and datasets. Table 5 reports ogbn-arXiv under four frozen
+backbones (five seeds each): the hierarchical CSR advantage over the strongest baseline reproduces
+on 4/4 backbones (+0.9 to +2.6 pp, all p = 0.062), and the cost advantage over CF2-hetero on 4/4
+(−4.1 to −7.1 pp); R-GCN, whose simpler aggregation makes more predictions relation-deletable,
+yields the highest CSR (0.490). The backbone study extends to ACM, Cora-derived, and ogbn-mag
+(three backbones each, five seeds; Table 10, Appendix G): the hierarchical method beats CF2-hetero
+on CSR in all 9/9 cells (+1.0 to +8.1 pp, all p = 0.062). DBLP reproduces the CSR advantage—
+0.161 vs. 0.145 for CF2-hetero (+1.6 pp, five seeds, p = 0.0625). Natural multi-relation vocabulary.
+A four-relation variant of ogbn-mag (PAP, citation, shared-field-of-study, shared-institution) raises
+coverage from 0.17 to 0.27, and the hierarchy still beats CF2-hetero (0.322 vs. 0.299, +2.3 pp,
+ten seeds, p = 0.002) and the flat switch (+9.3 pp, p = 0.002), with the attribution staying on
+citation (5/5 seeds). Taken with Table 1, the mechanism is dataset- and backbone-agnostic, and the
+relation-level contract is not an artifact of K=2 vocabularies.
+RQ5: determinism and robustness. Given the frozen backbone, the relation-level answer is ex-
+act and deterministic; across seeds the relation sets agree at 0.89/0.62/0.89 (ACM/Cora/mag), and
+under 5% random edge add/remove the attributed relation sets remain near-identical (S∗
+v agreement
+0.975±0.016/0.930±0.023/0.965±0.011). Sensitivity ablations (Table 11, Appendix H) confirm
+the reported results are not artifacts of the margin threshold or the cost definition: κ=0.05 lowers
+coverage by −2.3/−1.0/−3.3 pp (the expected effect of a stricter flip threshold), and switching the
+cost criterion leaves coverage identical on all three datasets.
+RQ6 and the Synthetic SCM: scalability and identifiability. A synthetic five-mechanism gener-
+ator (CF-GNNExplainer-style Lucic et al. (2022); causal, spurious with environment shift, redun-
+dant, noise, and a synergistic variant; generation details in Appendix J) separates model-dependence
+recovery (the returned set equals the relation the trained model relies on) from data-causal recov-
+ery (it equals the generating relation). In the benchmark regime (K ≤10), exact search certi-
+8
+
+
+Preprint
+Table 5: ogbn-arXiv: hierarchical vs. strongest baseline per backbone (5 seeds; all CSR/cost compar-
+isons p = 0.062, the minimum attainable with five seeds). RACE-bb is the relation-aware backbone
+of Sec. 3.2. Bold: better value in each pairwise comparison.
+CSR↑
+cost↓
+Backbone
+RACE-hier
+CF2
+RACE-hier
+CF2
+RACE-bb
+0.283
+0.267
+0.287
+0.385
+HAN
+0.255
+0.245
+0.284
+0.379
+HGT
+0.288
+0.275
+0.286
+0.430
+R-GCN
+0.490
+0.464
+0.315
+0.510
+fies the minimum-cost answer at negligible wall-clock cost (0.1 s at K=3 to 7 s at K=10, faster
+than the effect-ordered greedy/beam heuristics for K ≤5), and the double hit-rate protocol reports
+model-dependence equal to data-causal recovery—the regularized model relies on the generating
+relation. The heuristics attain higher data-causal hit only because the lexicographic tie-break prefers
+cheaper noise relations over the causal one when both flip; exact search’s guarantee is the certi-
+fied minimum-cost answer. When the mechanism is not learnable (synergistic variant, test accuracy
+0.25 ≈chance), all data-causal hits collapse to chance while model-dependence sits at 0.20: the
+double protocol attributes the collapse to model unlearnability rather than explainer error, which a
+single hit rate conflates. At K=20, where 220 enumeration is impractical, the budgeted branch-and-
+bound search (a first-order Lipschitz bound, capped at 500 local forwards per instance) is the only
+approximation that improves over greedy/beam (0.16 vs. 0.06 data-causal hit). The full results are
+in Table 13 (Appendix J); the same certification discipline applies at the edge level, where the scan
+equals the true minimum in 85% of enumerable cases and is off by one edge in the rest (Appendix I).
+5
+CONCLUSION
+We presented RACE, which explains a frozen heterogeneous GNN at two granularities that prior
+work conflates: an instance-level minimal relation-deletion set found by exact, deterministic search,
+and a verified, single-edge-restoration-irreducible typed edge set inside the attributed relations. Un-
+der a strict same-frozen-typed-backbone, instance-targeted protocol, the hierarchical explainer sig-
+nificantly improves success rate while deleting fewer edges than the strongest baseline on ACM,
+Cora-derived, and ogbn-mag; the advantage reproduces across four backbones on ogbn-arXiv, on
+DBLP, and on a natural four-relation ogbn-mag; and across the same-task counterfactual baselines,
+RACE attains the highest success rate on every dataset. Two properties make the answers depend-
+able in practice: determinism—the same checkpoint yields the same explanation, with cross-seed
+relation-set agreement up to 0.89 and 0.93–0.98 agreement under 5% edge perturbation—and the
+per-instance output contract—every reported flip is certified on the discrete model, and every infea-
+sible instance is reported as such rather than force-attributed. Future work extends the intervention
+unit from relation types to meta-paths, grounds relation-level fidelity in explicit structural causal
+models, scales the certified search past K=10 with provable approximation bounds, and evaluates
+hierarchical explanations with human users.
+AI USE STATEMENT
+In this work, we used generative AI tools to aid and polish the writing of the paper. We have not
+used generative AI tools for any task requiring disclosure—generating synthetic data, developing
+theoretical models or conceptual frameworks, formulating mathematical claims or assisting their
+proofs, proposing or refining hypotheses, designing or providing feedback on research methodology
+or experiments, implementing methods, translation, cleaning or reformatting datasets, supporting
+qualitative or thematic data analysis, or interpreting results; these tasks are not applicable to this
+work. All research ideas, methods, experiments, analyses, figures, tables, and claims were produced
+and verified by the authors. We have reviewed all AI-assisted work and take responsibility for the
+final content of this work, including text, claims, and artifacts produced with the aid of generative
+AI.
+9
+
+
+Preprint
+REPRODUCIBILITY STATEMENT
+All datasets used in this work are public benchmarks (ACM, ogbn-mag, ogbn-arXiv, Cora, DBLP)
+or synthetic generators described in Sec. 4.2; the subsampling and preprocessing steps are speci-
+fied in Sec. 4.1 and Appendix B. The complete experimental protocol—hyperparameters, interven-
+tion semantics, and statistical procedures—is given in Sec. 4.1 and Appendix B. An anonymized
+implementation of RACE (backbone training, exact relation search, hierarchical refinement, and
+the evaluation harness) is available at https://anonymous.4open.science/r/race_
+official-68A1.
+REFERENCES
+Mohit Bajaj, Lingyang Chu, Zi Yu Xue, Jian Pei, Lanjun Wang, Peter Cho-Ho Lam, and Yong
+Zhang. Robust counterfactual explanations on graph neural networks. In Advances in Neural
+Information Processing Systems (NeurIPS), volume 34, pp. 5644–5655, 2021.
+Federico Baldassarre and Hossein Azizpour. Explainability techniques for graph convolutional net-
+works. In ICML 2019 Workshop on Learning and Reasoning with Graph-Structured Representa-
+tions (LRGSD), 2019.
+Ruichu Cai, Yuxuan Zhu, Xuexin Chen, Yuan Fang, Min Wu, Jie Qiao, and Zhifeng Hao. On
+the probability of necessity and sufficiency of explaining graph neural networks: A lower bound
+optimization approach. Neural Networks, 184:107065, 2025.
+Weihua Hu, Matthias Fey, Marinka Zitnik, Yuxiao Dong, Hongyu Ren, Bowen Liu, Michele Catasta,
+and Jure Leskovec.
+Open graph benchmark: Datasets for machine learning on graphs.
+In
+Advances in Neural Information Processing Systems (NeurIPS), volume 33, pp. 22118–22133,
+2020a.
+Ziniu Hu, Yuxiao Dong, Kuansan Wang, and Yizhou Sun. Heterogeneous graph transformer. In
+Proceedings of the Web Conference 2020 (WWW), pp. 2704–2710, 2020b.
+Eric Jang, Shixiang Gu, and Ben Poole. Categorical reparameterization with gumbel-softmax. In
+International Conference on Learning Representations (ICLR), 2017.
+Ana Lucic, Maartje A. Ter Hoeve, Gabriele Tolomei, Maarten De Rijke, and Fabrizio Silvestri.
+Cf-gnnexplainer: Counterfactual explanations for graph neural networks. In Proceedings of the
+25th International Conference on Artificial Intelligence and Statistics (AISTATS), volume 151,
+pp. 4499–4511. PMLR, 2022.
+Dongsheng Luo, Wei Cheng, Dongkuan Xu, Wenchao Yu, Bo Zong, Haifeng Chen, and Xiang
+Zhang. Parameterized explainer for graph neural network. In Advances in Neural Information
+Processing Systems (NeurIPS), volume 33, pp. 19620–19631, 2020.
+Jiali Ma, Ichigaku Takigawa, and Akihiro Yamamoto. C2explainer: Customizable mask-based coun-
+terfactual explanation for graph neural networks. In ACM Conference on Fairness, Accountability,
+and Transparency (FAccT), pp. 137–149, 2025.
+Chris J. Maddison, Andriy Mnih, and Yee Whye Teh. The concrete distribution: A continuous
+relaxation of discrete random variables. In International Conference on Learning Representations
+(ICLR), 2017.
+Danilo Numeroso and Davide Bacciu. Meg: Generating molecular counterfactual explanations for
+deep graph networks. In International Joint Conference on Neural Networks (IJCNN), pp. 1–8.
+IEEE, 2021.
+Judea Pearl. Probabilities of causation: Three counterfactual interpretations and their identification.
+Synthese, 121(1):93–149, 1999.
+Phillip E. Pope, Soheil Kolouri, Mohammad Rostami, Charles E. Martin, and Heiko Hoffmann.
+Explainability methods for graph convolutional neural networks. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition (CVPR), pp. 10772–10781, 2019.
+10
+
+
+Preprint
+Michael Schlichtkrull, Thomas N. Kipf, Peter Bloem, Rianne van den Berg, Ivan Titov, and Max
+Welling. Modeling relational data with graph convolutional networks. In European Semantic Web
+Conference (ESWC), pp. 593–607. Springer, 2018.
+Chuan Shi, Yitong Li, Jiawei Zhang, Yizhou Sun, and Philip S. Yu. A survey of heterogeneous
+information network analysis. IEEE Transactions on Knowledge and Data Engineering, 29(1):
+17–37, 2017.
+Mukund Sundararajan, Ankur Taly, and Qiqi Yan. Axiomatic attribution for deep networks. In
+Proceedings of the 34th International Conference on Machine Learning (ICML), volume 70, pp.
+3319–3328. PMLR, 2017.
+Juntao Tan, Shijie Geng, Zuohui Fu, Yingqiang Ge, Shuyuan Xu, Yunqi Li, and Yongfeng Zhang.
+Learning and evaluating graph neural network explanations based on counterfactual and factual
+reasoning. In Proceedings of the ACM Web Conference 2022 (WWW), pp. 1018–1027, 2022.
+Jin Tian and Judea Pearl. Probabilities of causation: Bounds and identification. Annals of Mathe-
+matics and Artificial Intelligence, 28(1):287–313, 2000.
+Samidha Verma, Burouj Armgaan, Sourav Medya, and Sayan Ranu. Induce: Inductive counter-
+factual explanations for graph neural networks. Transactions on Machine Learning Research
+(TMLR), 2024.
+Xiao Wang, Houye Ji, Chuan Shi, Bai Wang, Yanfang Ye, Peng Cui, and Philip S. Yu. Heterogeneous
+graph attention network. In The World Wide Web Conference (WWW), pp. 2022–2032, 2019.
+Rex Ying, Dylan Bourgeois, Jiaxuan You, Marinka Zitnik, and Jure Leskovec. Gnnexplainer: Gen-
+erating explanations for graph neural networks. In Advances in Neural Information Processing
+Systems (NeurIPS), volume 32, pp. 9244–9255, 2019.
+Hao Yuan, Haiyang Yu, Jie Wang, Kang Li, and Shuiwang Ji. On explainability of graph neural
+networks via subgraph explorations. In Proceedings of the 38th International Conference on
+Machine Learning (ICML), volume 139, pp. 12241–12252. PMLR, 2021.
+Yu Zhang, Sean Bin Yang, Arijit Khan, and Cuneyt Gurcan Akcora. Atex-cf: Attack-informed
+counterfactual explanations for graph neural networks. In International Conference on Learning
+Representations (ICLR), 2026.
+A
+DATASET STATISTICS
+Table 6 summarizes the datasets used in the experiments.
+Table 6: Datasets used in the experiments.
+Dataset
+#Nodes #Classes
+Features
+Relation types
+ACM (HAN)
+12,499
+14
+1,903-d BoW PAP, PTP
+ogbn-mag (sub)
+30,000
+20
+128-d emb.
+PAP, citation
+ogbn-mag (sub, 4-rel)
+30,000
+20
+128-d emb.
+PAP, citation, PFP,
+PAIP
+Cora-derived
+2,708
+7
+1,433-d BoW citation,
+common-
+neighbor
+ogbn-arXiv (sub)
+30,000
+20
+128-d emb.
+citation, co-citation
+DBLP
+4,057
+4
+334-d BoW
+co-authorship,
+shared-term
+Synthetic SCM
+400
+4
+16-d noise
+causal,
+spurious,
+redundant,
+noise
+×(K−3)
+11
+
+
+Preprint
+B
+EXTENDED EXPERIMENTAL SETTINGS
+Backbone. Hidden dim 32, 2 layers, dropout 0.5, weight decay 5 × 10−4, early stopping. Ex-
+plainer. 150 mask steps (Adam, lr 0.1, λsp = 0.05, Gumbel τ = 1.0), then discrete verification
+(40–80 deletion batches) and up to three backward-pruning sweeps. Relation search. Exact enu-
+meration, κ = 0; the margin constraint of Eq. (5) is applied uniformly in the relation search and
+in the discrete edge-level checks (ties count against the original class). Intervention semantics.
+Deletion zeroes the masked edge entries before aggregation; the attention softmax is not renormal-
+ized over the surviving edges (it is computed on the intact edge set); node features and the residual
+self-projection are never modified; edge sets are stored symmetrically so each direction is an inde-
+pendent maskable message entry, and all costs count these directed message entries. Every check
+runs the frozen model in eval mode with the original predicted class held fixed. Verification cost.
+The restoration scan costs 1.5–6 min per seed against 2–5 s for the soft-mask baselines, with the cost
+concentrating in the per-node restoration passes (relation enumeration 0.1–0.7 s, one saliency pass
+0.01 s). Statistics. Aggregates over seeds use the per-seed (macro) mean unless a table caption says
+otherwise; hierarchical fallback records are imputed at the per-seed CF2 mean cost in the all-targets
+cost convention of Table 1.
+C
+EXTENDED METRIC DEFINITIONS
+Backbone accuracy. Test accuracy of f on the intact graph—reported separately from explana-
+tion quality (the explained model, not the explainer). Counterfactual success rate (CSR). The
+fraction of explained instances whose prediction flips under the intervention; equals mean NF. A
+method that returns no intervention (infeasible, or budget exhaustion without a verified flip) counts
+as a failure, never as a zero-cost success. Edge cost. The fraction of the instance’s receptive-field
+edges deleted (reported per instance and averaged); relation cost is |S∗
+v|. Cost is reported under la-
+beled conventions—over all targets (failures assigned the full-cost penalty 1.0), over each method’s
+successful subset, and over the subset on which all compared methods succeed—and no aggre-
+gate mixes them without a label. NF / SF. Necessity and sufficiency fidelity of Eq. (7), reported
+separately. Coverage. The fraction of explained instances with a feasible relation-level deletion
+(for the relation-level and hierarchical methods). Stability. Cross-seed agreement of the relation
+set (identity agreement) and Jaccard of the deleted edge sets; for baselines, Jaccard of their masks
+across seeds. Runtime. Wall-clock per seed, plus forward-pass counts for the search procedures.
+Hit rates (synthetic only). Model-dependence recovery (the returned set equals the relation the
+trained model actually relies on) and data-causal recovery (the returned set equals the generating
+relation)—reported separately, since they need not agree.
+D
+DIAGNOSTIC COMPARISON AND PARETO FRONTIER
+Table 7 reports the factual, gradient, and random diagnostics on the same checkpoints. Factual ob-
+jectives (GNNExplainer, PGExplainer) optimize prediction preservation, so near-zero CSR is by
+construction; the gradient attributions delete a single instance-blind global top-5% edge budget and
+are not per-instance interventions; Random is a sanity floor. These rows are not same-task baselines
+and are excluded from win claims. Figure 2 shows the success-rate-vs-cost frontier across all com-
+pared methods, and Fig. 3 contrasts the hierarchical method with the strongest baseline on CSR and
+cost directly.
+12
+
+
+Preprint
+Table 7: Diagnostic comparison (same checkpoints, 10 seeds, mean±std). Factual objectives opti-
+mize prediction preservation, so near-zero CSR is by construction; the gradient attributions delete a
+single instance-blind global top-5% edge budget and are not per-instance interventions; Random is
+a sanity floor. These rows are not same-task baselines and are excluded from win claims.
+ACM
+Cora
+ogbn-mag
+Method
+CSR↑
+cost↓
+CSR↑
+cost↓
+CSR↑
+cost↓
+factual
+GNNExplainer 0.000±0.001 0.139±0.041 0.001±0.001 0.224±0.021 0.002±0.001 0.192±0.014
+PGExplainer
+0.038±0.058 0.250±0.354 0.022±0.048 0.039±0.080 0.056±0.062 0.358±0.412
+gradient (global top-5% edge budget, instance-blind)
+Saliency
+0.142±0.026 0.103±0.006 0.158±0.037 0.181±0.030 0.150±0.007 0.611±0.012
+GradCAM
+0.195±0.053 0.100±0.005 0.379±0.080 0.131±0.015 0.162±0.008 0.483±0.012
+random
+Random
+0.010±0.003 0.050±0.001 0.028±0.010 0.052±0.004 0.009±0.002 0.050±0.003
+0.1
+0.2
+0.3
+0.4
+mean local cost
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+CSR
+CF2
+ACM
+0.2
+0.4
+0.6
+mean local cost
+CF2
+Cora
+0.2
+0.4
+0.6
+mean local cost
+CF2
+ogbn-mag
+RACE-hier (ours)
+counterfactual baselines
+diagnostics
+Figure 2: Success rate vs. mean local deletion cost across the compared methods (10 seeds; same-
+task counterfactual methods in filled markers, diagnostics in open markers). RACE-hier (star) is the
+highest-CSR point on all three datasets, Pareto-dominating the strongest baseline CF2 (annotated).
+ACM
+Cora
+ogbn-mag
+0.0
+0.2
+0.4
+0.6
+*
+*
+*
+(a) success rate
+RACE-hier
+CF2-hetero
+ACM
+Cora
+ogbn-mag
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+*
+*
+*
+(b) edge cost
+Figure 3: Hierarchical vs. the strongest baseline (CF2-hetero): (a) counterfactual success rate and
+(b) mean local edge cost (10 seeds, mean ± 1 std; ∗: paired sign-flip p = 0.002, Holm-corrected
+≤0.062). The hierarchy improves both metrics at once on every dataset.
+E
+MECHANISM: CSR DECOMPOSITION, BUDGET CURVES, AND
+COMPONENT ABLATION
+CSR decomposition. Table 8 decomposes the ten-seed success rate into the relation-phase answers
+and the flat fallback (per-seed contributions, so the two phases sum to the total by construction).
+The flat fallback only extends coverage where no relation deletion exists, so the hierarchy is not a
+wrapper around the flat explainer but the mechanism that produces the double advantage.
+13
+
+
+Preprint
+Table 8: Where the success rate comes from (10 seeds): relation-phase answers vs. the flat fallback.
+The relation phase delivers most of the CSR at roughly half the strongest baseline’s cost.
+ACM
+Cora
+ogbn-mag
+relation-phase answers (certified, n)
+2546
+1106
+4185
+CSR contribution (pp)
+18.2±4.8 33.7±9.6 16.7±0.9
+mean edge cost (fraction)
+0.105
+0.311
+0.273
+fallback CSR (pp)
+4.2±2.9
+14.7±2.9
+1.5±0.3
+total CSR
+0.224
+0.484
+0.182
+CF2 mean cost (ref.)
+0.195
+0.342
+0.434
+Component ablation. Table 9 isolates each component on the same checkpoints. Removing the flat
+fallback drops CSR by exactly the fallback’s contribution (−4.2/−14.7/−1.5 pp, matching Table 8);
+the scan budget trades cost against compute along the budget curves (coarser budgets are faster but
+coarser; the default budget 128 is the working point used throughout). The “full” row reproduces
+the numbers of Table 1, as the pipeline’s core is deterministic given the frozen checkpoint; the rows
+are derived from the per-node scan traces, so no separate runs were needed.
+Table 9: Component ablation of the hierarchical pipeline (10 seeds, mean±std; CSR over all targets,
+cost = mean feasible edge cost at the given scan budget). full = saliency prior + CF2 fallback +
+single-edge scan (budget 128).
+Variant
+ACM
+Cora
+ogbn-mag
+CSR↑
+cost↓CSR↑
+cost↓CSR↑
+cost↓
+full (budget 128) 0.224±0.077 0.107 0.484±0.122 0.313 0.182±0.009 0.273
+−fallback
+0.182±0.048 0.107 0.337±0.096 0.313 0.167±0.009 0.273
+budget 64
+0.182
+0.176 0.322
+0.390 0.167
+0.273
+budget 32
+0.182
+0.279 0.322
+0.458 0.167
+0.287
+Budget curves. Reconstructing the per-node scan traces at forward budgets {8, . . . , 128} (Fig. 4)
+shows the hierarchical cost decreasing monotonically with budget (ACM 0.490→0.107; Cora
+0.552→0.313) at unchanged CSR, while the flat variant saturates after ≤16 forwards; the curves
+give the common working point at any budget.
+50
+100
+scan budget
+0.1
+0.2
+0.3
+0.4
+0.5
+mean feasible cost
+ACM
+RACE-hier
+flat verified
+50
+100
+scan budget
+0.1
+0.2
+0.3
+0.4
+0.5
+Cora
+50
+100
+scan budget
+0.25
+0.30
+0.35
+0.40
+ogbn-mag
+Figure 4: Budget curves (10 seeds): mean feasible edge cost vs. the per-node scan budget for the
+hierarchical (solid) and flat-verified (dashed) pipelines, reconstructed from the per-node scan traces.
+The hierarchy’s cost decreases monotonically with budget at unchanged CSR; the flat variant satu-
+rates after ≤16 forwards. The default working point is budget 128.
+14
+
+
+Preprint
+F
+OUTPUT CONTRACT: ATTRIBUTION DETAIL, ARCHETYPES, AND
+EXPLANATION STRUCTURE
+Per-class attribution. On ogbn-mag, classes 1/2/6/11/13/16/17/18 are citation-dominated (68–100%
+of relation-attributed nodes) while classes 0/3/4/14/19 lean on co-authorship (31–60%); on ACM,
+co-authorship dominates every venue class (62–86%) with the keyword relation contributing 6–30%.
+The instance-level search thus recovers per-class relation semantics that a dataset-level rate cannot.
+Figure 5 reports the single-relation flip rates behind these attributions.
+Archetypes. Four archetypes recur across the explained nodes (ACM, seed 0; Fig. 7): a single-
+relation flip (node 3: delete co-authorship, 1/87 local edges, margin −0.21, irreducible certificate),
+a two-relation flip (node 6: co-authorship plus keyword, 8/91 local edges, margin −0.032, irre-
+ducible), an explicit refusal (node 18: no relation deletion flips, margin 0.83), and a flat-fallback
+success (node 76). The same pipeline returns a human-readable relation answer where one exists,
+and says so where it does not.
+Explanation structure. Figure 6 summarizes the structure of the explanations: the certified edge
+sets are cheap (mean local cost 0.11–0.31); a single relation suffices for 86–93% of feasible in-
+stances; and the final margins separate flipped from refused instances. Margin buckets. Bucketing
+the explained nodes by their prediction margin (10 deciles, 10 seeds, pooled), the hierarchical CSR is
+highest in the lowest-margin decile and falls monotonically across deciles on all three datasets (ACM
+0.693 to 0.015; Cora 0.885 to 0.177; ogbn-mag 0.396 to 0.030): the method delivers relation-level
+counterfactuals exactly where predictions are closest to the decision boundary—the instances for
+which an explanation is most consequential.
+PAP
+PTP
+0.0
+0.1
+0.2
+0.3
+single-relation flip rate
+ACM
+citation
+common-nbr
+0.0
+0.1
+0.2
+0.3
+Cora
+PAP
+citation
+0.0
+0.1
+0.2
+0.3
+ogbn-mag
+Figure 5: Single-relation flip rates (10 seeds, mean ± 1 std, dots: per-seed values): ACM (separable:
+co-authorship PAP dominates), Cora (common-neighbor wins with moderate separation), ogbn-mag
+(citation dominates).
+15
+
+
+Preprint
+0.00
+0.25
+0.50
+0.75
+0
+250
+500
+750
+1000
+1250
+ACM
+edge cost (successes)
+-1.0
+-0.5
+0.0
+0.5
+1.0
+0
+500
+1000
+1500
+final margin
+1
+2
+3
+0
+500
+1000
+1500
+2000
+|S| distribution
+0.00
+0.25
+0.50
+0.75
+1.00
+0
+100
+200
+300
+400
+Cora
+-1.0
+-0.5
+0.0
+0.5
+1.0
+0
+100
+200
+300
+400
+1
+2
+3
+0
+200
+400
+600
+800
+1000
+0.00
+0.25
+0.50
+0.75
+1.00
+0
+200
+400
+600
+ogbn-mag
+-0.5
+0.0
+0.5
+1.0
+0
+250
+500
+750
+1000
+1250
+1
+2
+3
+0
+1000
+2000
+3000
+4000
+Figure 6: Structure of the explanations (10 seeds): the certified edge sets are cheap (mean local
+cost 0.11–0.31); a single relation suffices for 86–93% of feasible instances; and the final margins
+separate flipped from refused instances.
+before
+after
+-0.50
+-0.25
+0.00
+0.25
+0.50
+0.75
+1.00
+prediction margin
+0.25
+-0.21
+cost 0.011
+irreducible
+node 3
+single-relation flip
+before
+after
+-0.50
+-0.25
+0.00
+0.25
+0.50
+0.75
+1.00
+0.35
+-0.03
+cost 0.088
+irreducible
+node 6
+two-relation flip
+before
+after
+-0.50
+-0.25
+0.00
+0.25
+0.50
+0.75
+1.00
+0.83
+0.83
+no relation deletion flips
+(margin unchanged)
+node 18
+relation-infeasible
+before
+after
+-0.50
+-0.25
+0.00
+0.25
+0.50
+0.75
+1.00
+0.28
+ 0
+flat verified edge set flips
+(margin 
+ 0)
+node 76
+flat fallback
+Figure 7: Case studies (ACM, seed 0): the four archetypes of the output contract. (a) a single-
+relation flip; (b) a two-relation flip; (c) an explicit refusal—no relation deletion flips the prediction,
+reported as infeasible; (d) a relation-infeasible node that the flat verified edge set flips instead. Bars
+show the prediction margin before/after the intervention (hatched: no relation-level change exists);
+edge costs are the deleted fraction of the node’s receptive field.
+G
+GENERALITY: CROSS-BACKBONE STUDY
+Table 10 extends the backbone study of Table 5 to ACM, Cora-derived, and ogbn-mag (three back-
+bones each, five seeds): the hierarchical method beats CF2-hetero on CSR in all 9/9 backbone–
+dataset cells (+1.0 to +8.1 pp, all p = 0.062, the minimum attainable with five seeds). The paired
+cost advantage is established in the all-targets comparison of Table 1 and on ogbn-arXiv (Table 5).
+16
+
+
+Preprint
+Table 10: Cross-backbone study on ACM / Cora-derived / ogbn-mag (5 seeds; hierarchical vs. CF2-
+hetero, CSR = success rate; all CSR differences p = 0.062, the minimum attainable with five seeds).
+The CSR advantage holds in all 9/9 backbone–dataset cells; the paired cost advantage is established
+in the all-targets comparison of Table 1 and on ogbn-arXiv (Table 5). Bold: better value in each
+pairwise comparison.
+Backbone
+Method
+ACM CSR↑
+Cora CSR↑
+ogbn-mag CSR↑
+HAN
+RACE-hier
+0.255
+0.314
+0.182
+CF2-hetero
+0.244
+0.298
+0.164
+HGT
+RACE-hier
+0.384
+0.611
+0.205
+CF2-hetero
+0.355
+0.581
+0.185
+R-GCN
+RACE-hier
+0.785
+0.939
+0.318
+CF2-hetero
+0.771
+0.858
+0.292
+H
+ROBUSTNESS AND SENSITIVITY ABLATIONS
+Table 11 reports the κ-sensitivity and cost-criterion ablations plus relation-set robustness under 5%
+random edge add/remove: κ=0.05 lowers coverage by −2.3/−1.0/−3.3 pp (the expected effect of a
+stricter flip threshold, ACM/Cora/mag); switching the cost criterion leaves coverage identical on all
+three datasets (0.1818/0.3370/0.1674); and the attributed relation sets remain near-identical under
+perturbation.
+Table 11: Sensitivity ablations (ACM/Cora/mag, 10 seeds): margin threshold and cost criterion, plus
+relation-set robustness under 5% random edge add/remove.
+Ablation
+Setting
+Result (ACM / Cora / ogbn-mag)
+margin threshold
+κ
+κ=0.05 vs. κ=0; coverage
+0.159±0.044 vs. 0.182;
+0.327±0.095 vs. 0.337;
+0.135±0.009 vs. 0.167
+cost criterion
+type / edge / lexicographic;
+coverage
+identical on all datasets (0.1818 / 0.3370 / 0.1674)
+edge
+perturbation
+5% random add/remove; S∗
+v
+agreement
+0.975±0.016 / 0.930±0.023 / 0.965±0.011
+I
+EDGE-LEVEL CERTIFICATION ON ENUMERABLE SUBGRAPHS
+On enumerable computation subgraphs (synthetic SCM, 1-layer backbone so radius-1 computation
+subgraphs are enumerable; 120 instances) we certify the restoration scan against full edge enumera-
+tion (Table 12): the certified heuristic equals the true minimum deletion count in 102/120 cases and
+is off by one edge in the five other feasible cases; non-monotonicity (a flip that disappears when one
+edge is added back) occurs in 60/120 instances.
+Table 12: Exact edge-level certification on enumerable subgraphs (120 instances). The certified
+heuristic equals the true minimum deletion count in 102/120 cases and is off by one edge in the five
+other feasible cases.
+Quantity
+Value
+Note
+scan = true minimum
+102/120 (85%)
+scan vs. full enum.
+off by exactly one edge
+5
+only nonzero gaps
+non-monotonic instances
+60/120 (50%)
+flip under S, not S ∪{e}
+17
+
+
+Preprint
+J
+SYNTHETIC SCM: ADDITIONAL DETAIL
+Generation. Features are iid noise; labels are determined by the mean of the causal-relation neigh-
+bors’ features projected onto class patterns; a spurious relation is homophilic in an attribute corre-
+lated with the label in the train environment but independent in the test environment; a redundant
+relation duplicates the causal signal; the rest are Erd˝os–Rényi noise; a synergistic variant splits the
+label into two parts recoverable only from two relations jointly. For each configuration and ten data
+seeds we train the frozen backbone and report the two hit rates of Sec. 4.2. Table 13 reports the
+full K-scan: exact search attains 0.529/0.292/0.151 data-causal hit at K=3/5/10 while the effect-
+ordered heuristics attain 0.634/0.440/0.286.
+Table 13: Synthetic SCM (10 data seeds; hit = data-causal recovery; model-dependence recovery
+coincides with it at K≤10 and is 0.089 at K=20 / 0.201 synergistic; exact at K ≤10, greedy/beam
+everywhere, bnb at K=20). Exact search certifies the minimum-cost answer and is the fastest search
+in the benchmark regime (K ≤10); greedy/beam are effect-ordered heuristics, and at K=20 the
+budgeted branch-and-bound (bnb) is the only approximation that improves over them.
+Config
+exact greedy beam
+bnb
+time (ex./gr.)
+standard K=3
+0.529
+0.634
+0.633
+—
+0.07 s / 1.0 s
+standard K=5
+0.292
+0.440
+0.438
+—
+0.23 s / 2.5 s
+standard K=10
+0.151
+0.286
+0.285
+—
+7.0 s / 5.6 s
+standard K=20
+—
+0.064
+0.064 0.158
+— / 33 s
+synergistic K=5
+0.018
+0.018
+0.021
+—
+0.17 s / 1.1 s
+Irreducibility vs. optimality.
+A scripted adversarial instance instantiates the irreducibility-vs-
+optimality gap: valid deletion sets {a, b, c} ⊃{a, b} ⊃{c} coexist, the restoration scan (saliency
+order a > b > c) returns the irreducible {a, b} (cost 2), and {c} (cost 1) is the true minimum—
+the certificate characterizes the returned set, and the gap is measured exactly where enumeration is
+feasible (Appendix I).
+Synergistic variant. When the mechanism is not learnable (test accuracy 0.25 ≈chance; the failure
+decomposes as compounded per-part errors), all hits collapse to chance on the data-causal target
+while model-dependence sits at 0.20; the double hit-rate evaluation makes the cause visible—the
+drop reflects model unlearnability, not explainer error—which a single hit rate conflates.
+Scaling. Figure 8 reports the hit rates and wall-clock cost of all search procedures as the relation
+vocabulary grows; exact search is the fastest search in the benchmark regime (K≤10) and certifies
+the minimum-cost answer at every feasible K, while at K=20 reliance drifts onto noise relations
+(test accuracy 0.33) and the budgeted branch-and-bound is the only approximation that improves
+over greedy/beam (companion implementation).
+5
+10
+15
+20
+K
+0.0
+0.2
+0.4
+0.6
+data-causal hit
+benchmark regime
+exact (certified min-cost)
+greedy
+beam
+branch-and-bound
+5
+10
+15
+20
+K
+10
+1
+100
+101
+102
+seconds per seed (log)
+exact
+greedy
+beam
+branch-and-bound
+Figure 8: Relation search as the vocabulary grows (synthetic SCM, 10 data seeds, mean ± 1 std;
+shaded: benchmark regime K≤10). (a) Data-causal hit rate: exact search certifies the minimum-cost
+answer at every feasible K; the effect-ordered greedy/beam heuristics rank the causal relation higher
+because the lexicographic cost prefers cheaper noise relations; at K=20 the budgeted branch-and-
+bound (bnb) is the only approximation that improves over greedy/beam. (b) Wall-clock per seed:
+exact search is the fastest in the benchmark regime.
+18

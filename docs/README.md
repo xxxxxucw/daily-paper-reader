@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-02</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-05</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 23 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>14</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-02 10:45:08 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-05 11:58:18 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-02 日报：共筛读 23 篇，精读 9 篇、速读 14 篇，重点落在共形风险控制与因果机器学习两条线。最值得看的是满分精读《ReCIRC: Rectified Conformal Risk Control》和 9 分的《Reference-Null Calibrated Thresholds for E-Processes with Applications to Conformal Martingales》，前者关注共形风险控制的修正，后者把 E-过程阈值校准延伸到共形鞅；速读中因果 ML 端到端流程、固定置信在线因果学习和因果时序超图 LLM 预测也都拿到 8 分。普通读者若时间有限，建议先读这两篇精读建立校准与风险控制的主线，再按兴趣挑一篇因果应用类速读。</p>
+<p>今天筛选 23 篇论文，精读 9 篇、速读 14 篇，重点放在因果发现与表格基础模型两个方向。</p>
+<p>最值得看的是两篇 9.0 分因果发现工作：一篇用可微分结构学习处理带潜在混杂的循环线性高斯模型，另一篇用离散分数匹配从计数数据中做因果发现。</p>
+<p>普通读者可先看这两篇的摘要与开源代码，再按兴趣跟进表格基础模型的蒸馏、鲁棒适配等 8.0 分速读工作。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -81,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">9 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="ReCIRC: Rectified Conformal Risk Control">ReCIRC: Rectified Conformal Risk Control</span></li><li><span class="dpr-home-dashboard-paper-title" title="Reference-Null Calibrated Thresholds for E-Processes with Applications to Conformal Martingales">Reference-Null Calibrated Thresholds for E-Processes with Applications to Conformal Martingales</span></li><li><span class="dpr-home-dashboard-paper-title" title="Shared Experience, Separate Learning: Companion Confidence Calibration for LLMs">Shared Experience, Separate Learning: Companion Confidence Calibration for LLMs</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Differentiable Structure Learning for Cyclic Linear Gaussian Models with Latent Confounders">Differentiable Structure Learning for Cyclic Linear Gaussian Models with Latent Confounders</span></li><li><span class="dpr-home-dashboard-paper-title" title="Discrete Score Matching Enables Causal Discovery from Count Data">Discrete Score Matching Enables Causal Discovery from Count Data</span></li><li><span class="dpr-home-dashboard-paper-title" title="Proximal Balancing for Causal Effect Estimation under Unmeasured Confounding">Proximal Balancing for Causal Effect Estimation under Unmeasured Confounding</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>3</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>2</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>6</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -94,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">14 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="An End-to-End Pipeline for Causal ML with Continuous Treatments: An Application to Financial Decision Making">An End-to-End Pipeline for Causal ML with Continuous Treatments: An Application to Financial Decision Making</span></li><li><span class="dpr-home-dashboard-paper-title" title="FOCUS: Fixed-Confidence Online Causal Learning Using Sequential Adaptive Interventions">FOCUS: Fixed-Confidence Online Causal Learning Using Sequential Adaptive Interventions</span></li><li><span class="dpr-home-dashboard-paper-title" title="CHAIN: Calibrated LLM Forecasting via Causal-Temporal Hypergraph Inference">CHAIN: Calibrated LLM Forecasting via Causal-Temporal Hypergraph Inference</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Marginal Response Surface Elicitation for Zero-Label Tabular Learning">Marginal Response Surface Elicitation for Zero-Label Tabular Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="Parameter-Efficient Distributionally Robust Adaptation of Tabular Foundation Models under Subpopulation Shift">Parameter-Efficient Distributionally Robust Adaptation of Tabular Foundation Models under Subpopulation Shift</span></li><li><span class="dpr-home-dashboard-paper-title" title="Distillation of Tabular Foundation Models into Efficient Predictors">Distillation of Tabular Foundation Models into Efficient Predictors</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>5</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>5</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>4</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>8</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>5</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
 </section>
 </div>
 

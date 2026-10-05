@@ -1,0 +1,1268 @@
+Shivam Dubey∗, Mohamed Bouadi∗,
+Nassim Bouarour∗, Varun Kulkarni,
+Aditya Tanna, Vinay Kumar Sankarapu
+Lexsi Labs
+∗Equal contribution
+Abstract
+Relational foundation models are increasingly pretrained on synthetic databases, yet downstream benchmarks
+reveal little about why one synthetic corpus produces a better model than another. In particular, strong
+performance may arise from realistic row-level statistics without the model ever learning to use relational
+structure. We study this as a data-attribution problem: which property of synthetic pretraining data induces
+relational computation? Using four Relational Transformer checkpoints trained with the same architecture,
+initialization, objective, and compute budget on corpora produced by four relational data generators, we trace a
+measurable property of the data to learned computation and downstream behavior. We hypothesize that
+relational mechanisms emerge when cross-table information is predictively necessary for the masked-cell
+pretraining objective. RelDiff exhibits by far the largest predictive gain from foreign-key-linked parents, and
+its corresponding model is uniquely sensitive to foreign-key interventions on unseen databases. This
+dependence survives a random-initialization control, grows monotonically with the fraction of corrupted links,
+and localizes to a serial cross-table pathway. Finally, disrupting the same mechanism during downstream
+inference removes RelDiff’s advantage on relational tasks while leaving structure-insensitive models nearly
+unchanged. These results connect a property of synthetic training data to a learned mechanism and, through
+intervention, to downstream behavior
+Keywords: Relational Foundation Models; Synthetic Pretraining; Data Attribution; Mechanistic
+Interpretability; Relational Learning
+1
+Introduction
+Relational databases encode information at two levels: in the attributes of individual rows and in the relationships
+that connect entities across tables. A customer’s properties, for example, may be informative on their own, but many
+prediction problems additionally depend on related transactions, products, accounts, or organizations. Recent work has
+therefore moved beyond single-table prediction [1, 2, 3, 4, 5] toward relational deep learning and relational foundation
+models (RFMs), including Relational Deep Learning [6], RelBench [7], Griffin [8], KumoRFM [9], and the Relational
+Transformer (RT) [10]. A central goal of these models is to transfer across databases and prediction tasks while
+exploiting foreign-key (FK) structure, rather than requiring a separately trained model and manually engineered joins or
+aggregations for every task.
+Pretraining such models creates a fundamental data problem. Large and diverse collections of real relational databases
+are difficult to obtain, frequently proprietary, and heterogeneous in both schema and semantics. This has motivated the
+use of synthetic data for foundation-model pretraining. In the single-table setting, O’PRIOR [11] shows that the design
+of the synthetic pretraining distribution itself can be a first-order determinant of downstream accuracy and robustness,
+arXiv:2610.03057v1  [cs.LG]  2 Oct 2026
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+even when model architecture and training budget are held fixed. This question becomes especially important in
+the relational setting, where a synthetic generator must determine not only feature distributions but also schemas,
+cardinalities, foreign-key structure, and statistical dependencies across related tables. RelDiff [12] and graph-conditional
+relational diffusion models (GRDM) [13] generate data conditioned on real database structure, whereas PluRel [14] and
+RDB-PFN [15] construct relational pretraining distributions without requiring a reference database. These approaches
+differ substantially in how schemas, cardinalities, attribute distributions, and dependencies between related tables are
+generated.
+A natural way to compare such generators is to pretrain the same model on each resulting corpus and evaluate the
+checkpoints on downstream tasks. This establishes which synthetic pretraining distribution produces the strongest
+model, but it does not establish why. A generator may improve downstream performance because it better reproduces
+single-column marginals, because it produces more diverse schemas, because its rows contain more predictable within-
+table structure, because its foreign-key relationships carry useful signal, or because of some combination of these
+factors. A benchmark score alone cannot identify which property of the synthetic data produced a particular learned
+capability. Our central question is therefore not simply which generator performs best?, but rather:
+What property of a synthetic relational pretraining distribution causes a model to learn to use
+relations?
+We view this as a problem of data attribution. Classical influence functions [16], TracIn [17], datamodels [18], and
+TRAK [19] attribute predictions or model behaviors to individual training examples or subsets. Our attribution target is
+different: a synthetic generator induces an entire distribution over relational databases. Attributing a capability directly
+to generator identity is therefore too coarse. We instead seek an intermediate property of the generated distribution that
+explains why a particular computation becomes useful during pretraining.
+Our hypothesis is motivated by RT’s masked-cell reconstruction objective. If a masked value is already predictable
+from information in its own row, a model can reduce pretraining loss without making meaningful use of related tables.
+If FK-linked rows contain additional predictive information unavailable locally, however, exploiting relational context
+becomes useful for solving the objective. We refer to this property as relational predictive necessity. Importantly, this
+distinguishes architectural capacity from learned reliance: providing a model with cross-table computational pathways
+does not imply that pretraining will make those pathways functionally important. Section 2 formalizes this hypothesis
+and describes the relevant RT mechanisms.
+We test this idea by tracing a sequence from the training data to model behavior. First, we measure relational predictive
+signal directly in the generated corpora, without using RT. We then test whether the corresponding pretrained checkpoints
+functionally depend on FK structure during masked reconstruction. Next, we intervene on RT’s internal cross-table
+computation to localize the mechanism responsible for this dependence. Finally, we perturb the same relational
+information during downstream RelBench inference to determine whether the identified mechanism is responsible for
+the observed downstream behavior.
+Our contributions are threefold:
+1. A data-side measure of relational predictive necessity. We quantify the predictive gain provided by
+FK-linked information beyond features available in the target row, giving a model-independent measure of
+whether a synthetic pretraining corpus rewards cross-table computation.
+2. A mechanistic analysis of relational reliance. Using structural corruption, a random-initialization
+control, graded interventions, and pathway-specific ablations, we show that the RT checkpoint pretrained on
+the corpus with the strongest parent-linked predictive signal develops substantially stronger functional reliance
+on relational structure. We further localize this dependence to a specific serial cross-table computation.
+3. A causal connection between mechanism and downstream behavior. We rerun downstream
+inference while disrupting FK structure or the corresponding internal computation. On a task where relational
+structure provides a large advantage, disrupting the identified mechanism removes that advantage, whereas
+checkpoints that do not rely on relational structure remain nearly unchanged. We also identify cases in which
+disrupting relational information improves performance, showing that learned relational priors can help or hurt
+depending on how well they match the downstream database.
+The causal scope of these results is important. Our inference-time interventions establish a causal link between
+the identified relational computation and model behavior while holding the trained checkpoint fixed. The synthetic
+pretraining corpora themselves, however, are not produced by independently randomizing relational predictive necessity
+while holding every other property constant. We therefore treat the relationship between corpus predictive structure and
+the learned mechanism as evidence for our hypothesis, rather than as a universal causal law. A stronger data-side causal
+2
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+test would selectively alter cross-table predictive dependencies while preserving other corpus statistics and retrain from
+the same initialization.
+2
+Problem Setup and Hypothesis
+2.1
+Controlled Comparison of Synthetic Pretraining Distributions
+We study four checkpoints of the Relational Transformer (RT) [10], a relational foundation model pretrained by
+masked-cell reconstruction on multi-table databases. Given a partially masked database, RT predicts the missing cell
+values from the remaining cells and the database’s relational structure.
+The four checkpoints use the same model architecture: 12 transformer blocks, hidden dimension 256, and approximately
+19.2M parameters. They also share the same masked-value reconstruction objective, initialization, and training budget.
+The experimental variable is the synthetic corpus used for pretraining. Each checkpoint is trained on 1,000 generated
+databases produced by one of four relational data generators: RelDiff [12], GRDM [13], PluRel [14], or RDB-PFN
+[15].
+These generators represent two broad approaches to relational synthesis. RelDiff and GRDM are reference-conditioned:
+their generated databases are tied to structural properties of real reference databases. PluRel and RDB-PFN are
+reference-free: they sample relational databases from designed synthetic priors rather than conditioning generation on a
+particular reference database. The resulting corpora consequently differ not only in relational dependencies, but also in
+properties such as feature distributions, schema structure, cardinalities, and data types.
+This distinction is important for the interpretation of our experiments. We do not treat generator identity itself as
+the causal variable. A statement such as "RelDiff teaches relational reasoning" would conflate all properties that
+differ between the generated corpora. Instead, we measure a specific property of those corpora—whether FK-linked
+information provides predictive signal beyond information available within a row—and ask whether that property is
+associated with the relational computation learned during pretraining.
+2.2
+Cross-Table Computation in RT
+RT represents database cells as tokens and applies separate attention operations along different axes of the relational
+input. Our analysis focuses on two operations through which information can cross table boundaries.
+Parent access (feat).
+The feature-attention stream normally operates over cells associated with the target row, but
+its attention mask additionally exposes cells from rows referenced through foreign keys. Consequently, when predicting
+a cell in a child row, the model can directly access attributes of the corresponding FK-linked parent row. We refer to
+this operation as parent access.
+Child aggregation (nbr).
+The neighbor-attention stream operates in the complementary direction. It allows a
+representation associated with a parent entity to aggregate information from rows that reference that entity through a
+foreign key. We refer to this operation as child aggregation.
+These two routes are architecturally available in every checkpoint. Thus, architecture alone cannot explain differences
+in relational behavior: all four models have the capacity to exchange information across tables. The relevant question is
+whether their respective pretraining distributions create sufficient optimization pressure for those pathways to become
+functionally important.
+Importantly, we do not assume a priori that parent access and child aggregation constitute independent or serial compu-
+tations. Their functional interaction is determined experimentally in Sec. 3.3 through pathway-specific interventions.
+2.3
+Evaluation Setting
+Model-side analyses are performed on real RelBench databases [7, 20]: rel-stack, rel-arxiv, and rel-ratebeer.
+All checkpoint comparisons use identical preprocessed inputs and, within each experiment, identical masked cells,
+batches, and interventions. This paired design ensures that differences in reconstruction loss arise from the checkpoints’
+responses to the same inputs rather than from different sampled examples.
+Our most controlled mechanistic experiments—including the random-initialization baseline, graded FK corruption, and
+pathway-specific ablations—use fixed rel-stack batches so that the interventions can be compared directly under a
+3
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+single evaluation protocol. We additionally report broader experiments across all three databases in Appendix E to
+assess whether the observed behavior is specific to a single database.
+One corpus-specific caveat requires separate treatment. In the available GRDM pretraining corpus, textual and datetime
+fields were converted to numerical representations rather than preserved under their original semantic types. RT contains
+type-specific encoders, including a dedicated text pathway, so this preprocessing difference means that the GRDM
+checkpoint did not receive the same type-level training signal as the other checkpoints. We therefore retain GRDM as
+an informative comparison throughout the analysis but do not interpret its absolute performance ranking as an isolated
+consequence of its relational generation strategy. Appendix A.2 provides the corresponding corpus audit.
+2.4
+Relational Predictive Necessity
+Our hypothesis follows directly from the masked-cell reconstruction objective. Let y denote a masked target value,
+xrow the information available from the target row, and xrel information available through FK-linked rows. If relational
+information contributes no additional predictive signal, then
+p(y | xrow, xrel) ≈p(y | xrow).
+In this regime, a model can reduce reconstruction loss primarily from within-row statistics. Cross-table pathways may
+exist architecturally but are not required to solve the pretraining task.
+Conversely, when
+p(y | xrow, xrel)̸ = p(y | xrow),
+FK-linked information contains predictive signal unavailable locally. Exploiting relational context can then reduce
+the pretraining loss beyond what is achievable from the target row alone. We call this condition relational predictive
+necessity.
+We do not attempt to estimate the conditional distributions above directly. Instead, Section 3.1 operationalizes predictive
+necessity through out-of-sample predictive gain: we compare a predictor that uses only target-row information with the
+same predictor augmented by information from related tables. This measurement is performed entirely on the synthetic
+corpora and does not involve RT, preventing the quantity being explained from also defining the explanatory variable.
+The hypothesis generates three linked empirical predictions:
+H1: Predictive structure in the pretraining data.
+Synthetic corpora differ in the amount of target information
+available through FK-linked rows beyond what can already be recovered from the target row. A corpus that creates
+stronger relational predictive necessity should therefore exhibit larger out-of-sample predictive gains when relational
+information is added.
+H2: Learned relational reliance.
+If relational predictive necessity creates pressure to learn cross-table computa-
+tion, the corresponding pretrained checkpoint should become functionally dependent on correct relational structure.
+Corrupting FK assignments or disabling the relevant internal pathways should therefore increase reconstruction loss
+substantially more for that checkpoint than for models whose pretraining objectives could be solved primarily from
+row-local information.
+H3: Relational mechanism and downstream behavior.
+If the learned cross-table computation is responsible
+for a downstream capability, intervening on that computation while holding the trained checkpoint fixed should produce
+a corresponding change in downstream performance. Conversely, checkpoints that do not functionally rely on relational
+structure during reconstruction should be comparatively insensitive to the same intervention.
+Together, these predictions define the empirical chain studied in the remainder of the paper:
+predictive structure in data −→relational reliance −→localized cross-table mechanism −→downstream behavior
+The arrows have different causal status. The inference-time interventions used to test H2 and H3 manipulate the trained
+model or its relational inputs while holding the checkpoint fixed, permitting causal conclusions about the dependence
+of model behavior on the intervened mechanism. By contrast, the four pretraining corpora were not generated by
+independently manipulating relational predictive necessity while holding all other distributional properties fixed. The
+data-to-mechanism link in H1–H2 is therefore a controlled observational comparison. Establishing that link causally
+would require retraining on corpora in which cross-table predictive coupling is selectively manipulated while other
+corpus properties, initialization, objective, and training budget are held constant.
+4
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+Table 1 Predictive structure in the synthetic pretraining corpora. Row-only R2 measures target predictability without
+cross-table information. ∆parent and ∆child measure the additional predictive value of FK-linked parent attributes and simple child
+aggregates, respectively. Np/Nc gives the number of target-column problems for which each relational feature set is available.
+Corpus
+Targets
+Np/Nc
+Row-only R2
+∆parent
+∆child
+RelDiff
+48
+30/22
+0.022
++0.072 [+0.018, +0.091]
+−0.001
+GRDM
+120
+65/78
+−0.011
+−0.057 [−0.076, −0.044]
+−0.105
+PluRel
+113
+84/71
+0.166
++0.009 [+0.001, +0.022]
+−0.000
+RDB-PFN
+120
+72/68
+0.436
++0.001 [−0.004, +0.009]
+−0.005
+3
+Experimental Evaluation
+We evaluate the relational-predictive-necessity hypothesis through four increasingly model-dependent stages. First,
+we measure whether FK-linked information is predictively useful in the synthetic pretraining corpora themselves,
+without using RT. Second, we test whether the corresponding trained checkpoints functionally depend on relational
+structure during masked-cell reconstruction. Third, we intervene on RT’s internal cross-table pathways to localize the
+computation responsible for that dependence. Finally, we apply the same structural and internal interventions during
+downstream RelBench inference.
+This progression separates three questions that are often conflated in evaluations of synthetic pretraining data: whether
+relations contain useful signal in the generated corpus, whether a model actually learns to use that signal, and whether
+the resulting computation matters for downstream prediction.
+3.1
+Predictive Structure in Synthetic Pretraining Data
+Our first experiment tests H1 directly at the data level. The goal is to determine whether a target value in each synthetic
+corpus becomes more predictable when information from FK-linked tables is made available, independently of any
+representation learned by RT.
+Protocol.
+For each eligible target column y, we construct three prediction problems using the same LightGBM
+learner. The first uses only features available in the target row. The second augments those features with attributes from
+the FK-linked parent row. The third instead augments the target row with simple statistics of linked children: mean,
+standard deviation, and count. Let the corresponding held-out scores be
+Srow = R2(y | xrow),
+Sparent = R2(y | xrow, xparent),
+and
+Schild = R2(y | xrow, a(xchild)) ,
+where a(·) denotes the child-aggregation features. We define
+∆parent = Sparent −Srow,
+∆child = Schild −Srow.
+Positive gain therefore means that relational information predicts the held-out target beyond what is available from the
+target row alone.
+We sample 40 generated databases from each corpus. Individual held-out R2 values are clipped to [−1, 1] before
+differences are computed, preventing a small number of pathological fits from dominating the aggregate. Table 1 reports
+medians over target-column prediction problems; parent gains additionally include 95% bootstrap confidence intervals.
+Full task-level distributions are shown in Appendix B.1.
+RelDiff contains substantially stronger parent-linked predictive signal.
+Table 1 reveals markedly different
+pretraining regimes. In RelDiff, adding linked-parent attributes improves median held-out R2 by 0.072. The corre-
+sponding gain is 0.009 for PluRel and approximately zero for RDB-PFN. RelDiff’s parent gain is therefore about eight
+times PluRel’s and more than two orders of magnitude larger than the rounded RDB-PFN gain.
+The contrast with row-local predictability is also informative. RDB-PFN has by far the largest row-only score
+(R2 = 0.436) while exhibiting essentially no gain from parent information. Its generated values are therefore
+comparatively predictable without cross-table context. RelDiff lies at the opposite extreme: row-local predictability is
+weak (R2 = 0.022), while linked parents provide substantial additional signal.
+5
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+Table 2 Functional reliance on relational structure on rel-stack. Entries are original masked-cell loss and absolute
+changes under three interventions. The final column reports the relative loss increase under full FK shuffling.
+Model
+L0
+∆Lnbr
+∆Lshuffle
+∆Lremove
+Rel. FK change
+RelDiff
+0.241
++0.127
++0.202
++0.197
++83.6%
+GRDM
+0.342
+−0.002
++0.018
++0.034
++5.3%
+PluRel
+0.161
+−0.000
++0.010
++0.019
++6.1%
+RDB-PFN
+0.208
++0.003
++0.007
++0.015
++3.4%
+Random init
+0.556
+−0.025
++0.027
++0.057
++4.9%
+Simple child aggregates do not improve prediction in any corpus. This result narrows our hypothesis: the directly
+measurable relational incentive in these corpora is principally access to linked parents, rather than the mean/count-style
+child aggregates tested here. It does not imply that richer functions of child rows are uninformative.
+The GRDM results require the preprocessing caveat described in Section 2.3: its available corpus does not preserve the
+same semantic type information as the other arms. We therefore do not interpret its negative gains as evidence against
+relational generation in general.
+Could this simply reflect corpus diversity?
+RelDiff is also the most diverse corpus under our feature-, table-,
+and cross-table diversity measurements. Diversity alone, however, does not reproduce the ordering of functional
+relational reliance. For example, PluRel has greater measured cross-table diversity than GRDM but exhibits little
+structural dependence in the experiments below. We report the complete diversity analysis in Appendix B.2. This
+motivates our focus on predictive necessity rather than diversity alone: the relevant question is not only how much the
+generated databases vary, but whether variation across relations helps solve the pretraining objective.
+3.2
+Functional Reliance on Relational Structure
+The corpus experiment establishes that relational information can be predictive, but this does not show that RT actually
+learned to use it. We therefore intervene directly on relational structure during masked-cell reconstruction.
+3.2.1
+Structural Interventions
+Our primary controlled probe uses 24 fixed rel-stack batches, corresponding to 384 masked cells at context length
+1,024. Every checkpoint is evaluated on exactly the same examples and masks under four conditions:
+• Original: ordinary inference on the unmodified database;
+• FK shuffle: FK-neighbor assignments are permuted among a selected set of row positions while cell values
+are left unchanged;
+• FK removal: relational indices are removed;
+• Neighbor ablation: the input database is unchanged, but the output of RT’s nbr stream is set to zero.
+For intervention c, we report ∆Lc = Lc −L0, where L0 is the original masked-cell reconstruction loss. Positive values
+therefore indicate that the perturbed information or computation was useful.
+RelDiff is substantially more dependent on correct FK structure.
+Full FK shuffling raises RelDiff’s loss
+from 0.241 to 0.443, an absolute increase of 0.202 or 83.6%. GRDM, PluRel, and RDB-PFN increase by only 5.3%,
+6.1%, and 3.4%, respectively. FK removal produces the same qualitative ordering. The result is therefore not specific to
+one particular corruption procedure.
+Internal intervention gives a complementary result. Zeroing nbr increases RelDiff’s loss by 0.127, whereas the same
+ablation has negligible effect on the other trained checkpoints. Thus, the difference is not merely that RelDiff reacts
+strongly to an unusual input perturbation: an internal cross-table computation is itself load-bearing.
+3.2.2
+Architectural Floor and Graded Corruption
+FK shuffling also changes the relational masks supplied to RT, so some response can arise from the architecture even
+in the absence of learning. We quantify this floor using a randomly initialized RT with exactly the same architecture.
+Full FK shuffling increases its loss by 4.9%, comparable to the 3.4–6.1% changes of the three weakly reliant trained
+checkpoints but far below RelDiff’s 83.6% increase. RelDiff’s relative response is approximately 17× the random-
+initialization effect.
+6
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+RelDiff
+GRDM
+PluRel
+RDB-PFN
+−0.075
+−0.050
+−0.025
+0.000
+0.025
+0.050
+0.075
+0.100
+Δparent (held-out R 2)
+(a)
+Predictive gain from FK-linked parents
+0
+25
+50
+75
+100
+FK links corrupted (%)
+0.000
+0.025
+0.050
+0.075
+0.100
+0.125
+0.150
+0.175
+0.200
+Δ masked-cell loss
+(b)
+Sensitivity to graded FK corruption
+RelDiff
+GRDM
+PluRel
+RDB-PFN
+Random init
+Figure 1 From data-side relational signal to model-side structural reliance. Left: median gain in held-out R2 obtained
+by adding FK-linked parent attributes to a row-only predictor; error bars are 95% bootstrap intervals. Right: increase in masked-cell
+reconstruction loss as an increasing fraction of rel-stack FK assignments is corrupted. RelDiff exhibits both the strongest
+parent-linked predictive signal and the steepest functional response to corruption.
+Table 3 Structural reliance averaged over three real RelBench databases. Entries are mean original masked-cell loss
+and absolute changes under each intervention. The experiment uses a broader 27-batch probe suite than Table 2.
+Model
+Original
+∆Lnbr
+∆Lshuffle
+∆Lremove
+RelDiff
+0.339
++0.029
++0.069
++0.065
+GRDM
+0.350
++0.013
+−0.005
+−0.007
+PluRel
+0.339
++0.007
++0.009
++0.014
+RDB-PFN
+0.351
+−0.002
++0.003
++0.007
+A binary intervention alone could still reflect an extreme out-of-distribution perturbation. We therefore vary the
+corrupted fraction ρ ∈{0, 0.25, 0.50, 0.75, 1} while holding the evaluation batches fixed. Figure 1(b) shows that
+RelDiff’s loss increases monotonically with corruption strength. Linear fits give a slope 11–30× larger than the other
+trained checkpoints. The random-init model and the three weakly reliant trained models remain comparatively flat.
+Figure 1 places the data-side and model-side measurements next to one another. The corpus with the largest gain from
+linked-parent information is also the checkpoint whose reconstruction loss is most sensitive to progressively destroying
+FK structure.
+3.2.3
+Reliance Across Real Databases
+The preceding experiments deliberately use one fixed rel-stack protocol so that binary corruption, graded corruption,
+pathway ablation, and the random-initialization control are directly comparable. We additionally ask whether the
+qualitative checkpoint ordering survives across real databases.
+We therefore evaluate the original structural-intervention protocol over 27 fixed probe batches drawn from rel-stack,
+rel-arxiv, and rel-ratebeer. Because this is a different probe suite, its absolute loss values should not be compared
+directly with Table 2.
+The broader evaluation reproduces the aggregate separation: RelDiff is the only checkpoint for which FK corruption
+and internal neighbor ablation both produce substantial mean degradation. Importantly, however, the sign is not
+uniform across databases. For RelDiff, full FK shuffling changes reconstruction loss by +0.165 on rel-stack, +0.067
+on rel-ratebeer, and −0.112 on rel-arxiv. Thus, the learned model is sensitive to relational structure across
+databases, but that structure is not always beneficial. On rel-arxiv, corrupting the learned relational prior improves
+reconstruction.
+This distinction will matter again downstream: relational reliance should be interpreted as a learned inductive bias, not
+as a guarantee that the bias is correct for every target database.
+7
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+Linked
+child rows
+Parent
+representation
+Masked tar-
+get cell
+nbr: child aggregation
+feat: parent access
+No child aggregation:
+L = 0.386
+(∆L = +0.128)
+No parent access:
+L = 0.453
+(∆L = +0.195)
+Original: L = 0.258
+|
+Both ablated: L = 0.453 (∆L = +0.195)
+Both ablated = no parent access
+⇒serial, not independent
+Figure 2 Pathway-specific intervention localizes a serial cross-table computation. Neighbor attention aggregates
+linked children into a parent representation, which subsequently reaches the target through parent access in feat. Blocking parent
+access makes additional nbr ablation behaviorally redundant.
+3.3
+Mechanistic Localization of Cross-Table Computation
+Structural corruption establishes dependence on relational information but perturbs every operation that consumes FK
+indices. We next intervene directly on RT’s internal cross-table pathways to determine how the relational computation
+is organized.
+3.3.1
+Pathway-Specific Interventions
+The pathway experiment uses 12 fixed rel-stack batches, corresponding to 192 masked cells at context length 1,024.
+We compare four conditions:
+1. Original: both cross-table pathways operate normally;
+2. No child aggregation: the nbr output is zeroed;
+3. No parent access: the feat attention mask is restricted to same-row cells;
+4. Both: child aggregation and parent access are disabled simultaneously.
+These interventions distinguish two possible organizations. If nbr and feat provide independent routes by which
+relational information reaches the target, ablating both should be more damaging than ablating either route alone. If they
+instead form a serial computation, disabling a downstream route should make removal of the upstream route redundant.
+3.3.2
+A Serial Relational Pathway
+Figure 2 supports the serial interpretation. RelDiff’s original loss is 0.258. Removing child aggregation raises it to
+0.386 (∆L = +0.128), while removing parent access raises it to 0.453 (+0.195). Crucially, disabling both routes also
+yields 0.453, identical to parent-access ablation alone to six decimal places.
+The equality is not caused by accidentally silencing nbr. Its activation magnitude remains essentially unchanged when
+parent access is blocked. The neighbor computation is therefore still performed, but its output can no longer influence
+the masked target. The functional pathway supported by these interventions is
+linked child rows
+nbr
+−−−→parent representation
+feat
+−−−→masked target cell.
+Thus, nbr should not be interpreted as an independent direct route from children to the target. It first enriches the
+representation of the linked parent, and feat subsequently exposes that representation to the queried cell.
+3.3.3
+Fine-Grained Functional Specialization Across Heads
+The pathway intervention establishes that the nbr stream is functionally important for RelDiff, but does not reveal
+whether this dependence is spread uniformly across its attention heads. We therefore ablate the eight nbr heads
+individually and measure the resulting change in reconstruction loss.
+8
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+0
+1
+2
+3
+4
+5
+6
+7
+nbr head index
+0.000
+0.005
+0.010
+0.015
+0.020
+0.025
+0.030
+Δ masked-cell loss
+(a)
+Behavioral effect of individual head ablation
+RelDiff
+GRDM
+PluRel
+RDB-PFN
+0
+1
+2
+3
+4
+5
+6
+7
+nbr head index
+0
+5
+10
+15
+20
+25
+30
+35
+40
+Share of positive knockout effect (%)
+(b)
+RelDiff head-level concentration
+Uniform 8-head share (12.5%)
+Figure 3 Behavioral importance of individual nbr attention heads. Individual head ablations reveal concentrated
+functional specialization in RelDiff. Its most important head accounts for approximately 39.5% of the positive head-attributable loss
+increase, compared with 12.5% under uniform contribution from eight heads.
+Figure 3 shows a clear concentration of functional importance for RelDiff. Ablating head 0 increases masked-cell loss
+by approximately 0.032, while most individual heads in the other checkpoints have effects close to zero. Considering
+the positive head-attributable degradation in RelDiff, head 0 accounts for approximately 39.5% of the total, compared
+with 12.5% under a uniform eight-head contribution.
+This concentration is specifically behavioral. Per-head weight-change Gini coefficients are nearly identical across
+checkpoints (0.016–0.020), and therefore do not recover the same specialization. This provides a useful methodological
+control: parameter movement can nominate components for investigation, but functional specialization must be
+established by intervention.
+Additional weight-space, representation-similarity, and attention-distribution diagnostics are reported in Appendix C.
+We use them as complementary descriptions of checkpoint differences rather than as evidence of causal functional
+importance.
+3.4
+Causal Link to Downstream Performance
+The preceding experiments connect a property of the synthetic corpora to a learned cross-table computation. We now
+ask whether this computation explains downstream predictive behavior.
+3.4.1
+Downstream Evaluation and Corrected Context Scaling
+We evaluate the four checkpoints using RT’s in-context inference protocol on nine RelBench tasks across context
+lengths {100, 200, 512, 1024, 30000}. Six tasks are classification problems and are summarized by AUROC.
+At context length 1,024, mean classification AUROC is 0.748 for RelDiff, 0.740 for RDB-PFN, 0.723 for PluRel,
+and 0.666 for GRDM. Our original 30k-context evaluation, however, used only n = 256 examples on two rare-label
+rel-stack tasks. This produced only six positive examples for user-engagement and ten for user-badge, making
+their AUROC estimates unstable.
+We therefore repeated those evaluations with n = 2048, yielding approximately 60 positive examples per task. The
+correction materially changes the context-scaling conclusion. The original RelDiff estimates decrease from 0.929 to
+0.865 on user-engagement and from 0.847 to 0.812 on user-badge; on user-engagement, PluRel increases from
+0.564 to 0.652 and RDB-PFN from 0.538 to 0.642. Already well-powered cells move by at most 0.007.
+After correction, all four checkpoints decrease in mean classification AUROC from context 1,024 to 30k:
+∆AUC30k−1k =
+
+
+
+
+
+
+
+−0.011,
+RelDiff,
+−0.038,
+GRDM,
+−0.043,
+PluRel,
+−0.069,
+RDB-PFN.
+We therefore do not claim that RelDiff improves indefinitely with increasing context. The supported result is narrower:
+among the four checkpoints, it is the most robust to the increase from 1,024 to 30k.
+9
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+100
+200
+512
+1k
+30k
+In-context length
+0.62
+0.64
+0.66
+0.68
+0.70
+0.72
+0.74
+Mean AUROC over 6 classification tasks
+Classification performance vs. in-context length
+RelDiff
+GRDM
+PluRel
+RDB-PFN
+Figure 4 Mean classification AUROC as a function of in-context length. Each point averages the six classification tasks.
+The 30k points incorporate the n = 2048 re-evaluation of the two rare-label rel-stack tasks. Under the corrected evaluation all
+four checkpoints degrade from context 1,024 to 30k, with RelDiff showing the smallest decline.
+Table 4 Downstream intervention on rel-stack user-engagement. Entries are AUROC on identical examples under
+standard inference, FK shuffling, and internal nbr ablation. The 30k evaluation uses n = 2048 examples (60 positives). ∆FK and
+∆nbr are changes relative to original inference.
+Context
+Model
+Original
+FK shuffled
+Nbr ablated
+∆FK
+∆nbr
+30k
+RelDiff
+0.865
+0.579
+0.624
+−0.286
+−0.241
+30k
+GRDM
+0.520
+0.622
+0.537
++0.102
++0.018
+30k
+PluRel
+0.652
+0.650
+0.636
+−0.003
+−0.017
+30k
+RDB-PFN
+0.642
+0.643
+0.634
++0.001
+−0.008
+1,024
+RelDiff
+0.847
+0.718
+0.728
+−0.129
+−0.119
+1,024
+GRDM
+0.609
+0.618
+0.622
++0.009
++0.013
+1,024
+PluRel
+0.708
+0.701
+0.697
+−0.007
+−0.011
+1,024
+RDB-PFN
+0.691
+0.694
+0.687
++0.003
+−0.004
+3.4.2
+Intervening on the Learned Mechanism
+A benchmark association alone cannot establish that RelDiff’s downstream behavior is caused by the relational
+computation identified above. We therefore rerun the downstream examples under the same two mechanistically
+informative interventions used during reconstruction:
+• FK shuffled: relational correspondences are corrupted while cell values are unchanged;
+• nbr ablated: the input database is unchanged, but RT’s internal child-aggregation output is zeroed.
+For AUROC we report
+∆AUC
+FK
+= AUCshuffle −AUCoriginal,
+so a negative value indicates that correct relational structure contributes positively to prediction.
+Table 4 reports rel-stack user-engagement at both context 1,024 and 30k, using the same examples across intervention
+conditions.
+The effect on RelDiff is large at both context lengths. At 1,024, FK shuffling reduces AUROC from 0.847 to 0.718
+(−0.129), and nbr ablation reduces it to 0.728 (−0.119). At 30k, the corresponding effects grow to −0.286 and
+10
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+−0.241. FK corruption therefore removes RelDiff’s intact advantage and pushes its performance below the untouched
+PluRel and RDB-PFN checkpoints.
+The comparison models behave differently. PluRel and RDB-PFN remain nearly invariant to FK shuffling at both context
+lengths. Their largest FK-shuffle change in the table is 0.007 AUROC in magnitude. This mirrors the reconstruction
+experiment, in which the same checkpoints showed little functional dependence on FK structure.
+The fact that the separation is already present at context 1,024 also rules out a simpler explanation in which the
+30k intervention result arises only from the unusually large context window. Increasing context amplifies RelDiff’s
+dependence on the relational mechanism, but does not create it.
+Taken together, these interventions establish the strongest causal link in our analysis: holding the trained checkpoint and
+non-relational input values fixed, destroying relational correspondence or disabling the identified internal computation
+changes the downstream behavior of the model that learned strong relational reliance, while having little effect on the
+checkpoints that did not.
+3.4.3
+When Relational Priors Hurt
+Relational reliance is not uniformly beneficial. On rel-ratebeer user-churn at context 1,024, FK shuffling improves
+RelDiff from 0.612 to 0.673 (+0.061 AUROC) and GRDM from 0.627 to 0.691 (+0.064), while PluRel and RDB-PFN
+change by at most 0.007.
+The same phenomenon appears in Table 4: on rel-stack user-engagement at 30k, shuffling FK structure improves
+GRDM from 0.520 to 0.622. These sign reversals are useful controls because they show that the intervention is not
+merely removing information that must always help. A learned relational computation acts as an inductive bias. When
+the learned relation between topology and attributes matches the downstream problem, preserving relational structure
+can be beneficial; when it is mismatched, destroying that structure can improve prediction.
+This behavior parallels the masked-reconstruction probe, where RelDiff is harmed by FK corruption on rel-stack
+and rel-ratebeer but improves on rel-arxiv. Relational reliance and relational usefulness are therefore distinct: a
+checkpoint may strongly use relational structure even when the particular structural prior it applies is poorly matched to
+a target database.
+4
+Discussion and Limitations
+Our results distinguish architectural access to relational information from learned functional reliance on relations.
+All four checkpoints use the same FK-aware RT architecture and therefore have access to the same cross-table
+computational routes, yet they respond very differently when relational structure is corrupted or internally ablated.
+The checkpoint trained on the corpus with the strongest measurable parent-linked predictive signal also develops the
+strongest dependence on correct FK structure. That dependence can be localized to a concrete serial cross-table pathway,
+and intervention on the same computation substantially changes downstream behavior. The strongest causal evidence in
+our study therefore concerns the mechanism-to-behavior link: when the trained checkpoint is held fixed, disrupting the
+relational structure or the corresponding internal computation changes the prediction.
+The data-side analysis suggests a broader design principle for synthetic relational pretraining. Structural complexity
+alone is not sufficient. A generated corpus may contain many tables, foreign keys, diverse schemas, or heterogeneous
+cardinalities while still allowing the pretraining objective to be solved largely from row-local regularities. To create
+optimization pressure for cross-table computation, relational context must provide predictive information that is not
+already available locally. Our diversity analysis supports this distinction: corpus diversity does not reproduce the
+ordering of functional relational reliance across checkpoints (Appendix B.2). This suggests that future relational data
+generators should be evaluated not only by how much structural variation they produce, but also by whether that
+structure carries predictive information relevant to the model’s pretraining objective.
+The results also emphasize that relational reliance and relational usefulness are not equivalent. On some databases
+and tasks, corrupting relational structure improves reconstruction or downstream accuracy. The learned relational
+computation should therefore be viewed as an inductive bias rather than an intrinsically beneficial capability. When
+the statistical dependencies learned during pretraining align with the target database, the bias can improve prediction;
+when they are mismatched, the same mechanism can be harmful. This distinction is important for evaluating relational
+foundation models: sensitivity to structure demonstrates that the model is using relations, but does not by itself establish
+that the learned relational prior transfers correctly to every schema or task.
+Our study has several limitations. First, we analyze a single relational architecture and a single masked-cell reconstruc-
+tion objective. The specific nbr→feat computation identified here is therefore RT-specific, although the data-side
+11
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+notion of relational predictive necessity is not tied to a particular architecture and may generalize to other relational
+pretraining settings. Second, each generator is represented by one trained checkpoint. We can therefore measure paired
+intervention effects within each checkpoint, but we cannot estimate variability across training seeds, independently
+generated corpora, or repeated pretraining runs. Third, the four synthetic corpora differ along multiple dimensions
+simultaneously. The association between corpus predictive structure and learned relational reliance is therefore a
+controlled observational attribution rather than a randomized intervention on the training distribution. A stronger
+causal test would begin from the same generated corpus, selectively destroy FK-conditioned predictive coupling while
+preserving marginal and row-local statistics, retrain from the same initialization and budget, and test whether relational
+reliance disappears. The complementary sufficiency test would inject such coupling into a weakly relational corpus and
+ask whether reliance emerges. Finally, the available GRDM corpus contains the semantic-type preprocessing confound
+described in Section 2.3. We therefore retain GRDM as an informative comparison but avoid interpreting its absolute
+ranking as an isolated estimate of the quality of its relational generation procedure.
+Conclusion.
+Synthetic-data benchmarks can reveal which pretraining corpus produces the strongest model, but not
+what properties of that corpus produced a capability. We trace one such capability across four levels of analysis: relational
+predictive signal is measurable directly in the synthetic pretraining distribution; the corresponding checkpoint develops
+load-bearing dependence on FK structure; that dependence can be localized to a specific cross-table computation; and
+intervening on the same mechanism changes downstream behavior. More broadly, our results motivate attributing the
+effects of synthetic pretraining not only to generator identity, but to measurable properties of the generated distribution
+that create optimization pressure for particular computations to be learned.
+References
+[1] Benjamin Jäger, Nick Erickson, Léo Grinsztajn, Felix Birkel, Klemens Flöge, Oscar Key, Kür¸sat Kaya, Jonas
+Kübler, Adèle Frankel, Tobias Schröder, et al. Tabpfn-3.5: Technical report. arXiv preprint arXiv:2609.17895,
+2026.
+[2] Jingang Qu, David Holzmüller, Gaël Varoquaux, and Marine Le Morvan. Tabiclv2: A better, faster, scalable, and
+open tabular foundation model. CoRR, abs/2602.11139, 2026.
+[3] Xingxuan Zhang, Gang Ren, Hao Yuan, Hao Zou, Hongze Tan, Hui Wang, Jianhao Song, Jiansheng Li, Jiayao
+Zhang, Jinghan Zhang, et al. Limix-2: A contextual mechanism network towards general structured-data
+intelligence. arXiv preprint arXiv:2609.17488, 2026.
+[4] Mohamed Bouadi, Pratinav Seth, Aditya Tanna, and Vinay Kumar Sankarapu. Orion-msp: Multi-scale sparse
+attention for tabular in-context learning. CoRR, abs/2511.02818, 2025.
+[5] Mohamed Bouadi, Pratinav Seth, Aditya Tanna, and Vinay Kumar Sankarapu. Orion-bix: Bi-axial attention for
+tabular in-context learning. In Proceedings of the ACM Web Conference 2026, pages 8673–8676, 2026.
+[6] Matthias Fey, Weihua Hu, Kexin Huang, Jan Eric Lenssen, Rishabh Ranjan, Joshua Robinson, Rex Ying, Jiaxuan
+You, and Jure Leskovec. Position: Relational deep learning-graph representation learning on relational databases.
+In Forty-first International Conference on Machine Learning, 2024.
+[7] Joshua Robinson, Rishabh Ranjan, Weihua Hu, Kexin Huang, Jiaqi Han, Alejandro Dobles, Matthias Fey, Jan E
+Lenssen, Yiwen Yuan, Zecheng Zhang, et al. Relbench: A benchmark for deep learning on relational databases.
+Advances in Neural Information Processing Systems, 37:21330–21341, 2024.
+[8] Yanbo Wang, Xiyuan Wang, Quan Gan, Minjie Wang, Qibin Yang, David Wipf, and Muhan Zhang. Griffin:
+Towards a graph-centric relational database foundation model. arXiv preprint arXiv:2505.05568, 2025.
+[9] Matthias Fey, Vid Kocijan, Federico Lopez, J Lenssen, and Jure Leskovec. Kumorfm: A foundation model for
+in-context learning on relational data. Technical whitepaper, Kumo AI, 2025.
+[10] Rishabh Ranjan, Valter Hudovernik, Mark Znidar, Charilaos Kanatsoulis, Roshan Upendra, Mahmoud Moham-
+madi, Joe Meyer, Tom Palczewski, Carlos Guestrin, and Jure Leskovec. Relational transformer: Toward zero-shot
+foundation models for relational data. In International Conference on Learning Representations, volume 2026,
+pages 69149–69174, 2026.
+[11] Mohamed Bouadi, Nassim Bouarour, Varun Kulkarni, Shivam Dubey, Aditya Tanna, and Vinay Kumar Sankarapu.
+Shaping the prior: How synthetic task distributions determine tabular foundation model quality. arXiv preprint
+arXiv:2605.18971, 2026.
+[12] Valter Hudovernik, Minkai Xu, Juntong Shi, Lovro Šubelj, Stefano Ermon, Erik Štrumbelj, and Jure Leskovec.
+Reldiff: Relational data generative modeling with graph-based diffusion models. arXiv preprint arXiv:2506.00710,
+2025.
+12
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+[13] Mohamed Amine Ketata, David Lüdke, Leo Schwinn, and Stephan Günnemann. Joint relational database genera-
+tion via graph-conditional diffusion models. Advances in Neural Information Processing Systems, 38:163644–
+163672, 2026.
+[14] Vignesh Kothapalli, Rishabh Ranjan, Valter Hudovernik, Vijay Prakash Dwivedi, Johannes Hoffart, Carlos
+Guestrin, and Jure Leskovec. Plurel: synthetic data unlocks scaling laws for relational foundation models. arXiv
+preprint arXiv:2602.04029, 2026.
+[15] Yanbo Wang, Jiaxuan You, Chuan Shi, and Muhan Zhang. Relational in-context learning via synthetic pre-training
+with structural prior. arXiv preprint arXiv:2603.03805, 2026.
+[16] Pang Wei Koh and Percy Liang. Understanding black-box predictions via influence functions. In International
+conference on machine learning, pages 1885–1894. Pmlr, 2017.
+[17] Garima Pruthi, Frederick Liu, Satyen Kale, and Mukund Sundararajan. Estimating training data influence by
+tracing gradient descent. Advances in neural information processing systems, 33:19920–19930, 2020.
+[18] Andrew Ilyas, Sung Min Park, Logan Engstrom, Guillaume Leclerc, and Aleksander Madry. Datamodels:
+Understanding predictions with data and data with predictions. In International Conference on Machine Learning,
+pages 9525–9587. PMLR, 2022.
+[19] Sung Min Park, Kristian Georgiev, Andrew Ilyas, Guillaume Leclerc, and Aleksander Madry. Trak: Attributing
+model behavior at scale. arXiv preprint arXiv:2303.14186, 2023.
+[20] Justin Gu, Rishabh Ranjan, Charilaos Kanatsoulis, Haiming Tang, Martin Jurkovic, Valter Hudovernik, Mark
+Znidar, Pranshu Chaturvedi, Parth Shroff, Fengyu Li, et al. Relbench v2: A large-scale benchmark and repository
+for relational data. arXiv preprint arXiv:2602.12606, 2026.
+13
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+A
+Generator and Corpus Details
+The main text deliberately treats generator identity as a source of different pretraining distributions rather than as the
+explanatory variable itself. Here we provide additional details on the four generators and document the semantic-type
+issue affecting the available GRDM corpus.
+A.1
+Generator Characteristics
+The four generators differ in both how relational structure is obtained and how attribute reference-conditioned: generation
+is tied to structural properties of an existing relational database. PluRel and RDB-PFN instead construct relational
+databases from synthetic priors without requiring a reference database.
+Table 5 summarizes the distinctions relevant to this study. These categories are descriptive rather than causal: each
+generator changes multiple properties of the resulting pretraining distribution simultaneously.
+Table 5 Summary of the four synthetic pretraining generators. “Reference-conditioned” denotes generation tied to the
+schema or relational structure of an existing database; “reference-free” denotes generation from a synthetic prior.
+Generator
+Reference data
+Relational structure
+Value generation
+RelDiff
+Yes
+fitted to reference FK graph
+joint graph-conditioned diffusion
+GRDM
+Yes
+reference structure / degree statistics
+graph-conditional diffusion
+PluRel
+No
+procedural relational sampler
+conditional causal mechanisms
+RDB-PFN
+No
+hand-designed relational prior
+SCM-style synthetic prior
+A.2
+GRDM Semantic-Type Conversion
+RT contains type-specific input pathways for numerical, textual, datetime, and boolean values, including a dedicated
+MiniLM-based text encoder. We therefore audited the semantic types present in the exported pretraining corpora.
+Table 6 reports the resulting census.
+Table 6 Column-type census in the available synthetic corpora. Counts are over the sampled databases used in the audit.
+The available GRDM export contains no preserved text/categorical columns: string and datetime fields are represented numerically.
+Corpus
+Numerical
+Text / categorical
+Boolean
+RelDiff
+512
+234
+0
+GRDM
+518
+0
+0
+PluRel
+1132
+0
+518
+RDB-PFN
+1081
+0
+0
+This difference is relevant because the GRDM checkpoint received no training signal through RT’s text pathway. In
+particular, reference databases for which the RelDiff corpus retains string-valued attributes have no corresponding
+preserved string columns in the available GRDM export.
+Consequently, comparisons involving GRDM combine differences in relational generation with differences in semantic-
+type exposure. We therefore retain GRDM as an informative comparison but do not interpret its absolute ranking as an
+isolated effect of relational coupling or generator design.
+B
+Additional Corpus-Level Analyses
+B.1
+Task-Level Predictive-Necessity Distributions
+Table 1 summarizes relational predictive necessity using medians across target-column prediction problems. Figure 5
+shows the underlying task-level values.
+Each point corresponds to one held-out target-column problem and measures the change in R2 obtained by augmenting
+row-only features with relational information. The task-level distribution is important because an aggregate median
+alone could in principle be driven by a small number of unusual generated databases.
+14
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+The distribution supports the aggregate result. RelDiff exhibits more frequent and larger positive gains from linked-
+parent attributes, whereas RDB-PFN is strongly concentrated near zero. Child-aggregate gains remain close to zero
+across the corpora. Thus, the data-side result is not simply a single extreme target-column problem.
+Figure 5 Task-level relational predictive gains. Each point corresponds to one target-column prediction problem. RelDiff
+exhibits substantially larger gains from linked-parent attributes, whereas the simple child aggregates considered here provide little
+additional predictive signal.
+B.2
+Corpus Diversity as an Alternative Explanation
+Relational predictive necessity is not the only corpus-level property that could explain checkpoint differences. A natural
+alternative is that RelDiff simply generates a more diverse training distribution. We therefore measure feature-, table-,
+and cross-table diversity directly in the generated databases.
+The diversity metrics are based on mean pairwise embedding distances and do not use representations from the trained
+RT checkpoints.
+Table 7 Diversity of the generated corpora. Values are mean pairwise embedding distances along feature-, table-, and
+cross-table axes. RelDiff has the largest measured diversity, but the ordering of the remaining corpora does not reproduce the
+ordering of functional relational reliance.
+Corpus
+Feature
+Table
+Cross-table
+RelDiff
+1.10
+0.57
+1.04
+GRDM
+0.69
+0.43
+0.71
+PluRel
+0.79
+0.34
+0.85
+RDB-PFN
+0.82
+0.16
+0.81
+RelDiff is the most diverse corpus under all three measurements. Diversity alone, however, does not explain the
+functional results. Most notably, PluRel has greater cross-table diversity than GRDM (0.85 versus 0.71), despite
+exhibiting little dependence on FK structure under the interventions in Sec. 3.2. RDB-PFN similarly has greater feature
+diversity than PluRel while remaining nearly insensitive to structural corruption.
+Diversity and predictive necessity therefore capture different properties. Diversity asks how broadly the generated data
+vary; predictive necessity asks whether information is coupled across relations in a way that improves prediction of the
+pretraining target.
+C
+Additional Checkpoint Diagnostics
+The main mechanistic claims are based on behavioral interventions. This section reports complementary diagnostics
+of parameter movement, representation similarity, and attention distributions. These measurements help characterize
+where checkpoints differ, but they do not by themselves establish that a component is functionally necessary.
+15
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+Figure 6 Output diversity measured directly in the generated databases. RelDiff has the largest diversity on all three
+axes, but diversity alone does not reproduce the ordering of functional relational reliance.
+C.1
+Weight-Space Specialization
+Because all four checkpoints begin from the same initialization, parameter displacement provides a simple diagnostic
+of which components were altered most strongly during pretraining. Raw L2 distances are not directly comparable
+across modules of different sizes, so we normalize by parameter count and report the RMS deviation
+DRMS(W) =
+s
+1
+|W|
+W −¯W
+2
+2,
+where ¯W is the corresponding tensor in the four-checkpoint mean.
+Table 8 Per-parameter checkpoint deviation by RT component. Entries are RMS deviations from the four-checkpoint
+mean, multiplied by 103. Among the attention streams, RelDiff has its largest deviation in nbr, whereas GRDM has its largest
+deviation in feat.
+Model
+Encoders
+Col
+Feat
+Nbr
+FFN
+GRDM
+4.386
+3.440
+4.047
+3.129
+3.525
+PluRel
+2.345
+2.893
+2.636
+2.198
+2.504
+RDB-PFN
+2.311
+3.142
+2.455
+2.142
+2.445
+RelDiff
+3.690
+3.025
+3.315
+3.622
+3.089
+Normalizing by parameter count changes an interpretation suggested by raw L2 norms: the encoders are not uniformly
+insensitive to the pretraining corpus. Their per-parameter movement is substantial for the reference-conditioned
+checkpoints.
+The narrower observation relevant to the main mechanism nevertheless survives: among RT’s attention streams,
+RelDiff’s largest RMS displacement is in nbr, whereas GRDM’s is in feat. We treat this only as a localization cue,
+not as evidence that those parameters are functionally important.
+C.2
+Representation Similarity
+Parameter similarity does not imply similarity of the computations performed on real inputs. We therefore compute
+linear centered-kernel alignment (CKA) between residual-stream activations from different checkpoints evaluated on
+identical inputs. Approximately 20,000 non-padding cell activations are collected for each comparison. We summarize
+blocks 0–5 as early layers and blocks 6–11 as late layers.
+Checkpoint representations generally diverge with depth. More importantly, representation similarity and parameter-
+space similarity do not induce the same clustering. PluRel and RDB-PFN are comparatively close in parameter space,
+16
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+Figure 7 Checkpoint deviation by attention stream and depth. Weight-space differences identify components that were
+affected differently during pretraining. Functional importance is established separately by intervention.
+Table 9 Pairwise linear CKA on identical real-data inputs. Early and late values average blocks 0–5 and 6–11, respectively.
+Checkpoint pair
+Early CKA
+Late CKA
+GRDM / RelDiff
+0.944
+0.824
+PluRel / RelDiff
+0.944
+0.810
+GRDM / PluRel
+0.938
+0.718
+PluRel / RDB-PFN
+0.909
+0.707
+RDB-PFN / RelDiff
+0.870
+0.587
+GRDM / RDB-PFN
+0.808
+0.406
+yet RDB-PFN is the largest late-layer functional outlier under CKA. Conversely, GRDM and RelDiff have the largest
+late-layer CKA.
+This disagreement illustrates why parameter-space proximity is insufficient to infer similarity of learned computation.
+C.3
+Attention Within the Permitted FK Neighborhood
+RT’s nbr attention is masked so that a head may attend only to structurally permitted FK-linked cells. Consequently,
+observing attention on relational edges is not itself evidence of learning: the support is imposed architecturally.
+We instead ask how each checkpoint distributes probability within its permitted neighborhood. We recompute attention
+probabilities from the nbr query/key projections and report normalized entropy, for which a value of one corresponds
+to uniform attention, together with the probability mass assigned to the highest-weight neighbor.
+Table 10 Within-neighborhood attention statistics. Lower normalized entropy indicates more selective attention among the
+FK-linked cells permitted by the architectural mask.
+Model
+Normalized entropy
+Top-1 mass
+RelDiff
+0.843
+0.396
+GRDM
+0.858
+0.394
+RDB-PFN
+0.890
+0.361
+PluRel
+0.898
+0.361
+RelDiff and GRDM exhibit sharper within-neighborhood attention than PluRel and RDB-PFN. However, GRDM’s
+relatively selective attention does not translate into comparable functional dependence under FK corruption. Attention
+concentration therefore characterizes how the permitted neighborhood is weighted, but is not itself evidence that the
+resulting relational computation is load-bearing.
+D
+Negative Result: Input-Decodable Linear Probes
+We also investigated whether differences between pretraining corpora could be identified using linear probes on frozen
+RT representations. We considered semantic type, table identity, parent-table identity, and row degree, asking whether
+these quantities become more linearly decodable after pretraining under particular synthetic distributions.
+17
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+These probes do not discriminate meaningfully between the checkpoints. All tested properties are already at or near
+ceiling in a randomly initialized RT, and improvements relative to the random-init baseline are below 0.014; for two
+trained checkpoints the measured gain is negative.
+The failure is structural rather than simply statistical. RT is a residual architecture, so information available in the original
+cell representation can remain linearly accessible at later layers even if the network has not learned a computation
+involving that information. Moreover, quantities such as parent-table identity and row degree can be derived directly
+from the FK index structure supplied as input.
+Consequently, high probe accuracy for these targets does not demonstrate that RT has learned a relational computation.
+We therefore exclude these probes from the main mechanistic evidence. A more discriminative probe target would
+need to depend on information unavailable in the queried cell’s input representation and require actual cross-table
+computation—for example, a property of the values contained in linked parent rows.
+E
+Database-Specific Sign of Structural Reliance
+Section 3.2.3 reports the three-database aggregate structural intervention. Here we emphasize the database-specific sign
+of the effect, which is important for distinguishing relational reliance from beneficial relational reliance.
+For RelDiff, the change in masked-cell reconstruction loss under FK shuffling is
+∆Lshuffle =
+
+
+
++0.165,
+rel-stack,
++0.067,
+rel-ratebeer,
+−0.112,
+rel-arxiv.
+The corresponding absolute changes for the other checkpoints are at most 0.027 in this probe suite.
+A positive value means that correct FK structure helps reconstruction, whereas a negative value means that destroying
+the structure improves it. The rel-arxiv sign reversal therefore does not indicate absence of a relational effect. Rather,
+the checkpoint’s predictions change substantially when relational correspondences are destroyed, but in a beneficial
+direction.
+This distinction motivates our terminology throughout the paper: reliance measures whether a learned computation
+depends on relational structure, not whether that dependence necessarily improves performance.
+F
+Additional Downstream Evaluation Details
+F.1
+Rare-Label Re-Evaluation at 30k Context
+The initial 30k-context evaluation used n = 256 examples on two rare-label rel-stack classification tasks. This
+produced only six positive examples for user-engagement and ten for user-badge, making AUROC highly sensitive
+to individual predictions.
+We therefore reran both tasks with n = 2048.
+The corrected evaluation contains 60 positive examples for
+user-engagement and 64 for user-badge. The largest changes occur precisely in the previously underpowered cells:
+• RelDiff user-engagement: 0.929 →0.865;
+• RelDiff user-badge: 0.847 →0.812;
+• PluRel user-engagement: 0.564 →0.652;
+• RDB-PFN user-engagement: 0.538 →0.642.
+Evaluation cells that were already well powered change by at most 0.007. This pattern is consistent with instability
+caused by the small number of positive examples rather than a systematic change to the evaluation protocol.
+All context-scaling results in the main paper use these corrected values. In particular, we make no claim that RelDiff’s
+mean classification performance improves from context 1,024 to 30k.
+F.2
+Additional Example of a Harmful Relational Prior
+Section 3.4.3 reports that disrupting relational structure can improve performance when the learned structural prior is
+mismatched to the downstream problem.
+18
+
+
+When Does Synthetic Relational Data Teach Models to Use Relations? Tracing Predictive Structure from Pretraining
+Data to Model Behavior
+On rel-ratebeer user-churn at context 1,024, FK shuffling changes AUROC from 0.612 to 0.673 for RelDiff and
+from 0.627 to 0.691 for GRDM, corresponding to improvements of +0.061 and +0.064. PluRel and RDB-PFN change
+by at most 0.007 under the same intervention.
+This downstream sign reversal mirrors the reconstruction-level result in Appendix E. Together they illustrate that learned
+relational structure functions as an inductive bias: sensitivity to relations can produce either gains or losses depending
+on how well the learned prior matches the target database and task.
+G
+Implementation and Reproducibility Details
+This section records the evaluation protocols underlying the primary results. Within each intervention experiment, all
+checkpoints are evaluated on identical examples, masks, and randomly selected corruption positions so that changes are
+paired at the example level.
+Predictive-necessity analysis.
+For each of the four synthetic corpora, we sample 40 generated databases. Each
+eligible target column defines a held-out prediction problem. Identical LightGBM procedures are used for the row-only,
+row-plus-parent, and row-plus-child-aggregate feature sets. Child features consist of mean, standard deviation, and
+count aggregates over linked rows. Held-out R2 scores are clipped to [−1, 1] before relational gains are computed.
+Tables report medians across target-column tasks, and parent gains include 95% bootstrap confidence intervals.
+Structural interventions.
+All checkpoints receive identical preprocessed inputs. FK shuffling permutes FK-
+neighbor index assignments among the selected row positions while leaving cell values unchanged. FK removal sets
+the corresponding relational indices to the missing-link value. Internal neighbor ablation leaves the input database
+unchanged and sets the output of the nbr module to zero during inference.
+Random-initialization and graded-corruption experiment.
+The controlled rel-stack experiment uses 24
+fixed batches containing 384 masked cells at context length 1,024. The random-initialization control uses the same
+RT architecture without pretraining. Graded corruption evaluates ρ ∈{0, 0.25, 0.50, 0.75, 1} on exactly the same
+examples; ρ denotes the fraction of FK assignments selected for corruption.
+Pathway intervention.
+The pathway-specific experiment uses 12 fixed rel-stack batches containing 192 masked
+cells at context length 1,024. Child aggregation is disabled by zeroing the output of nbr. Parent access is disabled by
+modifying the feat attention mask so that only same-row cells remain accessible. The joint condition applies both
+interventions simultaneously.
+Individual-head intervention.
+For the head-level experiment, each of the eight nbr attention heads is ablated
+individually while all other model components remain unchanged. Functional importance is measured by the resulting
+increase in masked-cell reconstruction loss relative to the same intact batches. When reporting the fraction of RelDiff’s
+positive head-attributable effect, negative knockout changes are excluded from the denominator rather than treated as
+negative importance.
+Broader real-database probe.
+The cross-database structural-reliance experiment uses 27 fixed probe batches
+drawn from rel-stack, rel-arxiv, and rel-ratebeer. This probe suite is distinct from the 24-batch controlled
+rel-stack experiment; absolute loss values between the two protocols are therefore not directly compared.
+Downstream evaluation.
+Downstream experiments use RT’s standard in-context inference protocol on nine
+RelBench tasks and context lengths 100, 200, 512, 1024, and 30000. Classification performance is measured by
+AUROC. The corrected 30k evaluations of the two rare-label rel-stack tasks use n = 2048 examples. For every
+downstream intervention, the original, FK-shuffled, and nbr-ablated conditions are evaluated on identical examples.
+Scope of statistical comparisons.
+The predictive-necessity experiment reports bootstrap uncertainty across
+target-column prediction problems. The mechanistic intervention experiments instead use paired, fixed-batch compar-
+isons: the same masked cells are evaluated before and after each intervention. Because each generator is represented
+by one pretrained checkpoint, these experiments quantify within-checkpoint intervention effects rather than variance
+across independent pretraining seeds.
+19

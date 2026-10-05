@@ -1,0 +1,4204 @@
+CAUSAL REPRESENTATION LEARNING WITH INSTAN-
+TANEOUS AND LAGGED RELATIONS VIA NONSTA-
+TIONARITY
+Tatsuya Yamada1,2
+Hiroshi Morioka3,1,2
+Yoshinobu Kawahara1,2
+1The University of Osaka
+2RIKEN
+3Shiga University
+t-yamada@ist.osaka-u.ac.jp
+hiroshi-morioka@biwako.shiga-u.ac.jp
+kawahara@ist.osaka-u.ac.jp
+ABSTRACT
+Causal representation learning for time-series data aims to identify latent states
+and their causal relations from observations. In this setting, an important chal-
+lenge is to model both lagged causal relations across observation intervals and
+faster causal effects that appear as instantaneous relations within an interval, while
+accounting for nonstationarity in time-series data. However, methods that jointly
+handle these causal relations and nonstationarity remain limited. To address this
+gap, we establish sufficient conditions for identifying latent states up to component
+permutation and component-wise invertible transformations, and their instanta-
+neous and lagged causal structures up to the same permutation, using an observed
+auxiliary variable, such as time or a condition label, associated with changes in
+transition-noise distributions. Based on these results, we propose iCReN, a frame-
+work that uses contrastive learning with discrete or continuous auxiliary variables
+to learn latent representations and estimate their instantaneous and lagged causal
+structures. Experiments demonstrate accurate recovery of latent states and both
+instantaneous and lagged causal structures on synthetic data and the utility of the
+learned representations for downstream forecasting on real-world data.
+1
+INTRODUCTION
+Time-series analysis is used for a wide range of tasks (Yue et al., 2022; Wu et al., 2023), includ-
+ing weather forecasting (Bi et al., 2023; Lam et al., 2023) and human motion analysis (B¨utepage
+et al., 2017; Martinez et al., 2017). Many time-series methods model dependencies among ob-
+served variables, while learning the factors underlying the observations and their causal relations
+may additionally support generalization under distribution shifts (Sch¨olkopf et al., 2021; Shirahmad
+Gale Bagi et al., 2023; Song et al., 2026). When these factors are directly observed, causal discov-
+ery methods can be used to infer their causal structure (Shimizu et al., 2006; Zheng et al., 2018;
+Runge, 2020), whereas in many applications, the relevant factors are not directly observed but are
+instead entangled in observations such as sensor measurements or images. Causal representation
+learning (CRL) therefore seeks to identify these factors and their causal relations in learned repre-
+sentations (Komanduri et al., 2024). However, different latent representations can produce the same
+distribution of observations, so identifying the underlying factors requires additional conditions or
+information (Hyv¨arinen & Pajunen, 1999; Khemakhem et al., 2020). Consequently, a central ques-
+tion in CRL is under what conditions and with what additional information the underlying factors
+and their causal relations become identifiable (Moran & Aragam, 2026).
+Two important aspects of CRL for time-series data are modeling the underlying factors as latent
+states and their causal relations within and across time steps, and accounting for nonstationarity of
+the data distribution. First, causal interactions occurring within an observation interval are repre-
+sented as relations among variables at the same time step, termed instantaneous causal relations,
+whereas interactions across time steps are represented as lagged causal relations. While earlier CRL
+work for time-series data largely focused on lagged causal relations (Yao et al., 2022b;a), recent
+1
+arXiv:2610.03452v1  [cs.LG]  2 Oct 2026
+
+
+work explicitly models both instantaneous and lagged relations (Lippe et al., 2023; Li et al., 2025b;a;
+Song et al., 2025). These relations can be represented using structural causal models (SCMs) (Pearl,
+2009), where each component of the latent state is modeled as a function of its instantaneous and
+lagged parents and exogenous noise (Hyv¨arinen et al., 2010; Peters et al., 2013). Second, the distri-
+bution of time-series data can change across seasons, times of day, operating conditions, or exper-
+imental conditions; accounting for such nonstationarity is important for time-series modeling (Liu
+et al., 2022; Ditzler et al., 2015; Song et al., 2023). Within this formulation, one way to model non-
+stationarity is to allow the distribution of the exogenous noise—which we call transition noise—to
+vary over time or across conditions. Prior work has used such transition-noise variation (Yao et al.,
+2022b) or, more generally, nonstationarity in the transitions between latent states (Yao et al., 2022a;
+Song et al., 2023; 2024) to identify latent states and their temporal relations. However, methods that
+explicitly model such nonstationarity and use it to identify latent states and their instantaneous and
+lagged causal structures remain underexplored.
+To address this gap, we propose iCReN, a framework for identifying latent states and their instanta-
+neous and lagged causal relations using nonstationarity of transition-noise distributions. We model
+nonstationarity through variation in transition-noise distributions associated with an observed auxil-
+iary variable, while the structural functions governing transitions between latent states and the map-
+ping from latent states to observations remain invariant. Under this setting, our main contributions
+are as follows. First, we establish sufficient conditions for identifying latent states and their instanta-
+neous and lagged causal structures. Second, we develop iCReN-T and iCReN-G, which instantiate
+iCReN using time-contrastive learning (TCL) and generalized contrastive learning (GCL), respec-
+tively. Third, we demonstrate accurate recovery of latent states and causal structures on synthetic
+data and predictive utility on real-world data.
+2
+RELATED WORK
+CRL methods for time-series data differ in what causal relations they identify and what informa-
+tion they use to do so. While causal discovery methods for time-series data identify instantaneous
+and lagged causal relations among directly observed variables under assumptions based on non-
+Gaussianity, conditional independence, or regime-switching nonstationarity (Hyv¨arinen et al., 2010;
+Runge, 2020; Hulsman et al., 2026), CRL must identify both the latent states underlying the ob-
+servations and their causal relations, requiring further assumptions or information. Several CRL
+approaches identify latent states and often their lagged causal relations using nonstationarity in
+transition-noise or latent transition distributions (Yao et al., 2022b;a; Song et al., 2023; 2024; Chen
+et al., 2024) or component-level interventions (Lippe et al., 2022). In particular, similar to our
+approach, LEAP (Yao et al., 2022b) exploits variation in transition-noise distributions while assum-
+ing invariant structural functions and an invariant observation process, but excludes instantaneous
+parents. Among methods that allow instantaneous causal relations, iCITRIS (Lippe et al., 2023) as-
+sumes known intervention targets and interventions that remove each targeted variable’s dependence
+on its instantaneous causal parents. G-CaRL (Morioka & Hyv¨arinen, 2024) can also be applied to
+time-series data with both instantaneous and lagged causal relations; when applied in this temporal
+setting, however, it identifies only lagged causal relations. IDOL (Li et al., 2025b) identifies latent
+states and their instantaneous and lagged causal relations from stationary time-series data without
+auxiliary information, using sufficiently diverse dependencies on past states together with sparsity
+of the causal structure. More broadly, prior work has studied how sparse dependencies can support
+identification of latent variables (Lachapelle et al., 2022). Our work identifies latent states and both
+instantaneous and lagged causal structures when an observed auxiliary variable is associated with
+changes in the transition-noise distributions.
+The methods above also differ in how representations are learned. LEAP and IDOL use variational
+inference with variational autoencoders (VAEs), while iCITRIS also offers a normalizing-flow vari-
+ant. In contrast, our identification framework uses contrastive learning without requiring a varia-
+tional posterior or decoder. Our approach builds on independent innovation analysis (IIA) (Morioka
+et al., 2021), which uses distributional changes associated with an auxiliary variable to identify tran-
+sition noise up to a component permutation and component-wise invertible transformations. Its TCL
+and GCL variants accommodate discrete and general auxiliary variables, respectively, and identify
+the transition-noise components by exploiting sufficient variability in the associated distributional
+changes. However, IIA alone identifies neither the latent states nor their causal structure. Under
+2
+
+
+Table 1: Comparison of closely related CRL methods for time-series data by the causal relations
+they identify, the information they use for identification, and how they learn representations. For
+iCITRIS (*), the distribution changes are induced by interventions with known targets.
+Instantaneous
+causal structure
+identification
+Nonstationarity
+No intervention-target
+labels required
+No variational
+inference required
+LEAP (Yao et al., 2022b)
+×
+✓
+✓
+×
+iCITRIS (Lippe et al., 2023)
+✓
+✓*
+×
+✓
+G-CaRL (Morioka & Hyv¨arinen, 2024)
+×
+×
+✓
+✓
+IDOL (Li et al., 2025b)
+✓
+×
+✓
+×
+iCReN
+✓
+✓
+✓
+✓
+additional structural constraints on the latent data-generating process and restrictions on the learned
+model class, we extend its transition-noise identification result to the latent states and their instan-
+taneous and lagged causal structures. Table 1 summarizes the differences among the most closely
+related methods.
+3
+PROBLEM SETUP
+We consider a generative model for time-series observations with both instantaneous and lagged
+causal relations among latent states. As shown in Figure 1, the latent states evolve according to
+structural functions and are mapped to observations through an observation function. In our setting,
+the transition-noise distributions may vary depending on an auxiliary variable, whereas the structural
+functions and observation function remain invariant.
+𝑧!"#,#
+𝑧!"#,%
+𝑥!"#,#
+𝑧!,#
+𝑧!,%
+𝑥!"#,%
+𝑥!,#
+𝑥!,%
+𝜖!"#,#
+𝜖!"#,%
+𝜖!,#
+𝜖!,%
+𝑢!"#
+𝑢!
+Observed
+Unobserved
+Observation mapping 𝑔
+Instantaneous causal 
+relations specified by 𝑓!
+Distributional conditioning
+Lagged causal 
+relations specified by 𝑓!
+Figure 1: Generative model with dz = 2 and
+L = 1. Gray dash-dotted, solid black, red,
+blue, and dashed black arrows denote condi-
+tioning of the transition-noise distributions on
+the auxiliary variable, transition-noise inputs to
+the structural functions, instantaneous causal
+relations, lagged causal relations, and the ob-
+servation mapping, respectively.
+Observation model.
+At each time step t, let
+xt ∈X denote an observation, with a correspond-
+ing continuous latent state zt ∈Rdz.
+The ob-
+servation is generated as xt = g(zt), where g is
+an observation function that represents the process
+through which the latent states generate observa-
+tions.
+Latent
+dynamics.
+We
+use
+structural
+equa-
+tions (Pearl, 2009) to model the temporal evolu-
+tion of the latent states, with instantaneous causal
+relations within each time step and lagged causal
+relations across time steps. We consider a finite-
+lag model with maximum lag L ≥1, in which
+the current latent state may receive direct effects
+from latent states up to L time steps in the past.
+For each latent component zt,i, we let fi denote its
+structural function and define the same-time and
+past latent variables on which fi depends nontriv-
+ially as its instantaneous and lagged parents, re-
+spectively. These parent sets satisfy
+painst(zt,i) ⊆{zt,j : j̸ = i},
+palags(zt,i) ⊆{zt−ℓ,j : 1 ≤ℓ≤L, 1 ≤j ≤dz}.
+(1)
+Each latent component is generated as
+zt,i = fi
+ painst(zt,i), palags(zt,i), ϵt,i
+
+.
+(2)
+Here, ϵt,i is the transition noise for component i. This formulation includes, as special cases, models
+in which the instantaneous parent sets are empty and models in which transition noise enters addi-
+tively. Each parent relation corresponds to a directed causal edge from the parent variable to zt,i.
+The instantaneous causal structure is assumed to form a directed acyclic graph (DAG). We further
+assume that there are no unmodeled common causes of the latent components.
+3
+
+
+Nonstationary transition noise.
+To model nonstationarity, we allow each conditional transition-
+noise distribution pi(ϵt,i | ut) to vary depending on an observed auxiliary variable ut. The auxiliary
+variable may be continuous, such as time, or discrete, such as a label indicating an environment, ex-
+perimental condition, phase, season, or time of day. Conditioned on the auxiliary-variable sequence
+u1:T , the transition-noise components are independent across components and time steps, and ϵt is
+independent of the latent states in the past L time steps given ut:
+p(ϵ1:T | u1:T ) =
+T
+Y
+t=1
+dz
+Y
+i=1
+pi(ϵt,i | ut),
+ϵt ⊥(zt−1, . . . , zt−L) | ut.
+(3)
+Under this model, we seek to identify the latent states up to a component permutation and
+component-wise invertible transformations, and their instantaneous and lagged causal structures
+up to the same permutation, from the joint distribution of the observation sequence (xt)T
+t=1 and the
+auxiliary-variable sequence (ut)T
+t=1.
+4
+IDENTIFIABILITY ANALYSIS
+In this section, we establish sufficient conditions for identifying the latent states and for identifying
+their instantaneous and lagged causal structures. For simplicity, we set L = 1 in this section and
+extend the results to any finite maximum lag L in Appendix A.5.
+4.1
+IDENTIFICATION OF LATENT COMPONENTS
+We first establish conditions for identifying the components of the latent state. Let ϕ be an encoder
+such that ˆzt = ϕ(xt). Because xt = g(zt), the learned representation satisfies ˆzt = (ϕ ◦g)(zt).
+When ϕ ◦g is invertible, we denote its inverse by H = (ϕ ◦g)−1, so that zt = H(ˆzt). We next
+define the conditional-dependence structures. Let Mz be the pairwise Markov network representing
+conditional-dependence relations among the components of zt given zt−1 and ut, and let Einst
+denote its edge set. We further let Elag denote the set of conditional-dependence edges between the
+components of zt−1 and zt in the pairwise Markov network for (zt−1, zt) given ut. For distinct i, j
+and any a, the absence of an edge is characterized by
+{zt,i, zt,j} /∈Einst ⇐⇒zt,i ⊥zt,j | zt,\i,j, zt−1, ut,
+(4)
+{zt−1,a, zt,i} /∈Elag ⇐⇒zt−1,a ⊥zt,i | zt−1,\a, zt,\i, ut.
+(5)
+Here, zs,\S denotes the vector obtained from zs by excluding the components indexed by S. We
+denote the corresponding quantities for the learned representation by Mˆz, bEinst, and bElag. Because
+these edge sets are defined by conditional dependence, their edges may correspond to direct causal
+edges or connect variables with no direct causal edge. For example, in zt,i →zt,k ←zt,j, the
+conditioning set in equation 4 includes the common child zt,k, and conditioning on it can induce
+dependence between zt,i and zt,j, even though no direct causal edge connects them.
+We next introduce quantities that characterize how differences in the conditional log transition den-
+sity across auxiliary-variable values depend on the current and past latent states. Fix a value u(0)
+t
+of the auxiliary variable as a reference, and let u(1)
+t , . . . , u(Naux)
+t
+denote the comparison values. For
+each n = 1, . . . , Naux, define
+∆n(zt, zt−1) := log p(zt | zt−1, u(n)
+t
+) −log p(zt | zt−1, u(0)
+t ),
+(6)
+and define b∆n(ˆzt, ˆzt−1) in the same way for the learned representation. We then define the instan-
+taneous and cross-time variation vectors
+wn(zt, zt−1) :=
+
+
+ 
+∂2∆n
+∂z2
+t,i
+!dz
+i=1
+,
+
+∂2∆n
+∂zt,i∂zt,j
+
+{zt,i,zt,j}∈Einst
+,
+∂∆n
+∂zt,i
+dz
+i=1
+
+
+⊤
+,
+(7)
+via(zt, zt−1) :=
+
+∂2∆n
+∂zt,i∂zt−1,a
+Naux
+n=1
+.
+(8)
+4
+
+
+The corresponding learned quantity ˆvia(ˆzt, ˆzt−1) is obtained from b∆n(ˆzt, ˆzt−1) in the same
+manner. To examine cross-time relations between zt and zt+1, we also use vbi(zt+1, zt), with
+ˆvbi(ˆzt+1, ˆzt) denoting its learned counterpart. Because H does not depend on the value of the aux-
+iliary variable, the Jacobian term introduced by the change of variables cancels in the log-density
+ratio, giving b∆n(ˆzt, ˆzt−1) = ∆n(H(ˆzt), H(ˆzt−1)). For fixed learned-component indices j and a,
+differentiating this equation expresses ˆvja(ˆzt, ˆzt−1) as a linear combination of the true variation
+vectors vkm(H(ˆzt), H(ˆzt−1)) over current and past component indices k and m, where the coeffi-
+cients are products of Jacobian entries of H. In Theorem 1, the instantaneous variation vector wn
+and the cross-time variation vector via play complementary roles in establishing component-wise
+identification. First, the condition involving wn restricts possible mixing between latent components
+to a specific type of neighboring pair in Mz. Following Zhang et al. (2024), we call zt,j an intimate
+neighbor of zt,i if zt,j is adjacent to zt,i and to every other neighbor of zt,i; the formal definition is
+given in Appendix A.2. The condition involving via then eliminates this remaining mixing, yielding
+component-wise identification.
+Theorem 1 (Identification of latent components) Suppose that the following conditions hold.
+(i) Regularity. The inverse H = (ϕ ◦g)−1 exists and is a C2 diffeomorphism independent of time
+and the value of the auxiliary variable. The transition densities are positive, and their log densities
+are twice continuously differentiable.
+(ii) Instantaneous variation. Let Ninst := 2dz + |Einst|. For every zt, there exists a set of Ninst
+pairs (nq, ¯z(q)
+t−1) ∈{1, . . . , Naux} × Rdz, q = 1, . . . , Ninst, such that
+W (zt) :=
+h
+wnq(zt, ¯z(q)
+t−1)
+iNinst
+q=1
+has rank Ninst.
+(9)
+Here, the indices nq need not be distinct from one another.
+(iii) Cross-time variation and separation. For each learned variation vector ˆvja(ˆzt, ˆzt−1), the
+vectors vkm(zt, zt−1) indexed by all pairs (k, m) that can contribute to its linear expansion above
+are linearly independent almost everywhere. Moreover, for every intimate neighbor zt,j of zt,i in
+Mz, there exists a past or future component with a conditional-dependence edge to zt,i and no such
+edge to zt,j. The precise index sets and past and future conditions are given in Appendix A.2.
+(iv) Bounds on the learned edge sets. |bEinst| ≤|Einst| and |bElag| ≤|Elag| hold.
+Under these conditions, there exist a permutation πz and univariate C2 diffeomorphisms ξ1, . . . , ξdz
+such that ˆzt,πz(i) = ξi(zt,i) for every i and t. The same permutation πz also defines an isomorphism
+between Mz and Mˆz.
+The following discussion clarifies the scope of the conditions in Theorem 1 and the role of Condi-
+tion (iii) when intimate neighbors are present. Compared with IDOL, whose sufficient-variability
+condition uses only variation across past states, Condition (ii) additionally exploits changes in
+transition-noise distributions across auxiliary-variable values, including changes in their mean or
+variance. Consequently, our condition may hold for additive Gaussian transition noise in cases
+where IDOL’s condition does not (Li et al., 2025b). However, as in IDOL, Condition (ii) cannot
+hold when each transition-noise component can be expressed as the sum of a function of the current
+state and a function of the past state in the presence of instantaneous edges, as shown in Remark 1.
+Condition (iii) requires linear independence to prevent cancellation among the relevant cross-time
+variation vectors and uses differences in past or future conditional-dependence relations to eliminate
+mixing between intimate neighbors. Complete proofs are given in Appendices A.1 and A.2.
+4.2
+IDENTIFICATION OF THE CAUSAL GRAPH
+We then establish conditions for identifying the causal graph. For the learned representation, let ˆr be
+a learned inverse transition function that estimates transition noise as ˆϵt = ˆr(ˆzt, ˆzt−1). To express
+direct causal edges through derivatives, we regard each fi as a function of all candidate instanta-
+neous and lagged variables and characterize its parent sets by the variables whose corresponding
+partial derivatives are not identically zero. Theorem 2 builds on the latent-component identification
+in Theorem 1 and component-wise identification of transition noise to establish a correspondence
+between Jacobian entries of ˆr that are not identically zero and direct causal edges.
+5
+
+
+Theorem 2 (Identification of the causal graph) Suppose that Conditions (i)–(iv) of Theorem 1
+and the following additional conditions hold, and let πz denote the resulting permutation between
+the true and learned latent components.
+(v) Transition-noise identification. The conditional transition-noise distribution factorizes across
+components, with each factor belonging to an exponential family with at least two twice continuously
+differentiable and nonredundant sufficient statistics, such as ϵt,i and ϵ2
+t,i for a Gaussian distribution.
+The natural parameters vary sufficiently across auxiliary-variable values to satisfy the full-rank
+condition required by IIA (Morioka et al., 2021). The remaining regularity conditions on the true
+and learned transformations, together with the estimation conditions for contrastive learning, are
+given in Assumption 3.
+(vi) Differentiability of the structural functions. Each fi is continuously differentiable.
+Under the above conditions, there exist a permutation πϵ and univariate C2 diffeomorphisms qi such
+that ˆϵt,πϵ(i) = qi(ϵt,i) for every i and t. Moreover, because the instantaneous causal structure is a
+DAG, the instantaneous Jacobian support of ˆr uniquely determines the correspondence between the
+indices πϵ(i) and πz(i). Under this correspondence, the following equivalence holds for ℓ∈{0, 1}:
+∂ˆrπϵ(i)
+∂ˆzt−ℓ,πz(j)̸
+≡0
+⇐⇒
+∂fi
+∂zt−ℓ,j̸
+≡0.
+(10)
+Here, for ℓ= 0, the case i = j is excluded because instantaneous causal edges are defined only
+between distinct components. Consequently, the true instantaneous and lagged causal edges are
+identifiable up to the component permutation πz from the corresponding Jacobian supports of ˆr.
+We discuss the scope of the conditions and theoretical setting in Theorem 2. Condition (v), inherited
+from the IIA identification result (Morioka et al., 2021), requires the conditional transition-noise
+distributions to vary sufficiently across auxiliary-variable values and therefore does not cover data
+for which these distributions are invariant across those values. The smoothness in Conditions (v)
+and (vi) is used to derive the equivalence in equation 10. Using this equivalence to identify causal
+edges from the Jacobian support of ˆr applies the approach of Reizinger et al. (2023) to latent transi-
+tion dynamics. Appendix A.3 establishes transition-noise identification under the sufficient setting
+X = Rdz used in the IIA argument, and Appendix A.4 provides the complete causal-graph iden-
+tification proof. The latent-component result relies on the C2 diffeomorphism H in Condition (i),
+whereas the causal-graph result additionally uses the transition-noise correspondence; neither iden-
+tification argument otherwise depends on the dimension of the observations. Related invertibility
+assumptions between learned and true latent states are also used in CRL analyses (Lippe et al., 2023;
+Morioka & Hyv¨arinen, 2024; Li et al., 2025b). For higher-dimensional observations, the same argu-
+ments would apply if the learned representation admitted such an H and allowed the transition noise
+to be identified; however, we do not establish conditions under which such a representation can be
+learned.
+5
+LEARNING FRAMEWORK
+This section describes the learning framework, summarized in Figure 2, and how the causal graph
+is subsequently estimated from the learned model. We first apply the shared encoder ϕ separately to
+each observation xt−ℓfor ℓ= 0, . . . , L and then apply the learned inverse transition function ˆr to
+the resulting representations. For contrastive learning, we also use a history feature map η to obtain
+a history feature ht from the past learned representations:
+ˆzt−ℓ= ϕ(xt−ℓ),
+ˆϵt = ˆr(ˆzt, ˆzt−1, . . . , ˆzt−L),
+ht = η(ˆzt−1, . . . , ˆzt−L).
+(11)
+Further parameterization details are provided in Appendix B.1.
+Contrastive learning with auxiliary variables.
+Based on IIA (Morioka et al., 2021), we consider
+two variants of contrastive learning: TCL for discrete auxiliary variables, such as labels indicating
+an environment, experimental condition, motion phase, season, or time of day, and GCL for general
+auxiliary variables, including continuous values such as time. TCL and GCL use the following
+6
+
+
+regression functions, respectively:
+T TCL
+u
+(ˆϵt, ht) =
+dz
+X
+i=1
+K
+X
+k=1
+wuikψik(ˆϵt,i) + φ(ht, u) + bu,
+T GCL(ˆϵt, ht, ut) =
+dz
+X
+i=1
+K
+X
+k=1
+ψik(ˆϵt,i)µik(ut) + φ(ht, ut) + B(ˆϵt, ht).
+(12)
+Here, K is the number of feature functions for each transition-noise component, and ψik denotes the
+k-th scalar-valued feature function applied to ˆϵt,i. The feature functions may be learned jointly with
+the remaining model components or, when the conditional noise family is specified in advance, fixed
+to include its sufficient statistics. For TCL, u indexes a class, T TCL
+u
+is its logit, and wuik and bu
+are learned separately for each class. For GCL, the learned function µik determines the coefficient
+of the k-th feature of component i from the auxiliary variable. The learned function φ models the
+relation between the history feature and the auxiliary variable, while B collects terms independent
+of the auxiliary variable. In both regression functions, the terms that depend jointly on transition
+noise and the auxiliary variable decompose additively across components, as required by IIA.
+The TCL logits over all possible values of the discrete auxiliary variable define a multinomial logistic
+regression model, which is trained using softmax cross-entropy with the observed ut as the target.
+In GCL, T GCL serves as the logit of a binary logistic regression model trained using binary cross-
+entropy, with matched tuples (ˆϵt, ht, ut) as positive examples and mismatched tuples (ˆϵt, ht, u′
+t)
+as negative examples; u′
+t is obtained by permuting auxiliary-variable values within each minibatch.
+We write LIIA for the selected TCL or GCL loss; see Appendix B.2 for details.
+𝒙!
+𝒙!"#:!"%
+𝒛#!
+𝒛#!"#:!"%
+Learned inverse
+transition function 𝑟̂
+𝒉!
+History feature map
+𝜂
+𝑢!
+𝝐#!
+ℒ!!"
+Shared encoder 𝜙
+Regression function 𝑇
+for TCL/GCL
+ℛ#$%&#'()
+ℛ*"+
+TCL
+target
+GCL 
+input
+Figure 2:
+Learning framework.
+Gray nodes denote observed vari-
+ables; white nodes denote learned
+representations, estimated transi-
+tion noise, and history features.
+Dashed arrows denote auxiliary-
+variable inputs to TCL/GCL. The
+encoder ϕ is shared across time,
+and
+blue
+modules
+are
+trained
+jointly using the orange objectives.
+Structural regularization and training objective.
+Moti-
+vated by the bounds on learned edge sets in Condition (iv), we
+impose sparsity regularization on the instantaneous and lagged
+input dependencies of ˆr. Following IDOL’s use of sparsity
+regularization (Li et al., 2025b), we use ℓ1-based regularizers
+Rinst and Rlag to encourage sparse instantaneous and lagged
+input dependencies of ˆr, respectively. We denote their sum
+by Rsparsity. Because latent components are identifiable only
+up to permutation, any acyclic instantaneous structure can be
+represented under a fixed triangular mask after an appropriate
+permutation of the latent coordinates. However, this requires
+the encoder to align the learned components with the fixed or-
+der encoded by the mask. We therefore also consider a vari-
+ant using the NOTEARS acyclicity regularizer RDAG (Zheng
+et al., 2018), which does not fix an order during training. We
+optimize all learnable parameters using the objective L:
+L := LIIA + λsparsityRsparsity + λDAGRDAG.
+(13)
+Here, λsparsity and λDAG are nonnegative coefficients con-
+trolling the strengths of the sparsity and acyclicity regulariza-
+tion, respectively. When the fixed triangular mask is used, the
+RDAG term can be omitted. Further details of the regularizers
+and training objective are provided in Appendix B.3.
+Causal-graph estimation.
+After learning, we estimate a causal graph over the learned latent co-
+ordinates from the Jacobian support of ˆr; under the conditions of Theorem 2, the estimated edges
+correspond to the true causal edges up to a component permutation. For the case L = 1 consid-
+ered in the theory, we estimate that an instantaneous edge ˆzt,j →ˆzt,i is present for i̸ = j when
+∂ˆri/∂ˆzt,j̸ ≡0, and that a lagged edge ˆzt−1,j →ˆzt,i is present when ∂ˆri/∂ˆzt−1,j̸ ≡0. The same
+rule can be applied to each lag ℓ= 1, . . . , L.
+6
+EXPERIMENTS
+We evaluate latent-state and causal-graph recovery on synthetic data and the utility of learned
+representations for downstream forecasting on real-world data. The evaluated CRL baselines are
+7
+
+
+Table 2: Comparison of the proposed methods with baselines on synthetic data. The left and right
+blocks report results for discrete-variation data and continuous-variation data, respectively. Each
+entry is the mean ± standard deviation over 10 seeds; boldface indicates the best value in each
+column, and -- indicates a metric not applicable to the method.
+Discrete variation
+Continuous variation
+Method
+MCC
+Inst. F1
+Lagged F1
+MCC
+Inst. F1
+Lagged F1
+iCReN-T 0.951 ± 0.011 0.950 ± 0.158 0.980 ± 0.063 0.959 ± 0.010 0.975 ± 0.079 0.970 ± 0.095
+iCReN-G
+0.940 ± 0.010
+0.700 ± 0.158
+0.980 ± 0.042
+0.945 ± 0.013
+0.975 ± 0.079
+0.950 ± 0.071
+IDOL
+0.468 ± 0.046
+0.225 ± 0.142
+0.480 ± 0.079
+0.534 ± 0.090
+0.225 ± 0.142
+0.520 ± 0.123
+G-CaRL
+0.764 ± 0.065
+--
+0.440 ± 0.117
+0.762 ± 0.047
+--
+0.340 ± 0.084
+CtrlNS
+0.432 ± 0.071
+--
+0.600 ± 0.000
+0.398 ± 0.102
+--
+0.600 ± 0.000
+LEAP
+0.373 ± 0.107
+--
+0.380 ± 0.092
+0.365 ± 0.086
+--
+0.380 ± 0.063
+iVAE
+0.230 ± 0.106
+--
+--
+0.373 ± 0.110
+--
+--
+β-VAE
+0.482 ± 0.067
+--
+--
+0.473 ± 0.075
+--
+--
+IDOL (Li et al., 2025b), G-CaRL (Morioka & Hyv¨arinen, 2024), CtrlNS (Song et al., 2024), and
+LEAP (Yao et al., 2022b). iCITRIS (Lippe et al., 2023) is not evaluated because the experimental
+settings provide neither its required intervention targets nor interventions that remove incoming in-
+stantaneous edges. In addition, iVAE (Khemakhem et al., 2020) and β-VAE (Higgins et al., 2017)
+are included as representation-learning baselines that use and do not use the auxiliary variable, re-
+spectively. iVAE is evaluated only on synthetic data because, unlike the other methods, its inference
+model conditions on u when encoding observations at downstream inference.
+6.1
+EXPERIMENTS ON SYNTHETIC DATA
+We generate synthetic data with nonlinear structural and observation functions defined by three-layer
+neural networks that remain invariant across auxiliary-variable values, while Gaussian transition-
+noise distributions vary discretely across environments or continuously over time. The main com-
+parison uses xt, zt ∈R5 and L = 1, with 216 samples from 256 environments for discrete-variation
+data and a sequence of length 218 with time as the auxiliary variable for continuous-variation data.
+We measure latent-state recovery by the mean correlation coefficient (MCC) and graph recovery by
+instantaneous and lagged F1 scores. Each ranges from 0 to 1, with higher values indicating better
+recovery. Details of data generation and the evaluation protocol are provided in Appendix C.1.
+We evaluate iCReN-T and iCReN-G under both transition-noise variation settings. For discrete-
+variation data, both use the observed environment labels; for continuous-variation data, iCReN-G
+uses continuous time and iCReN-T uses its discretization into 256 bins. The results in Table 2 show
+that iCReN-T attains the highest mean score for every metric in both settings. iCReN-G attains
+comparable MCC and lagged F1 scores, but its instantaneous F1 is lower on discrete-variation data.
+The sample-size analysis in Appendix C.4 indicates that iCReN-G is more sensitive to sample size
+than iCReN-T and that its lower instantaneous F1 on discrete-variation data is partly a finite-sample
+effect. Reducing the depth of the observation function from three layers to one increases mean MCC
+for every evaluated method, with the largest increases for IDOL and LEAP, which remain below both
+proposed methods, as shown in Appendix C.5. Appendix C additionally reports sensitivity analyses
+of latent causal structure and latent dimension, along with ablations of the objective components.
+6.2
+EXPERIMENTS ON REAL-WORLD DATA
+Because ground-truth latent states and causal structures are unavailable for the real-world datasets,
+we assess the utility of learned representations through two downstream forecasting tasks under
+held-out conditions: future-motion prediction at a walking speed and weather forecasting in a later
+period. For each task, we construct discrete auxiliary labels and use iCReN-T with an observation
+reconstruction loss during pretraining; we then freeze each encoder and train a forecasting head.
+Treadmill motion forecasting.
+Using the treadmill walking data of Riglet et al. (2024), we eval-
+uate future-motion forecasting at the Comfortable speed after pretraining and model selection on
+the Slow and Fast speeds. Participants are split among the training, validation, and test sets without
+overlap; during pretraining, iCReN and LEAP use gait phase divided into 12 classes as the auxil-
+iary variable. With each encoder frozen, a forecasting head is trained and selected on the Slow and
+8
+
+
+Table 3: Forecasting results on real-world data. Entries are means across runs; lower is better.
+Treadmill reports mean marker error in mm, and weather reports standardized MSE for three-hour-
+ahead relative-humidity forecasting. Weather columns are southeastern Australia (AU), Canada
+Great Lakes–St. Lawrence (CAN), China (CN), France (FR), Germany (GER), Japan (JP), South
+Korea (KR), and US Atlantic (US). Boldface marks the best result in each column.
+Treadmill: marker error [mm] ↓
+Weather: standardized MSE ↓
+Method
+0.48 s
+0.96 s
+1.44 s
+1.92 s
+AU
+CAN
+CN
+FR
+GER
+JP
+KR
+US
+iCReN
+42.060 58.650 82.034 107.309 0.352 0.481 0.546 0.422 0.474 0.414 0.291 0.427
+IDOL
+44.076
+62.400
+86.791
+115.146
+0.359 0.484 0.555 0.438 0.469 0.440 0.304 0.440
+G-CaRL 52.197
+75.790 103.133 135.169
+0.649 0.673 0.664 0.750 0.754 0.615 0.535 0.554
+CtrlNS
+43.593
+62.337
+86.040
+117.059
+0.385 0.522 0.618 0.459 0.504 0.501 0.382 0.462
+LEAP∗
+44.220
+63.431
+87.338
+113.210
+0.396 0.524 0.591 0.486 0.566 0.482 0.327 0.460
+β-VAE
+43.391
+63.305
+91.089
+123.960
+0.357 0.475 0.561 0.445 0.484 0.426 0.328 0.416
+∗For LEAP, pretraining on treadmill data was unstable for two seeds; results are based on eight runs.
+Fast data to predict the following 24 frames (1.92 seconds) from the latent representations of the
+preceding 12 frames (0.96 seconds). The head is then evaluated without updates on the Comfort-
+able condition, which is excluded from training and model selection. We report mean marker error,
+defined as the three-dimensional Euclidean distance between predicted and true marker positions
+averaged over test windows and markers. The results in Table 3 show that iCReN achieves the low-
+est error at every reported horizon, suggesting that the learned representation supports forecasting at
+a walking speed excluded from training and model selection. Details of the experimental setup and
+results with standard deviations are provided in Appendix D.1.
+Weather forecasting.
+Using the ERA5 global reanalysis (Hersbach et al., 2020), we examine
+whether representations pretrained on historical weather observations support forecasting of relative
+humidity in a later period across eight regions. We construct three-hourly observations from five
+cities in each region, using 2-m temperature, mean sea-level pressure, 10-m zonal and meridional
+wind components, and precipitation over the preceding three hours. Relative humidity is excluded
+from representation pretraining and serves as the downstream prediction target. For iCReN and
+LEAP, the auxiliary variable combines 12 months, four periods within each month, and eight UTC
+times at three-hour intervals, yielding 384 classes. Each method is pretrained and selected using
+data from 1981–2013; with the selected encoder frozen, a forecasting head is trained on 2014–2016,
+selected using 2017 validation data, and evaluated on 2018–2020. The head predicts relative humid-
+ity three hours ahead from the latent representations at the preceding eight time points. Performance
+is evaluated using standardized mean squared error (MSE). Among the compared representation-
+learning methods, iCReN achieves the lowest mean standardized MSE in five regions and the
+second-lowest in the remaining three, suggesting that the learned representations support forecasting
+in a later evaluation period across diverse regions. Details of the experimental setup and results with
+standard deviations are provided in Appendix D.2.
+7
+DISCUSSION AND CONCLUSION
+The following discussion compares our framework with related methods and considers the limi-
+tations of our analysis and experiments. Our framework requires an observed auxiliary variable
+associated with sufficient variation in transition-noise distributions, but not the intervention-target
+labels required by iCITRIS (Lippe et al., 2023). IIA-HMM (Morioka et al., 2021) may offer a route
+to relaxing the requirement for an observed auxiliary variable by modeling nonstationarity with a
+hidden Markov model. For latent-component identification, our analysis draws on the identification
+argument of IDOL (Li et al., 2025b) by combining variation across auxiliary-variable values and
+past states; transition-noise identification builds on IIA (Morioka et al., 2021). The full-rank re-
+quirement in Condition (ii) does not cover models with instantaneous relations when the transition
+noise can be expressed as a sum of functions of the current and past latent states, including linear
+transition models. Consistent with this limitation, Appendix C.5 shows lower instantaneous F1 for
+linear transitions. Finally, because ground-truth latent states and causal structures are unavailable for
+the real-world datasets, we evaluate predictive utility rather than recovery of these quantities. Vali-
+9
+
+
+dating the learned states and causal relations on real-world data would require additional evidence,
+such as domain knowledge or interventional information.
+We established sufficient conditions for identifying latent states and their instantaneous and lagged
+causal structures from time-series observations, using an observed auxiliary variable associated with
+changes in transition-noise distributions. Based on these results, we developed iCReN, a contrastive
+learning framework that accommodates discrete and continuous auxiliary variables. Experiments
+demonstrated accurate recovery of latent states and their causal structures on synthetic data and the
+utility of the learned representations for downstream forecasting on real-world data. Our results
+show how transition-noise nonstationarity associated with observed auxiliary variables can support
+CRL with both instantaneous and lagged causal relations.
+AI USE STATEMENT
+In this work, we used generative AI tools to assist with (i) theoretical work, including derivations
+and proof checking, as well as finding potentially relevant literature; (ii) experimental work and
+implementation, including experimental design, implementation and review of models and code for
+synthetic-data generation and real-world-data preprocessing, and interpretation of results; and (iii)
+manuscript preparation, including drafting, translation, and editing for clarity and readability. We
+have reviewed all AI-assisted work and take responsibility for the final content of this work.
+ETHICS STATEMENT
+This work involved no new recruitment of human participants or collection of human-subject data.
+The motion-prediction experiment used the previously published, publicly available motion-capture
+dataset of Riglet et al. (2024). We used only the released kinematic measurements and pseudony-
+mous subject identifiers and did not attempt to identify participants.
+REPRODUCIBILITY STATEMENT
+The assumptions and complete proofs underlying our identifiability results are provided in Ap-
+pendix A. Appendix B specifies the model parameterizations, training objectives, structural regu-
+larization, and joint learning procedure. Appendices C and D document the data generation and
+preprocessing, optimization settings, data splits, auxiliary variables, method-specific inputs, model
+selection, evaluation protocols, sensitivity analyses, and ablations.
+ACKNOWLEDGEMENTS
+This work was supported by JSPS KAKENHI Grant Numbers JP26H02498, JP24H02177, and
+JP26K02971. It was also supported by JST PRESTO, Japan, Grant Number JPMJPR24KC, and
+JST BOOST Program, Japan, Grant Number JPMJBY24H4.
+REFERENCES
+Kaifeng Bi, Lingxi Xie, Hengheng Zhang, Xin Chen, Xiaotao Gu, and Qi Tian. Accurate medium-
+range global weather forecasting with 3D neural networks. Nature, 619:533–538, 2023.
+David Bolton. The computation of equivalent potential temperature. Monthly Weather Review, 108
+(7):1046–1053, 1980.
+Judith B¨utepage, Michael Black, Danica Kragic, and Hedvig Kjellstr¨om. Deep representation learn-
+ing for human motion prediction and classification. In IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR), pp. 1591–1599, 2017.
+Guangyi Chen, Yifan Shen, Zhenhao Chen, Xiangchen Song, Yuewen Sun, Weiran Yao, Xiao Liu,
+and Kun Zhang. CaRiNG: Learning temporal causal representation under non-invertible genera-
+tion process. In International Conference on Machine Learning (ICML), volume 235 of Proceed-
+ings of Machine Learning Research, pp. 7236–7259, 2024.
+10
+
+
+Copernicus Climate Change Service. ERA5 hourly data on single levels from 1940 to present.
+Copernicus Climate Change Service (C3S) Climate Data Store (CDS), 2023. Accessed on 2
+September 2026.
+Gregory Ditzler, Manuel Roveri, Cesare Alippi, and Robi Polikar. Learning in nonstationary envi-
+ronments: A survey. IEEE Computational Intelligence Magazine, 10(4):12–25, 2015.
+Hans Hersbach, Bill Bell, Paul Berrisford, Shoji Hirahara, Andr´as Hor´anyi, Joaqu´ın Mu˜noz-Sabater,
+Julien Nicolas, Carole Peubey, Raluca Radu, Dinand Schepers, Adrian Simmons, Cornel Soci,
+Saleh Abdalla, Xavier Abellan, Gianpaolo Balsamo, Peter Bechtold, Gionata Biavati, Jean Bidlot,
+Massimo Bonavita, Giovanna De Chiara, Per Dahlgren, Dick Dee, Michail Diamantakis, Rossana
+Dragani, Johannes Flemming, Richard Forbes, Manuel Fuentes, Alan Geer, Leo Haimberger,
+Sean Healy, Robin J. Hogan, El´ıas H´olm, Marta Janiskov´a, Sarah Keeley, Patrick Laloyaux,
+Philippe Lopez, Cristina Lupu, Gabor Radnoti, Patricia de Rosnay, Iryna Rozum, Freja Vamborg,
+Sebastien Villaume, and Jean-No¨el Th´epaut. The ERA5 global reanalysis. Quarterly Journal of
+the Royal Meteorological Society, 146(730):1999–2049, 2020.
+Irina Higgins, Lo¨ıc Matthey, Arka Pal, Christopher P. Burgess, Xavier Glorot, Matthew M.
+Botvinick, Shakir Mohamed, and Alexander Lerchner. beta-VAE: Learning basic visual concepts
+with a constrained variational framework. In International Conference on Learning Representa-
+tions (ICLR), 2017.
+Roel Hulsman, Carles Balsells-Rodas, and Sara Magliacane. Identifiable Markov switching models
+with instantaneous effects and exponential families. In International Conference on Machine
+Learning (ICML), 2026.
+Aapo Hyv¨arinen and Petteri Pajunen. Nonlinear independent component analysis: Existence and
+uniqueness results. Neural Networks, 12(3):429–439, 1999.
+Aapo Hyv¨arinen, Kun Zhang, Shohei Shimizu, and Patrik O. Hoyer. Estimation of a structural
+vector autoregression model using non-Gaussianity. Journal of Machine Learning Research, 11:
+1709–1731, 2010.
+Ilyes Khemakhem, Diederik P. Kingma, Ricardo Pio Monti, and Aapo Hyv¨arinen. Variational au-
+toencoders and nonlinear ICA: A unifying framework. In International Conference on Artificial
+Intelligence and Statistics (AISTATS), volume 108 of Proceedings of Machine Learning Research,
+pp. 2207–2217, 2020.
+Aneesh Komanduri, Xintao Wu, Yongkai Wu, and Feng Chen.
+From identifiable causal repre-
+sentations to controllable counterfactual generation: A survey on causal generative modeling.
+Transactions on Machine Learning Research, 2024. ISSN 2835-8856.
+S´ebastien Lachapelle, Pau Rodr´ıguez, Yash Sharma, Katie Everett, R´emi Le Priol, Alexandre La-
+coste, and Simon Lacoste-Julien. Disentanglement via mechanism sparsity regularization: A new
+principle for nonlinear ICA. In Conference on Causal Learning and Reasoning (CLeaR), volume
+177 of Proceedings of Machine Learning Research, pp. 428–484, 2022.
+Remi Lam, Alvaro Sanchez-Gonzalez, Matthew Willson, Peter Wirnsberger, Meire Fortunato, Fer-
+ran Alet, Suman Ravuri, Timo Ewalds, Zach Eaton-Rosen, Weihua Hu, Alexander Merose,
+Stephan Hoyer, George Holland, Oriol Vinyals, Jacklynn Stott, Alexander Pritzel, Shakir Mo-
+hamed, and Peter Battaglia. Learning skillful medium-range global weather forecasting. Science,
+382(6677):1416–1421, 2023.
+Zijian Li, Minghao Fu, Junxian Huang, Yifan Shen, Ruichu Cai, Yuewen Sun, Guangyi Chen, and
+Kun Zhang. Towards identifiability of hierarchical temporal causal representation learning. In
+Advances in Neural Information Processing Systems (NeurIPS), volume 38, pp. 19680–19719,
+2025a.
+Zijian Li, Yifan Shen, Kaitao Zheng, Ruichu Cai, Xiangchen Song, Mingming Gong, Guangyi
+Chen, and Kun Zhang. On the identification of temporal causal representation with instantaneous
+dependence. In International Conference on Learning Representations (ICLR), 2025b.
+11
+
+
+Phillip Lippe, Sara Magliacane, Sindy L¨owe, Yuki M. Asano, Taco Cohen, and Stratis Gavves.
+CITRIS: Causal identifiability from temporal intervened sequences. In International Conference
+on Machine Learning (ICML), volume 162 of Proceedings of Machine Learning Research, pp.
+13557–13603, 2022.
+Phillip Lippe, Sara Magliacane, Sindy L¨owe, Yuki M. Asano, Taco Cohen, and Efstratios Gavves.
+Causal representation learning for instantaneous and temporal effects in interactive systems. In
+International Conference on Learning Representations (ICLR), 2023.
+Yong Liu, Haixu Wu, Jianmin Wang, and Mingsheng Long. Non-stationary transformers: Exploring
+the stationarity in time series forecasting. In Advances in Neural Information Processing Systems
+(NeurIPS), volume 35, pp. 9881–9893, 2022.
+Julieta Martinez, Michael J. Black, and Javier Romero. On human motion prediction using recurrent
+neural networks. In IEEE Conference on Computer Vision and Pattern Recognition (CVPR), pp.
+4674–4683, 2017.
+Gemma Moran and Bryon Aragam. Toward interpretable deep generative models via causal repre-
+sentation learning. Journal of the American Statistical Association, 121(553):259–275, 2026.
+Hiroshi Morioka and Aapo Hyv¨arinen. Causal representation learning made identifiable by grouping
+of observational variables. In International Conference on Machine Learning (ICML), volume
+235 of Proceedings of Machine Learning Research, pp. 36249–36293, 2024.
+Hiroshi Morioka, Hermanni H¨alv¨a, and Aapo Hyv¨arinen. Independent innovation analysis for non-
+linear vector autoregressive process. In International Conference on Artificial Intelligence and
+Statistics (AISTATS), volume 130 of Proceedings of Machine Learning Research, pp. 1549–1557,
+2021.
+Judea Pearl. Causality. Cambridge University Press, 2nd edition, 2009.
+Jonas Peters, Dominik Janzing, and Bernhard Sch¨olkopf. Causal inference on time series using
+restricted structural equation models. In Advances in Neural Information Processing Systems
+(NIPS), volume 26, 2013.
+Patrik Reizinger, Yash Sharma, Matthias Bethge, Bernhard Sch¨olkopf, Ferenc Husz´ar, and Wieland
+Brendel. Jacobian-based causal discovery with nonlinear ICA. Transactions on Machine Learning
+Research, 2023.
+Louis Riglet, Corentin Delphin, Lauranne Claquesin, Baptiste Orliac, Paul Ornetti, Davy Laroche,
+and Mathieu Gueugnon. 3D motion analysis dataset of healthy young adult volunteers walking
+and running on overground and treadmill. Scientific Data, 11(1):556, 2024. URL https://
+doi.org/10.1038/s41597-024-03420-y.
+Jakob Runge. Discovering contemporaneous and lagged causal relations in autocorrelated nonlinear
+time series datasets. In Conference on Uncertainty in Artificial Intelligence (UAI), volume 124 of
+Proceedings of Machine Learning Research, pp. 1388–1397, 2020.
+Bernhard Sch¨olkopf, Francesco Locatello, Stefan Bauer, Nan Rosemary Ke, Nal Kalchbrenner,
+Anirudh Goyal, and Yoshua Bengio.
+Toward causal representation learning.
+Proceedings of
+the IEEE, 109(5):612–634, 2021.
+Shohei Shimizu, Patrik O. Hoyer, Aapo Hyv¨arinen, and Antti J. Kerminen. A linear non-Gaussian
+acyclic model for causal discovery. Journal of Machine Learning Research, 7:2003–2030, 2006.
+Shayan Shirahmad Gale Bagi, Zahra Gharaee, Oliver Schulte, and Mark Crowley. Generative causal
+representation learning for out-of-distribution motion forecasting. In International Conference
+on Machine Learning (ICML), volume 202 of Proceedings of Machine Learning Research, pp.
+31596–31612, 2023.
+Xiangchen Song, Weiran Yao, Yewen Fan, Xinshuai Dong, Guangyi Chen, Juan Carlos Niebles,
+Eric P. Xing, and Kun Zhang. Temporally disentangled representation learning under unknown
+nonstationarity. In Advances in Neural Information Processing Systems (NeurIPS), volume 36,
+pp. 8092–8113, 2023.
+12
+
+
+Xiangchen Song, Zijian Li, Guangyi Chen, Yujia Zheng, Yewen Fan, Xinshuai Dong, and Kun
+Zhang. Causal temporal representation learning with nonstationary sparse transition. In Advances
+in Neural Information Processing Systems (NeurIPS), volume 37, pp. 77098–77131, 2024.
+Xiangchen Song, Jiaqi Sun, Zijian Li, Yujia Zheng, and Kun Zhang. LLM interpretability with
+identifiable temporal-instantaneous representation. In Advances in Neural Information Processing
+Systems (NeurIPS), volume 38, pp. 103963–104000, 2025.
+Xinxin Song, Yuxiao Cheng, Tingxiong Xiao, and Jinli Suo. COGS: A causal representation learning
+framework for out-of-distribution generalization in time series. In AAAI Conference on Artificial
+Intelligence (AAAI), pp. 25572–25580, 2026.
+Haixu Wu, Tengge Hu, Yong Liu, Hang Zhou, Jianmin Wang, and Mingsheng Long. TimesNet:
+Temporal 2D-variation modeling for general time series analysis. In International Conference on
+Learning Representations (ICLR), 2023.
+Weiran Yao, Guangyi Chen, and Kun Zhang. Temporally disentangled representation learning. In
+Advances in Neural Information Processing Systems (NeurIPS), volume 35, pp. 26492–26503,
+2022a.
+Weiran Yao, Yuewen Sun, Alex Ho, Changyin Sun, and Kun Zhang. Learning temporally causal
+latent processes from general temporal data. In International Conference on Learning Represen-
+tations (ICLR), 2022b.
+Zhihan Yue, Yujing Wang, Juanyong Duan, Tianmeng Yang, Congrui Huang, Yunhai Tong, and
+Bixiong Xu. TS2Vec: Towards universal representation of time series. In AAAI Conference on
+Artificial Intelligence (AAAI), pp. 8980–8987, 2022.
+Kun Zhang, Shaoan Xie, Ignavier Ng, and Yujia Zheng. Causal representation learning from mul-
+tiple distributions: A general setting. In International Conference on Machine Learning (ICML),
+volume 235 of Proceedings of Machine Learning Research, pp. 60057–60075, 2024.
+Xun Zheng, Bryon Aragam, Pradeep K. Ravikumar, and Eric P. Xing. DAGs with NO TEARS:
+Continuous optimization for structure learning. In Advances in Neural Information Processing
+Systems (NeurIPS), volume 31, pp. 9472–9483, 2018.
+APPENDIX CONTENTS
+A Proofs
+14
+A.1
+Identification of the Instantaneous Markov Network . . . . . . . . . . . . . . . . .
+14
+A.2
+Identification of Latent Components . . . . . . . . . . . . . . . . . . . . . . . . .
+17
+A.3
+Transition-Noise Identification by IIA . . . . . . . . . . . . . . . . . . . . . . . .
+26
+A.4
+Causal-Graph Identification from the Jacobian of the Inverse Transition Function
+.
+29
+A.5
+Extension to Multiple Lags . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+31
+B
+Learning Framework Details
+33
+B.1
+Model Parameterization . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+33
+B.2
+Contrastive Learning with Auxiliary Variables . . . . . . . . . . . . . . . . . . . .
+33
+B.3
+Structural Regularization and Training Objective
+. . . . . . . . . . . . . . . . . .
+34
+C Synthetic-data Experimental Details and Additional Results
+35
+C.1
+Common Experimental Settings
+. . . . . . . . . . . . . . . . . . . . . . . . . . .
+35
+C.2
+Sensitivity to Latent Causal Structure
+. . . . . . . . . . . . . . . . . . . . . . . .
+38
+13
+
+
+C.3
+Sensitivity to Latent Dimension
+. . . . . . . . . . . . . . . . . . . . . . . . . . .
+39
+C.4
+Sensitivity to Total Sample Size
+. . . . . . . . . . . . . . . . . . . . . . . . . . .
+39
+C.5
+Sensitivity to Data-generating Function Complexity . . . . . . . . . . . . . . . . .
+41
+C.6
+Ablation of Objective Components . . . . . . . . . . . . . . . . . . . . . . . . . .
+41
+D Real-world Experimental Details
+42
+D.1
+Treadmill Motion Forecasting
+. . . . . . . . . . . . . . . . . . . . . . . . . . . .
+42
+D.2
+Weather Forecasting
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+44
+D.3
+Data Sources and Availability . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+45
+A
+PROOFS
+A.1
+IDENTIFICATION OF THE INSTANTANEOUS MARKOV NETWORK
+This section establishes an isomorphism between the true and learned instantaneous Markov net-
+works. The argument draws on the Markov-network identification step of IDOL (Li et al., 2025b),
+using a variability condition that incorporates variation across both past states and values of the aux-
+iliary variable. Suppose that their latent representations are related by a C2 diffeomorphism H that
+is independent of time and the value of the auxiliary variable:
+zt = H(ˆzt),
+zt−1 = H(ˆzt−1).
+We use nonedges in the learned instantaneous network to derive constraints on JH and combine them
+with instantaneous edge-count minimality to establish an isomorphism between the true and learned
+instantaneous Markov networks. Let Mz and Mˆz denote the pairwise Markov networks over the
+components of zt and ˆzt, respectively, defined by the instantaneous conditional-independence rela-
+tions in the true and learned transition distributions, and write their edge sets as
+Einst := E(Mz),
+bEinst := E(Mˆz).
+For i̸ = j and k̸ = l, their nonedges are characterized by
+{zt,i, zt,j} /∈Einst
+⇐⇒
+zt,i ⊥zt,j | zt,\{i,j}, zt−1, ut,
+{ˆzt,k, ˆzt,l} /∈bEinst
+⇐⇒
+ˆzt,k ⊥ˆzt,l | ˆzt,\{k,l}, ˆzt−1, ut.
+Here and below, we write each edge as an unordered pair of its latent-variable nodes.
+A nonedge in the learned instantaneous network implies that the corresponding mixed derivative
+of the log-density ratio in the learned coordinates is zero. After expansion through H, however,
+this condition is a linear combination with Jacobian products as coefficients. These products need
+not vanish individually because nonzero terms may cancel. To rule out such cancellation and ad-
+ditional learned edges, we impose sufficient variability and instantaneous edge-count minimality,
+respectively.
+Assumption 1 (Sufficient variability and instantaneous edge-count minimality) The following
+conditions hold.
+(i) Regularity. For every auxiliary-variable value u(n)
+t
+, the density p(zt | zt−1, u(n)
+t
+) is positive on
+Rdz × Rdz, and its logarithm is twice continuously differentiable in (zt, zt−1).
+(ii) Sufficient variability across auxiliary-variable values and past states. Choose a reference value
+u(0)
+t , let Naux be the number of comparison values, and define, for n ∈{1, . . . , Naux},
+∆n(zt, zt−1) := log p(zt | zt−1, u(n)
+t
+) −log p(zt | zt−1, u(0)
+t ).
+Set Ninst := 2dz + |Einst| and define
+wn(zt, zt−1) :=
+ 
+∂2∆n
+∂z2
+t,i
+!dz
+i=1
+⊕
+
+∂2∆n
+∂zt,i∂zt,j
+
+{zt,i,zt,j}∈Einst
+⊕
+∂∆n
+∂zt,i
+dz
+i=1
+∈RNinst.
+14
+
+
+For every zt, suppose that there exist pairs of auxiliary-variable indices and past-state values
+ n1, ¯z(1)
+t−1
+
+, . . . ,
+ nNinst, ¯z(Ninst)
+t−1
+
+∈{1, . . . , Naux} × Rdz.
+Here, the overbar indicates past-state evaluation values selected with zt fixed, rather than the ran-
+dom variable zt−1; the indices n1, . . . , nNinst need not be distinct. Using these pairs, define
+W (zt) :=
+h
+wn1(zt, ¯z(1)
+t−1), . . . , wnNinst(zt, ¯z(Ninst)
+t−1
+)
+i
+∈RNinst×Ninst,
+and assume that W (zt) has full rank.
+(iii) Instantaneous edge-count minimality. The learned instantaneous edge set satisfies
+|bEinst| ≤|Einst|.
+We first fix two nonadjacent components in Mˆz and derive Jacobian conditions that prevent a true
+component, or the endpoints of a true instantaneous edge, from depending simultaneously on these
+two learned components.
+Lemma 1 (Jacobian conditions implied by a learned instantaneous nonedge) Consider
+the
+learned representation above satisfying zt = H(ˆzt), and suppose that Assumption 1(i)–(ii) holds.
+Fix distinct k, l such that {ˆzt,k, ˆzt,l} /∈bEinst. Then, at every ˆzt in the domain of H,
+∀i,
+∂zt,i
+∂ˆzt,k
+∂zt,i
+∂ˆzt,l
+= 0,
+(14)
+∀{zt,i, zt,j} ∈Einst,
+∂zt,i
+∂ˆzt,k
+∂zt,j
+∂ˆzt,l
+= 0.
+(15)
+The relation in equation 14 states that a true component cannot depend simultaneously on two non-
+adjacent components of Mˆz. The relation in equation 15 states that, for a true instantaneous edge,
+its two endpoints cannot separately depend on the two nonadjacent learned components.
+Proof. Define the learned log-density ratio by
+b∆n(ˆzt, ˆzt−1) := log p(ˆzt | ˆzt−1, u(n)
+t
+) −log p(ˆzt | ˆzt−1, u(0)
+t ).
+The density transformation induced by zt = H(ˆzt) and zt−1 = H(ˆzt−1) gives
+p(ˆzt, ˆzt−1, ut) = p(zt, zt−1, ut) |det JH(ˆzt)| |det JH(ˆzt−1)| ,
+p(ˆzt−1, ut) = p(zt−1, ut) |det JH(ˆzt−1)| .
+Dividing the first equality by the second gives the conditional-density transformation. Taking loga-
+rithms and subtracting the reference expression from each comparison expression cancels the Jaco-
+bian term because it does not depend on the auxiliary variable, yielding
+b∆n(ˆzt, ˆzt−1) = ∆n
+ H(ˆzt), H(ˆzt−1)
+
+.
+(16)
+Because {ˆzt,k, ˆzt,l} /∈bEinst, the pairwise Markov property gives
+log p(ˆzt | ˆzt−1, ut) = log p(ˆzt,k | ˆzt,\{k,l}, ˆzt−1, ut)
++ log p(ˆzt,l | ˆzt,\{k,l}, ˆzt−1, ut) + log p(ˆzt,\{k,l} | ˆzt−1, ut).
+No term on the right-hand side depends on both ˆzt,k and ˆzt,l, so its mixed derivative with respect
+to these variables is zero for every auxiliary-variable value. Taking the difference between the
+comparison and reference values therefore gives ∂2 b∆n/∂ˆzt,k∂ˆzt,l = 0. Substituting this result
+into the left-hand side of equation 16 and applying the chain rule to the right-hand side gives
+0 =
+dz
+X
+a=1
+∂2∆n
+∂z2
+t,a
+∂zt,a
+∂ˆzt,k
+∂zt,a
+∂ˆzt,l
++
+X
+{zt,a,zt,b}∈Einst
+∂2∆n
+∂zt,a∂zt,b
+∂zt,a
+∂ˆzt,k
+∂zt,b
+∂ˆzt,l
++ ∂zt,b
+∂ˆzt,k
+∂zt,a
+∂ˆzt,l
+
++
+dz
+X
+a=1
+∂∆n
+∂zt,a
+∂2zt,a
+∂ˆzt,k∂ˆzt,l
+.
+15
+
+
+Here, all derivatives of ∆n are evaluated at (H(ˆzt), H(ˆzt−1)). In the second sum, only pairs in
+Einst remain because, by the same pairwise Markov property, the mixed derivative is zero for every
+true instantaneous nonedge.
+Denote the coefficients of the derivatives of ∆n in this expansion by
+κdiag
+a
+:= ∂zt,a
+∂ˆzt,k
+∂zt,a
+∂ˆzt,l
+,
+κedge
+{a,b} := ∂zt,a
+∂ˆzt,k
+∂zt,b
+∂ˆzt,l
++ ∂zt,b
+∂ˆzt,k
+∂zt,a
+∂ˆzt,l
+,
+κgrad
+a
+:=
+∂2zt,a
+∂ˆzt,k∂ˆzt,l
+.
+Stack them in the same order as wn into κ ∈RNinst. Then wn(zt, zt−1)⊤κ = 0 for all n and zt−1.
+For fixed zt, κ is independent of the past state and auxiliary-variable value. Stacking the equations
+for the pairs selected in Assumption 1(ii) gives
+W (zt)⊤κ = 0,
+rank W (zt) = Ninst
+=⇒
+κ = 0.
+In particular, κdiag
+i
+= 0, which proves equation 14.
+For {zt,i, zt,j} ∈Einst, let
+Aij := ∂zt,i
+∂ˆzt,k
+∂zt,j
+∂ˆzt,l
+,
+Bij := ∂zt,j
+∂ˆzt,k
+∂zt,i
+∂ˆzt,l
+.
+The equalities κedge
+{i,j} = 0 and equation 14 imply
+Aij + Bij = 0,
+AijBij = 0.
+Thus, Aij = Bij = 0, proving equation 15.
+□
+We next use invertibility of the Jacobian of H to match every true latent component locally to a
+distinct learned coordinate.
+Lemma 2 (Local component matching from an invertible Jacobian) For every ˆzt, there exists a
+permutation πˆzt such that
+∂zt,i
+∂ˆzt,πˆ
+zt(i)̸
+= 0
+(∀i).
+Proof. Since H is a diffeomorphism, det JH(ˆzt)̸ = 0 at every ˆzt. The determinant expands as
+det JH(ˆzt) =
+X
+π∈Sdz
+sgn(π)
+dz
+Y
+i=1
+∂zt,i
+∂ˆzt,π(i)
+,
+where Sdz denotes the set of all permutations of {1, . . . , dz}. Since the determinant is nonzero,
+at least one product in the sum is nonzero. Choosing its associated permutation as πˆzt proves the
+claim.
+□
+The Jacobian conditions and local component matching now show that every true instantaneous edge
+is preserved in the learned representation; instantaneous edge-count minimality then yields network
+isomorphism.
+Theorem 3 (Identification of the instantaneous Markov network) Fix ˆzt and take a local per-
+mutation πˆzt from Lemma 2. Under Assumption 1, for every i̸ = j,
+{zt,i, zt,j} ∈Einst
+⇐⇒
+{ˆzt,πˆ
+zt(i), ˆzt,πˆ
+zt(j)} ∈bEinst.
+Thus, Mz and Mˆz are isomorphic under πˆzt. At this stage, πˆzt may depend on the fixed point ˆzt.
+Proof. Take any {zt,i, zt,j} ∈Einst. If its image were a learned nonedge, Lemma 1 would give
+∂zt,i
+∂ˆzt,πˆ
+zt(i)
+∂zt,j
+∂ˆzt,πˆ
+zt(j)
+= 0,
+contradicting Lemma 2. Thus, every true instantaneous edge maps injectively to a learned instanta-
+neous edge, and
+|Einst| ≤|bEinst|,
+|bEinst| ≤|Einst|.
+16
+
+
+The first inequality follows from edge preservation and injectivity of πˆzt, and the second from
+Assumption 1(iii). The edge sets therefore have equal cardinality, and the images of the true edges
+exhaust the learned edge set, proving the isomorphism.
+□
+The following remark examines the full-rank condition in Assumption 1(ii) for additively separable
+inverse transitions.
+Remark 1 (Rank bound for an additively separable inverse transition function) Suppose that
+the inverse transition function satisfies ϵt,i = ri(zt, zt−1) = ai(zt) + bi(zt−1), where ai depends
+only on zt and bi only on zt−1. Define the component-wise log-density ratio of the transition noise
+by
+δi,n(ϵt,i) := log pi(ϵt,i | u(n)
+t
+) −log pi(ϵt,i | u(0)
+t ).
+Conditioning on zt−1 and ut, component-wise independence of the transition noise and the change
+of variables ϵt = r(zt, zt−1) give
+p(zt | zt−1, ut) =
+dz
+Y
+i=1
+pi
+ ri(zt, zt−1) | ut
+ det ∂r(zt, zt−1)
+∂zt
+ .
+Because r is independent of the auxiliary-variable value, its Jacobian term cancels in the log-density
+ratio, yielding
+∆n(zt, zt−1) =
+dz
+X
+i=1
+δi,n
+ ri(zt, zt−1)
+
+.
+For all j, k ∈{1, . . . , dz}, evaluating the derivatives of δi,n at ϵt,i = ri(zt, zt−1) gives
+∂∆n
+∂zt,j
+=
+dz
+X
+i=1
+∂δi,n
+∂ϵt,i
+∂ai
+∂zt,j
+,
+∂2∆n
+∂zt,j∂zt,k
+=
+dz
+X
+i=1
+(
+∂2δi,n
+∂ϵ2
+t,i
+∂ai
+∂zt,j
+∂ai
+∂zt,k
++ ∂δi,n
+∂ϵt,i
+∂2ai
+∂zt,j∂zt,k
+)
+.
+For fixed zt, all derivatives of ai are fixed, and variation with the auxiliary-variable value and past
+state appears only through the two scalar coefficients ∂δi,n/∂ϵt,i and ∂2δi,n/∂ϵ2
+t,i for each i. Thus,
+every wn is a linear combination of at most 2dz fixed directions, and
+rank W (zt) ≤2dz.
+If |Einst| > 0, then Ninst = 2dz + |Einst| > 2dz, so the required full-rank condition cannot hold. A
+linear inverse transition function is a special case of this additively separable form, so the theorem
+does not cover such models when instantaneous edges are present.
+Mixed derivatives with respect to a current and past component, however, may retain terms such as
+∂2δi,n
+∂ϵ2
+t,i
+∂ai
+∂zt,j
+∂bi
+∂zt−1,m
+.
+Therefore, when the transition-noise variance changes with the auxiliary-variable value, cross-time
+sufficient variability may hold even for an additively separable model.
+A.2
+IDENTIFICATION OF LATENT COMPONENTS
+This section builds on the local isomorphism between the instantaneous Markov networks estab-
+lished in Appendix A.1 to identify the latent components. We first show that any remaining com-
+ponent mixing is restricted to intimate neighbors in the instantaneous Markov network. When such
+neighbors exist, we eliminate the remaining mixing using cross-time relations and their variation
+across auxiliary-variable values. Finally, we show that the resulting local permutations reduce to a
+single permutation independent of state and time, yielding component-wise identification. Our ar-
+gument draws on the intimate-neighbor proof strategy of IDOL (Li et al., 2025b), while treating the
+instantaneous and cross-time relations separately and using changes across values of the auxiliary
+variable for the latter.
+Throughout this section, suppose that the true and learned representations are related by the same
+C2 diffeomorphism H, independent of time and the value of the auxiliary variable, and that As-
+sumption 1 holds.
+17
+
+
+A.2.1
+DEFINITIONS AND NOTATION
+To describe component mixing that cannot be ruled out by the isomorphism of the instantaneous
+Markov networks alone, we define neighborhoods and intimate neighbors in Mz. The neighborhood
+of zt,i in Mz is
+NMz(zt,i) := {zt,j | {zt,i, zt,j} ∈Einst} .
+Definition 1 (Intimate neighbor (Zhang et al., 2024)) In the pairwise Markov network Mz, the
+intimate-neighbor set of each node zt,i is
+ΨMz(zt,i) := {zt,j | zt,j ∈NMz(zt,i) and NMz(zt,i) \ {zt,j} ⊆NMz(zt,j) \ {zt,i}} .
+Thus, zt,j is an intimate neighbor of zt,i if they are adjacent in Mz and every neighbor of zt,i
+other than zt,j is also a neighbor of zt,j other than zt,i. This relation is generally asymmetric:
+zt,j ∈ΨMz(zt,i) does not imply zt,i ∈ΨMz(zt,j).
+Even after the instantaneous Markov networks have been shown to be isomorphic, mixing may
+remain between components corresponding to intimate neighbors. We express this possibility using
+off-diagonal entries of the Jacobian of the mapping H : ˆzt 7→zt.
+Definition 2 (Residual mixing) Fix a point ˆzt and choose the local permutation πˆzt given by
+Lemma 2. For i̸ = j, we say that residual mixing remains between zt,i and ˆzt,πˆ
+zt(j) under H
+if
+∂zt,i
+∂ˆzt,πˆ
+zt(j)̸
+= 0.
+The following lemma shows that residual mixing is restricted to components corresponding to inti-
+mate neighbors.
+Lemma 3 (Residual mixing is restricted to intimate neighbors) Fix a point ˆzt and choose the lo-
+cal permutation πˆzt given by Lemma 2. For every i̸ = j,
+∂zt,i
+∂ˆzt,πˆ
+zt(j)̸
+= 0
+=⇒
+zt,j ∈ΨMz(zt,i).
+Proof. Suppose, for contradiction, that residual mixing occurs, so that
+∂zt,i
+∂ˆzt,πˆ
+zt(j)̸
+= 0,
+(17)
+while zt,j /∈ΨMz(zt,i).
+First consider the case {zt,i, zt,j} /∈Einst. Theorem 3 implies
+{ˆzt,πˆ
+zt(i), ˆzt,πˆ
+zt(j)} /∈bEinst.
+The relation in equation 14 from Lemma 1 therefore gives
+∂zt,i
+∂ˆzt,πˆ
+zt(i)
+∂zt,i
+∂ˆzt,πˆ
+zt(j)
+= 0.
+The two factors are nonzero by Lemma 2 and equation 17, respectively, yielding a contradiction.
+Next consider {zt,i, zt,j} ∈Einst. Because zt,j is not an intimate neighbor of zt,i, there exists an
+index k such that
+{zt,i, zt,k} ∈Einst,
+{zt,j, zt,k} /∈Einst.
+Theorem 3 then implies
+{ˆzt,πˆ
+zt(j), ˆzt,πˆ
+zt(k)} /∈bEinst.
+Applying equation 15 in Lemma 1 to the true edge {zt,i, zt,k} yields
+∂zt,i
+∂ˆzt,πˆ
+zt(j)
+∂zt,k
+∂ˆzt,πˆ
+zt(k)
+= 0.
+Again, the two factors are nonzero by equation 17 and Lemma 2, respectively, which is a contradic-
+tion. Thus, whether or not zt,i and zt,j are adjacent in Mz, assuming zt,j /∈ΨMz(zt,i) leads to a
+contradiction. Hence zt,j ∈ΨMz(zt,i).
+□
+18
+
+
+A.2.2
+EMPTY INTIMATE-NEIGHBOR SETS
+When every intimate-neighbor set is empty, Lemma 3 immediately rules out all residual mixing.
+Specifically, suppose
+ΨMz(zt,i) = ∅
+(∀i),
+and fix any point ˆzt and the local permutation πˆzt given by Lemma 2. By Lemma 3, a nonzero off-
+diagonal entry of the locally permuted Jacobian would imply the existence of an intimate neighbor,
+contradicting the assumption. Therefore,
+∂zt,i
+∂ˆzt,πˆ
+zt(j)
+= 0
+(∀i, ∀j̸ = i).
+After its columns are arranged according to πˆzt, the local Jacobian is thus diagonal with nonzero
+diagonal entries.
+A.2.3
+NONEMPTY INTIMATE-NEIGHBOR SETS: USING CROSS-TIME RELATIONS
+When intimate neighbors remain as candidates for residual mixing after considering the local struc-
+ture of Mz, we use conditional-dependence relations with the past and future time steps to eliminate
+residual mixing. We first define the cross-time relations and their changes across auxiliary-variable
+values, derive Jacobian conditions from learned cross-time nonedges, and then combine these con-
+ditions with cross-time edge-count minimality to match the true and learned cross-time relations.
+Definition 3 (Cross-time conditional-dependence relations) Within this section, combine the la-
+tent variables at two time steps as
+ct := (zt−1, zt),
+ˆct := (ˆzt−1, ˆzt).
+Let Mct be the pairwise Markov network for the conditional joint distribution p(zt−1, zt | ut),
+and define Mˆct analogously for p(ˆzt−1, ˆzt | ut). The current–current part of Mct represents the
+instantaneous conditional-independence relations given the past state and therefore coincides with
+Mz and its edge set Einst defined in Appendix A.1. Here, we use only the past–current part of these
+Markov networks.
+Define the relations between the past and current time steps by
+E−
+lag :=
+
+{zt−1,a, zt,i}
+ zt−1,a̸ ⊥zt,i | zt−1,\{a}, zt,\{i}, ut
+	
+.
+For the learned representation, define
+bE−
+lag :=
+
+{ˆzt−1,a, ˆzt,i}
+ ˆzt−1,a̸ ⊥ˆzt,i | ˆzt−1,\{a}, ˆzt,\{i}, ut
+	
+.
+Thus, E−
+lag and bE−
+lag are the past–current parts of Mct and Mˆct, respectively. They correspond to
+Elag and bElag in the main text. The future-directed sets E+
+lag and bE+
+lag are obtained by applying the
+same definitions to ct+1 = (zt, zt+1) and ˆct+1 = (ˆzt, ˆzt+1).
+For a reference value u(0)
+t
+and comparison value u(n)
+t
+, define the log-density ratio between the
+corresponding transition densities by
+∆−
+n (zt, zt−1) := log p(zt | zt−1, u(n)
+t
+) −log p(zt | zt−1, u(0)
+t ).
+For each current–past component pair (i, a), collect these mixed derivatives over the comparison
+values as
+v−
+ia(zt, zt−1) :=
+∂2∆−
+n (zt, zt−1)
+∂zt,i∂zt−1,a
+Naux
+n=1
+∈RNaux.
+The quantities ∆n and via in the main text correspond to ∆−
+n and v−
+ia, respectively. Define b∆−
+n and
+ˆv−
+ia analogously for the learned representation. Analogously, the future-directed quantities ∆+
+n , v+
+bi,
+and their learned counterparts are obtained by shifting these definitions forward by one time step.
+The following lemma relates cross-time nonedges to zeros of the corresponding derivative vectors.
+19
+
+
+Lemma 4 (A cross-time nonedge implies zero mixed derivatives of the log-density ratio) For
+the true representation, the past- and future-directed statements are, respectively,
+{zt−1,a, zt,i} /∈E−
+lag =⇒v−
+ia(zt, zt−1) = 0,
+{zt,i, zt+1,b} /∈E+
+lag =⇒v+
+bi(zt+1, zt) = 0.
+For the learned representation, the corresponding statements are
+{ˆzt−1,m, ˆzt,k} /∈bE−
+lag =⇒ˆv−
+km(ˆzt, ˆzt−1) = 0,
+{ˆzt,k, ˆzt+1,m} /∈bE+
+lag =⇒ˆv+
+mk(ˆzt+1, ˆzt) = 0.
+Proof. We first consider the true distribution in the past case. Suppose {zt−1,a, zt,i} /∈E−
+lag. By the
+definition of E−
+lag, for every auxiliary-variable value ut,
+zt−1,a ⊥zt,i | zt−1,\{a}, zt,\{i}, ut.
+The transition density therefore factorizes as
+p(zt | zt−1, ut) = p
+ zt,i | zt,\{i}, zt−1,\{a}, ut
+
+p(zt,\{i} | zt−1, ut).
+The first factor does not depend on zt−1,a, and the second does not depend on zt,i. Because the
+transition density is positive, taking its logarithm gives
+∂2
+∂zt,i∂zt−1,a
+log p(zt | zt−1, ut) = 0
+for every auxiliary-variable value. Taking the difference between each comparison value and the
+reference value therefore makes every entry of v−
+ia(zt, zt−1) zero, and hence
+v−
+ia(zt, zt−1) = 0.
+For the learned representation, the same conclusion follows directly from the definition of a nonedge
+in the learned Markov network. In particular, if
+{ˆzt−1,m, ˆzt,k} /∈bE−
+lag,
+then, for every ut,
+ˆzt−1,m ⊥ˆzt,k | ˆzt−1,\{m}, ˆzt,\{k}, ut.
+The same factorization argument gives
+∂2
+∂ˆzt,k∂ˆzt−1,m
+log p(ˆzt | ˆzt−1, ut) = 0,
+and hence ˆv−
+km(ˆzt, ˆzt−1) = 0. Shifting time forward by one step proves the statements for the future
+case for both representations.
+□
+The Jacobian conditions in Appendix A.1 restrict which true components can have nonzero deriva-
+tives with respect to each learned coordinate according to the local structure of Mz. To express this
+restriction at each time step, let [dz] := {1, . . . , dz} and, for each time s and index a ∈[dz], define
+the candidate component index set
+Cs(a) := {i ∈[dz] | i = a or zs,a ∈ΨMz(zs,i)} .
+By Lemma 3,
+∂zt,i
+∂ˆzt,πˆ
+zt(a)̸
+= 0
+=⇒
+i ∈Ct(a),
+and the analogous implication holds after shifting time by one step. Thus, for the learned current
+and past coordinates indexed by j and a, respectively, only true components indexed by Ct(j) and
+Ct−1(a) can have nonzero derivatives.
+Among the index pairs in Ct(j)×Ct−1(a), only those corresponding to true cross-time relations need
+to be retained, because Lemma 4 makes the derivative vector zero for every cross-time nonedge. We
+therefore define the past-directed candidate block as the following set of index pairs:
+B−(j, a) :=
+n
+(k, m) ∈[dz]2  k ∈Ct(j), m ∈Ct−1(a), {zt−1,m, zt,k} ∈E−
+lag
+o
+.
+20
+
+
+In the future direction, define
+B+(j, b) :=
+n
+(k, m) ∈[dz]2  k ∈Ct(j), m ∈Ct+1(b), {zt,k, zt+1,m} ∈E+
+lag
+o
+.
+Here, B−(j, a) contains index pairs, whereas edges in E−
+lag are written as unordered pairs of the
+corresponding latent-variable nodes. Using these candidate blocks, we next express each learned
+cross-time derivative vector as a linear combination of the corresponding true derivative vectors.
+Lemma 5 (Transformation of cross-time derivatives over local candidate blocks) Fix
+(ˆzt, ˆzt−1) and choose the corresponding local permutations πˆzt and πˆzt−1 from Lemma 2.
+For any j, a ∈[dz],
+ˆv−
+πˆ
+zt(j),πˆ
+zt−1(a)(ˆzt, ˆzt−1) =
+X
+(k,m)∈B−(j,a)
+χkmv−
+km(zt, zt−1),
+where zt = H(ˆzt), zt−1 = H(ˆzt−1), and
+χkm :=
+∂zt,k
+∂ˆzt,πˆ
+zt(j)
+∂zt−1,m
+∂ˆzt−1,πˆ
+zt−1(a)
+.
+The analogous equality holds in the future direction after shifting time by one step.
+Proof. We prove the past case. Transforming the conditional density under zs = H(ˆzs) gives
+p(ˆzt | ˆzt−1, ut) = p
+ H(ˆzt) | H(ˆzt−1), ut
+
+|det JH(ˆzt)| .
+Applying this equality under the reference and comparison values and taking their difference cancels
+log | det JH(ˆzt)| because H is independent of the auxiliary variable. Thus, for every n,
+b∆−
+n (ˆzt, ˆzt−1) = ∆−
+n
+ H(ˆzt), H(ˆzt−1)
+
+.
+Differentiate this equality once with respect to the learned current coordinate ˆzt,πˆ
+zt(j) and once with
+respect to the learned past coordinate ˆzt−1,πˆ
+zt−1(a). Since the transformation acts separately at each
+time step, the chain rule leaves only products of first-order Jacobian entries:
+∂2 b∆−
+n (ˆzt, ˆzt−1)
+∂ˆzt,πˆ
+zt(j)∂ˆzt−1,πˆ
+zt−1(a)
+=
+dz
+X
+k=1
+dz
+X
+m=1
+χkm
+∂2∆−
+n (zt, zt−1)
+∂zt,k∂zt−1,m
+.
+Collecting this equality over n = 1, . . . , Naux gives the corresponding equality for v−.
+By
+Lemma 3, χkm can be nonzero only if k ∈Ct(j) and m ∈Ct−1(a). Moreover, Lemma 4 gives
+v−
+km = 0 whenever {zt−1,m, zt,k} /∈E−
+lag. The sum can therefore be restricted to B−(j, a). The
+equality for the future case follows by shifting time forward by one step.
+□
+Figure 3 illustrates how differences in cross-time relations can resolve intimate-neighbor ambiguities
+that remain after considering the instantaneous Markov network alone. Based on the preceding re-
+sults, we impose the following three conditions to eliminate the remaining residual mixing. The first
+is a local linear-independence condition that prevents cancellation among the cross-time derivative
+vectors in the preceding transformation. The second is a cross-time edge-count minimality condi-
+tion that rules out additional learned cross-time edges. The third requires each intimate-neighbor
+ambiguity left by the instantaneous Markov network to be resolved by a difference in the cross-time
+relations with some past or future component.
+Assumption 2 (Cross-time variation, separation, and edge-count minimality) For every time t,
+the following conditions hold.
+(i) Local cross-time variability. For every j, a ∈[dz], at almost every (zt, zt−1),
+rank
+
+v−
+km(zt, zt−1)
+
+(k,m)∈B−(j,a) = |B−(j, a)|,
+where the vectors v−
+km(zt, zt−1) form the columns of the matrix.
+21
+
+
+𝑧!"#,#
+𝑧!"#,%
+𝑧!,#
+𝑧!,%
+𝑧!,&
+𝑧!"#,&
+𝑧!"#,'
+𝑧!,'
+Latent causal relations
+𝑧!"#,#
+𝑧!"#,%
+𝑧!,#
+𝑧!,%
+𝑧!,&
+𝑧!"#,&
+𝑧!"#,'
+𝑧!,'
+Instantaneous
+Markov network
+Pairwise Markov
+network
+over 𝒛!"#, 𝒛!
+𝑧!(#,#
+𝑧!(#,%
+𝑧!(#,&
+𝑧!(#,'
+𝑧!(#,#
+𝑧!(#,%
+𝑧!(#,&
+𝑧!(#,'
+Pairwise Markov
+network
+over 𝒛!, 𝒛!$#
+Figure 3: Illustration of how cross-time relations resolve intimate-neighbor ambiguities.
+The
+left panel shows a four-component latent causal model, and the right panel shows the corre-
+sponding instantaneous and cross-time pairwise Markov networks. In the instantaneous network,
+zt,2 ∈ΨMz(zt,1) and zt,3 ∈ΨMz(zt,4), as indicated by the red edges. The blue cross-time re-
+lations resolve the ambiguity of the first pair through zt−1,1 and that of the second through zt+1,4,
+illustrating that either a past or a future relation can suffice for each intimate-neighbor pair. Dotted
+edges denote conditional-dependence relations that are not direct causal edges. All Markov-network
+relations are defined conditionally on the auxiliary variable.
+(ii) Cross-time edge-count minimality. The learned cross-time edge set has no greater cardinality
+than the true one:
+|bE−
+lag| ≤|E−
+lag|.
+(iii) Intimate-neighbor separation. For every zt,j ∈ΨMz(zt,i), at least one of the following condi-
+tions holds:
+1. There exists a past component zt−1,a such that
+{zt−1,a, zt,i} ∈E−
+lag,
+{zt−1,a, zt,j} /∈E−
+lag.
+2. There exists a future component zt+1,b such that
+{zt,i, zt+1,b} ∈E+
+lag,
+{zt,j, zt+1,b} /∈E+
+lag.
+We first note a dimensional requirement for the local cross-time variability condition in Assump-
+tion 2(i). A necessary condition is
+Naux ≥max
+j,a |B−(j, a)|.
+This dimensional bound is necessary but does not by itself guarantee linear independence. Because
+Assumption 2 holds at every time step, Conditions (i) and (ii) also apply in the future direction
+after shifting time forward by one step. Thus, no separate variability, dimensional, or edge-count
+condition is required for the future case. We next combine the transformation in Lemma 5 with
+Condition (i) to derive Jacobian constraints from learned cross-time nonedges.
+Lemma 6 (Jacobian condition implied by a learned cross-time nonedge) Fix
+(ˆzt, ˆzt−1)
+and
+choose the corresponding local permutations πˆzt and πˆzt−1 from Lemma 2.
+Suppose that
+{zt−1,a, zt,i} ∈E−
+lag and i ∈Ct(j). Then
+{ˆzt−1,πˆ
+zt−1(a), ˆzt,πˆ
+zt(j)} /∈bE−
+lag
+=⇒
+∂zt,i
+∂ˆzt,πˆ
+zt(j)
+∂zt−1,a
+∂ˆzt−1,πˆ
+zt−1(a)
+= 0.
+The future-directed result follows by applying the same argument after shifting time forward by one
+step.
+22
+
+
+Proof. We prove the past case. The assumed learned nonedge and Lemma 4 imply
+ˆv−
+πˆ
+zt(j),πˆ
+zt−1(a)(ˆzt, ˆzt−1) = 0.
+Applying Lemma 5 gives
+0 =
+X
+(k,m)∈B−(j,a)
+χkmv−
+km(zt, zt−1).
+Since a ∈Ct−1(a) by definition, the conditions i ∈Ct(j) and {zt−1,a, zt,i} ∈E−
+lag imply (i, a) ∈
+B−(j, a). By the linear independence in Assumption 2(i), all coefficients in this linear combination
+must be zero. In particular, χia = 0, which gives the claimed Jacobian condition.
+The rank condition in Assumption 2(i) holds almost everywhere, so it remains to consider points
+where this condition may fail. At such a point, the Jacobian entries associated with the chosen local
+permutations are nonzero by Lemma 2. By continuity, these entries remain nonzero in a sufficiently
+small neighborhood, so the same local permutations can be used there. Since the rank condition
+holds almost everywhere, every sufficiently small neighborhood contains points where it holds. At
+such points, the preceding argument gives χia = 0, and continuity then gives χia = 0 at the original
+point as well. The future-directed result follows by applying the same argument after shifting time
+forward by one step.
+□
+Lemma 6 shows that every true cross-time edge is preserved under the local permutations. Combined
+with cross-time edge-count minimality, this yields the local correspondence between the true and
+learned cross-time edge sets stated next.
+Lemma 7 (Local isomorphism of cross-time conditional-dependence relations) Fix (ˆzt, ˆzt−1)
+and choose the corresponding local permutations πˆzt and πˆzt−1 from Lemma 2. Under Assump-
+tions 1 and 2, for every i, a ∈[dz],
+{zt−1,a, zt,i} ∈E−
+lag
+⇐⇒
+{ˆzt−1,πˆ
+zt−1(a), ˆzt,πˆ
+zt(i)} ∈bE−
+lag.
+The future-directed result follows by applying the same argument after shifting time forward by one
+step.
+Proof. We first show that every true cross-time relation is preserved under the local permutations.
+Take {zt−1,a, zt,i} ∈E−
+lag. Suppose, for contradiction, that the corresponding learned pair is a
+nonedge:
+{ˆzt−1,πˆ
+zt−1(a), ˆzt,πˆ
+zt(i)} /∈bE−
+lag.
+Applying Lemma 6 with j = i then gives
+∂zt,i
+∂ˆzt,πˆ
+zt(i)
+∂zt−1,a
+∂ˆzt−1,πˆ
+zt−1(a)
+= 0.
+Both factors are nonzero by Lemma 2, yielding a contradiction. Therefore,
+{zt−1,a, zt,i} ∈E−
+lag
+=⇒
+{ˆzt−1,πˆ
+zt−1(a), ˆzt,πˆ
+zt(i)} ∈bE−
+lag.
+Because πˆzt and πˆzt−1 are permutations, this edge-preserving map is injective, and hence
+|E−
+lag| ≤|bE−
+lag|.
+Assumption 2(ii) gives the reverse inequality, so the two edge sets have equal cardinality. Since
+every true cross-time relation is already mapped to a learned one, the learned edge set contains no
+additional relations, proving the equivalence. The future-directed result follows by applying the
+same argument after shifting time forward by one step.
+□
+Lemma 3 leaves only intimate neighbors as candidates for residual mixing. Assumption 2(iii) re-
+quires each such pair to differ in its cross-time relation with at least one past or future component.
+The local cross-time correspondence established in Lemma 7 then allows this difference to rule out
+the remaining residual mixing, as shown next.
+23
+
+
+Lemma 8 (Elimination of residual mixing associated with intimate neighbors) Under Assump-
+tions 1 and 2, for every zt,j ∈ΨMz(zt,i),
+∂zt,i
+∂ˆzt,πˆ
+zt(j)
+= 0.
+Proof. Fix zt,j ∈ΨMz(zt,i) and suppose, for contradiction, that
+∂zt,i
+∂ˆzt,πˆ
+zt(j)̸
+= 0.
+By the definition of Ct(j), zt,j ∈ΨMz(zt,i) implies i ∈Ct(j).
+First suppose that the past case in Assumption 2(iii) holds for some component zt−1,a:
+{zt−1,a, zt,i} ∈E−
+lag,
+{zt−1,a, zt,j} /∈E−
+lag.
+By Lemma 7, the second relation implies
+{ˆzt−1,πˆ
+zt−1(a), ˆzt,πˆ
+zt(j)} /∈bE−
+lag.
+Together with {zt−1,a, zt,i} ∈E−
+lag and i ∈Ct(j), Lemma 6 then gives
+∂zt,i
+∂ˆzt,πˆ
+zt(j)
+∂zt−1,a
+∂ˆzt−1,πˆ
+zt−1(a)
+= 0.
+The second factor is nonzero by Lemma 2, so
+∂zt,i
+∂ˆzt,πˆ
+zt(j)
+= 0,
+contradicting the assumed residual mixing.
+If instead the future case in Assumption 2(iii) holds for some zt+1,b, then
+{zt,i, zt+1,b} ∈E+
+lag,
+{zt,j, zt+1,b} /∈E+
+lag.
+Applying Lemma 7 and the future-directed form of Lemma 6 gives, by the same argument,
+∂zt,i
+∂ˆzt,πˆ
+zt(j)
+= 0,
+again contradicting the assumed residual mixing. Thus, residual mixing is ruled out for every
+intimate-neighbor pair.
+□
+A.2.4
+FROM LOCAL JACOBIAN CONDITIONS TO COMPONENT-WISE TRANSFORMATIONS
+With residual mixing eliminated, we now use the resulting local Jacobian structure to obtain a global
+component-wise transformation. Lemma 3 restricts potentially nonzero off-diagonal Jacobian en-
+tries to intimate-neighbor pairs, while Lemma 8 shows that these entries are also zero. Indeed, fix
+ˆzt and its local permutation πˆzt. If, for some i̸ = j,
+∂zt,i
+∂ˆzt,πˆ
+zt(j)̸
+= 0,
+then Lemma 3 gives zt,j ∈ΨMz(zt,i), whereas Lemma 8 forces the same derivative to be zero.
+Therefore,
+∂zt,i
+∂ˆzt,πˆ
+zt(j)
+= 0
+(i̸ = j).
+The local Jacobian is thus diagonal with nonzero diagonal entries after its columns are arranged
+according to πˆzt. The next lemma makes this pointwise permutation independent of the state.
+24
+
+
+Lemma 9 (Globalizing the local latent-component permutation) Let H be a C2 diffeomorphism
+from the range of the learned representation onto Rdz. Suppose that for every ˆzt in the domain of
+H there exists a permutation πˆzt such that, for every i,
+∂zt,i
+∂ˆzt,k
+= 0
+(k̸ = πˆzt(i)) ,
+∂zt,i
+∂ˆzt,πˆ
+zt(i)̸
+= 0.
+Then there exist a permutation πz independent of ˆzt and univariate C2 diffeomorphisms ξi such that
+ˆzt,πz(i) = ξi(zt,i)
+(∀i).
+Proof. For each ˆzt in the domain of H, the assumed derivative pattern uniquely determines πˆzt:
+∂zt,i
+∂ˆzt,k
+= 0
+if k̸ = πˆzt(i),
+∂zt,i
+∂ˆzt,πˆ
+zt(i)̸
+= 0.
+By continuity of JH, the dz selected nonzero entries at any fixed point remain nonzero in a common
+neighborhood. Since the assumption allows only one nonzero entry in each row at every point, the
+same permutation holds throughout this neighborhood. Thus, πˆzt is locally constant.
+The domain of H is connected because H is a diffeomorphism from that domain onto the connected
+space Rdz. Therefore, the permutation is constant over the domain; denote it by πz.
+Differentiating the identity H(H−1(z)) = z gives
+JH−1(zt) = JH
+ H−1(zt)
+−1 .
+Since JH has exactly one nonzero entry in each row and column under the fixed permutation πz,
+its inverse has the corresponding pattern. Consequently, writing (H−1)k for the k-th component of
+H−1, for every i and every zt,
+∂(H−1)πz(i)(zt)
+∂zt,j
+= 0
+(j̸ = i),
+∂(H−1)πz(i)(zt)
+∂zt,i̸
+= 0.
+Since the domain of H−1 is the connected set Rdz, the zero cross-component derivatives imply that
+(H−1)πz(i) depends only on zi. Denote the resulting univariate function by ξi. Because H−1 is bi-
+jective and has this component-wise form, each ξi is bijective between the corresponding coordinate
+ranges. Since H−1 is C2 and the derivative of each ξi is everywhere nonzero, each ξi is a univariate
+C2 diffeomorphism. Thus,
+ˆzt,πz(i) = ξi(zt,i)
+(i = 1, . . . , dz).
+□
+The preceding results yield the following latent-component identification theorem. The first case
+shows that no cross-time conditions are needed when all intimate-neighbor sets are empty, whereas
+the second case gives the general result used in the main theorem.
+Theorem 4 (Identification of latent components) Consider a learned representation related to
+the true representation by a C2 diffeomorphism H, independent of time and the value of the auxil-
+iary variable, from the range of the learned representation onto Rdz, with zt = H(ˆzt), and suppose
+Assumption 1 holds. Suppose further that either
+1. ΨMz(zt,i) = ∅for every i; or
+2. Assumption 2 holds.
+Then there exists a permutation πz, independent of time and the values of the latent variables, under
+which Mz and Mˆz are isomorphic via the correspondence zt,i 7→ˆzt,πz(i). Moreover, there exist
+univariate C2 diffeomorphisms ξ1, . . . , ξdz such that
+ˆzt,πz(i) = ξi(zt,i)
+(i = 1, . . . , dz).
+25
+
+
+Proof.
+In the first case, the argument in Section A.2.2 shows that, at every point, arranging the
+local Jacobian columns according to the local permutation produces a diagonal matrix with nonzero
+diagonal entries. In the second case, Lemma 3 restricts all off-diagonal mixing to intimate-neighbor
+pairs, and Lemma 8 eliminates this remaining mixing. Thus, in either case, the local Jacobian be-
+comes diagonal with nonzero diagonal entries at every point after its columns are arranged according
+to some local permutation πˆzt.
+Lemma 9 gives a permutation πz independent of ˆzt and univariate C2 diffeomorphisms ξi such that
+ˆzt,πz(i) = ξi(zt,i)
+(∀i).
+Substituting πˆzt = πz into the local isomorphism of the instantaneous Markov networks established
+in Theorem 3 shows that Mz and Mˆz are isomorphic under the same fixed permutation. Finally,
+because the coordinate transformation H is common to all time steps, πz and the functions ξi are
+also independent of time.
+□
+A.3
+TRANSITION-NOISE IDENTIFICATION BY IIA
+This appendix adapts the transition-noise identification argument of independent innovation analysis
+(IIA) (Morioka et al., 2021) to the encoder and learned inverse transition function used in our frame-
+work. Here, transition noise plays the role of the innovations in IIA. In the sufficient setting proved
+in this appendix, we take X = Rdz, as in the IIA argument. We consider two contrastive-learning
+approaches used in IIA (Morioka et al., 2021): time-contrastive learning (TCL) and generalized
+contrastive learning (GCL). TCL predicts a discrete auxiliary-variable value from the estimated
+transition noise and a learned feature of the past observations, whereas GCL distinguishes matched
+tuples from tuples in which only the auxiliary-variable value is permuted. Let ϕ be the encoder and
+define the maps ρaug, ˆρaug : R2dz →R2dz by
+ρaug(xt, xt−1) := (ϵt, xt−1),
+ˆρaug(xt, xt−1) :=
+ ˆr
+ ϕ(xt), ϕ(xt−1)
+
+, xt−1
+
+.
+For the theoretical setting with L = 1, the history feature ht = η(ϕ(xt−1)) is a determinis-
+tic function of xt−1, so we write the regression functions below in terms of xt−1. Accordingly,
+in the analysis below, we regard the implemented regression function T(ˆϵt, ht, ut) as a function
+of (ˆϵt, xt−1, ut). For either TCL or GCL, the regression function decomposes over the learned
+transition-noise components as
+T(ˆϵt, xt−1, ut) =
+dz
+X
+i=1
+K
+X
+k=1
+ψik(ˆϵt,i)µik(ut) + φ(xt−1, ut) + B(ˆϵt, xt−1).
+(18)
+For TCL, µik(u) = wuik, and bu is absorbed into φ. The auxiliary-variable-independent term B
+can be omitted because it cancels when the class logits are compared. Here, ψik is a scalar-valued
+function of the estimated transition-noise component ˆϵt,i, µik modulates its coefficient with the
+auxiliary variable, and the remaining terms account for dependence involving the past observation
+and terms independent of the auxiliary variable. The corresponding finite-sample TCL and GCL
+objectives are given in Appendix B. A regression function is population-optimal when it minimizes
+the expected multiclass cross-entropy for TCL or the expected binary cross-entropy for GCL under
+the corresponding population distributions. Let u(0)
+t
+denote a reference auxiliary-variable value and
+let u(n)
+t
+denote the n-th comparison value. For both TCL and GCL, comparing the reference value
+with each comparison value gives
+T ⋆(ˆϵt, xt−1, u(n)
+t
+) −T ⋆(ˆϵt, xt−1, u(0)
+t ) = log p(ˆϵt, xt−1 | u(n)
+t
+)
+p(ˆϵt, xt−1 | u(0)
+t )
++ cn.
+(19)
+Assumption 3 (Conditions for transition-noise identification by IIA) The following conditions
+hold.
+(i) Invertibility and regularity. The learned inverse transition function ˆr is C1, and ρaug, ˆρaug, and
+the observation function g are C2 diffeomorphisms on their respective domains.
+(ii) Exponential-family modulation. There exist K ≥2, base measures Qi, normalizing terms Zi,
+twice continuously differentiable sufficient statistics sik, and natural parameters λik depending on
+26
+
+
+the auxiliary variable such that
+p(ϵt | ut) =
+dz
+Y
+i=1
+Qi(ϵt,i)
+Zi(ut) exp
+" K
+X
+k=1
+sik(ϵt,i)λik(ut)
+#
+.
+For each i, the sufficient statistics are nonredundant up to a constant: if PK
+k=1 cksik(e) is constant
+in e, then c1 = · · · = cK = 0. Let λ(u) collect all dzK natural parameters. For an arbitrarily
+selected reference value u(0)
+t
+and distinct comparison values u(n1)
+t
+, . . . , u(ndzK)
+t
+satisfying 1 ≤n1 <
+· · · < ndzK ≤Naux, the matrix
+Λ :=
+h
+λ(u(n1)
+t
+) −λ(u(0)
+t ), . . . , λ(u(ndzK)
+t
+) −λ(u(0)
+t )
+i
+has rank dzK. For a finite-valued auxiliary variable, this condition requires at least dzK+1 distinct
+values, including the reference.
+(iii) Population regression and learned-feature rank. The learned regression function attains a
+population optimum satisfying equation 19. For the feature functions ψik in this solution, define
+Dψ,i(e) :=
+∂ψik(e)
+∂e
+, ∂2ψik(e)
+∂e2
+K
+k=1
+∈RK×2,
+and suppose that rank Dψ,i(e) = 2 for every i and every e. This condition plays the role of the
+learned-feature nonredundancy condition in the IIA argument of Morioka et al. (2021); we state the
+required derivative-rank property directly for simplicity.
+Under these conditions, the transition-noise components are identified up to a permutation and
+component-wise C2 diffeomorphisms.
+Theorem 5 (Transition-noise identification) Under Assumption 3, there exist a permutation πϵ
+and component-wise C2 diffeomorphisms qi, all independent of time and the auxiliary-variable
+value, such that
+ˆϵt,πϵ(i) = qi(ϵt,i)
+(i = 1, . . . , dz).
+Proof.
+The assumptions ϵt ⊥zt−1 | ut from the problem setup and xt−1 = g(zt−1) imply
+ϵt ⊥xt−1 | ut. By Assumption 3(ii), the density ratio between a reference value and a comparison
+value in the true augmented coordinates (ϵt, xt−1) decomposes as
+log p(ϵt, xt−1 | u(n)
+t
+)
+p(ϵt, xt−1 | u(0)
+t )
+=
+dz
+X
+i=1
+K
+X
+k=1
+sik(ϵt,i)
+h
+λik(u(n)
+t
+) −λik(u(0)
+t )
+i
++ Pn(xt−1).
+(20)
+Here, Pn(xt−1) collects the density-ratio term for the past observations and the normalizing terms
+of the exponential-family distributions.
+The transformation ˆρaug ◦ρ−1
+aug between the true and learned augmented coordinates is a diffeomor-
+phism that does not depend on the auxiliary variable. Consequently, the Jacobian terms from the
+change of variables cancel in the density ratio between the reference and comparison values, and at
+corresponding points,
+p(ˆϵt, xt−1 | u(n)
+t
+)
+p(ˆϵt, xt−1 | u(0)
+t )
+= p(ϵt, xt−1 | u(n)
+t
+)
+p(ϵt, xt−1 | u(0)
+t )
+.
+(21)
+Let y := (ϵt, xt−1), and write the learned transition noise expressed in the true augmented coordi-
+nates as ˆϵt(y). Stack the learned features, sufficient statistics, and learned coefficients into ψ(ˆϵt),
+s(ϵt), and µ(ut), respectively, and define
+M :=
+h
+µ(u(n1)
+t
+) −µ(u(0)
+t ), . . . , µ(u(ndzK)
+t
+) −µ(u(0)
+t )
+i
+.
+Taking the difference in equation 19 eliminates the term B because it does not depend on the aux-
+iliary variable. Using equation 20 and equation 21 and stacking the resulting equations over the
+comparison values gives
+M ⊤ψ
+ ˆϵt(y)
+
++ Φ(xt−1) = Λ⊤s(ϵt) + P(xt−1) + c,
+(22)
+27
+
+
+where Φ and P depend only on the past observation and c stacks the constant terms.
+By nonredundancy of the sufficient statistics, the space spanned by their derivative vectors has di-
+mension K. Hence, there exist evaluation points e(1)
+i , . . . , e(K)
+i
+at which these derivative vectors are
+linearly independent. Define the matrices obtained by evaluating the derivatives of the true sufficient
+statistics and learned features at these points as
+Ai :=
+"
+∂sik(e(m)
+i
+)
+∂e
+#K
+k,m=1
+,
+A := diag(A1, . . . , Adz),
+e
+A :=
+"
+∂
+∂ϵt,i
+ψ
+ ˆϵt(y)
+
+ϵt,i=e(m)
+i
+#
+(i,m)
+.
+Differentiating equation 22 with respect to each ϵt,i eliminates the terms depending only on xt−1
+and the constants. Evaluation at the selected points gives M ⊤e
+A = Λ⊤A. Since Λ and A are
+nonsingular, the equality above implies that M is also nonsingular.
+For distinct j1 and j2, take the mixed derivative of equation 22 with respect to ϵt,j1 and ϵt,j2. Since
+the right-hand side is a sum of univariate functions of the individual transition-noise components, its
+mixed derivative vanishes; the nonsingularity of M therefore gives ∂2ψ(ˆϵt(y))/∂ϵt,j1∂ϵt,j2 = 0.
+Expanding the K entries corresponding to ˆϵt,i by the chain rule gives
+Dψ,i(ˆϵt,i)
+
+
+
+
+∂2ˆϵt,i
+∂ϵt,j1∂ϵt,j2
+∂ˆϵt,i
+∂ϵt,j1
+∂ˆϵt,i
+∂ϵt,j2
+
+
+
+= 0,
+∂ˆϵt,i
+∂ϵt,j1
+∂ˆϵt,i
+∂ϵt,j2
+= 0,
+(23)
+where the second relation follows from the full column rank of Dψ,i. Similarly, taking the mixed
+derivative of equation 22 with respect to ϵt,j and xt−1,a and using the full column rank of Dψ,i
+gives
+∂ˆϵt,i
+∂ϵt,j
+∂ˆϵt,i
+∂xt−1,a
+= 0.
+(24)
+The composition ˆρaug ◦ρ−1
+aug has the form (ϵt, xt−1) 7→(ˆϵt(ϵt, xt−1), xt−1), and its Jacobian is
+block triangular:
+Jˆρaug◦ρ−1
+aug =
+
+
+∂ˆϵt
+∂ϵt
+∂ˆϵt
+∂xt−1
+0
+I
+
+.
+(25)
+Since this map is a diffeomorphism, its Jacobian is nonsingular, and equation 25 therefore im-
+plies that ∂ˆϵt/∂ϵt is nonsingular. Equation 23 implies that each row of this Jacobian has at most
+one nonzero entry, while nonsingularity implies exactly one nonzero entry in each row and col-
+umn. Thus, its support defines a permutation of the transition-noise components at every point.
+Equation 24 then implies that each learned transition-noise component does not depend on the past
+observation. Continuity makes this permutation locally constant, and connectedness of R2dz there-
+fore fixes it globally to a single permutation πϵ. For each i, the fixed permutation together with the
+product-zero conditions implies that ˆϵt,πϵ(i) has zero derivatives with respect to all coordinates other
+than ϵt,i. Since the augmented-coordinate domain is R2dz, it follows that ˆϵt,πϵ(i) is a function only
+of ϵt,i, yielding
+ˆϵt,πϵ(i) = qi(ϵt,i)
+(i = 1, . . . , dz).
+(26)
+Since ˆρaug ◦ρ−1
+aug is a diffeomorphism that preserves the past observation, the map ϵt 7→ˆϵt is
+bijective for each fixed xt−1, and the corresponding derivatives are nonzero. Thus, every qi is a C2
+diffeomorphism.
+□
+28
+
+
+A.4
+CAUSAL-GRAPH IDENTIFICATION FROM THE JACOBIAN OF THE INVERSE TRANSITION
+FUNCTION
+This section combines transition-noise identification from Theorem 5 with latent-component identi-
+fication from Theorem 4 to identify the true instantaneous and lagged causal edges from the Jacobian
+support of the learned inverse transition function ˆr. We first relate the Jacobian supports of the true
+and learned inverse transition functions. Acyclicity of the instantaneous DAG then determines the
+correspondence between learned output rows and current latent components. Finally, the Jacobian
+support of the true inverse transition function r is related to the direct causal edges defined by the
+structural functions fi. Throughout this section, suppose that the conditions of Theorems 5 and 4
+hold.
+Let πϵ and πz denote the permutations for the transition-noise and latent components, respectively.
+Using component-wise C2 diffeomorphisms qi and ξi, write
+ˆϵt,πϵ(i) = qi(ϵt,i),
+ˆzt,πz(i) = ξi(zt,i).
+(27)
+Here, πϵ and πz specify the orderings of the learned output and latent input components, respectively,
+and are not assumed to be identical. When describing the functional support of fi, we regard it
+as a function of all candidate instantaneous and lagged variables, with derivatives with respect to
+nonparents understood to be identically zero. We write the true inverse transition function as r =
+(r1, . . . , rdz), where ϵt,i = ri(zt, zt−1).
+Lemma 10 (Jacobian-support correspondence for inverse transition functions) The
+Jacobian
+supports of the true and learned inverse transition functions coincide up to the row permutation
+πϵ and column permutation πz. Specifically, for ℓ∈{0, 1} and all i, j,
+∂ˆrπϵ(i)
+∂ˆzt−ℓ,πz(j)̸
+≡0
+⇐⇒
+∂ri
+∂zt−ℓ,j̸
+≡0.
+(28)
+Proof. Substituting ϵt = r(zt, zt−1) and ˆϵt = ˆr(ˆzt, ˆzt−1) into the transition-noise correspondence
+in equation 27 gives
+ˆrπϵ(i)(ˆzt, ˆzt−1) = qi
+ ri(zt, zt−1)
+
+.
+The latent-component correspondence in equation 27 also gives zt−ℓ,j = ξ−1
+j (ˆzt−ℓ,πz(j)). Differ-
+entiating the preceding identity with respect to ˆzt−ℓ,πz(j) and applying the chain rule yields
+∂ˆrπϵ(i)(ˆzt, ˆzt−1)
+∂ˆzt−ℓ,πz(j)
+= ∂qi(ϵt,i)
+∂ϵt,i
+∂ri(zt, zt−1)
+∂zt−ℓ,j
+∂ξ−1
+j (ˆzt−ℓ,πz(j))
+∂ˆzt−ℓ,πz(j)
+.
+(29)
+Because qi and ξj are univariate diffeomorphisms, the first and last factors on the right-hand side
+are nonzero, proving equation 28.
+□
+We next use acyclicity of the instantaneous DAG to match the learned output rows ordered by πϵ
+uniquely to the current latent components ordered by πz.
+Lemma 11 (Matching transition-noise and latent components using the instantaneous DAG)
+Suppose that the instantaneous causal structure is a DAG as in the problem setup and that every
+structural function fi is continuously differentiable. Consider the bipartite graph whose left nodes
+are ri, whose right nodes are zt,j, and which contains an edge whenever ∂ri/∂zt,j̸ ≡0.
+A
+perfect matching pairs every ri with exactly one zt,j and every zt,j with exactly one ri. This graph
+has a unique perfect matching, consisting of the edges between ri and zt,i. Consequently, the
+learned Jacobian support uniquely determines the pairing between each output row ˆrπϵ(i) and its
+corresponding current latent component ˆzt,πz(i).
+Proof. We first show that the pairs (ri, zt,i) form a perfect matching and then prove that no other
+perfect matching exists. Assumption 3(i) ensures that the true inverse transition function r is con-
+tinuously differentiable. Substituting ϵt,i = ri(zt, zt−1) into the structural equation gives
+zt,i = fi
+ painst(zt,i), palags(zt,i), ri(zt, zt−1)
+
+.
+29
+
+
+Because zt,i is not its own instantaneous parent, differentiating this identity with respect to zt,i
+produces no direct parent term, leaving only the term through ri. For j̸ = i, differentiating the same
+identity with respect to zt,j gives zero on the left-hand side. Thus,
+1 = ∂fi
+∂ϵt,i
+∂ri
+∂zt,i
+,
+0 = ∂fi
+∂zt,j
++ ∂fi
+∂ϵt,i
+∂ri
+∂zt,j
+.
+For each past component zt−1,j, differentiating the same identity gives
+0 =
+∂fi
+∂zt−1,j
++ ∂fi
+∂ϵt,i
+∂ri
+∂zt−1,j
+.
+The first equality implies that both factors are nonzero throughout the domain. Therefore,
+∂ri
+∂zt,i
+=
+ ∂fi
+∂ϵt,i
+−1̸
+= 0,
+∂ri
+∂zt,j
+= −
+ ∂fi
+∂ϵt,i
+−1 ∂fi
+∂zt,j
+.
+Similarly, for each past component,
+∂ri
+∂zt−1,j
+= −
+ ∂fi
+∂ϵt,i
+−1
+∂fi
+∂zt−1,j
+.
+Thus, the edges joining ri to zt,i form a perfect matching, while the off-diagonal Jacobian support
+corresponds to the instantaneous causal edges. It remains to show that this perfect matching is
+unique. Suppose, for contradiction, that a different perfect matching exists. Relative to the matching
+(ri, zt,i), its associated permutation contains a nontrivial cycle i1, . . . , is. Writing is+1 = i1, this
+matching pairs each row rih with the distinct current component zt,ih+1. Hence,
+∂rih
+∂zt,ih+1̸
+≡0
+(h = 1, . . . , s).
+Because ih̸ = ih+1, the relation derived above between the derivatives of ri and fi implies
+∂fih
+∂zt,ih+1̸
+≡0
+(h = 1, . . . , s).
+These dependencies form the directed instantaneous cycle
+zt,i2 →zt,i1,
+zt,i3 →zt,i2,
+. . . ,
+zt,i1 →zt,is,
+contradicting the instantaneous DAG assumption. Therefore, the matching between corresponding
+components is unique. By Lemma 10, the true and learned supports coincide up to πϵ and πz;
+hence, the unique learned matching pairs ˆrπϵ(i) with ˆzt,πz(i). This argument uses only acyclicity of
+the instantaneous DAG and does not require a unique topological order.
+□
+Together, the two lemmas match each output row of ˆr to its corresponding current latent component.
+The Jacobian supports with respect to its current and past inputs can then be interpreted as direct
+causal edges.
+Theorem 6 (Causal-graph identification from the learned inverse transition function)
+Suppose that Theorems 5 and 4 hold.
+Under the instantaneous DAG assumed in the problem
+setup, also suppose that every structural function fi is continuously differentiable. Define the direct
+causal edges induced by fi by
+zt,j →zt,i
+⇐⇒
+∂fi
+∂zt,j̸
+≡0
+(j̸ = i),
+zt−1,j →zt,i
+⇐⇒
+∂fi
+∂zt−1,j̸
+≡0.
+Then, for all i̸ = j,
+∂ˆrπϵ(i)
+∂ˆzt,πz(j)̸
+≡0
+⇐⇒
+∂fi
+∂zt,j̸
+≡0,
+and, for all i, j,
+∂ˆrπϵ(i)
+∂ˆzt−1,πz(j)̸
+≡0
+⇐⇒
+∂fi
+∂zt−1,j̸
+≡0.
+Consequently, the true instantaneous and one-step lagged causal edges are identifiable up to a
+single component permutation πz from the off-diagonal instantaneous and one-step lagged Jacobian
+supports of ˆr, respectively.
+30
+
+
+Proof. For ℓ∈{0, 1}, Lemma 10 gives
+∂ˆrπϵ(i)
+∂ˆzt−ℓ,πz(j)̸
+≡0
+⇐⇒
+∂ri
+∂zt−ℓ,j̸
+≡0.
+The unique perfect matching in Lemma 11 assigns the learned output row ˆrπϵ(i) uniquely to its child
+component ˆzt,πz(i). For ℓ= 0 with j̸ = i, or for ℓ= 1, a nonzero entry in this output row at the
+column ˆzt−ℓ,πz(j) therefore corresponds to the edge
+ˆzt−ℓ,πz(j) →ˆzt,πz(i).
+This assignment does not assume πϵ = πz; the unique perfect matching associates each output row
+with its child component indexed according to πz.
+As derived in the proof of Lemma 11, differentiating the structural equation after substituting ϵt,i =
+ri(zt, zt−1) gives, for ℓ= 0 with j̸ = i, and for ℓ= 1,
+∂ri
+∂zt−ℓ,j
+= −
+ ∂fi
+∂ϵt,i
+−1
+∂fi
+∂zt−ℓ,j
+.
+As shown in the proof of Lemma 11, ∂fi/∂ϵt,i is nonzero throughout the domain. Therefore, a
+nonzero off-diagonal instantaneous component or a nonzero one-step lagged component of the Ja-
+cobian of ri is equivalent to the corresponding partial derivative of fi being nonzero. Thus, under the
+single node permutation πz, the off-diagonal instantaneous and one-step lagged Jacobian supports
+of ˆr correspond exactly to the true instantaneous and one-step lagged causal edges, respectively. □
+Remark 2 (Relation to Jacobian-based causal-graph identification) The proof follows the idea
+of Reizinger et al. (2023): after identifying transition noise and latent states component-wise, the
+causal graph is identified from the Jacobian support of the inverse transition function. We apply
+this idea to latent transition dynamics, using the instantaneous Jacobian to match transition-noise
+components to current latent components and the instantaneous and lagged Jacobians to identify
+their respective causal edges.
+A.5
+EXTENSION TO MULTIPLE LAGS
+We extend the preceding identification results from L = 1 to any finite maximum lag L. The single
+past state is replaced by a finite history, while cross-time relations and variability are considered sep-
+arately at each lag. Write the finite history over the past L time steps as z−
+t := (zt−1, . . . , zt−L). Let
+Mz denote the pairwise Markov network representing the instantaneous conditional-independence
+relations in p(zt | z−
+t , ut), and let Einst denote its edge set. For each ℓ= 1, . . . , L, let E(ℓ)
+lag denote
+the past–current edges between zt−ℓand zt in the pairwise Markov network of the conditional joint
+distribution p(z−
+t , zt | ut). Define the corresponding learned Markov networks analogously, with
+instantaneous edge set bEinst and lag-specific past–current edge sets bE(ℓ)
+lag, and let
+∆(L)
+n (zt, z−
+t ) := log p(zt | z−
+t , u(n)
+t
+) −log p(zt | z−
+t , u(0)
+t ),
+v(ℓ)
+ia (zt, z−
+t ) :=
+ 
+∂2∆(L)
+n
+∂zt,i∂zt−ℓ,a
+!Naux
+n=1
+.
+Here, we retain the assumption on H in Condition (i) of Theorem 1 throughout this section and
+define b∆(L)
+n
+and ˆv(ℓ)
+ia analogously for the learned representation. Define the candidate sets Cs as in
+Appendix A.2, using the instantaneous Markov network Mz defined above, and let
+B(ℓ)(j, a) :=
+n
+(k, m) ∈[dz]2  k ∈Ct(j), m ∈Ct−ℓ(a), {zt−ℓ,m, zt,k} ∈E(ℓ)
+lag
+o
+.
+The corresponding future-directed candidate blocks are defined by shifting these quantities forward
+by ℓtime steps.
+Assumption 4 (Finite-lag extension conditions) For every time t, the following conditions hold
+whenever the required past and future variables exist.
+31
+
+
+(i) Finite-history transition-noise identification. All conditions in Appendix A.3 hold after replac-
+ing the past observation xt−1 by the finite history x−
+t
+:= (xt−1, . . . , xt−L) in the augmented-
+coordinate construction.
+(ii) Instantaneous variability and edge-count minimality.
+The positivity and regularity condi-
+tion in Assumption 1(i) holds with z−
+t in place of zt−1. Let Ninst := 2dz + |Einst| and define
+w(L)
+n (zt, z−
+t ) ∈RNinst from ∆(L)
+n
+in the same way as wn is defined in Assumption 1(ii), replacing
+zt−1 with z−
+t . For every zt, suppose that there exist auxiliary-variable indices and finite-history
+evaluation values
+(nα, ¯z−,(α)
+t
+) ∈{1, . . . , Naux} × RLdz,
+α = 1, . . . , Ninst,
+such that
+W (L)(zt) :=
+h
+w(L)
+nα (zt, ¯z−,(α)
+t
+)
+iNinst
+α=1
+has rank Ninst. The indices nα need not be distinct. The learned instantaneous edge set also satisfies
+|bEinst| ≤|Einst|.
+(iii) Per-lag cross-time variability and edge-count minimality. For every ℓ= 1, . . . , L and j, a ∈
+[dz], at almost every (zt, z−
+t ),
+rank
+h
+v(ℓ)
+km(zt, z−
+t )
+i
+(k,m)∈B(ℓ)(j,a) = |B(ℓ)(j, a)|.
+The learned cross-time edge sets satisfy
+L
+X
+ℓ=1
+|bE(ℓ)
+lag| ≤
+L
+X
+ℓ=1
+|E(ℓ)
+lag|.
+(iv) Intimate-neighbor separation across lags. For every zt,j ∈ΨMz(zt,i), there exists at least one
+lag ℓ∈{1, . . . , L} and a past or future component at that lag whose cross-time relation is present
+with zt,i but absent with zt,j, as in Assumption 2(iii).
+This yields the following extension of the L = 1 result.
+Theorem 7 (Identification for a general finite maximum lag) Suppose that Assumption 4 holds.
+Then there exist a time-independent permutation πz and univariate C2 diffeomorphisms ξi such
+that ˆzt,πz(i) = ξi(zt,i). Furthermore, under the instantaneous DAG assumed in the problem setup,
+suppose that every structural function fi is continuously differentiable. Let πϵ be the transition-noise
+permutation obtained by IIA. Then, for all i̸ = j,
+∂ˆrπϵ(i)
+∂ˆzt,πz(j)̸
+≡0
+⇐⇒
+∂fi
+∂zt,j̸
+≡0,
+and, for every ℓ= 1, . . . , L and all i, j,
+∂ˆrπϵ(i)
+∂ˆzt−ℓ,πz(j)̸
+≡0
+⇐⇒
+∂fi
+∂zt−ℓ,j̸
+≡0.
+(30)
+Consequently, the true instantaneous and lagged causal edges are identifiable up to a single com-
+ponent permutation πz from the off-diagonal instantaneous and per-lag Jacobian supports of ˆr.
+Proof. In Appendix A.3, replacing xt−1 with x−
+t preserves the block-triangular Jacobian of the aug-
+mented coordinate transformation, so the same mixed-derivative argument applies to every compo-
+nent of the finite history. In Appendix A.1, replacing past-state evaluation values with finite-history
+evaluation values does not change the fact that the unknown coefficients constructed from the coor-
+dinate transformation H depend only on zt. The full-rank condition on W (L)(zt) and instantaneous
+edge-count minimality therefore imply an isomorphism of Mz.
+32
+
+
+For each lag ℓ, taking the mixed derivative of b∆(L)
+n
+with respect to ˆzt and ˆzt−ℓintroduces no terms
+from other lags because H acts separately at each time step, and gives
+ˆv(ℓ)
+πˆ
+zt(j),πˆ
+zt−ℓ(a) =
+X
+(k,m)∈B(ℓ)(j,a)
+∂zt,k
+∂ˆzt,πˆ
+zt(j)
+∂zt−ℓ,m
+∂ˆzt−ℓ,πˆ
+zt−ℓ(a)
+v(ℓ)
+km.
+The local full-rank condition preserves every true edge at each lag, so |E(ℓ)
+lag| ≤|bE(ℓ)
+lag|. Thus, each
+difference |bE(ℓ)
+lag| −|E(ℓ)
+lag| is nonnegative, while the aggregate edge-count minimality requires their
+sum to be nonpositive. Every difference must therefore be zero, yielding edge-set correspondence
+at each lag. The argument of Appendix A.2 then eliminates the remaining mixing and yields πz and
+ξi.
+Finally, the chain-rule support correspondence in Appendix A.4 extends directly to every input lag,
+while the unique perfect matching between output rows and current latent components is determined
+from the instantaneous Jacobian as before. Thus, at every lag, the Jacobian supports of the true and
+learned inverse transition functions correspond under the same row permutation πϵ and column
+permutation πz, proving the stated graph-identification result.
+□
+B
+LEARNING FRAMEWORK DETAILS
+This section provides details of the learning framework described in the main text, including its
+model parameterization, contrastive objectives, structural regularization, and optimization.
+B.1
+MODEL PARAMETERIZATION
+Shared encoder and learned inverse transition function.
+For maximum lag L, our method
+applies the shared encoder ϕ separately to each observation in (xt−L, . . . , xt), yielding ˆzt−ℓ=
+ϕ(xt−ℓ) for ℓ= 0, . . . , L. Each transition-noise component is then estimated by a component-
+specific learned inverse transition function. Each component of ˆr = (ˆr1, . . . , ˆrdz) is parameterized
+as
+ˆϵt,i = ˆri
+
+ˆzt,i, G(0)
+i,−i ⊙ˆzt,−i,
+n
+G(ℓ)
+i,: ⊙ˆzt−ℓ
+oL
+ℓ=1
+
+.
+(31)
+Here, G(0), G(ℓ) ∈Rdz×dz, ℓ= 1, . . . , L, are learnable weight matrices that gate individual current
+and lagged input components, respectively. For these matrices, row i corresponds to the target com-
+ponent ˆzt,i and column j to the source component ˆzt−ℓ,j. The notation −i denotes all components
+except component i, whereas : denotes all components. Accordingly, G(0)
+i,−i gates the other current
+components and G(ℓ)
+i,: gates all components at lag ℓ. Because the current component ˆzt,i is supplied
+directly to ˆri without a gate, the diagonal entries of G(0) are fixed to zero. For each i, the gated
+inputs are concatenated and processed jointly by a general nonlinear network parameterizing ˆri.
+History feature.
+For the contrastive objectives below, the past learned representations are sum-
+marized by the history feature
+ht = η(ˆzt−1, . . . , ˆzt−L),
+(32)
+where the history feature map η is learned jointly with the other modules.
+B.2
+CONTRASTIVE LEARNING WITH AUXILIARY VARIABLES
+We implement the IIA contrastive-learning framework (Morioka et al., 2021) in two forms. iCReN-T
+treats a discrete auxiliary variable as a finite set of classes, whereas iCReN-G accommodates a
+general observed auxiliary variable. We describe the corresponding regression functions and training
+losses below.
+iCReN-T.
+For a discrete auxiliary variable, iCReN-T treats each possible value as a class and
+predicts it from the estimated transition noise and history feature. For a candidate value u, the logit
+33
+
+
+is
+T TCL
+u
+(ˆϵt, ht) =
+dz
+X
+i=1
+K
+X
+k=1
+wuikψik(ˆϵt,i) + φ(ht, u) + bu.
+(33)
+Here, K is the number of feature functions for each transition-noise component, and ψik is the k-
+th scalar-valued feature function of ˆϵt,i. The feature functions may be learned or fixed; when the
+conditional noise family is specified, fixed functions can be chosen to include its sufficient statistics.
+The coefficients wuik and biases bu are learned separately for each class. The learned function
+φ(ht, u) represents the relation between the history feature and the auxiliary variable. We omit an
+auxiliary-variable-independent common term because it cancels from the softmax probabilities. The
+softmax cross-entropy for the observed ut defines LTCL.
+iCReN-G.
+iCReN-G uses changes in the transition-noise distributions associated with a general
+observed auxiliary variable through binary classification of matched and mismatched tuples. Its
+binary logistic regression function is
+T GCL(ˆϵt, ht, ut) =
+dz
+X
+i=1
+K
+X
+k=1
+ψik(ˆϵt,i)µik(ut) + φ(ht, ut) + B(ˆϵt, ht).
+(34)
+Here, µik is a learned function of the auxiliary variable that gives the coefficient of the k-th feature of
+component i. The learned function φ represents the relation between the history feature and the aux-
+iliary variable as well as terms that depend only on the auxiliary variable, whereas B collects terms
+independent of the auxiliary variable. The component-wise additive restriction applies only to the
+auxiliary-variable-dependent term; B may therefore depend jointly on all estimated transition-noise
+components and the history feature. For each minibatch, matched tuples (ˆϵt, ht, ut) are positive
+examples. Mismatched tuples (ˆϵt, ht, u′
+t) are constructed by permuting only the auxiliary-variable
+values within the minibatch, while keeping ˆϵt and ht fixed. We use a nonzero cyclic shift for this
+permutation so that each sample receives the auxiliary-variable value from a different sample. The
+resulting binary cross-entropy defines LGCL.
+B.3
+STRUCTURAL REGULARIZATION AND TRAINING OBJECTIVE
+Sparsity regularization of input dependencies.
+Motivated by the edge-count minimality used in
+the identification analysis in Appendix A.2, we impose the following regularizers on the input gates
+in equation 31:
+Rinst = 1
+d2z
+X
+i,j
+G(0)
+ij
+ ,
+Rlag =
+1
+Ld2z
+L
+X
+ℓ=1
+X
+i,j
+G(ℓ)
+ij
+ .
+(35)
+For any gated current or lagged input ˆzt−ℓ,j supplied to ˆri through G(ℓ)
+ij , the chain rule gives
+∂ˆri
+∂ˆzt−ℓ,j
+= G(ℓ)
+ij
+∂ˆri
+∂
+
+G(ℓ)
+ij ˆzt−ℓ,j
+.
+(36)
+Consequently, G(ℓ)
+ij = 0 makes the corresponding Jacobian component zero. Regularizing the gates
+therefore provides a computationally simple surrogate for encouraging sparse input dependencies,
+since it acts directly on the weight matrices without explicitly evaluating the Jacobian. IDOL instead
+applies an ℓ1 penalty directly to the Jacobian (Li et al., 2025b), which can also be used here but
+requires explicit Jacobian evaluation during training. We combine the instantaneous and lagged
+penalties as
+Rsparsity := Rinst + Rlag.
+(37)
+Instantaneous DAG regularization.
+When the instantaneous causal order is not fixed, we encour-
+age acyclicity using the following NOTEARS-style regularizer (Zheng et al., 2018):
+RDAG := tr
+h
+exp
+
+G(0) ⊙G(0)i
+−dz.
+(38)
+Because this term is optimized as an ordinary loss penalty in our implementation, equation 38 is a
+soft penalty and does not strictly guarantee acyclicity. When a causal order is fixed in advance, a
+hard mask restricts the learnable entries to the triangular part consistent with that order, structurally
+guaranteeing an instantaneous DAG; in this case, RDAG can be omitted.
+34
+
+
+𝑧!"#,#
+𝑧!"#,%
+𝑧!,#
+𝑧!,%
+𝑧!,&
+𝑧!"#,&
+𝑧!"#,'
+𝑧!,'
+𝑧!,(
+𝑧!"#,(
+Latent causal relations
+Instantaneous and lagged 
+adjacency matrices
+Figure 4: Instantaneous and lagged causal graphs in the default five-component setting and their
+adjacency matrices. Red and blue indicate instantaneous and lagged causal edges, respectively;
+rows and columns index targets and sources.
+Joint optimization.
+The regularizers are combined with the selected TCL or GCL loss as in equa-
+tion 13, and all learnable parameters are optimized jointly. A decoder and reconstruction loss may
+also be added, although neither is required by the learning framework or identification theory.
+C
+SYNTHETIC-DATA EXPERIMENTAL DETAILS AND ADDITIONAL RESULTS
+The main text presents the primary comparison between iCReN and the baselines in the default set-
+ting. This section details data generation, training conditions, baselines, and evaluation, followed
+by analyses of latent causal structure, latent dimension, sample size, data-generating function com-
+plexity, and objective components. General definitions of the model, TCL/GCL losses, input-gate
+sparsity regularization, and DAG regularization are given in Appendix B.
+C.1
+COMMON EXPERIMENTAL SETTINGS
+C.1.1
+DATA GENERATION
+Data-generating model.
+In the default setting, we generate sequences using nonlinear structural
+functions and a nonlinear observation function that remain invariant across auxiliary-variable values,
+while only the transition-noise distribution changes. We set dz = dx = 5 and L = 1 and generate
+data as
+zt,i = fi
+ painst(zt,i), palags(zt,i), ϵt,i
+
+,
+xt = g(zt).
+(39)
+We use the additive-noise special case fi(a, b, e) = efi(a, b)+e. In the default setting and dimension
+sweep, the instantaneous graph is the chain DAG zt,i →zt,i+1 for i = 1, . . . , dz −1. The lagged
+edges are zt−1,i →zt,i and zt−1,i →zt,1+((i+1) mod dz) for i = 1, . . . , dz. Figure 4 illustrates these
+graphs for the default five-component setting, together with their adjacency matrices.
+Function parameterization and data splits.
+Each efi is a three-layer multilayer perceptron (MLP)
+that uses Leaky-ReLU activations and jointly takes all instantaneous and lagged parents specified
+by the true causal graph as input. The nonlinear observation function g consists of three successive
+layers, each applying a Leaky-ReLU activation followed by an orthogonal linear transformation. For
+each seed, the training, validation, and test splits use independent transition-noise samples but share
+the true graph, structural and observation functions, and transition-noise parameters.
+Discrete variation in transition-noise distributions.
+For discrete-variation data, the transition-
+noise distribution switches across discrete environments. Each split contains 256 independent se-
+quences of length 256. For every environment u ∈{1, . . . , 256} and component i, we sample once
+and fix
+µu,i ∼Unif[−0.7, 0.7],
+σu,i ∼Unif[0.4, 1.1],
+(40)
+35
+
+
+and define
+p(ϵt | ut = u) =
+dz
+Y
+i=1
+N
+ ϵt,i; µu,i, σ2
+u,i
+
+.
+(41)
+Transition noise is sampled independently from this distribution at each time. Thus, its distribution is
+constant within a sequence, while its component-wise means and standard deviations switch across
+sequences. Each split contains 256 × 256 = 216 samples.
+Continuous variation in transition-noise distributions.
+For continuous-variation data, the
+transition-noise distribution varies smoothly with continuous time. Each split is one sequence of
+length T = 218, with t = 0, . . . , T −1 used as a continuous auxiliary variable. For each compo-
+nent i, we construct two smooth time series from separate random linear combinations of the sine
+and cosine functions {sin(2πkt/T), cos(2πkt/T)}64
+k=1. We standardize each time series, apply the
+standard Gaussian cumulative distribution function, and linearly rescale the results to [−0.7, 0.7]
+and [0.4, 1.1] to obtain µi(t) and σi(t), respectively. We then set
+p(ϵt | t) =
+dz
+Y
+i=1
+N
+ ϵt,i; µi(t), σi(t)2
+.
+(42)
+For methods requiring discrete labels, we divide the sequence into 256 equal-width bins and use the
+pseudo-label eut = ⌊256t/T⌋∈{0, . . . , 255}, which we distinguish from the continuous auxiliary
+variable t. In both data types, the conditional transition-noise distribution is a component-wise
+Gaussian exponential family with sufficient statistics (ϵt,i, ϵ2
+t,i) and auxiliary-variable-dependent
+natural parameters, matching the form assumed in the IIA analysis in Appendix A.3.
+Windows used for training and evaluation.
+We remove windows containing extreme observa-
+tions using a threshold determined solely from the training split. Specifically, we set
+τ = Q0.999
+
+|xtrain
+t,j
+|
+	
+t,j
+
+,
+(43)
+and retain windows satisfying maxℓ=0,...,L maxj |xt−ℓ,j| ≤τ. For window-based training and
+validation, we apply this threshold without using the true latent states. Because LEAP is trained
+on contiguous sequences, we do not remove individual windows from its training or validation
+sequences. At test time, however, we evaluate all methods only on windows satisfying the threshold.
+C.1.2
+TRAINING CONDITIONS AND BASELINES
+Model architecture.
+We use the model and objective defined in Appendix B with the dimensions
+and auxiliary variables specified for these experiments. The encoder and learned inverse transi-
+tion function are five-layer Leaky-ReLU MLPs, and the history feature map is a three-layer Leaky-
+ReLU MLP; all hidden widths are 4dz. The main comparison and all additional analyses except the
+reconstruction-loss ablation use no decoder or reconstruction loss. iCReN-T classifies 256 discrete
+environments using the Gaussian sufficient statistics (ˆϵt,i, ˆϵ2
+t,i) for each estimated transition-noise
+component, together with the history-feature vector ht and its element-wise square. iCReN-G ap-
+plies the same element-wise transformations to the estimated transition noise and history feature.
+For discrete-variation data, each coefficient µik(u), the coefficients multiplying the transformed his-
+tory features in φ, and the offset in φ are represented by separate parameters for each of the 256
+environments. For continuous-variation data, these coefficients and the offset are linear functions of
+a Fourier basis consisting of 64 pairs of sine and cosine functions. Its auxiliary-variable-independent
+term B(ˆϵt, ht) in equation 34 is implemented as the sum of two MLP outputs, one for ˆϵt and one
+for ht, each with hidden width 32. Although the theory assumes C2 mappings, the experimental
+implementation uses Leaky-ReLU activations, which are only piecewise smooth. This mismatch
+at the activation level can be removed by replacing Leaky-ReLU with a smooth, strictly increasing
+activation applied element-wise.
+Optimization.
+We clip the global gradient norm at 5 and set λsparsity = 0.005 and λDAG =
+10. Because the implementation averages the instantaneous and lagged mean ℓ1 quantities, this
+corresponds to an implementation-level sparsity coefficient of 0.01. We use AdamW with weight
+decay 10−5, initial learning rate 10−2, and minibatches of 256 windows, reducing the learning rate to
+36
+
+
+Table 4: Main optimization settings for the baselines in the synthetic experiments.
+Method
+Optimization
+IDOL
+Adam, initial learning rate 10−3; multiplied by 0.1 at epoch 120
+G-CaRL
+SGD, momentum 0.9, initial learning rate 10−2; multiplied by 0.1 after 80% of
+updates
+CtrlNS
+AdamW, initial learning rate 10−3
+iVAE / β-VAE
+AdamW, initial learning rate 10−2; multiplied by 0.1 at epoch 120
+LEAP
+AdamW (model/transition) and SGD (discriminator), initial learning rate 2 ×
+10−3
+Table 5: Auxiliary variables supplied to each method in the synthetic experiments.
+Method
+Discrete variation
+Continuous variation
+iCReN-T
+Discrete environment ut
+256-bin pseudo-label eut
+iCReN-G
+Discrete environment ut
+Continuous time t
+IDOL
+None
+None
+G-CaRL
+None
+None
+CtrlNS
+None
+None
+LEAP
+Discrete environment ut
+256-bin pseudo-label eut
+iVAE
+Discrete environment ut
+Continuous time t
+β-VAE
+None
+None
+0.001 from epoch 120. We selected these coefficients by inspecting validation-loss trajectories and
+avoiding values for which overly strong regularization produced degenerate solutions. The ablation
+in Table 10 shows that removing either or both penalties does not consistently reduce latent-state or
+causal-graph recovery in the evaluated synthetic settings.
+Training and checkpoint selection.
+All methods are trained independently with the same 10
+seeds, and checkpoints are selected using validation objectives that do not use the true latent states
+or causal graph. Methods with the same seed share the generated data and splits; data generation,
+model initialization, training, and evaluation are independent across seeds. Each method is trained
+for at most 150 epochs, and we select the checkpoint minimizing its corresponding validation ob-
+jective. Neither MCC nor F1 is used for checkpoint selection.
+Baselines and their inputs.
+We follow public implementations where possible, adapting network
+sizes to the present setting and making limited adjustments to optimization settings, including learn-
+ing rates, based on validation behavior. We evaluate IDOL (Li et al., 2025b), G-CaRL (Morioka &
+Hyv¨arinen, 2024), CtrlNS (Song et al., 2024), LEAP (Yao et al., 2022b), iVAE (Khemakhem et al.,
+2020), and β-VAE (Higgins et al., 2017), with β = 2 for β-VAE. Tables 4 and 5 summarize the final
+optimization settings and auxiliary variables, respectively.
+Method-specific sequence handling.
+For G-CaRL, CtrlNS, and LEAP, we adapt the inputs to the
+sequence structure of the default data. G-CaRL receives (xt, xt−1) as current- and past-time groups
+through a shared encoder, and we report past-to-current lagged F1. CtrlNS receives no auxiliary
+variable; its gating network estimates at most 256 regimes from consecutive learned representations.
+The 256 time bins are used only for chunk sampling and are not provided as labels. For LEAP,
+we compute the total-correlation loss from the residual components of each transition separately,
+rather than jointly across an entire residual sequence. For continuous-variation data, we divide the
+single sequence into the 256 pseudo-label bins and present each bin to LEAP as a separate sequence;
+consequently, transitions across bin boundaries are excluded.
+C.1.3
+EVALUATION PROTOCOL
+Latent-representation and causal-graph evaluation.
+We choose the permutation of the learned
+latent components that maximizes the mean absolute correlation with the true components and use
+37
+
+
+Table 6: Latent-state and causal-graph recovery by iCReN-T under different instantaneous and
+lagged causal structures on synthetic data with Gaussian transition-noise distributions that vary
+across discrete environments. Random DAGs are distinct across seeds. Values are the mean ±
+standard deviation over 10 seeds.
+Instant. graph
+Lagged graph
+MCC
+Inst. F1
+Lagged F1
+Default chain
+Default
+0.951 ± 0.011
+0.950 ± 0.158
+0.980 ± 0.063
+Random DAGs
+Default
+0.960 ± 0.008
+1.000 ± 0.000
+0.970 ± 0.067
+Default chain
+Self-loops
+0.955 ± 0.009
+0.925 ± 0.169
+0.940 ± 0.135
+Random DAGs
+Self-loops
+0.948 ± 0.032
+0.975 ± 0.079
+0.960 ± 0.126
+the same permutation to order the learned edge scores before computing F1. The resulting MCC is
+MCC = max
+π∈Sdz
+1
+dz
+dz
+X
+i=1
+corr
+ z:,i, ˆz:,π(i)
+ ,
+(44)
+where Sdz is the set of permutations of the dz components, corr denotes the sample Pearson corre-
+lation, and z:,i and ˆz:,i collect the values of component i over the evaluated test samples. Let bEtest
+denote the empirical mean over the evaluated test windows. For iCReN, we define the empirical
+edge scores as
+S(0)
+ij = bEtest
+
+∂ˆri
+∂ˆzt,j
+
+
+,
+i̸ = j,
+S(ℓ)
+ij = bEtest
+
+∂ˆri
+∂ˆzt−ℓ,j
+
+
+,
+ℓ= 1, . . . , L,
+(45)
+and use the edge scores produced by each baseline. Here, t denotes the target time of each evaluated
+window. Diagonal entries of S(0) are excluded from instantaneous edges, and rows and columns
+index targets and sources, respectively. Using the row-to-target convention of the learned inverse
+transition function, we apply the MCC-based latent-component permutation to the target and source
+axes of the empirical graph scores. We then select for each target the same number of highest-scoring
+sources as its true number of parents. This evaluation depends on the ranking of the edge scores
+rather than their absolute scale, which is not invariant to component-wise invertible transformations.
+From this binary support and the true support, we compute
+F1 =
+2TP
+2TP + FP + FN.
+(46)
+Here, TP, FP, and FN denote the numbers of true-positive, false-positive, and false-negative edges,
+respectively. We report instantaneous F1 and lagged F1, abbreviating the former as Inst. F1 in
+tables and figures. True latent states and true parent counts are not used for training or checkpoint
+selection. For G-CaRL, we separately align the current- and past-time groups and apply the two
+permutations to the target and source axes of its lagged-edge scores. Tables and figures report the
+mean ± standard deviation over 10 seeds; -- marks metrics not applicable to the method. Figure 5
+illustrates two seeds that recover the same support despite having different score scales.
+C.2
+SENSITIVITY TO LATENT CAUSAL STRUCTURE
+To examine sensitivity to the latent causal structure, we evaluate all four combinations of two instan-
+taneous and two lagged graphs. For the instantaneous graph, we compare the default chain with ten
+distinct randomly generated DAGs, one for each seed. Each random DAG has five nodes and four
+edges, respects the fixed component order, is connected but not chain-shaped when edge directions
+are ignored, and contains at least one fork and one collider. For the lagged graph, we compare the
+default pattern, in which each component has two lagged parents, with a graph containing only the
+lagged self-loop zt−1,i →zt,i for each component i. Because this replacement reduces the number
+of lagged parents per component from two to one, we double the weight assigned to the retained
+self-loop input in each true structural function. Table 6 shows that iCReN-T attains high MCC and
+F1 scores across all four combinations.
+38
+
+
+(a) Instantaneous
+1
+2
+3
+4
+5
+Source
+1
+2
+3
+4
+5
+Target
+0
+0
+0
+0
+0
+1
+0
+0
+0
+0
+0
+1
+0
+0
+0
+0
+0
+1
+0
+0
+0
+0
+0
+1
+0
+True adjacency
+1
+2
+3
+4
+5
+Source
+1
+2
+3
+4
+5
+0
+<.01
+0.01
+<.01
+<.01
+1.20
+0
+0.01
+0.04
+<.01
+<.01
+0.75
+0
+<.01
+<.01
+0.23
+0.13
+0.94
+0
+<.01
+0.21
+0.05
+0.26
+0.70
+0
+Full (seed 850)
+1
+2
+3
+4
+5
+Source
+1
+2
+3
+4
+5
+0
+0.07
+0.02
+0.03
+0.17
+5.37
+0
+0.11
+0.36
+<.01
+0.49
+5.26
+0
+0.04
+0.41
+0.09
+0.01
+8.29
+0
+<.01
+0.07
+0.01
+1.10
+7.61
+0
+Full (seed 840)
+0
+1
+0.00
+0.20
+0.40
+0.60
+0.80
+1.00
+1.20
+×10−2
+0.00
+2.00
+4.00
+6.00
+8.00
+×10−3
+(b) Lagged
+1
+2
+3
+4
+5
+Source
+1
+2
+3
+4
+5
+Target
+1
+0
+0
+1
+0
+0
+1
+0
+0
+1
+1
+0
+1
+0
+0
+0
+1
+0
+1
+0
+0
+0
+1
+0
+1
+True adjacency
+1
+2
+3
+4
+5
+Source
+1
+2
+3
+4
+5
+0.89
+<.01
+0.32
+0.80
+<.01
+0.23
+1.32
+0.10
+0.27
+0.99
+1.24
+0.27
+1.23
+0.03
+0.10
+0.54
+1.42
+0.28
+1.23
+0.17
+0.11
+0.20
+1.54
+0.49
+1.25
+Full (seed 850)
+1
+2
+3
+4
+5
+Source
+1
+2
+3
+4
+5
+0.12
+0.02
+0.01
+0.12
+<.01
+0.05
+0.12
+0.01
+0.04
+0.10
+0.10
+0.02
+1.10
+<.01
+0.01
+0.04
+0.15
+0.05
+0.08
+0.01
+0.01
+0.04
+0.16
+0.05
+0.08
+Full (seed 840)
+0
+1
+0.00
+0.20
+0.40
+0.60
+0.80
+1.00
+1.20
+1.40
+×10−2
+0.00
+0.20
+0.40
+0.60
+0.80
+1.00
+×10−1
+Figure 5: Jacobian edge scores in the default setting with Gaussian transition-noise distributions that
+vary across discrete environments: (a) instantaneous and (b) lagged. In each panel, the left matrix
+is the true support, and the middle and right matrices show seeds 850 and 840 trained with the full
+objective. Both seeds recover the same support, although their score scales differ under component-
+wise invertible transformations. Rows and columns index targets and sources, respectively.
+Table 7: Latent-state and causal-graph recovery by iCReN-T as the latent dimension varies on syn-
+thetic data with Gaussian transition-noise distributions that vary across discrete environments. Val-
+ues are the mean ± standard deviation over 10 seeds.
+dz
+MCC
+Inst. F1
+Lagged F1
+4
+0.958 ± 0.009
+1.000 ± 0.000
+1.000 ± 0.000
+5
+0.951 ± 0.011
+0.950 ± 0.158
+0.980 ± 0.063
+8
+0.860 ± 0.021
+0.743 ± 0.284
+0.869 ± 0.127
+12
+0.886 ± 0.017
+0.527 ± 0.200
+0.812 ± 0.118
+16
+0.792 ± 0.056
+0.140 ± 0.058
+0.569 ± 0.136
+C.3
+SENSITIVITY TO LATENT DIMENSION
+We vary the latent dimension of discrete-variation data over dx = dz ∈{4, 5, 8, 12, 16} while fixing
+the total sample size at 216. For dz = 4, the lagged graph contains only self-loops; otherwise, we
+use the default instantaneous and lagged graphs. Table 7 shows that MCC and F1 scores generally
+decrease as dz increases, with the most pronounced decrease in instantaneous F1.
+C.4
+SENSITIVITY TO TOTAL SAMPLE SIZE
+We vary the total sample size from 213 to 218 while retaining the respective discrete-variation and
+continuous-variation generation schemes. For discrete-variation data, we fix 256 environments and
+vary the sequence length per environment, whereas for continuous-variation data we vary the length
+of the single continuous sequence. Figure 6 shows that MCC and F1 generally improve with sam-
+ple size for both variants under both data-generation schemes. For both data-generation schemes,
+iCReN-G is more sensitive to sample size than iCReN-T, particularly in instantaneous F1. At
+N = 216, its instantaneous F1 is 0.700 ± 0.158 for discrete variation and 0.700 ± 0.197 for contin-
+uous variation. Increasing N to 218 raises both values to 0.975 ± 0.079, indicating that the lower
+discrete-variation result at the default sample size is partly a finite-sample effect.
+39
+
+
+13
+14
+15
+16
+17
+18
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+MCC
+13
+14
+15
+16
+17
+18
+Sample-size exponent p (N = 2p)
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Instantaneous F1
+13
+14
+15
+16
+17
+18
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Lagged F1
+iCReN-T (discrete)
+iCReN-G (discrete)
+iCReN-T (continuous)
+iCReN-G (continuous)
+Figure 6: Latent-state and causal-graph recovery as total sample size varies on synthetic data with
+Gaussian transition-noise distributions. Orange and blue denote iCReN-T and iCReN-G, respec-
+tively; solid curves with circular markers and dashed curves with square markers denote discrete
+variation across environments and continuous variation over time, respectively. Shaded regions
+show mean ± standard deviation over 10 seeds.
+Table 8: Latent-state and causal-graph recovery by iCReN-T as the complexity of the true data-
+generating functions varies on synthetic data with Gaussian transition-noise distributions that vary
+across discrete environments. We vary structural-function depth with a fixed three-layer observation
+function in (a), and observation-function depth with fixed three-layer structural functions in (b).
+Values are the mean ± standard deviation over 10 seeds.
+(a) Structural-function depth
+Depth
+MCC
+Inst. F1
+Lagged F1
+1
+0.913 ± 0.012
+0.275 ± 0.275
+1.000 ± 0.000
+2
+0.953 ± 0.007
+0.975 ± 0.079
+1.000 ± 0.000
+3
+0.951 ± 0.011
+0.950 ± 0.158
+0.980 ± 0.063
+4
+0.952 ± 0.007
+0.925 ± 0.237
+0.950 ± 0.127
+5
+0.955 ± 0.006
+1.000 ± 0.000
+1.000 ± 0.000
+(b) Observation-function depth
+Depth
+MCC
+Inst. F1
+Lagged F1
+1
+0.957 ± 0.008
+1.000 ± 0.000
+1.000 ± 0.000
+2
+0.953 ± 0.007
+0.975 ± 0.079
+1.000 ± 0.000
+3
+0.951 ± 0.011
+0.950 ± 0.158
+0.980 ± 0.063
+4
+0.946 ± 0.011
+0.950 ± 0.105
+1.000 ± 0.000
+5
+0.930 ± 0.008
+0.875 ± 0.177
+0.980 ± 0.063
+40
+
+
+Table 9: MCC of both proposed methods and the baselines with one- and three-layer observation
+functions on discrete-variation synthetic data. Each entry is the mean ± standard deviation over 10
+seeds.
+Method
+One layer
+Three layers
+iCReN-T
+0.957 ± 0.008
+0.951 ± 0.011
+iCReN-G
+0.947 ± 0.010
+0.940 ± 0.010
+IDOL
+0.704 ± 0.061
+0.468 ± 0.046
+G-CaRL
+0.775 ± 0.060
+0.764 ± 0.065
+CtrlNS
+0.503 ± 0.050
+0.432 ± 0.071
+LEAP
+0.536 ± 0.063
+0.373 ± 0.107
+iVAE
+0.264 ± 0.037
+0.230 ± 0.106
+β-VAE
+0.582 ± 0.058
+0.482 ± 0.067
+Table 10: Ablation of structural regularization on synthetic data with Gaussian transition-noise dis-
+tributions that vary across discrete environments, with dz = 5 (left) and dz = 8 (right). Values are
+the mean ± standard deviation over 10 seeds.
+dz = 5
+dz = 8
+Objective
+MCC
+Inst. F1
+Lagged F1
+MCC
+Inst. F1
+Lagged F1
+Full
+0.951 ± 0.011 0.950 ± 0.158 0.980 ± 0.063 0.860 ± 0.021 0.743 ± 0.284 0.869 ± 0.127
+No sparsity 0.955 ± 0.007 1.000 ± 0.000 1.000 ± 0.000 0.867 ± 0.016 0.900 ± 0.191 0.950 ± 0.097
+No DAG
+0.957 ± 0.004 0.950 ± 0.105 0.940 ± 0.135 0.861 ± 0.027 0.786 ± 0.205 0.894 ± 0.135
+Neither
+0.955 ± 0.008 0.925 ± 0.121 0.890 ± 0.191 0.861 ± 0.017 0.800 ± 0.204 0.800 ± 0.164
+C.5
+SENSITIVITY TO DATA-GENERATING FUNCTION COMPLEXITY
+We vary the depth of the true structural or observation function to examine its effect on latent-state
+and causal-graph recovery by iCReN-T. We use the default dimensions dx = dz = 5 and the default
+instantaneous and lagged graphs. First, we fix the observation function at three layers and vary
+the structural-function depth from one to five layers. One layer gives linear structural functions,
+whereas two to five layers are Leaky-ReLU MLPs with increasing numbers of hidden layers; all
+conditions use the same 10 seeds. As shown in Table 8(a), MCC and both F1 scores remain high
+for the nonlinear two- to five-layer structural functions. For the linear functions, instantaneous F1
+decreases to 0.275 ± 0.275, whereas MCC and lagged F1 remain high. An additively separable
+linear transition cannot satisfy the sufficient-variability rank condition when instantaneous edges
+are present (Remark 1). The reduced instantaneous F1 is consistent with this limitation.
+Next, we fix the structural functions at three layers and vary the observation-function depth from
+one to five layers. Table 8(b) shows that iCReN-T has mean MCC and instantaneous F1 that tend
+to decrease as the observation-function depth increases, whereas lagged F1 shows no clear trend.
+We also compare iCReN-T, iCReN-G, and the baselines using one- and three-layer observation
+functions while keeping the structural functions at three layers. Within each seed, the two settings
+share the same latent states, transition noise, environment labels, and time indices. Table 9 shows
+higher mean MCC at one layer for every evaluated method, with the largest increases for IDOL and
+LEAP; both proposed methods have higher mean MCC than all baselines at both depths.
+C.6
+ABLATION OF OBJECTIVE COMPONENTS
+Structural regularization.
+We remove the sparsity and DAG regularizers separately or jointly to
+assess their empirical contributions to latent-state and causal-graph recovery. On discrete-variation
+data with the default dz = 5 and with dz = 8, where recovery begins to deteriorate, we compare
+the full objective with three ablations: No sparsity with λsparsity = 0, No DAG with λDAG = 0,
+and Neither with both coefficients set to zero. The results in Table 10 show that removing either or
+both regularizers does not consistently lower MCC, instantaneous F1, or lagged F1 in the evaluated
+settings, although the regularizers are motivated by the structural conditions used in the theory.
+Reconstruction loss.
+We add a decoder and reconstruction loss to the default objective to as-
+sess how observation reconstruction affects latent-state and causal-graph recovery. For the default
+discrete-variation data, let ˆg be a three-layer decoder from the learned representation to the observa-
+41
+
+
+Table 11: Effect of adding a decoder and reconstruction loss to the default objective on synthetic
+data with Gaussian transition-noise distributions that vary across discrete environments. Values are
+the mean ± standard deviation over 10 seeds.
+Objective
+MCC
+Inst. F1
+Lagged F1
+Reconstruction loss
+Full
+0.951 ± 0.011
+0.950 ± 0.158
+0.980 ± 0.063
+--
+Full + reconstruction
+0.957 ± 0.009
+1.000 ± 0.000
+0.970 ± 0.048
+0.0022 ± 0.0005
+Table 12: Main pretraining objectives and auxiliary information for the treadmill motion forecasting
+experiment. KL denotes Kullback–Leibler.
+Method
+Pretraining objective
+Auxiliary information
+iCReN
+Reconstruction, TCL, and sparsity regularization
+12-class gait phase
+IDOL
+Reconstruction, KL divergence, and sparsity regu-
+larization
+None
+G-CaRL
+Group-contrastive objective
+None
+CtrlNS
+Variational transition objective
+No observed label; at most
+five inferred regimes
+LEAP
+Variational transition, total correlation, and sparsity
+regularization
+12-class gait phase
+β-VAE
+Reconstruction and β-weighted KL divergence
+None
+tion space. For a minibatch B of observation windows, define
+Lrec = 1
+|B|
+X
+b∈B
+L
+X
+ℓ=0
+x(b)
+t−ℓ−ˆg
+
+ϕ
+
+x(b)
+t−ℓ
+
+2
+2 .
+(47)
+We compare the full objective with Full + reconstruction, which adds Lrec with λrec = 1. Ta-
+ble 11 shows that adding reconstruction yields similarly high MCC and F1 scores but no consistent
+improvement across the three metrics.
+D
+REAL-WORLD EXPERIMENTAL DETAILS
+We use iCReN-T in both real-world experiments because it generally achieved higher mean re-
+covery scores in the synthetic comparisons.
+Its classifier applies the element-wise map a 7→
+(a, a2, log(1+a2)) to both the estimated transition noise and the history feature. Inputs are standard-
+ized using statistics computed only from the training data, and each method’s pretraining checkpoint
+is selected using its method-specific validation objective. After pretraining, each encoder is frozen,
+and a forecasting head with the same architecture across methods is trained, selected using val-
+idation data, and evaluated on test data. Each random seed defines one complete run, including
+representation pretraining, training of the forecasting head, and evaluation.
+D.1
+TREADMILL MOTION FORECASTING
+Dataset and preprocessing.
+We use the treadmill walking data provided by Riglet et al. (2024),
+including sequences recorded at Slow, Comfortable, and Fast walking speeds. From the three-
+dimensional coordinates of markers on the left and right sides of the pelvis, thigh, knee, ankle,
+heel, and toe, we construct 36-dimensional sequences. We align the coordinate axes, convert the
+coordinates from millimeters to meters, center each frame by subtracting the midpoint of the left
+and right pelvic markers, and retain every eighth frame of the original 100-Hz trajectories, yielding
+a sampling rate of 12.5 Hz. We split the 30 participants into 19 for training, 6 for validation, and
+5 for testing. We estimate the normalization statistics using only sequences recorded at the Slow
+and Fast walking speeds from the training participants and apply them unchanged to validation and
+test data. We use Slow and Fast for training and model selection and Comfortable only for final test
+evaluation.
+Pretraining.
+We pretrain each method for at most 20,000 steps with latent dimension 5 and batch
+size 256. Following the motion-capture setting of IDOL (Li et al., 2025b), we set the maximum lag to
+42
+
+
+Table 13: Mean marker error (mm) at every third predicted frame for Comfortable test sequences,
+which are excluded from training and model selection. Values are the mean ± standard deviation
+across runs; boldface indicates the best value in each column. We report 10 runs for iCReN, IDOL,
+G-CaRL, CtrlNS, and β-VAE and the eight numerically stable runs for LEAP.
+(a) Early prediction horizons
+Prediction horizon [s]
+0.24
+0.48
+0.72
+0.96
+iCReN
+35.518 ± 1.236
+42.060 ± 1.939
+47.863 ± 1.255
+58.650 ± 2.051
+IDOL
+36.654 ± 2.106
+44.076 ± 2.304
+50.717 ± 1.786
+62.400 ± 2.119
+G-CaRL
+45.942 ± 4.276
+52.197 ± 4.917
+60.568 ± 3.640
+75.790 ± 7.785
+CtrlNS
+37.152 ± 1.859
+43.593 ± 2.267
+48.861 ± 1.610
+62.337 ± 1.978
+LEAP
+37.281 ± 1.326
+44.220 ± 1.825
+50.902 ± 1.568
+63.431 ± 2.825
+β-VAE
+36.429 ± 0.877
+43.391 ± 1.865
+51.058 ± 2.257
+63.305 ± 2.546
+(b) Later prediction horizons
+Prediction horizon [s]
+1.20
+1.44
+1.68
+1.92
+iCReN
+67.673 ± 2.831
+82.034 ± 2.725
+95.912 ± 2.611
+107.309 ± 4.345
+IDOL
+71.989 ± 2.691
+86.791 ± 2.547
+102.094 ± 3.543
+115.146 ± 3.822
+G-CaRL
+86.037 ± 6.819
+103.133 ± 9.088
+118.191 ± 10.616
+135.169 ± 8.541
+CtrlNS
+70.025 ± 1.759
+86.040 ± 4.300
+101.372 ± 3.605
+117.059 ± 7.501
+LEAP
+70.623 ± 2.281
+87.338 ± 4.548
+99.185 ± 3.018
+113.210 ± 7.738
+β-VAE
+73.886 ± 2.671
+91.089 ± 4.090
+106.227 ± 4.279
+123.960 ± 5.890
+one for all dynamic methods. Using the right-foot-strike events provided with the dataset, we define
+each gait cycle as the interval between consecutive strikes, divide it uniformly into 12 phases, and
+use the phase index as the auxiliary variable for iCReN and LEAP. We fit each representation model
+on the Slow and Fast walking speeds from the 19 training participants and select its checkpoint on
+the same walking speeds from the six validation participants using the method-specific validation
+objective. For iCReN, a frame-wise decoder reconstructs the 36-dimensional marker coordinates
+from each latent representation, and the pretraining objective combines reconstruction and TCL
+classification losses with sparsity regularization on the input gates, using λrec = 1, λIIA = 0.001,
+and λsparsity = 5 × 10−5. Because we use a fixed lower-triangular mask for the instantaneous
+structure, no DAG regularization is applied in this experiment. Two LEAP runs produced non-finite
+losses or gradients during pretraining and were therefore excluded from downstream evaluation
+without replacement; we report the remaining eight runs. Table 12 summarizes the pretraining
+objectives and auxiliary information.
+Downstream forecasting.
+After pretraining, we freeze each selected encoder and train the same
+two-layer forecasting head with hidden width 64 and Gaussian error linear unit (GELU) activations
+for all methods to directly predict the marker coordinates for the following 24 frames (1.92 seconds)
+from the latent representations of the preceding 12 frames (0.96 seconds). For downstream learn-
+ing, we further divide the 19 training participants into 15 for fitting the forecasting head and 4 for
+selecting its checkpoint; both subsets contain only the Slow and Fast walking speeds. We train the
+head for at most 100,000 steps using Adam with learning rate 10−3 and batch size 256 and select
+the checkpoint with the lowest mean marker error averaged over all 24 prediction horizons on the
+four-participant selection subset. We then evaluate the selected encoder and forecasting head on
+the Comfortable walking speed from the five test participants without further parameter updates or
+model selection.
+Evaluation metric.
+Before computing the error, we return the standardized predictions and targets
+to the physical coordinate scale using the training-set normalization statistics. Let n = 1, . . . , N
+index test windows, h = 1, . . . , H index prediction horizons, and j = 1, . . . , J index markers,
+where N = 7,214, H = 24, and J = 12. Let yn,h,j and ˆyn,h,j denote the true and predicted
+three-dimensional marker coordinates, respectively. We compute the mean marker error at horizon
+h as
+1
+NJ
+N
+X
+n=1
+J
+X
+j=1
+∥yn,h,j −ˆyn,h,j∥2 .
+(48)
+43
+
+
+We convert the resulting distances from meters to millimeters and report every third prediction hori-
+zon, from h = 3 (0.24 seconds) to h = 24 (1.92 seconds). As shown in Table 13, iCReN attains the
+lowest mean marker error at every reported horizon.
+D.2
+WEATHER FORECASTING
+Dataset and preprocessing.
+We construct regional weather time series from the ERA5 global
+climate reanalysis dataset (Hersbach et al., 2020; Copernicus Climate Change Service, 2023) for the
+eight regions listed in Table 14. For each of the five cities in a region, we use the nearest 0.25◦grid
+point and sample the data at three-hour intervals. At each time point, the encoder input comprises 2-
+m temperature (t2m), mean sea-level pressure (msl), 10-m zonal and meridional wind components
+(u10 and v10), and total precipitation over the preceding three hours (tp) for all five cities. We
+convert the three-hour precipitation totals to millimeters and apply a log1p transformation. We use
+only windows consisting of consecutive three-hour observations. Within each month of the 1981–
+2013 pretraining period, we divide the days into four periods (1–7, 8–14, 15–21, and 22 onward) and
+reserve the final day of each period for validation. The preceding L time points used as context for
+these validation windows are also excluded from training and from the computation of normalization
+statistics. We standardize each input variable separately for each city using only the remaining 1981–
+2013 training samples and apply the resulting statistics unchanged to the pretraining validation and
+later downstream data.
+Pretraining.
+We use a calendar index as the auxiliary variable during pretraining. The index
+combines month (12 categories), the four within-month periods defined above, and UTC time (8
+three-hour categories), yielding 384 classes. We exclude February 29 and do not include the year,
+so the same 384 classes recur across years. Only iCReN and LEAP use this observed auxiliary
+variable during pretraining; the other methods receive no calendar label. We pretrain each method
+for at most 10,000 steps on data from 1981–2013, use latent dimension 5, and set the maximum lag
+to 8 for the dynamic methods, covering the preceding 24 hours at the three-hour sampling interval.
+For iCReN, the pretraining objective combines reconstruction and TCL classification losses with
+sparsity regularization on the input gates, using λrec = 1, λIIA = 0.005, and λsparsity = 5 × 10−5.
+A fixed lower-triangular mask is used for the instantaneous structure, so no DAG penalty contributes
+to the objective. Table 15 summarizes the pretraining objectives and auxiliary information.
+Downstream forecasting.
+After pretraining, we freeze each selected encoder and train the same
+two-layer forecasting head with hidden width 256, GELU activations, and dropout 0.1 for all meth-
+ods. The head uses the latent representations at the preceding eight time points to predict the relative
+humidity of all five cities three hours ahead. We fit the head on data from 2014–2016 for at most
+5,000 steps using Adam with learning rate 10−3 and select its checkpoint by standardized MSE
+on 2017 validation data. We then evaluate the selected encoder and head on data from 2018–2020
+without further parameter updates or model selection. The calendar index is not provided to the
+forecasting head.
+Target and evaluation metric.
+We derive relative humidity, which is not used during pretraining,
+from 2-m temperature and dew-point temperature and evaluate the three-hour-ahead forecasts using
+standardized MSE. Let T and Td denote 2-m temperature and dew-point temperature in kelvin, and
+Table 14: Cities used in the weather forecasting experiment. We use the ERA5 0.25◦grid point
+nearest to each city center.
+Region
+Cities
+Southeastern Australia
+Brisbane, Sydney, Canberra, Melbourne, Hobart
+Canada
+Toronto, Kingston, Ottawa, Montreal, Quebec City
+China
+Harbin, Beijing, Shanghai, Wuhan, Guangzhou
+France
+Lille, Paris, Strasbourg, Bordeaux, Marseille
+Germany
+Hamburg, Berlin, Cologne, Frankfurt, Munich
+Japan
+Sapporo, Sendai, Tokyo, Osaka, Fukuoka
+South Korea
+Seoul, Daejeon, Daegu, Gwangju, Busan
+US Atlantic
+Boston, New York, Washington, D.C., Atlanta, Miami
+44
+
+
+Table 15: Main pretraining objectives and auxiliary information for the weather forecasting experi-
+ment.
+Method
+Pretraining objective
+Auxiliary information
+iCReN
+Reconstruction, TCL, and sparsity regularization
+384-class calendar index
+IDOL
+Reconstruction, KL divergence, and sparsity reg-
+ularization
+None
+G-CaRL
+Group-contrastive objective
+None
+CtrlNS
+Variational transition objective
+No observed label; at most
+five inferred regimes
+LEAP
+Variational transition, total correlation, and spar-
+sity regularization
+384-class calendar index
+β-VAE
+Reconstruction and β-weighted KL divergence
+None
+Table 16: Standardized MSE for three-hour-ahead relative-humidity forecasting in eight regions.
+Each region comprises five cities. Values for the learned methods are the mean ± standard deviation
+over 10 runs; boldface indicates the best learned method in each column. The two panels partition
+the columns only for readability. Persistence is a deterministic forecasting reference and is shown
+without a standard deviation.
+(a) Southeastern Australia, Canada, China, and France
+Method
+AU
+CAN
+CN
+FR
+iCReN
+0.352 ± 0.004
+0.481 ± 0.011
+0.546 ± 0.010
+0.422 ± 0.015
+IDOL
+0.359 ± 0.004
+0.484 ± 0.010
+0.555 ± 0.006
+0.438 ± 0.007
+G-CaRL
+0.649 ± 0.017
+0.673 ± 0.013
+0.664 ± 0.009
+0.750 ± 0.019
+CtrlNS
+0.385 ± 0.021
+0.522 ± 0.084
+0.618 ± 0.028
+0.459 ± 0.061
+LEAP
+0.396 ± 0.006
+0.524 ± 0.009
+0.591 ± 0.012
+0.486 ± 0.014
+β-VAE
+0.357 ± 0.003
+0.475 ± 0.011
+0.561 ± 0.015
+0.445 ± 0.011
+Persistence (reference)
+0.477
+0.373
+0.356
+0.434
+(b) Germany, Japan, South Korea, and US Atlantic
+Method
+GER
+JP
+KR
+US
+iCReN
+0.474 ± 0.011
+0.414 ± 0.013
+0.291 ± 0.007
+0.427 ± 0.009
+IDOL
+0.469 ± 0.010
+0.440 ± 0.009
+0.304 ± 0.007
+0.440 ± 0.008
+G-CaRL
+0.754 ± 0.028
+0.615 ± 0.026
+0.535 ± 0.016
+0.554 ± 0.020
+CtrlNS
+0.504 ± 0.043
+0.501 ± 0.057
+0.382 ± 0.048
+0.462 ± 0.026
+LEAP
+0.566 ± 0.018
+0.482 ± 0.015
+0.327 ± 0.011
+0.460 ± 0.012
+β-VAE
+0.484 ± 0.017
+0.426 ± 0.009
+0.328 ± 0.009
+0.416 ± 0.008
+Persistence (reference)
+0.437
+0.446
+0.374
+0.334
+define their values in degrees Celsius as τ = T −273.15 and τd = Td −273.15. Using Bolton’s
+approximation of saturation vapor pressure (Bolton, 1980), we compute
+RH(T, Td) = clip[0,100]
+
+100 exp
+ 17.67τd
+τd + 243.5 −
+17.67τ
+τ + 243.5
+
+.
+(49)
+Dew-point temperature is used only for this calculation and is not provided to the encoder. We
+standardize relative humidity separately for each city using statistics from the 1981–2013 pretraining
+period. Let n = 1, . . . , N index test time points and c = 1, . . . , C index cities, and denote the
+standardized true and predicted relative humidity by yn,c and ˆyn,c, respectively. We compute
+MSEstd =
+1
+NC
+N
+X
+n=1
+C
+X
+c=1
+(yn,c −ˆyn,c)2 .
+(50)
+For each run, we evaluate the metric over all test time points and cities from 2018–2020. Table 16
+reports the results. We also report persistence, which uses the most recently observed relative hu-
+midity as the forecast. Because the learned methods do not receive relative humidity as an input, we
+treat persistence as a reference and exclude it from the boldface comparison.
+D.3
+DATA SOURCES AND AVAILABILITY
+The ERA5 hourly data on single levels used in the weather experiments are publicly available from
+the Copernicus Climate Change Service Climate Data Store (Copernicus Climate Change Service,
+45
+
+
+2023) under DOI 10.24381/cds.adbb2d47; we retrieved them on September 2, 2026. We do
+not redistribute the data. The results contain modified Copernicus Climate Change Service informa-
+tion 2020. Neither the European Commission nor ECMWF is responsible for any use that may be
+made of the Copernicus information or data it contains.
+The treadmill experiment uses the publicly available motion-capture dataset of Riglet et al. (2024),
+distributed through Figshare under DOI 10.6084/m9.figshare.c.7056797.v1. We do not
+redistribute the source data.
+46

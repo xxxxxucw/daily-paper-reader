@@ -1,0 +1,2267 @@
+Title: Proximal Balancing for Causal Effect Estimation under Unmeasured Confounding
+
+URL Source: https://arxiv.org/pdf/2609.40051v1
+
+Published Time: Thu, 01 Oct 2026 02:06:49 GMT
+
+Number of Pages: 50
+
+Markdown Content:
+2026-10-01 
+
+# Proximal Balancing for Causal Effect Estimation under Unmeasured Confounding 
+
+# Yonghan Jung ∗
+
+School of Information Sciences University of Illinois Urbana-Champaign Estimating causal effects from observational data is central to science and policy, but the effects are not identified when confounders are unmeasured. Proximal causal inference addresses this problem with proxies of the unmeasured confounders. How-ever, existing proxy-based approaches either designate proxy roles and solve an inverse problem, which is ill-posed and hard to estimate with high-dimensional proxies, or use a latent-variable model, which assumes that the learned latent variable matches the hidden confounder and leaves bias when it does not. To address these challenges, we introduce proximal balancing . It carries the classical idea of covariate balancing to confounders that are observed only through proxies: it learns a low-dimensional sum-mary of the covariates and proxies that makes the treatment groups comparable, and then adjusts for this summary. It needs no designated proxy roles, inverse problem, or latent model. We give identification theory, finite-sample guarantees, and a practical algorithm, PROBE. We demonstrate the method on low-dimensional, high-dimensional, and image proxies and on real-world data. 
+
+# Contents 
+
+1. Introduction 3
+
+1.1. Related Work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+
+2. Problem Setting and Notation 53. Identification by Proximal Balancing 6
+
+3.1. Exact Balance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 63.2. Unknown Valid Block . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 73.3. Approximate Balance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+
+4. Learning, Estimation, and Search 8   
+
+> ∗Code, results, and scripts that reproduce every figure and table: https://github.com/CausalDataScience/ proximal-balancing .
+
+1arXiv:2609.40051v1 [stat.ML] 30 Sep 2026 5. Experiments 11 6. Conclusion 13 A. Problem Setting 18 B. Identification 18 
+
+B.1. Identification for a Prespecified Held-Out Block . . . . . . . . . . . . . . . . . . . . . 18 B.1.1. Assumptions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 B.1.2. Exact Identification for a Fixed Block . . . . . . . . . . . . . . . . . . . . . . 20 B.1.3. Comparison with the Canonical Two-Proxy Proximal Model . . . . . . . . . . 20 B.2. Identification When the Valid Held-Out Block Is Unknown . . . . . . . . . . . . . . 21 B.3. Approximate Balance and Bias Bound . . . . . . . . . . . . . . . . . . . . . . . . . . 22 
+
+C. Representation Learning and AIPW Estimation 23 
+
+C.1. Representation Learning . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 C.2. AIPW Estimation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 C.3. Searching Across Proxy Splits . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 28 
+
+D. Experiment Details and Evidence Boundaries 31 
+
+D.1. Shared structural family . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 D.2. Image rendering . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 D.3. Search family, screen, and aggregation . . . . . . . . . . . . . . . . . . . . . . . . . . 32 D.4. Honest learning and evaluation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 D.5. Modeling choices and implementation . . . . . . . . . . . . . . . . . . . . . . . . . . 33 D.6. Additional results for the synthetic analysis . . . . . . . . . . . . . . . . . . . . . . . 35 D.7. Semi-synthetic benchmarks . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 39 D.8. Protocol discipline . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 40 D.9. Evidence boundaries . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 40 D.10.Additional figures . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 40 
+
+E. Proofs 42 
+
+E.1. Proofs for Section 3 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 42 E.2. Proofs for Section 4 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46 E.3. Finite-Strata MMD Specialization . . . . . . . . . . . . . . . . . . . . . . . . . . . . 49 2(a) UWXA Y              
+
+> (Wj,W−j)(b) UW−jXWj
+> AY
+> (c) UZtr XZout
+> AY
+
+Figure 1: (a) The proxy W , split into ( Wj , W−j ). (b) A higher-resolution view of (a), showing an allowed structure: the held-out block Wj affects Y but not A. (c) Proximal causal inference with designated proxies Ztr and Zout .
+
+# 1. Introduction 
+
+Estimating treatment effects from observational data, a central task in medicine and public policy, usually assumes that every confounder (every common cause of the treatment and the outcome) is measured. This assumption, known as no unmeasured confounding , often fails. In a hypothetical study of an aggressive therapy A and a recovery outcome Y , clinicians treat patients with severe disease more often, and severe disease lowers recovery, so the unrecorded severity U confounds the comparison even after adjustment for recorded covariates X such as age. The effect is then not identified, that is, not determined by the distribution of the observed data (Pearl, 2009). Although U is unrecorded, modern data often capture it indirectly. For instance, a pretreatment medical image reflects severity through the size, texture, and spread of affected tissue. Variables that carry such indirect information about a hidden confounder are called proxies , ranging from discrete codes to multimodal data such as images with thousands of pixels. Proxy-based causal inference has drawn growing attention because it identifies causal effects under hidden confounding by adding structural assumptions that are often plausible in practice (Kuroki and Pearl, 2014; Miao et al., 2018; Tchetgen Tchetgen et al., 2024). Existing proxy-based methods either designate proxy roles in advance, for example, that each proxy affects only one of the treatment and the outcome, and obtain the identification functional as the solution of an inverse problem, such as an integral equation for a bridge function (Miao et al., 2018), or model latent variables from the observations and treat them as the hidden confounder under strong assumptions (Louizos et al., 2017) (see Section 1.1 for details). For high-dimensional proxies such as images, these approaches are difficult to apply. When multiple medical images, such as radiographs, CT scans, and MRI scans taken before treatment, serve as proxies of hidden severity, clinical knowledge seldom tells which images may influence the treatment decision, so roles cannot be designated with confidence. The inverse problem is ill-posed, so small errors in the observed regressions can produce large errors in its solution, and this solution is harder to estimate when it takes an image as input (Kallus et al., 2021). A learned latent variable, in turn, need not match the hidden confounder (Rissanen and Marttinen, 2021). To address these concerns, we introduce proximal balancing , which uses a multi-dimensional proxy without designating roles in advance, solving an inverse problem, or modeling the confounder. It builds on balancing in causal inference (Rosenbaum and Rubin, 1983): when high-dimensional covariates X suffice for adjustment, a low-dimensional function ϕ(X) satisfying X ⊥⊥ A | ϕ(X)suffices as well. Proximal balancing carries this idea to hidden confounding. As Fig. 1(a) shows, it splits the proxy into a held-out block Wj and the remaining blocks W−j and learns ϕ(X, W−j )satisfying ( X, Wj ) ⊥⊥ A | ϕ(X, W−j ). We first develop this idea for a known held-out block and 3then extend it to the case where only the whole proxy W = ( W1, . . . , WJ ) is given and the valid block is unknown. We make three contributions. 1. Proximal balancing framework. We develop proximal balancing, which identifies the average treatment effect from a high-dimensional proxy (Section 3.1). 2. Extensions. We bound the bias under approximate balance, identify the effect by a plurality vote when the valid block is unknown, and give finite-sample guarantees for our algorithm, PROxy Blockwise Exclusion (PROBE) (Sections 3.2–4). 3. Empirical evidence. Simulations with scalar, vector, and image-rendered proxies show that proximal balancing recovers the known effect (Section 5). 
+
+1.1. Related Work 
+
+Causal inference under unmeasured confounding. When the causal graph is known, a graph-ical criterion such as the front-door criterion can identify an effect despite unmeasured confounding (Pearl, 2009; Fulcher et al., 2020; Jung, 2026), and a complete algorithm decides whether an effect is identifiable (Tian and Pearl, 2002; Shpitser and Pearl, 2006). Weighting, doubly robust, and debi-ased machine learning estimators have been developed for identifiable effects (Jung et al., 2020a,b, 2021b,a; Bhattacharya et al., 2022; Jung et al., 2023; Guo et al., 2023; Jung et al., 2024a,b). These methods, however, assume that the causal graph, or at least its equivalence class, is known; without such a graph, the observed data only bound the effect (Jung and Kang, 2026). Table 1: Requirements of proxy-based meth-ods; a check means not needed. Roles: designated proxy roles. In-verse: an inverse problem. Latent: a latent model of U .                
+
+> Method Roles Inverse Latent Proximal inference ××✓
+> Single-proxy control ××✓
+> CEVAE ✓✓×
+> Saha et al. ✓✓×
+> Proximal balancing ✓✓✓
+
+Proxy-based identification. For discrete vari-ables, matrix adjustment (Kuroki and Pearl, 2014; Lee and Bareinboim, 2021) identifies the effect by inverting the matrix of proxy probabilities given the confounder. Proximal causal inference, which grew out of negative-control methods (Lipsitch et al., 2010) and matrix adjustment, uses a treatment-side and an outcome-side proxy, which may affect only the treatment and only the outcome, respectively, as in Fig. 1(c) (Miao et al., 2018; Tchetgen Tchetgen et al., 2024; Cui et al., 2024). It computes the effect by solving an inverse problem, an integral equation among observed distributions, and completeness conditions make this solution identify the effect. Kernel and deep-learning estimators solve this inverse problem with statistical guarantees (Mas-touri et al., 2021; Kallus et al., 2021), including for image proxies and for proxies extracted from two separate pretreatment texts (Xu et al., 2021; Chen et al., 2024). Single-proxy control (Tchet-gen Tchetgen, 2014; Park et al., 2024) uses one proxy of Y (0), the outcome that a unit would have without treatment, and identifies the effect on the treated; a kernel version handles deterministic outcomes (Xu and Gretton, 2025). All of these methods fix proxy roles before the analysis and solve an inverse problem (Table 1). Fig. 1 contrasts proximal balancing, panels (a) and (b), with the standard proximal structure, panel (c). Proximal balancing restricts only the valid held-out block Wj , which must not affect the treatment; the remaining blocks W−j may affect both, and the valid block need not be known in advance. It replaces the inverse problem with an observable 4balance condition followed by ordinary adjustment. 
+
+Latent-variable modeling approaches. CEVAE (Louizos et al., 2017) fits a variational au-toencoder (Kingma and Welling, 2014) to the proxies, treatment, and outcome, and adjusts for the inferred latent vector. Its justification rests on the premise that the encoding and decoding steps recover a latent variable that matches U , a premise that need not hold, as Rissanen and Marttinen (2021) demonstrate empirically. Proximal balancing models neither the proxy nor the confounder. 
+
+Unknown valid candidates. Majority and plurality rules, implemented by median and mode estimators, identify an effect when most, or the largest group, of the candidate instruments are valid (Kang et al., 2016; Bowden et al., 2016; Hartwig et al., 2017; Guo et al., 2018). In proximal inference, Rakshit et al. (2025) take a median over candidate proxies when more than half are valid, Yu et al. (2025) assume that at least a known number of treatment-side proxies are valid, and data-driven searches select valid negative controls in linear models (Kummerfeld et al., 2024; Xie et al., 2024). Saha et al. (2026) identify the effect without designating proxy roles when three proxies are mutually independent given a categorical confounder. Proximal balancing applies the plurality rule to held-out blocks that pass a balance audit, in a nonparametric model with a learned representation. Its conditions also allow the blocks to depend on each other beyond the confounder. 
+
+Balancing and representation learning. Balancing scores and weights align measured covari-ates across treatment groups (Rosenbaum and Rubin, 1983; Hainmueller, 2012; Imai and Ratkovic, 2014), and representation learning balances after compressing high-dimensional covariates (Shalit et al., 2017). Both assume that the measured covariates suffice for adjustment, and a compressed representation can lose confounding information. Proximal balancing audits its representation with a held-out proxy block, and its estimation step uses separate samples for representation learning, nuisance fitting, and evaluation. 
+
+# 2. Problem Setting and Notation 
+
+We observe n i.i.d. copies O1, . . . , On of O ≜ (X, W , A, Y ), where A ∈ { 0, 1 } is treatment, Y is the observed outcome, and X contains observed pretreatment covariates. For each a ∈ { 0, 1 }, the 
+
+potential outcome Y (a) is the outcome that would be observed if treatment were set to a. The target is the average treatment effect τ ≜ E{Y (1) − Y (0) }.We impose the following global outcome conditions. 
+
+Assumption 1 (Consistency and integrability) . For each a ∈ {0, 1 }, Y = Y (A) and 
+
+E|Y (a)| < ∞.The high-dimensional pretreatment proxy W = ( W1, . . . , WJ ) is divided into prespecified blocks. An unobserved pretreatment variable U may affect both treatment and outcome. The proxy W
+
+carries information about U . Panels (a) and (b) of Fig. 1 visualize this problem setting; they do not themselves guarantee identification. We analyze one block at a time: one block is held out, and the other blocks remain available. 5Definition 1 (Held-out and remaining proxy blocks) . Let [ J] ≜ {1, . . . , J}. For j ∈ [J], call 
+
+Wj the held-out block and write W−j ≜ (Wk : k ∈ [J] \ { j}) for the collection of remaining blocks. Define Vj ≜ (X, W−j ) as the retained variables and Tj ≜ (X, Wj ) as the variables used later to formulate the held-out balance condition. 
+
+# 3. Identification by Proximal Balancing 
+
+We introduce proximal balancing , an identification method that brings covariate-balancing ideas (Hainmueller, 2012; Imai and Ratkovic, 2014) to high-dimensional pretreatment proxies. It learns a representation from the retained proxy blocks and uses the held-out block with observed covariates to audit residual treatment information. 
+
+3.1. Exact Balance 
+
+We first consider a fixed held-out block within the high-dimensional proxy W = ( W1, . . . , WJ ). For 
+
+j ∈ [J], Definition 1 calls Wj the held-out block and W−j the remaining blocks .
+
+Assumption 2 (Latent exchangeability and held-out treatment independence) . For each 
+
+a ∈ { 0, 1 }, Y (a) ⊥⊥ A | (U , Vj ) and Wj ⊥⊥ A | (U , Vj ). Latent exchangeability says that, after ( U , Vj ) is fixed, treatment carries no further information about Y (a). Held-out treatment independence states that Wj carries no additional treatment information given the latent and retained variables. Let ϕj be a measurable encoder and set Zj ≜ ϕj (Vj ) = ϕj (X, W−j ). Proximal balancing seeks a representation that makes the treatment arms comparable for the potential-outcome means, while 
+
+Tj = ( X, Wj ) supplies an observable check of residual treatment information. For a distribution 
+
+Q of ( Vj , U ), let Kj Q be the distribution of Tj obtained by drawing ( Vj , U ) ∼ Q and then Wj ∼
+
+P (Wj | Vj , U ). Let μa,j,z (v, u) ≜ E{Y (a) | Vj = v, U = u, Zj = z} be the mean of Y (a) at a latent state. Different distributions Q, Q′ of ( Vj , U ) can induce the same distribution of Tj . The next assumption states when this loss of latent information is harmless for the potential-outcome means needed for identification. 
+
+Assumption 3 (Outcome-relevant completeness) . For almost every z, every pair of distri-butions Q, Q′ of ( Vj , U ) that are absolutely continuous with respect to P (Vj , U | Zj = z)and under which μ0, j,z and μ1, j,z are integrable, and each a ∈ { 0, 1 }, Kj Q = Kj Q′ implies 
+
+EQμa,j,z = EQ′ μa,j,z .In words, if two distributions of the latent state Q, Q′ give different means of Y (a), they also give different distributions of Tj = ( X, Wj ). 6Theorem 1 (Identification from a held-out audit) . Fix j ∈ [J] and a measurable encoder 
+
+ϕj , and set Zj ≜ ϕj (Vj ). Suppose Assumptions 1–3 hold. If 0 < P (A = 1 | Zj ) < 1 a.s., (X, Wj ) ⊥⊥ A | Zj (1) then 
+
+τ = E[E(Y | A = 1, Zj ) − E(Y | A = 0, Zj )]. (2) 
+
+3.2. Unknown Valid Block 
+
+Section 3.1 treats the ideal case in which a valid held-out block is known and exact balance holds. We next allow the valid block to be unknown and then quantify the bias caused by imperfect balance. Let S ≜ {S ⊂ [J] : 1 ≤ | S| ≤ J − 1} be the collection of nonempty proper subsets of proxy-block indices. For S ∈ S, write WS = ( Wk)k∈S for the held-out blocks and W−S = ( Wk)k / ∈S for the remaining blocks, set VS ≜ (X, W−S ), and let ZS ≜ ϕS (VS ). The singleton S = {j} recovers the split of Section 3.1. Each split yields the population candidate adjustment value 
+
+θS ≜ E[E(Y | A = 1, ZS ) − E(Y | A = 0, ZS )]. (3) The next definition records the observable screen and the target plurality condition. 
+
+Definition 2 (Proximal plurality) . Let B be the collection of splits S ∈ S for which overlap 0 < P (A = 1 | ZS ) < 1 holds almost surely and exact balance ( X, WS ) ⊥⊥ A | ZS holds. The target has a unique proximal plurality when 
+
+|{ S ∈ B : θS = τ }| > max    
+
+> c̸=τ:{S∈B :θS=c}̸ =∅
+
+|{ S ∈ B : θS = c}| , (4) where the maximum over an empty set is zero. In words, proximal plurality means that τ is the most frequent candidate value among the screened splits, even if it is not attained by a majority. For example, let J = 3, so S =
+
+{{ 1}, {2}, {3}, {1, 2 }, {1, 3 }, {2, 3 }} . If B = {{ 1}, {2}, {1, 2 }, {1, 3 }} , τ = 1, θ{1} = θ{1,2 } = 1, 
+
+θ{2} = 0.5, and θ{1,3 } = 0.3, then τ appears twice while each competing value appears once, so the target has a unique proximal plurality. 
+
+Theorem 2 (Identification with an unknown valid block) . If B̸ = ∅ and the target has a unique proximal plurality, then {τ } = arg max c∈R |{ S ∈ B : θS = c}| .
+
+3.3. Approximate Balance 
+
+Exact balance in Eq. (1) may be infeasible in practice. We derive the bound for a fixed held-out block Wj . The same argument extends to a grouped held-out block WS after replacing the single-7block objects by their grouped counterparts. Define Zϕj ≜ ϕ(Vj ), ej,ϕ(z) ≜ P (A = 1 | Zϕj = z) and 
+
+qj,ϕ(t, z) ≜ P (A = 1 | Tj = t, Zϕj = z). 
+
+Definition 3 (Residual treatment discrepancy) . The residual treatment discrepancy of ϕ is 
+
+Dres, j (ϕ) ≜
+
+[
+
+E[{qj,ϕ(Tj , Zϕj ) − ej,ϕ(Zϕj )}2]]1/2
+
+. (5) The discrepancy Dres, j (ϕ) is the L2 magnitude of the additional treatment information in Tj =(X, Wj ) beyond Zϕj . It characterizes exact conditional balance as follows. 
+
+Proposition 1 (Zero discrepancy) . Dres, j (ϕ) = 0 if and only if A ⊥⊥ (X, Wj ) | Zϕj .To translate residual treatment discrepancy into bias of an adjusted effect, we impose the following stability condition. 
+
+Assumption 4 (L2 outcome-relevant stability) . For each encoder ϕ, let μϕa,j,z be μa,j,z with 
+
+Zϕj = z, let Pϕ,z ≜ P (Tj | Zϕj = z), and for a signed measure ν with a density with respect to Pϕ,z write ∥ν∥ϕ,z ≜ ∥dν/dP ϕ,z ∥L2(Pϕ,z ). There is a finite Γ j (ϕ) such that, for almost every 
+
+z, each a ∈ { 0, 1 }, and all Q, Q′ as in Assumption 3 with Zϕj in place of Zj ,
+
+|EQμϕa,j,z − EQ′ μϕa,j,z | ≤ Γj (ϕ) ∥K j Q − K j Q′∥ϕ,z .If Kj Q = Kj Q′, the right side of Assumption 4 is zero, so Assumption 4 implies Assumption 3 for 
+
+Zϕj . It gives additional rate information: when the two distributions of Tj are close, the two means of Y (a) are close, within the unobserved factor Γ j (ϕ). Under Assumption 4, imperfect balance yields a quantitative bound on causal bias. 
+
+Theorem 3 (Approximate-balance bias) . For any representation Z, define its ordinary ad-justment value as τZ ≜ E[E(Y | A = 1, Z) − E(Y | A = 0, Z)]. Under Assumptions 1, 2, and 4, and overlap η ≤ P (A = 1 | Zϕj ) ≤ 1 − η almost surely for some η ∈ (0, 1 /2], 
+
+|τZϕj
+
+− τ | ≤ Γj (ϕ)
+
+η(1 − η) Dres, j (ϕ). (6) 
+
+# 4. Learning, Estimation, and Search 
+
+This section gives the finite-sample proximal-balancing method and algorithm, called PROxy Block-wise Exclusion (PROBE). Throughout this section, we use three independent samples: a discrep-ancy sample ID of size nD for representation learning, a nuisance sample IN for outcome and propensity models, and an evaluation sample IE of size nE.We restrict the candidate encoder class to representations satisfying a common overlap condition. 8Assumption 5 (Common representation overlap) . There is one η ∈ (0, 1 /2] such that, for every candidate encoder ϕ, η ≤ P (A = 1 | Zϕj ) ≤ 1 − η almost surely. We estimate residual treatment discrepancy by comparing how well treatment A can be predicted from Zϕj alone and from ( Tj , Zϕj ). Let Fj,nD be a prespecified encoder class with Zϕj = ϕ(Vj ). Let H0, nD and H1, nD be prespecified classes of [0, 1]-valued treatment predictors based on Zϕj and (Tj , Zϕj ), respectively. We assume that H1, nD includes H0, nD as the subclass. 
+
+Definition 4 (Empirical Brier discrepancy) . For Zϕj,i = ϕ(Vj,i), define ̂
+
+R0, ϕ(h) ≜ 1
+
+nD
+
+∑
+
+> i∈I D
+
+{Ai − h(Zϕj,i)}2,̂ R1, ϕ(h) ≜ 1
+
+nD
+
+∑
+
+> i∈I D
+
+{Ai − h(Tj,i, Zϕj,i)}2,
+
+˜D2 
+
+> j,nD
+
+(ϕ) ≜
+
+[̂ 
+
+R0, ϕ(̂ h0, ϕ) −̂ R1, ϕ(̂ h1, ϕ)
+
+] 
+
+> +
+
+,̂ hb,ϕ ∈ arg min 
+
+> h∈H b,nD
+
+̂
+
+Rb,ϕ(h), for b ∈ { 0, 1 }. (7) The Brier risks are minimized by ej,ϕ and qj,ϕ of Section 3.3, so ˜D2 
+
+> j,nD
+
+(ϕ) estimates D2res, j (ϕ). 
+
+Theorem 4 (Learned-representation error) . Fix δD ∈ (0, 1), and select a measurable em-pirical minimizer ̂ ϕj ∈ arg min ϕ∈F j,nD
+
+˜D2 
+
+> j,nD
+
+(ϕ). Set ̂ Zj ≜̂ ϕj (Vj ) and τ̂ Zj ≜ E[E(Y | A =1, ̂ Zj ) − E(Y | A = 0, ̂ Zj )]. Let ξj,nD (δD) be a nonnegative deterministic radius satisfying 
+
+P
+
+{
+
+sup 
+
+> ϕ∈F j,nD
+
+∣∣∣ ˜D2 
+
+> j,nD
+
+(ϕ) − D2res, j (ϕ)
+
+∣∣∣ ≤ ξj,nD (δD)
+
+}
+
+≥ 1 − δD. (8) Suppose Assumptions 1 and 2 hold, Assumption 4 holds for every ϕ ∈ F j,nD , and Assump-tion 5 holds. Then, with probability at least 1 − δD,
+
+|τ̂Zj − τ | ≤ Γj (̂ϕj )
+
+η(1 − η)
+
+[
+
+inf 
+
+> ϕ∈F j,nD
+
+D2res, j (ϕ) + 2 ξj,nD (δD)
+
+]1/2
+
+. (9) Thm. 4 extends Thm. 3 to a learned representation: the infimum is the best balance the encoder class can reach, and 2 ξj,nD (δD) is the price of learning it from finite data. The preceding theorem controls representation-learning bias. To estimate τ̂Zj while limiting bias from nuisance estimation, we use an augmented inverse-probability-weighted (AIPW) score, whose remainder is a product of propensity and outcome-regression errors (Robins et al., 1994; Tsiatis, 2006; Chernozhukov et al., 2017; Kennedy, 2022). Let ma,j (z) = E[Y | A = a,̂ Zj = z] and 
+
+ej (z) = P (A = 1 |̂ Zj = z). Let ̂ ma,j (z), ̂ ej (z) denote its estimator fitted using samples IN, clip ̂ ej
+
+to [ η, 1 − η], and evaluate them on IE. At z =̂ Zj,i, the uncentered influence-function score (Robins et al., 1994; Tsiatis, 2006) is 
+
+UIF j (Oi) ≜̂ m1, j (z) −̂ m0, j (z) + Ai{Yi −̂ m1, j (z)}̂
+
+ej (z) − (1 − Ai){Yi −̂ m0, j (z)}
+
+1 −̂ ej (z) . (10) 9(a) Split proxy W into blocks; hold some out                           
+
+> W1W2W3W4W5
+> held out 25− 2 = 30 splits in all
+> (b) Learn Zfrom Xand the kept blocks
+> W2, …, W5and X
+> pick ϕto minimize ̃
+> D2
+> S
+> Z
+> never sees the held-out blocks
+> (c) Given Z, do the held-out blocks predict A?
+> screen statistic; keep below t
+> 10 −3 10 −1
+> keep 8 drop 22
+> W1out
+> W4out
+> (d) Repeat; the largest component gives  ̂ τ
+> one dot per split; dashed τ
+> 0.5 1̂
+> τ= 0.99
+> 2ρ
+> 7W4out
+
+Figure 2: PROBE learns, audits, and aggregates across held-out splits. Then, we define the AIPW estimator as ̂
+
+τ AIPW  
+
+> j
+
+≜ 1
+
+nE
+
+∑
+
+> i∈I E
+
+UIF j (Oi). (11) 
+
+Theorem 5 (Honest AIPW error) . Fix δE ∈ (0, 1). Suppose Assumptions 1 and 2 hold, Assumption 4 holds for ̂ ϕj , Assumption 5 holds, ̂ ej is clipped to [ η, 1 − η], and the variance defined below is finite. Conditional on ID and IN, let O be a fresh observation and define 
+
+∥g∥2, j ≜ [E{g(̂Zj )2 | I D, IN}]1/2 and σ2 
+
+> j
+
+≜ Var {UIF j (O) | I D, IN}. Define 
+
+err j ≜ 1
+
+η ∥̂ej − ej ∥2, j
+
+> 1
+
+∑
+
+> a=0
+
+∥̂ma,j − ma,j ∥2, j , bias j ≜ Γj (̂ ϕj )
+
+η(1 − η) Dres, j (̂ ϕj ). (12) Then, with probability at least 1 − δE over IE,
+
+|̂τ AIPW  
+
+> j
+
+− τ̂ Zj | ≤ σj
+
+√nEδE
+
++ err j , |̂τ AIPW  
+
+> j
+
+− τ | ≤ σj
+
+√nEδE
+
++ err j + bias j . (13) Thm. 5 adds sampling and nuisance errors to Thm. 4; the nuisance term err j is doubly robust, vanishing if the propensity model or both outcome models are correct, but bias j remains. So far, we have treated j as a fixed held-out block. When the valid block is unknown, PROxy Blockwise Exclusion (PROBE) in Algo. 1 turns the proximal plurality principle of Section 3.2 into a finite-sample search. PROBE searches the T = |S| = 2 J − 2 splits and samples m ∈ { 1, . . . , T }
+
+splits independently of data and learned objects, as in Algorithm 1. Fig. 2 summarizes the search. For S ∈̂ B, the estimate ̂ θS targets θS ≜ τ̂ϕS (VS ). PROBE can fail in three ways: ̂ θS misses θS
+
+by sampling and nuisance error, θS misses τ because balance is only approximate, or splits whose held-out blocks violate Assumption 2 or 4 agree on a wrong value and outnumber the rest. The next theorem bounds all three. 
+
+Theorem 6 (Finite-sample PROBE cluster recovery) . Suppose Assumption 5 holds and, for every S ∈̂ B,̂ eS is clipped to [ η, 1 − η] and σS < ∞, where σS , err S , and bias S are the quantities of Thm. 5 with S in place of j. Let C0 ⊆̂ B be the splits whose held-out blocks 10 Algorithm 1: PROBE split search 
+
+Input: split budget m, screen threshold t, overlap η, linking radius ρ 
+
+> 1
+
+Sample: draw m splits S uniformly without replacement from S.;  
+
+> 2
+
+Learn and screen: for each sampled split S, learn ̂ ϕS on ID by minimizing the discrepancy in Definition 4; fit an unclipped propensity ̂ eraw  
+
+> S
+
+on IN; retain the sampled S if ˜D2 
+
+> S,nD
+
+(̂ϕS ) ≤ t
+
+and ̂ eraw  
+
+> S
+
+passes a prespecified empirical overlap check at level η. Define ̂ B as the screen set of all splits S satisfying these fixed checks.;  
+
+> 3
+
+Estimate: fit outcome regressions on IN, set ̂ eS = clip( ̂eraw  
+
+> S
+
+, η, 1 − η), and compute ̂
+
+θS = n−1E 
+
+> ∑
+> i∈I E
+
+UIF S (Oi) using Eq. (10).;  
+
+> 4
+
+Aggregate: link S, S′ when |̂ θS −̂ θS′ | ≤ 2ρ; return the median ̂ τ of the unique largest component, and declare failure if its size is tied.; satisfy Assumptions 1, 2, and 4 with encoder ̂ ϕS , let N ≜ |̂ B| , and for δ ∈ (0, 1) let 
+
+ε ≜ max  
+
+> S∈̂B
+> {
+
+σS
+
+> √
+
+NnEδ + err S
+
+> }
+
+, b ≜ max 
+
+> S∈C0
+
+bias S .Suppose that (i) the linking radius satisfies ρ ≥ b + ε;(ii) the splits in ̂ B \ C0 fall into clusters C1, . . . , CL, where |θS′ − θS | ≤ 2( ρ − ε) whenever 
+
+S, S′ are in the same cluster; (iii) values θS in different clusters among C0, . . . , CL are more than 2( ρ + ε) apart; (iv) C0 is the largest cluster; ∆ ≜ (|C0| − max 1≤ℓ≤L |Cℓ|)/N > 0 (or ∆ = 1 if L = 0, since then C0 =̂ B). Then, with probability at least 1 − δ − P (R = 0) − L E{e−R∆2/2}, where R ∼
+
+Hypergeometric( T , N , m) is the number of the m sampled splits that lie in ̂ B, the output ̂ τ
+
+of Algorithm 1 satisfies 
+
+|̂τ − τ | ≤ max   
+
+> S∈̂B
+> {
+
+σS
+
+√N
+
+√nEδ + err S
+
+> }
+
++ max 
+
+> S∈C0
+
+bias S . (14) Eq. (14) is Eq. (13) applied to every retained split at δE = δ/N : its first maximum collects the sampling and doubly robust nuisance terms over all retained splits, its second collects the bias term over C0, and the search adds the failure probability P (R = 0) + L E{e−R∆2/2}. Thm. 6 quantifies the cost of examining only m uniformly sampled splits rather than all of S through two terms: 
+
+P (R = 0), the chance that no sampled split is retained, and L E{e−R∆2/2}, which bounds the chance that the sampled splits of C0 fail to outnumber those of every other cluster. 
+
+# 5. Experiments 
+
+This section provides empirical demonstration of the proposed theories. Appendix D gives the simulation details. We estimate the average treatment effect τ through PROBE (Algo. 1) and report 11 −1 0 1
+
+PROBE (ours) CEVAE Adjust for (X, W)
+
+Adjust for X
+
+Pixel CNN Proximal 2SLS Single-proxy control KSPC Oracle          
+
+> −1 0 1−1 0 1−1 0 1−0.1 0 0.1 −10 0 10 −10 0 10
+
+NA SCM-1 0.019 NA SCM-2 0.018 NA SCM-3 0.018 SCM-4 0.019 NA Twins 0.0073 NA IHDP 0.41 NA ACIC 0.20 PROBE’s MAE 
+
+Synthetic Semi-synthetic 
+
+estimate minus true effect correct roles wrong roles Figure 3: Estimate minus the true effect on a symmetric log scale; each dot is one data set. Filled and hollow dots show methods that need proxy roles with correct and wrong roles; on the semi-synthetic data, single-proxy control is used as an ATE estimator. the mean absolute error (MAE) over independently generated datasets. We compare PROBE with two groups of methods. The first group needs no proxy roles: adjustment for X, adjustment for (X, W ), CEVAE (Louizos et al., 2017), and, for image proxies, adjustment for a representation that a convolutional network learns from all pixels, without holding out a block or checking balance. The second group needs the designated roles for each proxy: proximal two-stage least squares (2SLS) (Tchetgen Tchetgen et al., 2024), which requires designating each proxy as treatment-side or outcome-side (Fig. 1(c)); single-proxy control (Park et al., 2024), which requires designating one proxy of the untreated outcome Y (0); and its kernel version KSPC (Xu and Gretton, 2025), which requires the same designation. We run each of these methods once with the correct roles and once with wrong roles. An oracle that adjusts for ( X, U ), including the hidden confounder, serves as a reference. 
+
+Synthetic Data Analysis. In our example scenario, a hidden severity U affects both the treatment and the outcome, and the true effect is τ = 1. The proxy has five blocks. Blocks W1, W2, and W3 are noisy measurements of U and are valid held-out blocks: each satisfies Assumptions 2 and 3. Blocks 
+
+W4 and W5 are not valid: W5 violates held-out treatment independence (Assumption 2), so no representation can balance it, and W4 can be balanced but violates outcome-relevant completeness (Assumption 3), so it points to a wrong effect. PROBE is not told which blocks are valid, whereas the role-requiring methods are given the correct roles in their correct-role runs. We render this structure with ( X, W ) of dimension 8, 88, and 1,312 (SCM-1 to SCM-3) and with six Shapes3D images in place of the six proxy coordinates of SCM-1 (SCM-4), and generate 100 data sets of size 
+
+n = 24,000 for each. Fig. 3 (left) shows that PROBE, without being told the roles, stays near zero error in all four 12 settings, while adjustment for X or ( X, W ) stays biased and CEVAE degrades as the dimension grows. Methods that need the roles are accurate only with the correct roles and fail badly with wrong ones. The invalid block W4 passes the balance screen in 396 of 400 data sets, yet plurality aggregation over held-out blocks removes it in every one of them, as Thm. 2 predicts. 
+
+Real-World Data Analysis. We use four real-world data sets. Twins (Louizos et al., 2017), IHDP (Hill, 2011), and ACIC 2016 (Dorie et al., 2019) are semi-synthetic benchmarks built on real covariates, with 11,984, 747, and 4,802 units and 42, 24, and 78 covariates. In each, we hide one covariate as U and generate the proxies and the treatment from it with one fixed recipe, so the effect is known exactly. The right heart catheterization (RHC) study (Connors et al., 1996) is observational, with 5,735 critically ill patients, days survived within 30 as the outcome, and ten physiological measurements grouped into five proxy blocks, as analyzed by Cui et al. (2024). No true effect is known for the RHC study. Fig. 3 (right) shows that PROBE, without being told the roles, is the most accurate method on Twins and among the three most accurate on IHDP and ACIC. As in the synthetic data, methods that need the roles are accurate only with the correct roles and degrade sharply with wrong ones. On RHC, where no true effect is known, PROBE’s interval contains the proximal estimate that Cui et al. (2024) obtain by assigning the roles, while KSPC’s estimate changes with the block it is given (Fig. 9). 
+
+# 6. Conclusion 
+
+We introduced proximal balancing, which estimates the average treatment effect from a multi-dimensional proxy without designating proxy roles, solving an inverse problem, or modeling the hidden confounder. When a held-out block does not affect the treatment and preserves the outcome-relevant part of the confounder, adjusting for a representation that balances it identifies the effect (Thm. 1). When the valid block is unknown, a plurality vote over held-out blocks identifies the effect (Thm. 2); under approximate balance, the bias is bounded by a stability-weighted residual treatment discrepancy (Thm. 3); and our algorithm, PROBE (Algo. 1), has finite-sample guarantees for representation learning, honest AIPW estimation, and search (Thms. 4–6). In synthetic data with vector and image proxies, PROBE had the smallest error of all competing methods other than the oracle, and on real-world data it remained competitive without role information, while methods given wrong roles degraded sharply. 13 References 
+
+Bhattacharya, R., Nabi, R., and Shpitser, I. (2022). Semiparametric inference for causal effects in graphical models with hidden variables. Journal of Machine Learning Research , 23(295):1–76. Bowden, J., Davey Smith, G., Haycock, P. C., and Burgess, S. (2016). Consistent estimation in Mendelian randomization with some invalid instruments using a weighted median estimator. 
+
+Genetic Epidemiology , 40(4):304–314. Brier, G. W. (1950). Verification of forecasts expressed in terms of probability. Monthly Weather Review , 78(1):1–3. Chen, J. M., Bhattacharya, R., and Keith, K. A. (2024). Proximal causal inference with text data. In Advances in Neural Information Processing Systems , volume 37, pages 135983–136017. Chernozhukov, V., Chetverikov, D., Demirer, M., Duflo, E., Hansen, C., Newey, W., and Robins, J. (2017). Double/debiased machine learning for treatment and causal parameters. arXiv preprint arXiv:1608.00060 .Connors, A. F., Speroff, T., Dawson, N. V., et al. (1996). The effectiveness of right heart catheter-ization in the initial care of critically ill patients. JAMA , 276(11):889–897. Cui, Y., Pu, H., Shi, X., Miao, W., and Tchetgen Tchetgen, E. (2024). Semiparametric proximal causal inference. Journal of the American Statistical Association , 119(546):1348–1359. Dorie, V., Hill, J., Shalit, U., Scott, M., and Cervone, D. (2019). Automated versus do-it-yourself methods for causal inference: Lessons learned from a data analysis competition. Statistical Science , 34(1):43–68. Fulcher, I. R., Shpitser, I., Marealle, S., and Tchetgen Tchetgen, E. J. (2020). Robust inference on population indirect causal effects: The generalized front door criterion. Journal of the Royal Statistical Society Series B: Statistical Methodology , 82(1):199–214. Guo, A., Benkeser, D., and Nabi, R. (2023). Targeted machine learning for average causal effect estimation using the front-door functional. arXiv preprint arXiv:2312.10234 .Guo, Z., Kang, H., Cai, T. T., and Small, D. S. (2018). Confidence intervals for causal effects with invalid instruments by using two-stage hard thresholding with voting. Journal of the Royal Statistical Society: Series B , 80(4):793–815. Hainmueller, J. (2012). Entropy balancing for causal effects: A multivariate reweighting method to produce balanced samples in observational studies. Political Analysis , 20(1):25–46. Hartwig, F. P., Davey Smith, G., and Bowden, J. (2017). Robust inference in summary data Mendelian randomization via the zero modal pleiotropy assumption. International Journal of Epidemiology , 46(6):1985–1998. Hill, J. L. (2011). Bayesian nonparametric modeling for causal inference. Journal of Computational and Graphical Statistics , 20(1):217–240. Hoeffding, W. (1963). Probability inequalities for sums of bounded random variables. Journal of the American Statistical Association , 58(301):13–30. Imai, K. and Ratkovic, M. (2014). Covariate balancing propensity score. Journal of the Royal 
+
+14 Statistical Society: Series B , 76(1):243–263. Jung, Y. (2026). Debiased front-door learners for heterogeneous effects. In International Conference on Learning Representations .Jung, Y., Díaz, I., Tian, J., and Bareinboim, E. (2023). Estimating causal effects identifiable from a combination of observations and experiments. Advances in Neural Information Processing Systems , 36:46446–46490. Jung, Y. and Kang, B. (2026). Information-theoretic causal bounds under unmeasured confounding. In Conference on Causal Learning and Reasoning .Jung, Y., Park, M. W., and Lee, S. (2024a). Complete graphical criterion for sequential covariate adjustment in causal inference. Advances in Neural Information Processing Systems , 37:19813– 19838. Jung, Y., Tian, J., and Bareinboim, E. (2020a). Estimating causal effects using weighting-based estimators. In Proceedings of the 34th AAAI Conference on Artificial Intelligence .Jung, Y., Tian, J., and Bareinboim, E. (2020b). Learning causal effects via weighted empirical risk minimization. Advances in Neural Information Processing Systems , 33. Jung, Y., Tian, J., and Bareinboim, E. (2021a). Estimating identifiable causal effects on Markov equivalence class through double machine learning. In Proceedings of the 38th International Conference on Machine Learning , pages 5168–5179. Jung, Y., Tian, J., and Bareinboim, E. (2021b). Estimating identifiable causal effects through double machine learning. In Proceedings of the 35th AAAI Conference on Artificial Intelligence .Jung, Y., Tian, J., and Bareinboim, E. (2024b). Unified covariate adjustment for causal inference. 
+
+Advances in Neural Information Processing Systems , 37. Kallus, N., Mao, X., and Uehara, M. (2021). Causal inference under unmeasured confounding with negative controls: A minimax learning approach. arXiv preprint arXiv:2103.14029 .Kang, H., Zhang, A., Cai, T. T., and Small, D. S. (2016). Instrumental variables estimation with some invalid instruments and its application to Mendelian randomization. Journal of the American Statistical Association , 111(513):132–144. Kennedy, E. H. (2022). Semiparametric doubly robust targeted double machine learning: A review. 
+
+arXiv preprint arXiv:2203.06469 .Kingma, D. P. and Welling, M. (2014). Auto-encoding variational Bayes. In International Confer-ence on Learning Representations .Kummerfeld, E., Lim, J., and Shi, X. (2024). Data-driven automated negative control estimation (DANCE): Search for, validation of, and causal inference with negative controls. Journal of Machine Learning Research , 25(229):1–35. Kuroki, M. and Pearl, J. (2014). Measurement bias and effect restoration in causal inference. 
+
+Biometrika , 101(2):423–437. Lee, S. and Bareinboim, E. (2021). Causal identification with matrix equations. In Advances in Neural Information Processing Systems , volume 34. 15 Lipsitch, M., Tchetgen Tchetgen, E., and Cohen, T. (2010). Negative controls: A tool for detecting confounding and bias in observational studies. Epidemiology , 21(3):383–388. Louizos, C., Shalit, U., Mooij, J. M., Sontag, D., Zemel, R., and Welling, M. (2017). Causal effect inference with deep latent-variable models. In Advances in Neural Information Processing Systems , volume 30, pages 6446–6456. Mastouri, A., Zhu, Y., Gultchin, L., Korba, A., Silva, R., Kusner, M. J., Gretton, A., and Muandet, K. (2021). Proximal causal learning with kernels: Two-stage estimation and moment restriction. In Proceedings of the 38th International Conference on Machine Learning , volume 139 of Pro-ceedings of Machine Learning Research , pages 7512–7523. Miao, W., Geng, Z., and Tchetgen Tchetgen, E. J. (2018). Identifying causal effects with proxy variables of an unmeasured confounder. Biometrika , 105(4):987–993. Park, C., Richardson, D. B., and Tchetgen Tchetgen, E. J. (2024). Single proxy control. Biometrics ,80(2):ujae027. Pearl, J. (2009). Causality: Models, Reasoning, and Inference . Cambridge University Press, 2 edition. Rakshit, P., Shi, X., and Tchetgen Tchetgen, E. (2025). Adaptive proximal causal inference with some invalid proxies. arXiv preprint arXiv:2507.19623 .Rissanen, S. and Marttinen, P. (2021). A critical look at the consistency of causal estimation with deep latent variable models. In Advances in Neural Information Processing Systems , volume 34, pages 4207–4217. Robins, J. M., Rotnitzky, A., and Zhao, L. P. (1994). Estimation of regression coefficients when some regressors are not always observed. Journal of the American Statistical Association , 89(427):846– 866. Rosenbaum, P. R. and Rubin, D. B. (1983). The central role of the propensity score in observational studies for causal effects. Biometrika , 70(1):41–55. Saha, A., Bates, S., and Shah, D. (2026). Causal inference with categorical unobserved confounder via mixture learning. arXiv preprint arXiv:2605.19006 .Shalit, U., Johansson, F. D., and Sontag, D. (2017). Estimating individual treatment effect: Gener-alization bounds and algorithms. In Proceedings of the 34th International Conference on Machine Learning , volume 70 of Proceedings of Machine Learning Research , pages 3076–3085. Shpitser, I. and Pearl, J. (2006). Identification of joint interventional distributions in recursive semi-Markovian causal models. In Proceedings of the 21st National Conference on Artificial Intelligence , pages 1219–1226. Tchetgen Tchetgen, E. J. (2014). The control outcome calibration approach for causal inference with unobserved confounding. American Journal of Epidemiology , 179(5):633–640. Tchetgen Tchetgen, E. J., Ying, A., Cui, Y., Shi, X., and Miao, W. (2024). An introduction to proximal causal inference. Statistical Science , 39(3):375–390. Teicher, H. (1961). Identifiability of mixtures. The Annals of Mathematical Statistics , 32(1):244– 248. 16 Tian, J. and Pearl, J. (2002). A general identification condition for causal effects. In Proceedings of the 18th National Conference on Artificial Intelligence , pages 567–573. Tsiatis, A. A. (2006). Semiparametric Theory and Missing Data . Springer Series in Statistics. Springer, New York. Xie, F., Chen, Z., Luo, S., Miao, W., Cai, R., and Geng, Z. (2024). Automating the selection of proxy variables of unmeasured confounders. In Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pages 54430– 54459. Xu, L. and Gretton, A. (2025). Kernel single proxy control for deterministic confounding. In 
+
+Proceedings of the 28th International Conference on Artificial Intelligence and Statistics , volume 258 of Proceedings of Machine Learning Research , pages 3736–3744. Xu, L., Kanagawa, H., and Gretton, A. (2021). Deep proxy causal learning and its application to confounded bandit policy evaluation. In Advances in Neural Information Processing Systems ,volume 34, pages 26264–26275. Yu, M., Shi, X., and Tchetgen Tchetgen, E. J. (2025). Fortified proximal causal inference with many invalid proxies. arXiv preprint arXiv:2506.13152 .17 A. Problem Setting 
+
+We observe independent copies Oi = ( Xi, Wi, Ai, Yi), i = 1, . . . , n, where X ∈ X is a possibly high-dimensional vector of observed pretreatment covariates, X is its value space, A ∈ { 0, 1 } is treatment, and Y is the observed outcome. For each a ∈ { 0, 1 }, the potential outcome Y (a) is the outcome that would be observed if treatment were set to a. Our target is the population average treatment effect τ ≜ E{Y (1) − Y (0) }.Let U denote an unobserved pretreatment variable that may affect both treatment A and outcome 
+
+Y . When U affects both A and Y , the observed-data distribution alone does not identify τ without additional structure. We therefore observe a proxy measurement W that contains information about 
+
+U . The proxy is divided into prespecified blocks, W = ( W1, . . . , WJ ). Each block may be scalar or vector-valued. A block can represent one repeated measurement, sensor channel, laboratory panel, or prespecified region of a larger measurement. For each block index j ∈ { 1, . . . , J}, we call Wj the held-out proxy block and let Wj denote its value space. We call the combination of all other blocks the remaining blocks (Definition 1) and write W−j ≜ (W1, . . . , Wj−1, Wj+1 , . . . , WJ ) for the resulting vector of remaining proxy blocks. Let 
+
+Vj denote the value space of the pair ( X, W−j ). Finally, define Vj ≜ (X, W−j ) ∈ V j . The variable 
+
+Vj is the combined vector of the observed covariates X and the remaining proxy blocks W−j . We also write Tj ≜ (X, Wj ) for the observed covariates together with the held-out block. 
+
+# B. Identification 
+
+Let dVj denote the coordinate dimension of Vj . Fix a user-specified output dimension dZj ≤ dVj .For a measurable representation function, define ϕ : Vj −→ RdZj , Zϕj ≜ ϕ(Vj ). Let Φ j denote a prespecified class of such representation functions. When a representation function ϕj ∈ Φj is fixed, we abbreviate Zϕj 
+
+> j
+
+= ϕj (Vj ) as Zj .
+
+B.1. Identification for a Prespecified Held-Out Block 
+
+B.1.1. Assumptions 
+
+Assumption 6 (Consistency and integrability; restatement of Assumption 1) . For each 
+
+a ∈ { 0, 1 }, Y = Y (A), E|Y (a)| < ∞.
+
+Assumption 7 (Latent exchangeability and held-out treatment independence; restatement of Assumption 2) . For each a ∈ { 0, 1 }, Y (a) ⊥⊥ A | (U , Vj ) and Wj ⊥⊥ A | (U , Vj ). The first clause says that ( U , Vj ) is sufficient to remove hidden confounding between treatment and each potential outcome. The second clause says that, after ( U , Vj ) is fixed, treatment status provides no additional information about the distribution of Wj .18 UW−j X Wj            
+
+> AY
+> (a)
+> UW−jXWj
+> AY
+> (b)
+> UW−jXWj
+> AY
+> (c)
+> UZtr XZout
+> AY
+> (d)
+
+Figure 4: Causal structures compatible with proximal balancing in panels (a)–(c) and a standard two-proxy proximal structure in panel (d). Fig. 4 shows three examples compatible with proximal balancing and one representative standard proximal structure. We then introduce the latent and proxy objects within each representation stratum. 
+
+Definition 5 (Latent and proxy objects within a representation stratum) . Let PZj denote the distribution of Zj . For PZj -almost every z, fix versions of the following conditional distributions. Define Qa,j,z ≜ P (Vj , U | A = a, Zj = z), a ∈ { 0, 1 }, and, by held-out treatment independence, define the treatment-invariant conditional distribution of the held-out block by Kj (· | v, u) ≜ P (Wj | Vj = v, U = u). For any probability distribution Q
+
+on ( Vj , U ), let Kj Q denote the induced distribution of ( X, Wj ) obtained by first drawing (Vj , U ) = ( X, W−j , U ) ∼ Q, then drawing Wj ∼ Kj (· | Vj , U ), and finally retaining ( X, Wj ). For each a ∈ { 0, 1 }, define μa,j,z (v, u) ≜ E{Y (a) | Vj = v, U = u, Zj = z}. For PZj -almost every z, let Qj,z be the collection of probability distributions Q on ( Vj , U ) such that 
+
+Q ≪ P (Vj , U | Zj = z) and EQ|μa,j,z (Vj , U )| < ∞ for both a ∈ { 0, 1 }.
+
+Assumption 8 (Outcome-relevant completeness; restatement of Assumption 3) . For PZj -almost every z, every Q, Q′ ∈ Qj,z , and each a ∈ {0, 1 }, Kj Q = Kj Q′ =⇒
+
+EQ{μa,j,z (Vj , U )} = EQ′ {μa,j,z (Vj , U )}.Assumption 3 is stated for all pairs Q, Q′ ∈ Q j,z (Definition 5) within a representation stratum. The next proposition gives concrete sufficient conditions. It treats the held-out block as a measurement of ( X, U ) that is conditionally independent of the remaining blocks, and it asks the measurement channel to be complete. 
+
+Proposition 2 (Sufficient conditions for outcome-relevant completeness) . Fix a block j and a representation ϕj . Suppose that (i) Wj ⊥⊥ W−j | (X, U ) and, for each a ∈ { 0, 1 }, Y (a) ⊥⊥ W−j | (X, U , Zj ), so that 
+
+Kj (· | v, u) and μa,j,z (v, u) depend on v = ( x, w−j ) only through x;(ii) for every x, the map π 7 → ∫ Kj (· | x, u) π(du ) from probability distributions of U to distributions of Wj is injective. Then Assumption 3 holds. Condition (ii) holds in the following two specializations, which 19 are not exhaustive. (a) Injective decoder with additive noise. Wj = g(X, U ) + ϵj , where ϵj is independent of (X, W−j , U ) and has a characteristic function without zeros, as Gaussian noise does, and u 7 → g(x, u) is injective for every x.(b) Count channel with an injective rate. Wj is a vector of counts whose coordinates are conditionally independent given ( X, U ), with Wj,ℓ | (X = x, U = u) ∼ Poisson {λℓ(x, u)}
+
+for each coordinate ℓ, and u 7 → λ(x, u) ≜ (λ1(x, u), . . . , λd(x, u)) is injective for every x.Condition (i) lets the remaining blocks influence the outcome only through ( X, U ) and through components retained in Zj ; Thm. 1, restated below, uses the more general Assumption 3. The first specialization covers latent-variable generative models in which the held-out block is a decoded image or embedding of ( X, U ) plus independent noise, and the second covers count-valued proxies such as event, word, or sequencing-read counts. When the latent state takes finitely many values and both proxy blocks are pure measurements satisfying the rank conditions of Kuroki and Pearl (2014), their matrix restoration identifies τ directly. 
+
+B.1.2. Exact Identification for a Fixed Block 
+
+The next theorem gives the central identification result. It states when adjustment for Zj identifies the population average treatment effect. 
+
+Theorem 7 (Identification from a held-out audit; restatement of Thm. 1) . Fix a prespecified block j ∈ { 1, . . . , J}. Suppose Assumptions 1–3 hold for this block and its representation. If 
+
+Zj = ϕj (Vj ) is constructed such that 0 < P (A = 1 | Zj ) < 1 almost surely, and ( X, Wj ) ⊥⊥
+
+A | Zj , then τ = E[E(Y | A = 1, Zj ) − E(Y | A = 0, Zj )] . The theorem is a conditional mean identification result. It establishes that the conditional mean of 
+
+Y (a) given ( A, Zj ) does not depend on A, and consistency converts this equality into the displayed adjustment formula. It does not assert the full conditional independence Y (a) ⊥⊥ A | Zj .
+
+B.1.3. Comparison with the Canonical Two-Proxy Proximal Model 
+
+Graphically and structurally, proximal balancing differs from the standard proximal causal inference framework (Miao et al., 2018; Tchetgen Tchetgen et al., 2024). The standard framework prespec-ifies a treatment-inducing proxy Ztr and an outcome-inducing proxy Zout . By contrast, proximal balancing requires only the held-out block Wj to satisfy Wj ⊥⊥ A | (U , Vj ). The remaining block is not subject to this restriction and may affect A, Y , both, or neither, as illustrated by panels (a)–(c). The underlying assumptions and identification strategies are also different. A representative canoni-cal completeness condition is, for every ( a, x), E{g(U ) | Ztr , A = a, X = x} = 0 almost surely =⇒
+
+g(U ) = 0 almost surely for functions g in the specified class. Identification then proceeds by seeking an outcome bridge h satisfying an observed conditional-moment equation such as 
+
+E(Y | Ztr , A, X) = E{h(Zout , A, X) | Ztr , A, X}.20 Proximal balancing instead combines observable balance in Thm. 1 with outcome-relevant com-pleteness in Assumption 3. For comparison, the canonical proximal conditions refer to proxy valid-ity, existence of an integrable outcome bridge, and treatment-proxy completeness for a designated proxy pair. The proximal-balancing conditions refer to Assumptions 1–3, representation overlap, and exact balance for a designated proxy split. A natural question is whether either framework’s sufficient conditions contain those of the other. 
+
+Proposition 3 (Non-nesting of canonical proximal and proximal-balancing sufficient con-ditions) . There exists a causal data-generating process for which the canonical proximal conditions hold for a designated proxy pair ( Ztr , Zout ) but the proximal-balancing conditions fail for the split with W−j = Ztr and Wj = Zout under every representation ϕj . Conversely, there exists a causal data-generating process for which the proximal-balancing conditions hold for a designated proxy split but the canonical proximal conditions fail for the pair (Ztr , Zout ) = ( W−j , Wj ). Moreover, neither canonical treatment-proxy completeness nor Assumption 3 implies the other. 
+
+B.2. Identification When the Valid Held-Out Block Is Unknown 
+
+Section B.1 fixes the held-out block in advance. We now allow its composition to be unknown. Consider every nonempty proper subset 
+
+S ≜ {S ⊂ { 1, . . . , J} : 1 ≤ | S| ≤ J − 1}. (15) A subset S and its complement Sc are distinct because they exchange the held-out and remaining roles. For each S ∈ S, let WS = ( Wj )j∈S be the held-out vector, let W−S = ( Wj )j / ∈S be the remaining vector, and define VS ≜ (X, W−S ), ZS ≜ ϕS (VS ), using the same construction as for a single held-out block. For each S ∈ S, define, whenever it is well-defined, θS ≜ E[E(Y | A = 1, ZS ) − E(Y | A = 0, ZS )] . Thm. 1 applies to each proxy split S after replacing ( Vj , Wj , Zj ) by ( VS , WS , ZS ) throughout. Thus, if Assumption 1 and the grouped versions of Assumptions 2 and 3 hold, representation overlap holds, and ( X, WS ) ⊥⊥ A | ZS , then θS = τ .The balance condition is observable at the population level. Define the population balance-screen set 
+
+B ≜ {S ∈ S : 0 < P (A = 1 | ZS ) < 1 a.s., ( X, WS ) ⊥⊥ A | ZS
+
+> }
+
+. (16) Each S ∈ B defines one retained proxy split and one candidate effect θS through Eq. (3). We assume that each such θS is well defined in R. The next result considers the case in which the true effect τ occurs more often than any other candidate value. 
+
+Theorem 8 (Identification with an unknown valid block; restatement of Thm. 2) . Sup-pose B̸ = ∅ and the target has a unique proximal plurality (Definition 2). Then {τ } =arg max 
+
+> c∈R
+> ∣∣
+
+{S ∈ B : θS = c}∣∣.21 UXA YW4:5 W1:3            
+
+> (a) A majority-valid proxy structure 3 valid: θj=τ
+> j= 1, 2, 3 2 unrestricted: θ4,θ5
+> median( θ1,. . . ,θ5) = τ
+> (b) Identification by median aggregation
+
+Figure 5: Median aggregation over five singleton proxy splits. The theorem states that τ can be identified even when we do not know the exact held-out proxy 
+
+Wj , if it is the unique most frequent candidate value. The following corollary is the strict-majority special case of Thm. 2. It gives both the unique most frequent candidate value and the corresponding median aggregation result. 
+
+Corollary 1 (Target-valued majority and median aggregation) . Suppose B̸ = ∅ and 
+
+∣∣{S ∈ B : θS = τ }∣∣ > |B| 
+
+2 . (17) That is, more than half of the retained proxy splits yield the true causal effect. Then 
+
+{τ } = arg max 
+
+> c∈R
+
+∣∣{S ∈ B : θS = c}∣∣, and median ((θS )S∈B 
+
+) = τ .Fig. 5 illustrates the result. The labels W1:3 and W4:5 denote grouped proxy blocks, not single variables. Under Assumption 1, if all five singleton proxy splits pass the balance screen and proxy splits 1, 2, 3 satisfy the grouped versions of Assumptions 2 and 3, then three of the five singleton candidate values equal τ , so their median equals τ .
+
+B.3. Approximate Balance and Bias Bound 
+
+Exact balance is an ideal endpoint. We now consider representations that achieve only approximate, rather than exact, balance. Fix a measurable encoder ϕ and write Tj ≜ (X, Wj ); the notation Zϕj
+
+was defined at the beginning of this section. Define ej,ϕ(z) ≜ P (A = 1 | Zϕj = z), qj,ϕ(t, z) ≜
+
+P (A = 1 | Tj = t, Zϕj = z). Their difference is the treatment information that remains in the held-out variables after conditioning on the representation. 
+
+Definition 6 (Residual treatment discrepancy; restatement of Definition 3) . Define 
+
+D2res, j (ϕ) ≜ E
+
+[
+
+{qj,ϕ(Tj , Zϕj ) − ej,ϕ(Zϕj )}2]
+
+and Dres, j (ϕ) ≜ {D2res, j (ϕ)}1/2.The discrepancy measures the treatment information in Tj that remains after conditioning on Zϕj .22 Proposition 4 (Zero discrepancy; restatement of Prop. 1) . Dres, j (ϕ) = 0 ⇐⇒ A ⊥⊥ Tj |
+
+Zϕj .To relate the discrepancy with the causal bias bound, we define Pϕ,z ≜ P (Tj | Zϕj = z). For a signed measure ν with a density with respect to Pϕ,z , write ∥ν∥ϕ,z ≜ ∥dν/dP ϕ,z ∥L2(Pϕ,z ). For PZϕj
+
+-almost every z and a ∈ { 0, 1 }, write Qϕa,j,z ≜ P (Vj , U | A = a, Zϕj = z) and μϕa,j,z (v, u) ≜ E{Y (a) | Vj =
+
+v, U = u, Zϕj = z}. Let Qϕj,z be the collection of probability distributions Q on ( Vj , U ) such that 
+
+Q ≪ P (Vj , U | Zϕj = z) and EQ|μϕa,j,z (Vj , U )| < ∞ for both a ∈ { 0, 1 }. We assume the following: 
+
+Assumption 9 (L2 outcome-relevant stability; restatement of Assumption 4) . For every representation ϕ under consideration, there is a finite scalar Γ j (ϕ) > 0 such that, for 
+
+PZϕj
+
+-almost every z, every a ∈ { 0, 1 }, and all Q, Q′ ∈ Q ϕj,z ,
+
+∣∣∣EQ{μϕa,j,z } − EQ′ {μϕa,j,z }
+
+∣∣∣ ≤
+
+Γj (ϕ) ∥K j Q − K j Q′∥ϕ,z .If Kj Q = Kj Q′, the right-hand side is zero. Assumption 4 therefore implies Assumption 3 for Zϕj .
+
+Theorem 9 (Approximate-balance bias; restatement of Thm. 3) . Suppose Assumptions 1, 2, and 4 hold for Zϕj . Suppose there is a constant η ∈ (0, 1 /2] such that η ≤ ej,ϕ(z) ≤ 1−η for 
+
+PZϕj
+
+-almost every z. Then 
+
+∣∣∣E
+
+[
+
+E(Y | A = 1, Zϕj ) − E(Y | A = 0, Zϕj )
+
+]
+
+− τ
+
+∣∣∣ ≤ Γj (ϕ) 
+
+> η(1 −η)
+
+Dres, j (ϕ). The theorem implies the following sensitivity result. 
+
+Proposition 5 (Population sensitivity region) . Suppose Assumptions 1, 2, and 4 hold for Zϕj , and suppose there is a constant η ∈ (0, 1 /2] such that η ≤ ej,ϕ(z) ≤ 1 − η
+
+for PZϕj
+
+-almost every z. Define τZϕj
+
+≜ E
+
+[
+
+E(Y | A = 1, Zϕj ) − E(Y | A = 0, Zϕj )
+
+]
+
+. Then 
+
+τ ∈
+
+[
+
+τZϕj
+
+− Γj (ϕ) 
+
+> η(1 −η)
+
+Dres, j (ϕ), τZϕj
+
++ Γj (ϕ) 
+
+> η(1 −η)
+
+Dres, j (ϕ)
+
+]
+
+.This is a population sensitivity region, not a finite-sample confidence interval. When Dres, j (ϕ) = 0, it collapses to the point-identified value in Thm. 1. The residual discrepancy is a functional of the observed distribution. The constant Γ j (ϕ) is structural and must be justified by scientific knowledge, additional theory, or sensitivity analysis. 
+
+# C. Representation Learning and AIPW Estimation 
+
+The identification results concern one fixed representation. We now select a representation from data and estimate the adjustment functional that it induces. The representation-learning and AIPW analysis below uses one prespecified held-out block j throughout. 23 C.1. Representation Learning 
+
+Recall that one observed record is Oi = ( Xi, Wi, Ai, Yi). Partition the observed sample into three mutually disjoint subsets, ID, IN, IE, with respective sizes nD, nN, and nE. The discrepancy-learning sample ID selects a representation. The nuisance-learning sample IN esti-mates the outcome regressions and propensity used by AIPW. The evaluation sample IE calculates the final estimate. Conditional on the preceding samples, the objects evaluated on the next sample are fixed. Let Fj,nD ⊆ Φj be a prespecified, possibly infinite class of deterministic encoders. For ϕ ∈ F j,nD ,write Zϕj = ϕ(Vj ) and retain Tj = ( X, Wj ) from Section B.3. Assumption 5 is imposed on Fj,nD . For any prespecified nonempty proper subset S ⊂ { 1, . . . , J},the results below also apply with ( Vj , Wj , Zϕj ) replaced by ( VS , WS , ϕ(VS )) and with the same assumptions imposed on this grouped split. The Brier-risk definition below estimates residual discrepancy by comparing squared-loss prediction of A from Zϕj alone with prediction from ( Tj , Zϕj ) (Brier, 1950). 
+
+Definition 7 (Empirical Brier discrepancy; general form of Definition 4) . Let H0, nD and 
+
+H1, nD be prespecified classes of measurable [0, 1]-valued predictors with inputs Zϕj and (Tj , Zϕj ), respectively, fixed independently of ID. Assume H1, nD contains each mem-ber of H0, nD lifted to ignore Tj . Define R0, ϕ(h) ≜ E[{A − h(Zϕj )}2] and ̂ R0, ϕ(h) ≜
+
+n−1D
+
+∑ 
+
+> i∈I D
+
+{Ai − h(Zϕj,i)}2. Likewise, define R1, ϕ(h) ≜ E[{A − h(Tj , Zϕj )}2] and ̂ R1, ϕ(h) ≜
+
+n−1D
+
+∑ 
+
+> i∈I D
+
+{Ai − h(Tj,i, Zϕj,i)}2, where Zϕj,i = ϕ(Vj,i). For each ϕ, let ̂ hb,ϕ ∈ H b,nD be an approximate empirical minimizer satisfying, for some εb,ϕ ≥ 0, ̂
+
+Rb,ϕ(̂ hb,ϕ) ≤ inf 
+
+> h∈H b,nD
+
+̂
+
+Rb,ϕ(h) + εb,ϕ, b ∈ { 0, 1 }. (18) Define εcrit, j ≜ sup ϕ∈F j,nD (ε0, ϕ + ε1, ϕ) and ˜D2 
+
+> j,nD
+
+(ϕ) ≜ max 
+
+{
+
+(̂ R0, ϕ(̂ h0, ϕ) −̂ R1, ϕ(̂ h1, ϕ)), 0 
+
+}
+
+.Each encoder ϕ and critic h give a squared-loss function of one observation: {A − h(ϕ(Vj )) }2 or 
+
+{A − h(Tj , ϕ(Vj )) }2. Varying both ϕ and h over their prespecified classes gives the loss classes 
+
+L0, j,nD and L1, j,nD , respectively. Let RnD (L) denote the expected Rademacher complexity of a loss class L. For δD ∈ (0, 1), define 
+
+rj,nD (δD) ≜ 2{RnD (L0, j,nD ) + RnD (L1, j,nD )} + 2 
+
+√ log(4 /δ D)2nD .This radius controls sampling fluctuation uniformly over the encoder–critic choices. The complexity terms account for the flexibility of the two loss classes, and the last term sets the failure-probability level δD.Throughout, the loss classes are taken pointwise measurable and separable, so that the suprema below are measurable, and the selected encoders and critics are measurable functions of the training observations and the algorithmic seed; every statement otherwise holds with outer probability. 24 Proposition 6 (Uniform residual-discrepancy deviation) . For each ϕ ∈ F j,nD , define 
+
+a0, nD (ϕ) ≜ inf 
+
+> h∈H 0, nD
+
+R0, ϕ(h) − E[{A − ej,ϕ(Zϕj )}2], 
+
+a1, nD (ϕ) ≜ inf 
+
+> h∈H 1, nD
+
+R1, ϕ(h) − E[{A − qj,ϕ(Tj , Zϕj )}2], 
+
+aj,nD ≜ sup 
+
+> ϕ∈F j,nD
+
+{a0, nD (ϕ) + a1, nD (ϕ)}.(19) With probability at least 1 − δD,sup 
+
+> ϕ∈F j,nD
+
+| ˜D2 
+
+> j,nD
+
+(ϕ) − D2res, j (ϕ)| ≤ rj,nD (δD) + aj,nD + εcrit, j . (20) At any fixed confidence level 1 − δD, this error bound is O(n−1/2D ) if both Rademacher complexities, 
+
+aj,nD , and εcrit, j are each O(n−1/2D ). 
+
+Definition 8 (Approximate empirical minimizer) . For a prescribed tolerance εenc, j ≥ 0, an approximate empirical minimizer is an encoder ̂ ϕj ∈ F j,nD selected measurably from the training observations and algorithmic seed such that 
+
+˜D2 
+
+> j,nD
+
+(̂ ϕj ) ≤ inf 
+
+> ϕ∈F j,nD
+
+˜D2 
+
+> j,nD
+
+(ϕ) + εenc, j . (21) An exact empirical minimizer has εenc, j = 0. 
+
+Proposition 7 (Residual-discrepancy oracle inequality) . Let δD ∈ (0, 1). Suppose the pre-specified encoder and [0, 1]-valued critic classes, approximate critic fits in Eq. (18) of Defini-tion 7 hold, and ̂ ϕj satisfies Eq. (21). Then, with probability at least 1 − δD,
+
+D2res, j (̂ ϕj ) ≤ inf 
+
+> ϕ∈F j,nD
+
+D2res, j (ϕ) + 2 {rj,nD (δD) + aj,nD + εcrit, j } + εenc, j . (22) Condition on the training observations {Oi : i ∈ I D} and any algorithmic seed used in training, which fixes ̂ ϕj . Here and below, population expectations involving this learned encoder use a fresh observation O = ( X, W , A, Y ) independent of the training observations and seed, with this conditioning understood. The learned representation and its population adjustment functional are 
+
+Ẑ ϕj 
+
+> j
+
+≜̂ ϕj (Vj ), ̂ Zj ≜ Ẑ ϕj 
+
+> j
+
+,
+
+τ̂Zj ≜ E
+
+[
+
+E(Y | A = 1, ̂ Zj ) − E(Y | A = 0, ̂ Zj )
+
+]
+
+. (23) Thus τ̂Zj = τZϕj
+
+∣∣ϕ=̂ϕj , where τZϕj
+
+is the population adjustment functional defined in Thm. 3. The adjustment functional is used whenever its two conditional means are absolutely integrable under the distribution of ̂ Zj .25 Theorem 10 (Learned-representation error with an explicit radius) . Let δD ∈ (0, 1). Suppose the prespecified encoder and [0, 1]-valued critic classes, approximate critic fits in Eq. (18) of Definition 7 hold, and ̂ ϕj satisfies Eq. (21). Suppose Assumptions 1, 2, and 4 hold for every Zϕj with ϕ ∈ Fj,nD , and there is a constant η ∈ (0, 1 /2] such that 
+
+η ≤ ej,ϕ(Zϕj ) ≤ 1 − η almost surely for every such ϕ. Then, with probability at least 1 − δD, |τ̂ Zj − τ | ≤ Γj (̂ϕj )
+
+> η(1 −η)
+
+[
+
+inf ϕ∈F j,nD D2res, j (ϕ) + 2 {rj,nD (δD) + aj,nD + εcrit, j } + εenc, j
+
+]1/2
+
+.At fixed confidence and fixed overlap constant η, the right-hand side is Op(n−1/4D ) if inf ϕ∈F j,nD D2res, j (ϕ) = 0, each of rj,nD (δD), aj,nD , εcrit, j , and εenc, j is O(n−1/2D ), and Γ j (̂ ϕj ) = Op(1). This is a conditional upper-bound rate; it is not a universal or minimax rate. 
+
+C.2. AIPW Estimation 
+
+This section estimates the adjustment functional τ̂Zj of the learned representation with an aug-mented inverse probability weighted (AIPW) estimator (Robins et al., 1994; Tsiatis, 2006) computed on the evaluation sample. Define the conditional outcome means and representation propensity 
+
+ma,j (z) ≜ E(Y | A = a,̂ Zj = z), 
+
+ej (z) ≜ P (A = 1 |̂ Zj = z). (24) For the observed adjustment functional τ̂ Zj , the following is the AIPW score: IF j (O) ≜ m1, j (̂Zj ) −
+
+m0, j (̂ Zj ) + A{Y −m1, j (̂Zj )} 
+
+> ej(
+
+̂Zj ) − (1 −A){Y −m0, j (̂ Zj )} 
+
+> 1−ej(
+
+̂ Zj ) − τ̂ Zj . When this score is square-integrable, it is the 
+
+efficient influence function in the nonparametric model for ( ̂Zj , A, Y ). Bounded outcomes together with uniform representation overlap provide one sufficient condition for square integrability. Use the nuisance-learning sample, with ̂ Zj,i =̂ ϕj (Vj,i), to estimate the nuisance functions. Denote the estimates by ̂ m0, j ,̂ m1, j , and ̂ ej .
+
+Definition 9 (Honest AIPW estimator) . For i ∈ I E, define ̂ Zj,i =̂ ϕj (Vj,i) and UIF j (Oi) ≜̂
+
+m1, j (̂ Zj,i)−̂ m0, j (̂Zj,i)+ Aî  
+
+> ej(
+
+̂Zj,i) {Yi −̂ m1, j (̂Zj,i)}− 1−Ai
+
+> 1−
+
+̂e j (̂Zj,i) {Yi −̂ m0, j (̂Zj,i)}. The score UIF j is the uncentered plug-in version of IF j : it replaces the nuisance functions by their estimates and omits the centering term τ̂ Zj . The honest AIPW estimator is ̂ τ AIPW  
+
+> j
+
+≜ 1
+
+> nE
+
+∑ 
+
+> i∈I E
+
+UIF j (Oi). The plug-in score has the doubly robust remainder structure of augmented inverse probability weighting (Chernozhukov et al., 2017; Kennedy, 2022): its conditional bias is a product of the propensity error and the outcome-regression errors, as the next proposition states exactly. For 
+
+a ∈ { 0, 1 }, write ra,j (z) ≜̂ m a,j (z)−ma,j (z)
+
+> a
+
+̂e j (z)+(1 −a){1−̂e j (z)} .
+
+Proposition 8 (Exact signed nuisance remainder) . Conditional on ID and IN,
+
+E{UIF j (O)} − τ̂ Zj = E
+
+[
+
+{̂ ej (̂Zj ) − ej (̂Zj )}{ r1, j (̂ Zj ) + r0, j (̂ Zj )}
+
+]
+
+. (25) 26 The remainder is zero if the propensity estimator is correct. It is also zero if both conditional outcome estimators are correct. Clip the propensity estimate so that η ≤̂ ej (z) ≤ 1 − η. Conditional on the two learning samples, that is, on their observations and the seeds used to fit the encoder and the nuisance functions, define for a function g of ̂ Zj the norm ∥g∥2, ̂Zj ≜ [E{g(̂Zj )2 | I D, IN}]1/2 and the realized nuisance errors 
+
+qe,j ≜ ∥̂ej − ej ∥2, ̂ Zj , qa,j ≜ ∥̂ma,j − ma,j ∥2, ̂ Zj , a ∈ { 0, 1 }. Let σ2 
+
+> j
+
+≜ Var {UIF j (O) | I D, IN}
+
+denote the conditional variance of the plug-in score; it is finite whenever E(Y 2) < ∞ and the outcome estimates are square-integrable. For δE ∈ (0, 1), define 
+
+εAIPW, j ≜ σj
+
+√nEδE
+
++ qe,j (q0, j + q1, j )
+
+η . (26) In the notation of Thm. 5, ∥ · ∥ 2, ̂Zj = ∥ · ∥ 2, j and qe,j (q0, j + q1, j )/η = err j , so εAIPW, j = σj /√nEδE +
+
+err j . The last term of the second bound of Thm. 11 below is bias j . The next theorem is the final guarantee of this section: the causal error of the honest AIPW estimator is at most the estimation radius εAIPW, j plus the stability-weighted residual discrepancy of the learned representation. 
+
+Theorem 11 (Honest AIPW error; general form of Thm. 5) . Suppose σj < ∞. Conditional on the two learning samples, with probability at least 1 − δE over IE,
+
+|̂ τ AIPW  
+
+> j
+
+− τ̂ Zj | ≤ εAIPW, j . (27) If, in addition, Assumptions 1, 2, and 4 hold for Ẑ ϕj 
+
+> j
+
+and η ≤ ej (̂Zj ) ≤ 1 − η almost surely, then on the same event |̂ τ AIPW  
+
+> j
+
+− τ | ≤ εAIPW, j + Γj (̂ ϕj ) 
+
+> η(1 −η)
+
+Dres, j (̂ϕj ). 
+
+Corollary 2 (Consistency) . Consider a sequence of encoder and critic classes, sample splits, nuisance estimators, optimization tolerances, and selected encoders ̂ ϕj,n indexed by the total sample size n, with a common overlap constant η ∈ (0, 1 /2], such that Thm. 5 applies at every n. Suppose the following three conditions hold. (C1) Vanishing evaluation error. δE, n → 0 and σ2
+
+> j,n
+
+/(nEδE, n) → 0. The evaluation sample grows faster than the confidence level shrinks. (C2) Vanishing nuisance product. qe,j,n(q0, j,n + q1, j,n) p
+
+−→ 0. The propensity and outcome-regression errors need not vanish individually; their product vanishes, for example, when each is op(n−1/4). (C3) Vanishing learned imbalance. Γj (̂ϕj,n)Dres, j (̂ ϕj,n) p
+
+−→ 0. By Prop. 7, this holds when inf ϕ∈F j,nD D2res, j (ϕ), the two Rademacher complexities, aj,nD , εcrit, j,n, εenc, j,n, δD, n, and log(1 /δ D, n)/n D all converge to zero and Γ j (̂ ϕj,n) = Op(1). Then ̂ τ AIPW 
+
+> j,np
+
+−→ τ .Eq. (13) separates the final error into an AIPW estimation term and a hidden-confounding sensi-tivity term. The selected stability constant Γ j (̂ϕj ), critic approximation error aj,nD , optimization tolerances, and nuisance errors are not generally observed. The result becomes an operational nu-27 Algorithm 2: PROBE split search, detailed form 
+
+Input: a block partition W = ( W1, . . . , WJ ); observations split into ID, IN, IE; a budget m; a threshold t ≥ 0; an overlap constant η; a linking radius ρ > 0. 
+
+Output: an estimate ̂ τ of τ , or failure.  
+
+> 1
+
+Draw m proxy splits uniformly without replacement from S; 
+
+> 2
+
+foreach sampled split S do  
+
+> 3
+
+learn ̂ ϕS on ID by minimizing ˜D2 
+
+> S,nD
+
+; 
+
+> 4
+
+fit an unclipped propensity ̂ eraw  
+
+> S
+
+on IN; retain S if ˜D2 
+
+> S,nD
+
+(̂ϕS ) ≤ t and ̂ eraw  
+
+> S
+
+passes a prespecified empirical overlap check at level η.;  
+
+> 5
+
+Let Rm be the set of retained splits;  
+
+> 6
+
+foreach S ∈ R m do  
+
+> 7
+
+fit outcome regressions on IN, set ̂ eS = clip( ̂eraw  
+
+> S
+
+, η, 1 − η), and compute the honest AIPW estimate ̂ θS from Eq. (10) on IE.;  
+
+> 8
+
+Link S and S′ whenever |̂θS −̂ θS′ | ≤ 2ρ, and form the connected components;  
+
+> 9
+
+return the median of {̂ θS } over the unique largest component; declare failure if several components share the largest size; merical certificate after these quantities are bounded by theory, computation, external information, or a declared sensitivity analysis. 
+
+C.3. Searching Across Proxy Splits 
+
+Exhaustive evaluation of all proxy splits in S, defined in Eq. (15), may be computationally expen-sive. The number of splits, |S| = 2 J − 2, grows exponentially in the number of blocks J, and each split requires its own representation and nuisance fits. Algorithm 2 therefore samples m proxy splits instead of evaluating all of them, and then works in four stages. The sampling stage draws the splits S (line 1). The screening stage keeps the splits that pass the empirical balance screen (lines 2–5). The estimation stage computes one honest AIPW estimate per retained split (lines 6–7). The aggregation stage links estimates within distance 2 ρ and returns the median of the largest component (lines 8–9). The theorem below gives conditions under which those empirical components recover a fixed oracle partition of the population candidates. Three questions decide whether the output is accurate: whether enough screened splits are sampled, whether the designated target cell remains the unique plurality, and whether the estimated graph recovers the fixed oracle cells. For the analysis only, preassign a learning seed ωS to every S ∈ S before the split draw, let 
+
+G ≜ σ(ID, IN, {ωS : S ∈ S}), and condition on G throughout this subsection. Counterfactually applying the fixed learning-and-screening rule to every S ∈ S defines ̂ B, although Algorithm 1 evaluates only sampled splits. Thus, for every S ∈ S, the learned encoder ̂ ϕS , the nuisance estimates, the screen outcome, and the set ̂ B are fixed. For S ∈̂ B, let ̂ ZS ≜̂ ϕS (VS ) and let 
+
+θS ≜ τ̂ZS be its population adjustment value. Let Π = {C0, . . . , CL} be a partition of ̂ B that is fixed given G and hence chosen before the random 28 split draw and IE. Because the population values θS are generally unknown, Π is an oracle device for analysis rather than an object computed by Algorithm 1. Let T ≜ |S| = 2 J − 2 and N ≜ |̂B| ≥ 1. Fix m ∈ { 1, . . . , T }. Line 1 of Algorithm 2 draws m proxy splits uniformly without replacement from S, independently of G. Let Rm be the sampled splits in ̂ B, let R ≜ |R m|, and let Rℓ ≜ |R m ∩ Cℓ|. Then 
+
+R ∼ Hypergeometric( T , N , m), (28) since exactly N of the T candidates belong to ̂ B and the m draws are made without replacement. For the oracle cells, define 
+
+nℓ ≜ |Cℓ|, ℓ = 0, . . . , L. (29) Adopt the convention that a maximum over an empty collection equals zero and define ∆Π ≜ n0
+
+N − max 
+
+> 1≤ℓ≤L
+
+nℓ
+
+N . (30) Thus ∆ Π > 0 means that the target cell C0 is larger than every competing oracle cell. If L = 0, the maximum in Eq. (30) and the retained-cell maximum in Lemma 1 are both defined as zero. Two quantities of the distribution in Eq. (28) enter the guarantee: 
+
+P (R = 0) = 
+
+> (
+
+T − Nm
+
+> )/(
+
+Tm
+
+> )
+
+,
+
+E{e−R∆2Π/2} = 
+
+> min( m,N)
+> ∑
+> r=0
+> (
+
+Nr
+
+> )(
+
+T − Nm − r
+
+> )
+
+e−r∆2Π/2/(Tm
+
+> )
+
+.(31) Eq. (31) gives the empty-draw probability and the plurality-reversal term; both decrease as the budget m grows. 
+
+Lemma 1 (Cluster plurality under random subsampling) . Conditional on G, R ∼
+
+Hypergeometric( T , N , m). If ∆ Π > 0, then with probability at least 1 − P (R = 0) −
+
+L E{e−R∆2Π/2}, R ≥ 1 and R0 > max 1≤ℓ≤L Rℓ, with an empty maximum equal to zero. Fix δ ∈ (0, 1). We call Π ( b, ε, ρ, δ)-recoverable if b, ε ≥ 0, b + ε ≤ ρ, |θS − τ | ≤ b for every S ∈ C0,within-cell distances are at most 2( ρ − ε), between-cell distances exceed 2( ρ + ε), and, conditional on G, |̂θS − θS | ≤ ε for every S ∈̂ B with probability at least 1 − δ over IE.The following theorem bounds the error of the output of Algorithm 1. Its probability is over the evaluation sample and the random draw of splits, conditional on the learning samples. 
+
+Theorem 12 (Finite-sample PROBE cluster recovery; general form of Thm. 6) . Conditional on G, suppose ∆ Π > 0 and Π is ( b, ε, ρ, δ)-recoverable. Then, over the independent split draw and IE, the output ̂ τ of Algorithm 1 run with linking radius ρ satisfies P (|̂τ − τ | ≤ b + ε) ≥
+
+1 − δ − P (R = 0) − L E{e−R∆2Π/2}, where R ∼ Hypergeometric( T , N , m) as in Eq. (28), the two sampling terms are given in Eq. (31), and a declared failure counts as |̂τ − τ | > b + ε.29 The subsampling lemma controls whether C0 remains the unique largest retained cell. The within-cell and between-cell conditions then make the graph components in line 8 of Algorithm 2 equal the retained restrictions of the oracle cells. The target-band and evaluation-error conditions place every estimate in the selected target component within b+ε of τ . Eq. (27) at δE = δ/N and a union bound over ̂ B supply ε = max S∈̂B εAIPW, S , and Eq. (6) supplies b = max S∈C0 ΓS (̂ ϕS )Dres, S (̂ϕS )/{η(1 − η)}
+
+when every S ∈ C0 satisfies Assumptions 1, 2, and 4; this gives Thm. 6 of the main text, with Π = {C0, . . . , CL} and ∆ = ∆ Π. The partition and its gap remain oracle quantities and are not certified by the empirical graph. When b = 0 and C0 = {S : θS = τ }, the target-band premise uses the exact population equality notion of Section 3.2; the finite-sample theorem additionally involves empirical screening, random subsampling, and estimation error. The evaluation failure δ is paid with the uniform radius ε, while the two sampling terms are paid with the budget m. The fraction p ≜ N/T , the oracle margin ∆ Π, and the number L of competing cells are fixed after conditioning. The next corollary converts a sampling-failure tolerance α into a budget. 
+
+Corollary 3 (Budget for a target failure level) . Condition on ID, IN, and the learning seeds. Let T ≜ |S|, let ̂ B be a fixed screened set of size N ≥ 1, and define θS ≜ τ̂ϕS (VS ). Before the split draw and IE, fix a partition Π = {C0, . . . , CL} of ̂ B that is fixed given G. Set nℓ ≜ |Cℓ|,∆Π ≜ n0/N − max 1≤ℓ≤L nℓ/N > 0, and p ≜ N/T , with an empty maximum equal to zero. Draw m ∈ { 1, . . . , T } splits uniformly without replacement, let R be the number drawn from ̂
+
+B, and fix α ∈ (0, 1). Then 
+
+P (R = 0) + L E{e−R∆2Π/2} ≤ (L + 1) exp {−m p (1 − e−∆2Π/2)}. (32) Suppose additionally that b, ε ≥ 0, b + ε ≤ ρ, |θS − τ | ≤ b on C0, within-cell distances are at most 2( ρ − ε), between-cell distances exceed 2( ρ + ε), and |̂ θS − θS | ≤ ε simultaneously with probability at least 1 − δ over IE. With every largest-component tie counted as failure, Algorithm 1 then satisfies P (|̂ τ − τ | ≤ b + ε) ≥ 1 − δ − α whenever m ≥ log {(L+1) /α } 
+
+> p(1 −e−∆2Π/2)
+
+,and the simpler budget m ≥ 3 log {(L + 1) /α }/(p∆2Π) is sufficient. If L = 0, the budget 
+
+m ≥ log(1 /α )/p suffices. The budget scales as log {(L + 1) /α }/(p∆2Π). The ratio R/m is unbiased for p, but ∆ Π is defined by the oracle partition and is not identified by the realized graph without additional assumptions. 
+
+Corollary 4 (Median under majority) . Condition on the learning samples and seeds. Let ̂ B
+
+be fixed, define θS ≜ τ̂ϕS (VS ), and before the split draw and IE fix a partition of ̂ B that is fixed given G and contains a target cell C0. Let Rm ⊆̂ B be the retained splits with R ≜ |R m|. Fix 
+
+b, ε ≥ 0. Suppose |θS − τ | ≤ b for every S ∈ C0, and let E be an event on which |̂ θS − θS | ≤ ε
+
+for every S ∈ R m. If |R m ∩ C0| > R/ 2, then on E the median of {̂ θS : S ∈ R m} lies within 
+
+b + ε of τ . The linking step and cell-separation conditions are not needed. When the target cell forms a strict retained majority, Cor. 4 dispenses with the linking step. With 
+
+b = 0 and C0 = {S : θS = τ }, its target-band premise reduces to the exact population target class used in Cor. 1. 30 D. Experiment Details and Evidence Boundaries 
+
+This appendix records the technical details behind Section 5. The tables in this appendix report the original runs of each experiment. Fig. 3 and its detailed versions, Figs. 8 and 9, also include data sets added later with seeds fixed in advance, for 100 data sets per synthetic setting, 100 Twins replicates, and 88 IHDP replicates in total, so their MAE values differ from the tables. 
+
+D.1. Shared structural family 
+
+All four confirmations share one structure. Let U be the hidden confounder, I a treatment-only cause, C an observed confounder, and let η, ϵ0, . . . , ϵ4 and εY be independent standard normal noises. The informative coordinates, which no learner sees by name, are X1 = U + 2 η, Mj =
+
+U + 0.85 ϵj (j = 0, . . . , 3), M4 = U − 3.0 I + 0.85 ϵ4. Treatment and outcome follow P (A = 1 |
+
+U , I, C, X1) = 0.1 + 0.8 Φ(1.5 U + 2.0 I + 0.2 X1 + 0.3 C), Y (a) = a − 2.5 U + 0.2 X1 − 0.5 C + 0.3 εY ,so the average treatment effect is τ = 1. The observed covariate X carries X1 and C. Blocks 
+
+W1, W2, W3 carry M1, M2, M3, block W4 carries the contaminated M4, and block W5 carries M0
+
+together with I. Each observed vector is a fixed random rotation of its informative coordinates stacked on pure noise coordinates with standard deviation 0.5, so no observed coordinate is a named quantity. Placing C inside X, which always enters the representation, prevents a representation from dropping an outcome-relevant coordinate in order to balance. The three numeric settings differ only in how many noise coordinates hide the informative ones. SCM-1 gives X two coordinates and the five blocks (1, 1, 1, 1, 2) coordinates, for 8 in total. SCM-2 gives X eight and each block sixteen, for 88. SCM-3 gives X thirty-two and each block 256, for 1,312. Because the coefficients are shared, the population values and the census of balanceable splits are the same objects across the three. In the population of this family, seven of the thirty candidate splits admit exact balance and target τ , namely those built from the clean blocks W1, W2, W3; the split that holds out W4 also admits balance and targets a different value; the seven splits that mix W4 with a clean block admit no balance; every split containing W5 admits no balance at all. This is the census the screen is measured against when we report true and false positive rates. 
+
+D.2. Image rendering 
+
+SCM-4 keeps the structure above and changes only what the learner receives in place of the six observed proxy coordinates. Each coordinate is recorded to 15 equally spaced levels on [ −3σ, 3 σ], where σ is its exact population standard deviation, and is then shown as one original 64 × 64 RGB Shapes3D image whose orientation factor equals that level. Every other generative factor of the image is drawn uniformly and independently, so the image carries the recorded level and nothing else about the unit. Blocks W1 to W4 contribute one image each and W5 contributes two, giving six images per unit. A frozen reader maps one image back to one number. It is a convolutional network trained with orientation labels on an image bank disjoint from every image used in the causal data, and it is never refitted during the experiment. Across the 14,400,000 reads of all 100 data sets it produced no level error, so SCM-4 measures the pipeline under an image proxy and not the discovery of a 31 representation from raw pixels. The pixel CNN comparator in Section 5 is a convolutional network fitted on all six images without holding out a block and without the balance screen. Two of the twenty SCM-4 data sets reached the wall-clock cap for that comparator while three tasks shared one GPU, and the sealed summary therefore recorded FAIL on the completeness gate and on the comparison that depends on it. The two comparator runs were repeated alone under the sealed configuration and the sealed seeds, and nothing else was rerun or changed. The sealed summary and the amended summary are both retained; the amended one passes all 13 gates. 
+
+D.3. Search family, screen, and aggregation 
+
+The search ranges over the thirty nonempty proper subsets of the five blocks. For a split S the representation is ZS = ( X, Bv −S ), where v−S stacks the preprocessed kept blocks and B has rank 
+
+k = 2. Preprocessing standardises X and reduces any block with more than two coordinates to its principal directions above the Marchenko–Pastur edge, at most four, fitted on the representation fold alone. The family is therefore linear in the observed coordinates and role-blind: it receives no label identifying a block, but it is not an unrestricted neural encoder. Each data set is split into four folds of nearly equal size, 6,000 rows each here, rotated so that every fold serves once as representation, screen, nuisance, and evaluation sample. The critics are bounded probit models with link 0.1 + 0.8Φ and ridge 10 −4; the augmented critic nests the base one, and the lifted base is a candidate whenever the augmented fit cannot improve on it. The screen statistic is the held-out Brier risk difference on the screen fold, refitted there rather than reused from the search and cross-fitted by row parity. A split is retained when max(gap, 0) + z SE falls below the threshold and every base-critic prediction on that fold lies in [0.05, 0.95], with z = Φ −1(1 − 0.05 /30) ≈ 2.935 for the thirty simultaneous decisions. The thresholds are 1.5, 1.8, 1.6 and 1.7 times 10 −3 for SCM-1 to SCM-4, each fixed on development data before the confirmation seeds were generated. Retained splits are grouped by single linkage at twice a common radius, and the reported estimate is the median of the largest agreeing group, with no estimate returned when two groups tie for largest. Relative to Algorithm 1, this implementation searches all 30 splits ( m = T ), adds a separate screen fold to the three samples, retains a split only if it passes the screen in all four rotations, averages its estimate over the rotations, and sets the linking radius ρ from the data by a Gaussian multiplier bootstrap. Appendix D.5 states every one of these choices in full. 
+
+D.4. Honest learning and evaluation 
+
+The four folds of a data set carry four separate jobs, and every rotation assigns each fold to each job once. The representation and its search critics use the representation fold. The screen refits fresh critics on the screen fold, so no statistic that decides retention was fitted on the rows that produced the representation. Propensity and outcome nuisance functions use the nuisance fold, and the AIPW score uses the evaluation fold. Preprocessing parameters are estimated only from the fold that is training at that step, and the four rotations are averaged. For a fixed representation, the base critic predicts A from Z, and the augmented critic predicts 
+
+A from ( X, WS , Z). The empirical screen uses the clipped difference between their paired Brier risks. The runs additionally record critic reliability diagnostics, while the overlap check is part of the retention rule. These diagnostics are empirical guards. They are not upper confidence bounds 32 on the population discrepancy. The reported paired comparison uses one value per independently generated data set. For method 
+
+M and baseline B, define dk = |̂τM ,k − 1| − | ̂ τB,k − 1|. The prespecified one-sided upper bound is 
+
+d + t0.95, K−1 sd( d1,... ,dK )√K . The data set, not a proxy split, row, or training restart, is the replication unit. A no-return data set is included in the return-rate denominator and is not filled with zero error. 
+
+D.5. Modeling choices and implementation 
+
+Why this representation family. Two requirements shaped the choice. The screen must certify balance from a finite sample, which asks for an encoder class whose uniform deviation term in Eq. (22) is small, and the search must stay role-blind, so the class may not use any label that identifies a block. A rank-two linear map on preprocessed kept blocks meets both, and every fit it produces is deterministic given its seed, which the sealing protocol requires. The price is that this family cannot represent a nonlinear measurement channel. SCM-4 pays that price explicitly: a frozen network reads each image into a number before PROBE sees it, so the linear family acts on recovered numbers rather than on pixels. 
+
+Preprocessing. All preprocessing is fitted on the representation fold alone. The covariates X are standardised. A block with at most two coordinates passes through unchanged. A block with more coordinates is reduced by a singular value decomposition: with eigenvalues s2/n of the centred block, the noise level is the median eigenvalue σ2, the Marchenko–Pastur edge is σ2(1 + √d/n )2 for 
+
+d coordinates, and the retained directions are those whose eigenvalue exceeds 1.1 times that edge, at least one and at most four. The retained scores are standardised again. 
+
+Representation. For a split S, let v−S stack the preprocessed kept blocks, of width q, and let 
+
+B ∈ Rk×q with k = min(2, q), so that ZS = ( X, v−S B⊤). The rows of B are normalised inside the objective, which makes the parameterisation scale invariant rather than constrained. The objective is the ridge-penalised Brier gap G(B) = ̂ R0 −̂ R1 of the two nested critics on the representation fold, and its gradient follows from the envelope theorem, projected onto the unit-row tangent space. The optimiser is L-BFGS-B with at most 60 outer iterations, tolerances 10 −14 and 10 −12 , and two starts: the top-k right singular vectors of the centred kept features, and one Gaussian random matrix. The start with the lower G is kept, and the critic fits are warm-started across outer iterations. No penalty is placed on B.
+
+Critics. Both critics are bounded probit models, q = 0.1 + 0.8 Φ( η), fitted by L-BFGS-B with at most 500 iterations on the ridge-penalised Brier risk with penalty 10 −4 on every coefficient except the intercept. The bounded link is what makes Assumption 5 hold by construction for the fitted propensity and keeps the critic class [0, 1]-valued, as Definition 4 requires. The base critic reads (1, X, ZS ) and the augmented critic reads those inputs together with TS . The base critic lifted into the augmented space, by padding its coefficients with zeros, is always a candidate for the augmented fit, so the empirical gap is nonnegative by construction. 33 Screen. On the screen fold the critics are refitted from scratch and cross-fitted by row parity: even rows fit and odd rows score, then the roles are reversed. The statistic is the pooled out-of-fold paired Brier difference, with gap its mean and SE its standard deviation divided by √nS. A split is retained when max(gap, 0) + z SE falls below the threshold and every base-critic prediction on that fold lies in [0.05, 0.95], and it is retained overall only if it passes in all four rotations. The overlap condition is part of the rule, not a diagnostic. 
+
+Aggregation. The common radius ρ comes from a Gaussian multiplier bootstrap rather than from resampling. The evaluation-fold scores of the thirty splits are stacked into one matrix, Σ is their centred cross-product divided by n2, and ρ is the 95th percentile of max j |ξj | over 5,000 draws 
+
+ξ ∼ N (0, Σ). Two splits are linked when their estimates differ by at most 2 ρ, groups are the connected components under single linkage, and the reported estimate is the median of the largest group. When two groups tie for largest, the run returns no estimate, and that data set enters the return-rate denominator. 
+
+Nuisance functions and the AIPW score. The propensity is the same bounded probit at ridge 10 −4, fitted on the nuisance fold and clipped to [0.05, 0.95]. Each arm’s outcome regression is a ridge least squares fit on the nuisance fold with an unpenalised intercept and penalty 10 −4n. The score is evaluated on the evaluation fold, and a split’s estimate is the plain mean of its four rotations. 
+
+Folds by setting. Every setting splits its rows into four folds of nearly equal size and rotates them, so the 6,000-row folds are specific to the synthetic settings.                             
+
+> Setting nData sets Fold sizes Screen rule SCM-1 to SCM-4 24,000 20 sealed, 100 total 6,000 each fixed threshold Twins 11,984 10 sealed, 100 total 2,996 each noise floor IHDP 747 10 sealed, 88 total 187, 187, 187, 186 noise floor ACIC 4,802 9, exploratory 1,201 or 1,200 noise floor RHC 5,735 1, effect unknown 1,434 or 1,433 noise floor Kernel benchmark 3,000 20 sealed, 100 total 750 each pooled gap
+
+The synthetic settings require a pass in all four rotations at the fixed threshold. The kernel benchmark disables the fixed threshold and retains a split when its pooled gap is at most z SE with 
+
+z = Φ −1(1 − 0.05 /2) = 1.96, since only two splits are available there. The noise floor pools the four rotations, taking gap = max(mean, 0) and SE =  
+
+> √∑
+
+SE 2/4, and retains a split when gap + z SE is at most the median of z SE over the thirty splits of the same data set. The realised floors are 0.002661 for Twins, 0.021346 for IHDP, 0.004694 for ACIC, and 0.006335 for RHC. Overlap is not part of this rule. 
+
+The image reader and the pixel comparator. The image bank is split once, under a fixed seed, into 200,000 reader-training images, 40,000 selection images, and 240,000 images reserved for the causal data, and the three parts are disjoint. The reader is four convolutions, 3 → 32 → 64 → 128 → 128 channels, each 3 ×3 with stride 2 and padding 1 and a ReLU, followed by a flattening and two linear layers of widths 256 and 1. It is trained as a regression on the scaled level ( ℓ − 7) /7 under squared 34 loss for six epochs with batch size 256 and Adam at learning rate 10 −3, the epoch with the lowest validation error is kept, and the weights are then frozen, hashed, and reloaded in evaluation mode for every run. The pixel comparator starts from the reader: it loads the reader’s convolutional tower and its 256-dimensional feature layer, adds a linear map to sixteen outputs whose first row is copied from the reader’s output layer, and shares that tower across the six images. The sixteen outputs per image and the standardised covariates enter two hidden layers of widths 128 and 64 with ReLU activations and three heads for the propensity and the two outcome regressions. Training minimises the Brier loss for treatment plus the squared loss for the standardised outcome, with Adam at 10 −4 for the tower and 10 −3 elsewhere, five epochs, batch size 128, a validation share of 0.2, and patience two. The comparator uses PROBE’s folds and rotations and the same clipping, and it carries a wall-clock cap of 2,400 seconds for its four rotations. 
+
+Which comparators share the folds. Adjustment for X, adjustment for ( X, W ), the unchecked summary, the oracle, and the pixel comparator all use PROBE’s folds and rotations, with the bounded probit propensity and arm-wise ridge outcome models whose ridge levels are chosen by three-fold cross-validation on the nuisance fold. The oracle adjusts for the latent coordinates rather than for the rotated observed covariates, so it is stronger than an estimator that sees X and U in observed form. CEVAE, proximal 2SLS, single-proxy control, and KSPC are fitted on the whole data set without PROBE’s folds and without cross-fitting, as in their source implementations. 
+
+Seeds and sealing. A sealed run writes a protocol file once, recording the sample size, the full design, and a hash of every source file it will execute; a later run aborts if any hash or any design field differs. Shards are written atomically and never over an existing file, and summaries are also write-once. Fold seeds, representation start seeds, bootstrap seeds, and comparator seeds are fixed offsets of the task seed, so a rerun of a task reproduces its fits exactly on the same hardware. 
+
+D.6. Additional results for the synthetic analysis 
+
+This subsection details the original sealed confirmation runs, summarized in Table 2. Fig. 6 shows every method on its own row, and Fig. 7 shows the kernel single-proxy benchmark. Methods that need proxy roles receive the roles of the data-generating process in their correct-role runs. Proximal 2SLS uses W4, which the treatment-only cause I affects, as the treatment-side proxy, a role W4 can fill although it is not a valid held-out block, and W2 as the outcome-side proxy, and single-proxy control and KSPC use the clean block W1. The wrong-role runs swap the two 2SLS proxies and give single-proxy control and KSPC the contaminated block W4. KSPC is our implementation of the estimator of Xu and Gretton (2025) with observed covariates, using its SKPV estimator only, on a random subsample of 3,000 rows when a data set is larger. 
+
+Comparators. Adjustment for X, adjustment for ( X, W ), and the oracle, which also adjusts for 
+
+U , are AIPW estimators on the same folds and rotations as PROBE. Proximal 2SLS is linear. It regresses the outcome-side proxy on A, the treatment-side proxy, and X, and then regresses Y on 
+
+A, the fitted proxy, and X; a block with more than four coordinates enters through its first four principal components. Single-proxy control fits the linear outcome bridge of Park et al. (2024) in 
+
+X and the first principal component of its block on the untreated units, which gives the effect 35 −5 −0.1 0 0.1 1 
+
+PROBE (ours) CEVAE Adjust for X
+
+and all of W
+
+Adjust for X
+
+Pixel CNN Proximal 2SLS Single-proxy control, clean block KSPC†, clean block Proximal 2SLS, roles swapped Single-proxy control, contaminated block KSPC†, contaminated block Oracle (adjusts for (X, U))
+
+> MAE
+> 0.020
+> 0.030
+> 0.271
+> 1.442
+> 0.031
+> 0.033
+> 0.875
+> 5.186
+> 5.258
+> 1.881
+> 0.003
+
+SCM-1 
+
+dim( X, W) = 8   
+
+> −5 −0.1 0 0.1 1
+> MAE
+> 0.017
+> 0.280
+> 0.277
+> 1.430
+> 0.159
+> 0.035
+> 0.854
+> 5.312
+> 5.228
+> 1.656
+> 0.003
+
+SCM-2 
+
+dim( X, W) = 88   
+
+> −5 −0.1 0 0.1 1
+> MAE
+> 0.014
+> 0.409
+> 0.446
+> 1.430
+> 0.120
+> 0.036
+> 0.813
+> 5.225
+> 5.249
+> 1.796
+> 0.004
+
+SCM-3 
+
+dim( X, W) = 1,312   
+
+> −5 −0.1 0 0.1 1
+> MAE
+> 0.018
+> 0.047
+> 0.306
+> 1.433
+> 0.281
+> 0.033
+> 0.038
+> 0.870
+> 5.136
+> 5.216
+> 1.807
+> 0.003
+
+SCM-4 six images 
+
+> No roles needed Correct roles given Wrong roles given
+
+estimate minus true effect 
+
+> † run after the protocol was frozen
+
+Figure 6: Detailed version of the left of Fig. 3 for the original 20 data sets per setting, with every method on its own row. KSPC ( †) was run after the protocol was frozen. on the treated. This effect equals τ in SCM-1 to SCM-4 because the effect is constant. As an ATE estimator, single-proxy control also fits the bridge on the treated units, which gives the effect on the untreated, and averages the two effects with weights equal to the shares of treated and untreated units. CEVAE is reimplemented in PyTorch with the architecture and default settings of the Pyro reference implementation: a 20-dimensional latent, three hidden layers of 200 units, 30 epochs, batch size 100, and learning rate 10 −3, fitted on the standardised ( X, W ). In SCM-4 the comparators that use the proxy receive the six numbers of the image reader, except the pixel CNN, which starts from the reader’s weights and fine-tunes them on the images. The kernel single-proxy benchmark uses the generator of Xu and Gretton (2025) with a hidden 
+
+U ∼ Unif( −1, 1), a binary treatment, P (A = 1 | U ) = 0.1+0.8 {1+erf( U )}/2, and the deterministic outcome Y = sin( πU/ 2) + A − 0.3, so τ = 1. PROBE receives the two proxies of that generator as two blocks, W1 = eU + ϵ with ϵ ∼ N (0, 0.1 2) and W2, an MNIST image of the digit ⌊5U + 5 ⌋; KSPC receives one of them at a time. Here KSPC is the authors’ code without covariates, and Fig. 7 shows both of its estimators, SKPV and SPMMR. With two splits, PROBE retains a split when its mean gap over the four rotations is at most z times its standard error, with z = Φ −1(1 − 0.05 /2). The benchmark has 20 replicates of size n = 3,000. Fig. 6 gives the detailed comparison. PROBE answers every one of the 80 original data sets, with mean absolute error between 0.014 and 0.020 and 90th percentile error between 0.033 and 0.046. 36 0.0 0.5          
+
+> estimate minus the exact e ff ect
+> Oracle (uses U)PROBE (ours) KSPC (SPMMR), given image KSPC (SPMMR), given W1
+> KSPC (SKPV), given image KSPC (SKPV), given W1
+> 2SLS, W2treats 2SLS, W1treats Adjust for all of W
+> Naive di ff erence 0.617
+> 0.104
+> 0.100
+> 0.025
+> 0.023
+> 0.273
+> 0.007
+> 0.555
+> 0.054
+> 0.004 MAE
+> KSPC benchmark, binary treatment
+
+Figure 7: Kernel single-proxy benchmark of Xu and Gretton (2025) with a binary treatment; the effect is exactly 1. Estimates minus the effect over 20 replicates, with the MAE on the right. Its prespecified one-sided paired bound on the excess over the oracle ranges from 0.015 to 0.023. The two ways of using the proxy without an audit both fail: adjustment for X and the entire raw proxy has mean estimate between 0.55 and 0.73 because it absorbs the treatment-only coordinate, and in SCM-4 a convolutional network that reads every pixel and never tests balance has mean estimate 0.72. The paired bound against that pixel network is −0.25. The prespecified-block contrast isolates identification from search, as Thm. 1 requires. Holding out the clean block W1 and balancing it gives 0.998, 0.987, 0.980 and 1.000 in the four settings. Holding out the contaminated block W4 gives 0.660, 0.656, 0.616 and 0.667, and the balance screen retains that split in 79 of the 80 original data sets and 396 of all 400, because W4 really can be balanced. Holding out W5 gives about 0.29 and is rejected in all 80 original data sets and all 400, since no representation balances a block that carries the treatment-only cause. Balance is observable, and on its own it is not enough. Aggregation repairs the one failure that balance leaves. Thm. 2 and Cor. 1 predict that the valid splits outvote W4 when they form a majority, and they do: averaging over the retained splits is dragged to 0.963, 0.956, 0.945 and 0.959, the plain median of the retained splits already recovers most of that at 1.002, 0.998, 0.991 and 0.997, and the median of the largest agreeing component that PROBE returns reaches 1.005, 1.003, 0.993 and 1.001. The screen has true positive rate between 0.986 and 1.000 and false positive rate between 0.041 and 0.046, every returned component is pure, and every data set returns a unique largest component. The two bounds of Thm. 4 and Thm. 5 are visible separately. For a single split in SCM-1 to SCM-3, the population effect of the learned representation sits a median of 0.042 to 0.046 from τ , with 37 Table 2: Sealed confirmations. Each row is 20 independently generated data sets at n = 24,000. 
+
+Setting What the learner sees Mean error p90 Oracle gap Status SCM-1 8 coordinates 0.020 0.033 0.022 12/12 gates SCM-2 88 coordinates 0.017 0.037 0.019 12/12 gates SCM-3 1,312 coordinates 0.014 0.035 0.015 12/12 gates SCM-4 six 64 × 64 images 0.018 0.046 0.023 13/13 gates, amended −5 −0.1 0 0.1 1 10                 
+
+> PROBE (ours) CEVAE Adjust for Xand all of W
+> Adjust for X
+> Pixel CNN Proximal 2SLS Single-proxy control KSPC Oracle (adjusts for (X,U))
+> MAE
+> 0.019
+> 0.039
+> 0.273
+> 1.438
+> 0.025
+> 5.188
+> 0.030
+> 5.275
+> 0.873
+> 1.873
+> 0.004
+> SCM-1
+> dim( X,W)= 8
+> −5 −0.1 0 0.1 1 10
+> MAE
+> 0.018
+> 0.283
+> 0.277
+> 1.436
+> 0.173
+> 5.559
+> 0.031
+> 5.253
+> 0.855
+> 1.659
+> 0.003
+> SCM-2
+> dim( X,W)= 88
+> −5 −0.1 0 0.1 1 10
+> MAE
+> 0.018
+> 0.416
+> 0.445
+> 1.441
+> 0.155
+> 5.220
+> 0.033
+> 5.261
+> 0.835
+> 1.809
+> 0.003
+> SCM-3
+> dim( X,W)= 1,312
+> −5 −0.1 0 0.1 1 10
+> MAE
+> 0.019
+> 0.051
+> 0.310
+> 1.435
+> 0.286
+> 0.030
+> 5.170
+> 0.037
+> 5.238
+> 0.875
+> 1.816
+> 0.004
+> SCM-4 six images estimate minus true effect
+> filled: correct roles hollow: wrong roles
+
+Figure 8: Detailed version of the left of Fig. 3 over all 100 data sets per setting, with the MAE of each method on the right; for methods that need proxy roles, the upper number is for the correct roles. 90th percentile 0.103 to 0.110, and the realised error of that one split has median 0.051 to 0.059. Aggregating the retained splits cuts this to the 0.014 to 0.020 reported above, so the combination step, not a single well-behaved representation, carries the accuracy. The same separation shows up in the intervals. A nominal 95% interval around one split, built from the estimate’s own standard error, covers τ̂Z at 0.950, 0.957 and 0.936 in SCM-1 to SCM-3, which is the nominal rate, and covers τ at 0.836, 0.857, 0.879 and 0.807. The shortfall is the representation gap, which no interval built from sampling variation can contain; Fig. 11 shows it per data set. Two boundaries limit what these results show. The image setting hands PROBE numbers produced by a reader that was trained with orientation labels on an auxiliary image bank, disjoint from the causal data; that reader made no level error in 14,400,000 reads of all 100 data sets, so SCM-4 tests the pipeline under an image proxy rather than the discovery of a representation from raw pixels. The second boundary is the one the W4 contrast exposes: the screen certifies balance and cannot certify the outcome-relevant condition that Assumption 3 adds. The SCM-4 row carries a correction that we report rather than hide. Two of its 20 data sets reached the wall-clock cap while three tasks shared one GPU, so the pixel-network comparator recorded no value there and the sealed summary returned FAIL on the completeness gate and on the comparison that depends on it. Those two comparator runs were repeated alone under the sealed configuration and the sealed seeds, every other number was left untouched, and the amended summary passes all 13 gates. 38 −0.1 0 0.1 1                  
+
+> PROBE (ours) CEVAE Adjust for Xand all of W
+> Adjust for X
+> Proximal 2SLS Single-proxy control, as an ATE KSPC Oracle (adjusts for (X,U))
+> MAE
+> 0.0073
+> 0.0735
+> 0.0218
+> 0.0758
+> 0.0139
+> 0.2473
+> 0.7272
+> 0.0086
+> 0.0801
+> 0.0061
+> Twins
+> −100 01100
+> MAE
+> 0.4088
+> 0.5561
+> 0.4536
+> 0.6407
+> 0.2257
+> 1.7226
+> 24.9196
+> 0.6779
+> 1.3581
+> 0.4770
+> IHDP
+> −10 01100
+> MAE
+> 0.2025
+> 0.2575
+> 0.2239
+> 0.1757
+> 0.1016
+> 0.8015
+> 34.6486
+> 0.5622
+> 0.9318
+> 0.1336
+> ACIC (exploratory)
+> −2 −1.5 −1
+> PROBE (no roles) proximal DR, roles assigned* difference in means KSPC, five blocks
+> RHC (no ground truth) estimate minus the exact effect effect on days survived
+> filled: correct roles hollow: wrong roles * published by Cui et al. (2024)
+
+Figure 9: Detailed version of the right of Fig. 3 over 100 Twins, 88 IHDP, and 9 ACIC data sets, with the MAE of each method, and the RHC estimates, where no true effect is known; PROBE’s estimate carries its resampled 95% interval, and * marks estimates published by Cui et al. (2024). 
+
+D.7. Semi-synthetic benchmarks 
+
+Twins (Louizos et al., 2017), IHDP (Hill, 2011), and ACIC 2016 (Dorie et al., 2019) keep their covariates and both potential outcomes, so the effect is known exactly. In each, one covariate is hidden as U (gestational age in Twins, the sixth of the 25 IHDP covariates, and x44 in ACIC), and the five proxy blocks and the treatment are generated from it by one fixed recipe. The blocks follow the proxy mechanism of SCM-1 with a generated standard normal treatment-only cause I, and the treatment follows P (A = 1 | U , I, X) = 0.1+0.8 Φ(1.5 U +2.0 I +w⊤ ˜X), where U is standardised, ˜X
+
+is the standardised X, and w ∼ N (0, 0.1 2I) is drawn once. Twins has n = 11,984 and 42 covariates, IHDP n = 747 and 24, and ACIC n = 4,802 and 78. The original runs use Twins replicates 11 to 20, IHDP replicates 12 to 21, and ACIC realizations 2 to 10. The comparators take the proxy roles of Appendix D.6; single-proxy control is run once, as an ATE estimator with the clean block W1.The sealed thresholds of SCM-1 to SCM-4 do not transfer to these data sets, because the noise level of the screen statistic changes with the numbers of rows and covariates. The screen therefore uses a noise-scaled threshold: instead of requiring a pass in all four rotations, it pools them, taking their mean gap and its standard error, and it retains a split when max(gap, 0) + z SE is at most the median of z SE over the thirty splits of the same data set. This rule was adopted after the pre-registered RHC analysis and the RHC-planted, ACIC, and earlier IHDP analyses with the sealed threshold returned no estimate. It was frozen before Twins replicates 11 to 20 and IHDP replicates 12 to 21 were generated, so these two studies are prospective tests; it was chosen after seeing ACIC realizations 2 to 10, so the ACIC results are exploratory. The RHC study (Connors et al., 1996) has 5,735 patients, days survived within 30 as the outcome, and ten physiological measurements grouped into five proxy blocks, as analyzed by Cui et al. (2024); no true effect is known. The blocks are, in order, the PaO 2/FiO 2 ratio and PaCO 2, pH and hematocrit, white cell count and albumin, bilirubin and creatinine, and sodium and potassium, and the comparators are the difference in means, the proximal estimate that Cui et al. (2024) obtain by assigning roles to W1 and W2, and KSPC given each block in turn. The interval around PROBE’s 39 Table 3: Mean absolute error on the original replicates in three semi-synthetic studies with known effects; ACIC is exploratory. Proximal 2SLS, single-proxy control, and KSPC require proxy roles; KSPC ( †) was run after the protocol was frozen. Bold marks the smallest error among the methods other than the oracle.                                        
+
+> Method Twins IHDP ACIC PROBE (ours) 0.0077 0.3054 0.2025 CEVAE 0.0894 0.1828 0.2575 Adjust for Xand all of W0.0207 0.3927 0.2239 Adjust for X0.0749 0.7221 0.1757 Proximal 2SLS, roles given 0.0156 0.2328 0.1016
+> Proximal 2SLS, roles swapped 0.2453 1.5856 0.8015 Single-proxy control, as an ATE 0.7318 5.9838 34.6486 KSPC †, clean block 0.0099 0.6214 0.5622 KSPC †, contaminated block 0.0815 1.2499 0.9318 Oracle (adjusts for ( X,U)) 0.0074 0.4868 0.1336
+
+RHC estimate in Fig. 9 gives the sampling spread of the median of the largest agreeing group over 20,000 draws, holding the retained splits and the linking radius at their observed values, so it omits the uncertainty of the screen. Table 3 gives the MAE on the original replicates. On IHDP, ten replicates do not resolve the gap between PROBE and CEVAE: the error ratio is 1.67, with a 90% paired-bootstrap interval from 0.78 to 2.78. 
+
+D.8. Protocol discipline 
+
+One generated data set is one replicate; splits, rows, rotations, and restarts are not. Seeds overlap across the synthetic settings: SCM-1 replicates 10 to 19 share seeds with SCM-2 replicates 0 to 9, and SCM-2 replicates 10 to 19 with SCM-3 replicates 0 to 9, so comparisons across those settings are not independent. Paired methods share data, sample roles, and nuisance budgets. For SCM-1 to SCM-4 the screen threshold is fixed before the confirmation data are generated, and Appendix D.7 gives the rule and its history for the other data sets. The threshold remains a screen rather than proof of causal validity. No-return outcomes stay in the return-rate denominator, failed sealed runs stay in the record, and this appendix documents exclusions, replacements, and the representation family the search ranges over. 
+
+D.9. Evidence boundaries 
+
+The empirical gates are performance criteria, not proofs of completeness, stability, or the population plurality condition. 
+
+D.10. Additional figures 
+
+Fig. 10 shows the three aggregation rules on the sealed confirmations, Fig. 11 shows the interval coverage of one split, and Fig. 12 separates the representation and estimation parts of the error. 40 0.8 0.9 1.0 1.1 PROBE: median of the largest agreeing group Median of the retained splits Average of the retained splits 
+
+SCM-1 8 numbers    
+
+> 0.8 0.9 1.0 1.1
+
+SCM-2 88 numbers    
+
+> 0.8 0.9 1.0 1.1
+
+SCM-3 1,312 numbers    
+
+> 0.8 0.9 1.0 1.1
+
+SCM-4 6 images Combined estimate over the retained splits (dashed line: τ = 1) Figure 10: Three ways to combine the retained splits. Averaging is pulled away from τ by the balanced but invalid split; the median of the largest agreeing group is not. 0.6 0.8 1.0 Covers τ,the causal e ff ect Covers τ̂ Z,what the representation targets 
+
+SCM-1 8 numbers   
+
+> 0.6 0.8 1.0
+
+SCM-2 88 numbers   
+
+> 0.6 0.8 1.0
+
+SCM-3 1,312 numbers   
+
+> 0.6 0.8 1.0
+> not recorded
+
+SCM-4 6 images Share of the seven target splits covered (dashed line: nominal 0.95) 
+
+Figure 11: Coverage of a nominal 95% interval around one split, one dot per data set. The interval covers the population effect of the learned representation at the nominal rate and covers 
+
+τ less often, by the representation gap. The interval in Fig. 11 is the AIPW estimate of one split plus or minus 1.96 times its own standard error, and that standard error is computed from the score cross-product the sealed run already stored, so the figure refits nothing. It covers what the learned representation targets at the nominal rate and covers τ less often, by the amount of the representation gap. An interval built from sampling variation cannot contain that gap, which is why Thm. 4 bounds it separately from Thm. 5. 41 0.01 0.1 1PROBE output: error | ̂τ − τ|One split: error | ̂θ − τ|One split: estimation gap | ̂θ − τ̂ Z|One split: representation gap | τ̂ Z − τ|CNN on all pixels, no balance check Adjust for X  
+
+> and all of W
+> Adjust for X
+> images only
+
+SCM-1 8 numbers   
+
+> 0.01 0.1 1
+> images only
+
+SCM-2 88 numbers   
+
+> 0.01 0.1 1
+> images only
+
+SCM-3 1,312 numbers   
+
+> 0.01 0.1 1
+> not recorded not recorded
+
+SCM-4 6 images Absolute error, log scale (bar: median over data sets) Figure 12: Absolute errors on a log scale. For one split the representation gap |τ̂Z − τ | is the pop-ulation effect of the learned representation, which is exact for the linear representations of SCM-1 to SCM-3 and is not recorded for SCM-4. Aggregation reduces the error of a single split by roughly a factor of three. 
+
+# E. Proofs 
+
+E.1. Proofs for Section 3 
+
+Sufficient conditions for outcome-relevant completeness. 
+
+Proof of Proposition 2. Fix z and Q, Q′ ∈ Q j,z with Kj Q = Kj Q′. Write πQ for the distribution of ( X, U ) under Q, πQ,X for its X-marginal, and πQ(· | x) for its conditional distribution of U
+
+given X = x. By condition (i), Kj (· | v, u) = Kj (· | x, u), so the distribution Kj Q of ( X, Wj ) has 
+
+X-marginal πQ,X and conditional distribution ∫ Kj (· | x, u) πQ(du | x) given X = x. The equality 
+
+Kj Q = Kj Q′ therefore gives πQ,X = πQ′,X and, for πQ,X -almost every x, ∫ Kj (· | x, u) πQ(du |
+
+x) = ∫ Kj (· | x, u) πQ′ (du | x). Condition (ii) yields πQ(· | x) = πQ′ (· | x) for almost every 
+
+x, hence πQ = πQ′ . By condition (i), μa,j,z (v, u) = ¯ μa,z (x, u) for a measurable function ¯ μa,z , so 
+
+EQ{μa,j,z (Vj , U )} = ∫ ¯μa,z dπ Q = ∫ ¯μa,z dπ Q′ = EQ′ {μa,j,z (Vj , U )}, which is Assumption 3. For case (a), the distribution of Wj given X = x is the convolution of the pushforward of π under 
+
+g(x, ·) with the distribution of ϵj . Its characteristic function is the product of the characteristic function of the pushforward and that of ϵj , and the latter vanishes nowhere by assumption. Two distributions π and π′ with equal convolutions therefore have pushforwards with equal characteristic functions, hence equal pushforwards by the uniqueness theorem for characteristic functions, and injectivity of g(x, ·) gives π = π′. Thus (ii) holds. For case (b), the probability generating function of Wj given X = x under a distribution π of U is 42 E(∏ 
+
+> ℓ
+
+sWj,ℓ 
+
+> ℓ
+
+) = ∫ exp {− ∑ 
+
+> ℓ
+
+λℓ(x, u)(1 − sℓ)} π(du ) for s ∈ [0, 1] d, which is the Laplace transform of the pushforward of π under λ(x, ·) evaluated on [0, 1] d. A finite measure on [0, ∞)d is determined by its Laplace transform on a set with nonempty interior, so two distributions with equal mixtures have equal pushforwards, and injectivity of λ(x, ·) gives π = π′. In the scalar case this is the identifiability of Poisson mixtures of Teicher (1961). Thus (ii) holds. 
+
+Identification from a held-out audit. 
+
+Proof of Theorem 1. Because Zj = ϕj (Vj ) is a measurable function of Vj , conditioning on (U , Vj , Zj ) is equivalent to conditioning on ( U , Vj ). The two clauses of Assumption 2 therefore remain valid after additionally conditioning on Zj . Thus, for each a ∈ { 0, 1 },
+
+E{Y (a) | A, Vj , U , Zj } = E{Y (a) | Vj , U , Zj }, (33) 
+
+P (Wj | A, Vj , U , Zj ) = Kj (· | Vj , U ). Integrating the second identity over Qb,j,z and using the definition of Kj gives P (X, Wj | A =
+
+b, Zj = z) = Kj Qb,j,z . Exact balance in Eq. (1) therefore implies Kj Q1, j,z = Kj Q0, j,z for PZj -almost every z. Representation overlap gives Qb,j,z ≪ P (Vj , U | Zj = z) for b ∈ { 0, 1 }. Assumption 1, Eq. (33), and Jensen’s inequality give the required integrability, so Qb,j,z ∈ Q j,z almost everywhere. Assumption 3 therefore gives, for each a ∈ { 0, 1 },
+
+EQ1, j,z {μa,j,z (Vj , U )} = EQ0, j,z {μa,j,z (Vj , U )}. (34) By Eq. (33) and iterated expectation, for each b ∈ {0, 1 }, E{Y (a) | A = b, Zj = z} =
+
+EQb,j,z {μa,j,z (Vj , U )}. Eq. (34) shows that the conditional mean of Y (a) given ( A, Zj ) does not depend on A. Consistency then gives E(Y | A = a, Zj = z) = E{Y (a) | A = a, Zj = z} = E{Y (a) |
+
+Zj = z}. Integrating over PZj yields Eq. (2). 
+
+Non-nesting of canonical proximal and proximal-balancing sufficient conditions. 
+
+Proof of Proposition 3. We give one finite-state distribution for each direction. In both construc-tions, X is constant, Y = Y (A), and every treatment draw is generated by an exogenous randomizer independent of all proxy noises and outcome noises. First, we construct a distribution satisfying the canonical proximal conditions but not the proximal-balancing conditions for the designated proxy split. Let U ∼ Bernoulli(1 /2), P (A = 1 | U = u) =  
+
+> 14
+
++ 12 u, and let Ztr = U ⊕ EZ , Zout = Wj = U ⊕ EW , where EZ and EW are mutually independent Bernoulli(1 /4) variables, independent of the treatment randomizer. Set Y (a) = a + U
+
+and Vj = Ztr . Consistency, integrability, and strict latent overlap hold. Independence of the exogenous noises gives the three canonical proxy-validity conditions. The function h(zout , a) = a + 2 zout − 12 is an outcome bridge because E(Zout | U = u) = 1 /4 + u/ 2, so E{h(Zout , a) | U = u} = a + u. Iterated expectation gives the required observed bridge equation. The binary channel from U to Ztr has matrix 
+
+(
+
+3/4 1/41/4 3/4
+
+)
+
+and determinant 1 /2. Conditional on 43 either treatment arm, both latent states have positive probability, and the corresponding unnor-malized conditional-expectation matrix has determinant 3 /32. It therefore has full column rank, which proves the canonical treatment-proxy completeness condition. Now consider any measurable representation Zj = ϕj (Vj ). The Markov relation U → Vj → Zj
+
+holds. Conditional on ( U , Zj ), treatment and Wj are independent, and E(A | U , Zj ) = E(Wj |
+
+U , Zj ) = 14 + 12 U . The conditional covariance decomposition gives Cov( A, Wj | Zj ) = 14 Var( U | Zj ). Because P (U = 1 | Vj = 0) = 1 /4 and P (U = 1 | Vj = 1) = 3 /4, P (U = 1 | Zj ) = E{P (U = 1 |
+
+Vj ) | Zj } ∈ [1 /4, 3 /4] almost surely. Hence Var( U | Zj ) ≥ 3/16 and Cov( A, Wj | Zj ) ≥ 364 > 0. Exact balance therefore fails for every such representation. This proves the first direction. Second, we construct a distribution satisfying the proximal-balancing conditions for the designated proxy split but not the canonical proximal conditions. Let U = ( U1, U2), where U1 and U2 are independent Bernoulli(1 /2) variables. Let Ztr and Zout be separate observed coordinates that agree almost surely with U1, and set Vj = Ztr = U1, Wj = Zout = U1, Zj = U1. Define 
+
+P (A = 1 | U1, U2) = 320 + 15 U1 + 25 U2, and let ξ be an independent mean-zero Rademacher variable, also independent of the treatment randomizer. Set Y (a) = a + U1 + (1 + U2)ξ. The four latent treatment probabilities are 3 /20, 11 /20, 7 /20, and 15 /20, so strict latent overlap holds. Latent exchangeability follows from the independent outcome noise, and held-out treatment independence holds because Wj is deterministic given U . Moreover, P (A = 1 | Zj = 0) = 720 , P (A = 1 | Zj =1) = 11 20 , so representation overlap holds. Because Wj = Zj and X is constant, exact balance also holds. It remains to verify the all-Q outcome-relevant completeness condition. Within a stratum Zj = z,every admissible distribution Q ∈ Q j,z is supported on Vj = U1 = z, while U2 may vary. On this support, μa,j,z (v, u) = a + z. Thus, for any admissible Q, Q′ and either potential treatment level, 
+
+Kj Q = Kj Q′ =⇒ EQ{μa,j,z (Vj , U )} = a + z = EQ′ {μa,j,z (Vj , U )}. This proves all proximal-balancing conditions for the designated proxy split. The outcome bridge h(zout , a) = a + zout exists because E(Y | Ztr = z, A = a) = a + z =
+
+E{h(Zout , a) | Ztr = z, A = a}. Canonical treatment-proxy completeness nevertheless fails. In the treated arm, P (U2 = 1 | U1 = 0, A = 1) = 11 14 , P (U2 = 1 | U1 = 1, A = 1) = 15 22 . Define the square-integrable, nonzero function g1(U ) = U2 −
+
+> {
+
+11 /14, U1 = 0, 15 /22, U1 = 1. Then E{g1(U ) | Ztr , A = 1 } =
+
+E{g1(U ) | U1, A = 1 } = 0 almost surely, although g1(U ) is not almost surely zero. Hence the canonical completeness condition fails, proving the second direction. For the final claim, the second construction satisfies Assumption 3 but not canonical treatment-proxy completeness. In the first construction, replace EW by an independent Bernoulli(1 /2) vari-able. Canonical treatment-proxy completeness is unchanged because it involves only ( U , Ztr , A). Now Wj is independent of U , so Kj Q is the same distribution for every Q. For every representation 
+
+ϕj and almost every z, the bound P (U = 1 | Zj ) ∈ [1 /4, 3 /4] shown above gives both values of U
+
+positive probability given Zj = z, so EQμa,j,z = a + Q(U = 1) takes more than one value over Qj,z
+
+and Assumption 3 fails. 
+
+Identification with an unknown valid block. 
+
+Proof of Theorem 2. Under condition (4), the number of proxy splits in B whose candidate value 44 equals τ is strictly larger than the count for every non-target value. Therefore, τ is the unique value maximizing the population count: {τ } = arg max 
+
+> c∈R
+
+∣∣{S ∈ B : θS = c}∣∣. If no non-target value occurs, the convention in Definition 2 compares the nonempty target cluster with zero and gives the same conclusion. 
+
+Target-valued majority. 
+
+Proof of Corollary 1. Define Nτ ≜ ∣∣{S ∈ B : θS = τ }∣∣ and Nc ≜ ∣∣{S ∈ B : θS = c}∣∣, c̸ = τ .Condition (17) gives Nτ > |B| /2. For every c̸ = τ , Nc ≤ |B| − Nτ < N τ . Therefore, τ is the unique candidate value of greatest multiplicity. It remains to establish the median statement. Let n = |B| . If n = 2 k + 1 is odd, then Nτ ≥ k + 1. At most k candidate values are strictly below τ , and at most k are strictly above τ , so the ( k + 1)st order statistic equals τ . If n = 2 k is even, then Nτ ≥ k + 1 and n − Nτ ≤ k − 1. Hence both the kth and the ( k + 1)st order statistics equal τ . Under the conventional definition of the even-sample median as the average of these two middle order statistics, the median equals τ . Thus, median ((θS )S∈B 
+
+) = τ . The stronger condition that more than half of the proxy splits in B satisfy the grouped assumptions is sufficient because each such proxy split has candidate value τ , but it is not necessary. 
+
+Zero discrepancy. 
+
+Proof of Proposition 1. By Definition 3, Dres, j (ϕ) = 0 if and only if qj,ϕ(Tj , Zϕj ) =
+
+ej,ϕ(Zϕj ) almost surely. Because A is binary, this equality is equivalent to Tj ⊥⊥ A | Zϕj .
+
+Supporting bias decomposition. Fix a representation ϕ and abbreviate e(z) = ej,ϕ(z). For each 
+
+a ∈ { 0, 1 } and PZϕj
+
+-almost every z, define δϕa,j (z) ≜ EQϕ
+
+> 1, j,z
+
+{μϕa,j,z (Vj , U )} − EQϕ
+
+> 0, j,z
+
+{μϕa,j,z (Vj , U )}.Under Assumptions 1 and 2, and under 0 < e (Zϕj ) < 1 almost surely, the conditioning argument used in Eq. (33) gives E(Y | A = a, Zϕj = z) = EQϕa,j,z
+
+{μϕa,j,z (Vj , U )}. Conditional expectation over 
+
+A gives E{Y (a) | Zϕj = z} = e(z)EQϕ
+
+> 1, j,z
+
+{μϕa,j,z } + {1 − e(z)}EQϕ
+
+> 0, j,z
+
+{μϕa,j,z }. Subtracting the two conditional expressions and collecting terms gives 
+
+E(Y | A = 1, Zϕj = z) − E(Y | A = 0, Zϕj = z)
+
+−
+
+[
+
+E{Y (1) | Zϕj = z} − E{Y (0) | Zϕj = z}
+
+]
+
+= {1 − e(z)}δϕ 
+
+> 1, j
+
+(z) + e(z)δϕ 
+
+> 0, j
+
+(z). (35) 
+
+Approximate-balance bias. 
+
+Proof of Theorem 3. Fix z in the almost-sure set on which overlap and the structural conditions hold. Bayes’ rule gives dP (Tj |A=1, Zϕj =z) 
+
+> dP ϕ,z
+
+(t) = qj,ϕ(t,z) 
+
+> e(z)
+
+and dP (Tj |A=0, Zϕj =z) 
+
+> dP ϕ,z
+
+(t) = 1−qj,ϕ(t,z)1−e(z) . Subtract-ing gives the density identity d{P (Tj |A=1, Zϕj =z)−P (Tj |A=0, Zϕj =z)} 
+
+> dP ϕ,z
+
+(t) = qj,ϕ(t,z)−e(z) 
+
+> e(z){1−e(z)}
+
+. Held-out treat-45 ment independence makes the conditional distribution of Wj given ( U , Vj ) treatment-invariant, so Kj Qϕb,j,z = P (Tj | A = b, Zϕj = z) for b ∈ { 0, 1 }. As in the proof of Thm. 1, overlap and Assumption 1 give Qϕb,j,z ∈ Q ϕj,z for b ∈ { 0, 1 }. Assumption 4 therefore implies 
+
+|δϕa,j (z)| ≤ Γj (ϕ)
+
+e(z){1 − e(z)}
+
+[
+
+E
+
+(
+
+{qj,ϕ(Tj , z) − e(z)}2∣∣∣ Zϕj = z
+
+)] 1/2
+
+. (36) Apply the triangle inequality to Eq. (35), use Eq. (36) for both potential out-comes, and integrate over Zϕj . This gives 
+
+∣∣∣E
+
+[
+
+E(Y | A = 1, Zϕj ) − E(Y | A = 0, Zϕj )
+
+]
+
+− τ
+
+∣∣∣ ≤
+
+E
+
+[ Γj (ϕ)  
+
+> ej,ϕ(Zϕj){1−ej,ϕ(Zϕj)}
+
+{
+
+E
+
+[
+
+{qj,ϕ(Tj , Zϕj ) − ej,ϕ(Zϕj )}2∣∣∣ Zϕj
+
+]} 1/2]
+
+≤ Γj (ϕ) 
+
+> η(1 −η)
+
+Dres, j (ϕ). Because Γj (ϕ)does not depend on z, the overlap bound η ≤ ej,ϕ(z) ≤ 1 − η gives the last inequality, together with 
+
+E{s(Zϕj )} ≤ [E{s(Zϕj )2}]1/2 = Dres, j (ϕ) by Cauchy–Schwarz, where s(z) denotes the conditional root-mean-square factor in the display, and proves Eq. (6). 
+
+Population sensitivity region. 
+
+Proof of Proposition 5. Thm. 3 gives |τZϕj
+
+− τ | ≤ Γj (ϕ)Dres, j (ϕ)/{η(1 − η)}, and the displayed interval is the set of values of τ compatible with this inequality. 
+
+E.2. Proofs for Section 4 
+
+Uniform discrepancy deviation. 
+
+Proof of Proposition 6. For clarity, the joint encoder–critic loss classes used in the proposition are L0, j,nD ≜ {o 7 → { a − h(ϕ(vj )) }2 : ϕ ∈ F j,nD , h ∈ H 0, nD
+
+}; L1, j,nD ≜{o 7 → { a − h(tj , ϕ(vj )) }2 : ϕ ∈ F j,nD , h ∈ H 1, nD
+
+} , where o = (vj , tj , a, y). For a loss class L,its expected Rademacher complexity is RnD (L) ≜ E
+
+[
+
+sup ℓ∈L 1
+
+> nD
+
+∑nD 
+
+> i=1
+
+σiℓ(Oi)
+
+]
+
+, where the σi are independent Rademacher signs independent of the observations. The loss classes are pointwise measurable and separable, so these suprema are measurable. The same argument may instead be stated with outer probability and outer expectation. Every loss in either class lies in [0, 1]. Standard symmetrization and bounded-difference concentra-tion therefore imply, simultaneously for b ∈ { 0, 1 }, that sup   
+
+> ϕ∈F j,nD,h∈H b,nD
+
+|̂Rb,ϕ(h) − Rb,ϕ(h)| ≤ 2RnD (Lb,j,nD ) + 
+
+√
+
+log(4 /δ D)2nD
+
+(37) with probability at least 1 −δD. Let R⋆b,ϕ = inf h∈H b,nD Rb,ϕ(h) and define ̂ R⋆b,ϕ analogously. Eq. (37) controls |̂R⋆b,ϕ − R⋆b,ϕ| by the same right-hand side. Eq. (18) also gives 0 ≤̂ Rb,ϕ(̂ hb,ϕ) −̂ R⋆b,ϕ ≤ εb,ϕ.The conditional-mean property of squared loss yields the Brier identity E[{A−ej,ϕ(Zϕj )}2]−E[{A−
+
+qj,ϕ(Tj , Zϕj )}2] = E[{qj,ϕ(Tj , Zϕj ) − ej,ϕ(Zϕj )}2] = D2res, j (ϕ). It follows from Eq. (19) that 
+
+∣∣∣R⋆ 
+
+> 0, ϕ
+
+− R⋆ 
+
+> 1, ϕ
+
+− D2res, j (ϕ)
+
+∣∣∣ ≤ a0, nD (ϕ) + a1, nD (ϕ) ≤ aj,nD . (38) 46 Combine Eqs. (37)–(38). The positive-part map is one-Lipschitz and D2res, j (ϕ) ≥ 0, so taking the supremum over ϕ gives Eq. (20). 
+
+Representation-learning oracle inequality. 
+
+Proof of Proposition 7. On the event in Eq. (20), set ¯ξj,nD ≜ rj,nD (δD)+ aj,nD +εcrit, j . The deviation inequality at ̂ ϕj , Eq. (21), and the deviation inequality at a near-minimizer of D2res, j over Fj,nD
+
+give D2res, j (̂ϕj ) ≤ ˜D2 
+
+> j,nD
+
+(̂ ϕj ) + ¯ξj,nD ≤ inf ϕ∈F j,nD
+
+˜D2 
+
+> j,nD
+
+(ϕ) + εenc, j + ¯ξj,nD ≤ inf ϕ∈F j,nD D2res, j (ϕ) + 2 ¯ξj,nD + εenc, j , which proves Eq. (22). 
+
+Learned-representation error. 
+
+Proof of Theorem 4. Conditional on the training observations {Oi : i ∈ I D} and any algorithmic seed used in training, the selected encoder is fixed; the population expectations below use a fresh observation independent of these training inputs. Eq. (6) gives |τ̂ Zj − τ | ≤ Γj (̂ ϕj ) 
+
+> η(1 −η)
+
+Dres, j (̂ϕj ). On the event in Eq. (8), which has probability at least 1 − δD, every ϕ ∈ F j,nD satisfies D2res, j (̂ϕj ) ≤
+
+˜D2 
+
+> j,nD
+
+(̂ϕj )+ ξj,nD (δD) ≤ ˜D2 
+
+> j,nD
+
+(ϕ)+ ξj,nD (δD) ≤ D2res, j (ϕ)+2 ξj,nD (δD). The first and last inequalities hold on this event, and the middle one holds because ̂ ϕj minimizes ˜D2 
+
+> j,nD
+
+over Fj,nD . Taking the infimum over ϕ and then the square root gives Dres, j (̂ϕj ) ≤ [inf ϕ∈F j,nD D2res, j (ϕ) + 2 ξj,nD (δD)] 1/2.Substituting this bound into the first display proves Eq. (9). Substituting the square root of Eq. (22) instead proves Thm. 10. 
+
+Exact signed nuisance remainder. 
+
+Proof of Proposition 8. Fix ̂ Zj = z. Taking the conditional expectation of the score and using Eq. (24) gives E{UIF j (O) |̂ Zj = z} =̂ m1, j (z) −̂ m0, j (z) + ej (z){m1, j (z)−̂m 1, j (z)}̂   
+
+> ej(z)
+
+−  
+
+> {1−ej(z)}{ m0, j(z)−
+
+̂m 0, j (z)}
+
+> 1−
+
+̂e j (z) . Subtract m1, j (z) − m0, j (z) and collect the two nuisance errors. Averaging the resulting identity over ̂ Zj proves Eq. (25). 
+
+Honest AIPW error. 
+
+Proof of Theorem 5. Conditional on the two learning samples, the evaluation observations are in-dependent and the score UIF j (O) has variance σ2 
+
+> j
+
+, so Chebyshev’s inequality bounds the difference between the evaluation average and its conditional expectation by σj /√nEδE, the first term in Eq. (26), with probability at least 1 − δE. Prop. 8, Cauchy–Schwarz, and the propensity clipping bound control the absolute conditional remainder by qe,j (q0, j +q1, j ) 
+
+> η
+
+. The triangle inequality proves Eq. (27). For Eq. (13), the triangle inequality gives |̂τ AIPW  
+
+> j
+
+− τ | ≤ | ̂ τ AIPW  
+
+> j
+
+− τ̂Zj | + |τ̂ Zj − τ |.Eq. (27) bounds the first term on the same event, and Eq. (6) bounds the second term by Γj (̂ ϕj )Dres, j (̂ ϕj )/{η(1 − η)}.47 Consistency. 
+
+Proof of Corollary 2. Condition (C1) makes the evaluation term σj,n/√nEδE, n of εAIPW, j vanish, condition (C2) makes its nuisance-product term vanish, and condition (C3) makes the stability-weighted residual-discrepancy term in Eq. (13) vanish. The failure probability δE, n of Thm. 5 also converges to zero, which proves convergence in probability. 
+
+Cluster plurality under random subsampling. 
+
+Proof of Lemma 1. Conditional on G and R = r ≥ 1, the retained proxy splits form a uniformly sampled r-element subset of ̂ B because the m draws are uniform without replacement and ̂ B is fixed. For each competing cell Cℓ, define Hℓ(S) ≜ 1{S ∈ C0} − 1{S ∈ Cℓ} for S ∈̂ B. This variable lies in [ −1, 1] and has population mean ( n0 − nℓ)/N ≥ ∆Π. Let Hℓ,r be its retained-sample average. The event Rℓ ≥ R0 implies Hℓ,r ≤ 0. Hoeffding’s inequality for sampling without replacement (Hoeffding, 1963) gives P (Hℓ,r ≤ 0 | G , R = r) ≤ e−r∆2Π/2. A union bound over the L competing cells yields P (max 1≤ℓ≤L Rℓ ≥ R0 | G , R = r) ≤ Le −r∆2Π/2. Averaging over R and counting R = 0 as failure gives P (failure | G ) ≤ P (R = 0 | G ) + L E{e−R∆2Π/2 | G} . If L = 0, every retained split belongs to C0, so the conclusion holds whenever R ≥ 1. 
+
+Finite-sample PROBE cluster recovery. 
+
+Proof of Theorem 6. Work conditionally on G. Let E1 be the uniform-evaluation-error event and let E2 be the event that R ≥ 1 and R0 > max 1≤ℓ≤L Rℓ. Eq. (27) applied to each S ∈̂ B at 
+
+δE = δ/N gives P (|̂θS − θS | > ε | G ) ≤ δ/N , because ε is at least the radius of Eq. (26) for S at that level, and a union bound over the N splits in ̂ B gives P (Ec1 | G ) ≤ δ, while Lemma 1 gives 
+
+P (Ec2 | G ) ≤ P (R = 0 | G ) + L E{e−R∆2Π/2 | G} . For S, S′ ∈ C0, Eq. (6) for S with encoder ̂ ϕS and Assumption 5 give |θS − τ | ≤ bias S ≤ b, and likewise |θS′ − τ | ≤ b. Hence |θS − θS′ | ≤ 2b ≤ 2( ρ − ε)by condition (i), so the within-cluster bound of condition (ii) also holds on C0. On E1, two retained splits in the same cell satisfy |̂θS −̂ θS′ | ≤ 2( ρ − ε) + 2 ε = 2 ρ, so they are linked. Two retained splits in different cells satisfy |̂ θS −̂ θS′ | > 2( ρ + ε) − 2ε = 2 ρ, so they are not linked. Hence the connected components are exactly the nonempty sets Rm ∩ Cℓ. On E2, Rm ∩ C0 is the unique largest component, and Algorithm 1 returns the median of its estimates. For every S ∈ C0,
+
+|̂θS − τ | ≤ | ̂θS − θS | + |θS − τ | ≤ ε + b, where |θS − τ | ≤ b by Eq. (6), because every S ∈ C0 satisfies Assumptions 1, 2, and 4. The median therefore lies in [ τ − (b + ε), τ + ( b + ε)]. A union bound over 
+
+Ec1 and Ec2 proves Eq. (14). 
+
+Proof of Corollary 3. Write c ≜ ∆2Π/2. First, P (R = 0) = ∏m−1 
+
+> i=0
+
+(T − N − i)/(T − i) ≤ (1 − p)m ≤
+
+e−mp . Second, R is the sum of the indicators 1 {S ∈̂ B} over the m splits drawn without replacement. Because x 7 → e−cx is continuous and convex, Thm. 4 of Hoeffding (1963) bounds E{e−cR } by the corresponding expectation under sampling with replacement. Thus E{e−cR } ≤ { 1 − p(1 − e−c)}m ≤
+
+exp {− mp (1 − e−c)}. Since 1 − e−c ≤ 1, adding the bound for P (R = 0) gives Eq. (32). Its right side is at most α when m ≥ log {(L+1) /α }/{p(1 −e−c)}, and Thm. 12 gives P (|̂τ −τ | ≤ b+ε) ≥ 1−δ−α.Finally, 1 − e−c ≥ c/ (1 + c) ≥ ∆2Π/3 because 0 < ∆Π ≤ 1. If L = 0, only the empty-draw bound is needed, and m ≥ log(1 /α )/p suffices. 48 Median under majority. 
+
+Proof of Corollary 4. On the target-band and uniform-evaluation-error event, every retained split in C0 satisfies |̂θS − τ | ≤ b + ε. If |R m ∩ C0| > R/ 2, more than half of all retained estimates lie in [τ − (b + ε), τ + ( b + ε)]. Both middle order statistics, and hence their midpoint when needed, lie in this interval. Therefore the median lies within b + ε of τ .
+
+E.3. Finite-Strata MMD Specialization 
+
+This subsection records the earlier finite-strata analysis as an independent specialization. It is not used by the continuous-representation results in the main text. Fix a finite library Ffs  
+
+> j
+
+⊆ Φj with N fs  
+
+> j
+
+≜ |F fs  
+
+> j
+
+|. Every ϕ ∈ F fs  
+
+> j
+
+is deterministic and takes values in a common finite set Sj of size Mj . Write Zϕj = ϕ(Vj ), let Rj (ϕ) be its positive-mass strata, and set pj,z (ϕ) = P (Zϕj = z). Assume, uniformly over the library and z ∈ R j (ϕ), P (Zϕj = z) ≥
+
+pmin > 0, η ≤ P (A = 1 | Zϕj = z) ≤ 1 − η for some η ∈ (0, 1 /2]. Let κj be a characteristic kernel on ( X, Wj ) with reproducing kernel Hilbert space Hj and sup v
+
+√
+
+κj (v, v) ≤ ρj < ∞. For 
+
+z ∈ R j (ϕ), define ∆ MMD  
+
+> j,z
+
+(ϕ) ≜ MMD κj
+
+{
+
+P (X, Wj | A = 1, Zϕj = z), P (X, Wj | A = 0, Zϕj = z)
+
+}
+
+;
+
+DMMD  
+
+> j
+
+(ϕ) ≜ ∑  
+
+> z∈R j(ϕ)
+
+pj,z (ϕ)∆ MMD  
+
+> j,z
+
+(ϕ). For i ∈ I D, let Zϕj,i = ϕ(Vj,i) and define N ϕa,z ≜ ∑ 
+
+> i∈I D
+
+1{Ai = a, Zϕj,i = z}; N ϕz ≜ N ϕ 
+
+> 0, z
+
++
+
+N ϕ 
+
+> 1, z
+
+;̂ pj,z (ϕ) ≜ N ϕz 
+
+> nD
+
+;̂ ma,j,z (ϕ) ≜ 1 
+
+> Nϕa,z
+
+∑ 
+
+> i∈I D
+
+1{Ai = a, Zϕj,i = z}; × κj {(Xi, Wj,i), ·} . When both treatment-arm cells are nonempty, set ̂ ∆MMD  
+
+> j,z
+
+(ϕ) ≜ ∥̂m1, j,z (ϕ) −̂ m0, j,z (ϕ)∥Hj ;̂ DMMD  
+
+> j
+
+(ϕ) ≜
+
+∑  
+
+> z:Nϕz>0
+
+̂ pj,z (ϕ)̂ ∆MMD  
+
+> j,z
+
+(ϕ). If an occupied stratum contains only one treatment arm, set ̂ DMMD  
+
+> j
+
+(ϕ) = +∞.The MMD specialization uses its own structural stability condition. For every ϕ ∈ F fs  
+
+> j
+
+, every positive-mass stratum z, every a ∈ { 0, 1 }, and all Q, Q′ ∈ Q j,z , define ∆ μa,j,z (Q, Q′) ≜ EQ{μa,j,z } − 
+
+EQ′ {μa,j,z }. Assume 
+
+∣∣∣∆μa,j,z (Q, Q′)
+
+∣∣∣ ≤ ΓMMD  
+
+> j
+
+(ϕ) MMD κj (Kj Q, Kj Q′), sup 
+
+> ϕ∈F fs
+> j
+
+ΓMMD  
+
+> j
+
+(ϕ) ≤ ΓMMD  
+
+> j
+
+< ∞. (39) 
+
+Proposition 9 (Finite-strata MMD learning bound) . Let δD ∈ (0, 1) and suppose 
+
+nD ≥ 8
+
+pmin η log 
+
+( 8Mj N fs 
+
+> j
+
+δD
+
+)
+
+. (40) Define eMMD  
+
+> j,nD
+
+(δD) ≜ ρj
+
+[
+
+2 + 
+
+√
+
+2 log 
+
+( 4Mj N fs 
+
+> j
+> δD
+
+)] √ 2 
+
+> nDpmin η
+
+; rMMD  
+
+> j,nD
+
+(δD) ≜ 2eMMD  
+
+> j,nD
+
+(δD) + 49 2ρj
+
+√ 2[Mj log 2+log {4N fs  
+
+> j/δ D}
+
+] 
+
+> nD
+
+. Then, with probability at least 1 − δD,sup 
+
+> ϕ∈F fs
+> j
+
+∣∣∣̂ DMMD  
+
+> j
+
+(ϕ) − DMMD  
+
+> j
+
+(ϕ)
+
+∣∣∣ ≤ rMMD  
+
+> j,nD
+
+(δD). (41) If ̂ ϕfs  
+
+> j
+
+obeys ̂ DMMD  
+
+> j
+
+(̂ ϕfs  
+
+> j
+
+) ≤ inf ϕ∈F fs 
+
+> j
+
+̂ DMMD  
+
+> j
+
+(ϕ) + εfs opt, j , then, on the same event, 
+
+DMMD  
+
+> j
+
+(̂ ϕfs  
+
+> j
+
+) ≤ inf 
+
+> ϕ∈F fs
+> j
+
+DMMD  
+
+> j
+
+(ϕ) + 2 rMMD  
+
+> j,nD
+
+(δD) + εfs opt, j , (42) 
+
+|τ̂Zfs 
+
+> j
+
+− τ | ≤ ΓMMD 
+
+> j
+
+[
+
+inf 
+
+> ϕ∈F fs
+> j
+
+DMMD  
+
+> j
+
+(ϕ) + 2 rMMD  
+
+> j,nD
+
+(δD) + εfs opt, j
+
+]
+
+, (43) where ̂ Zfs  
+
+> j
+
+=̂ ϕfs  
+
+> j
+
+(Vj ), provided the primitive structural conditions and overlap used in the exact bias decomposition hold for every candidate. 
+
+Proof. Eq. (40) and a multiplicative Chernoff bound imply that every candidate treatment-by-stratum cell contains at least nDpmin η/ 2 observations except on an event of probability at most δD/4. Conditional on the cell assignments, bounded Hilbert-space mean concentration and a union bound over at most 2 Mj N fs  
+
+> j
+
+cells give 
+
+∣∣∣̂ ∆MMD  
+
+> j,z
+
+(ϕ) − ∆MMD  
+
+> j,z
+
+(ϕ)
+
+∣∣∣ ≤ 2eMMD  
+
+> j,nD
+
+(δD) simultaneously, with failure probability at most δD/2. A multinomial L1 concentration bound gives ∑ 
+
+> z
+
+|̂pj,z (ϕ) − pj,z (ϕ)| ≤ √ 2[Mj log 2+log {4N fs  
+
+> j/δ D}
+
+] 
+
+> nD
+
+simultaneously over candidates, with failure probability at most δD/4. On the intersection of these events, 0 ≤ ∆MMD  
+
+> j,z
+
+(ϕ) ≤ 2ρj and the triangle inequality give Eq. (41). The empirical-risk comparison yields DMMD  
+
+> j
+
+(̂ ϕfs  
+
+> j
+
+) ≤̂ DMMD  
+
+> j
+
+(̂ϕfs  
+
+> j
+
+) + rMMD  
+
+> j,nD
+
+(δD) ≤ inf ϕ∈F fs  
+
+> j
+
+DMMD  
+
+> j
+
+(ϕ) + 2rMMD  
+
+> j,nD
+
+(δD) + εfs opt, j , which proves Eq. (42). The exact bias decomposition and the MMD stability condition in Eq. (39) give |τZϕj
+
+−τ | ≤ ΓMMD  
+
+> j
+
+(ϕ)DMMD  
+
+> j
+
+(ϕ). Apply this inequality to ̂ ϕfs  
+
+> j
+
+and substitute Eq. (42) to obtain Eq. (43). 50

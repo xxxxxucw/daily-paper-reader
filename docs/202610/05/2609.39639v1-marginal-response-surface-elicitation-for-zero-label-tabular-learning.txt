@@ -1,0 +1,1232 @@
+Marginal Response Surface Elicitation for Zero-Label Tabular
+Learning
+Fudan Institute on Networking Systems of AI
+Tabular learning uses structured data to predict target outcomes. Traditionally, this
+process has relied on labeled data. However, large language models (LLMs) can be used
+to elicit domain priors based on the task description and feature semantics, thereby
+enabling predictions without labeled data. We propose Marginal Response Surface
+Elicitation (MARS), a method that transforms feature-level LLM priors into a reusable,
+zero-shot tabular classifier. To construct this classifier, MARS selects representative values
+for each feature from unlabeled data and prompts the LLM to provide corresponding
+class support scores and feature weights. It then aggregates multiple responses using
+the median to construct feature response functions, and makes predictions through
+their weighted sum without further LLM queries. Across eight tabular benchmark tasks,
+MARS achieves the highest average AUC and AP, outperforming direct prompting by 1.97
+and 6.21 percentage points respectively, while substantially reducing end-to-end costs.
+Evaluations with LLMs of different sizes further demonstrate its predictive advantage
+over direct prompting.
+Keywords: Large language models, tabular learning, zero-label prediction
+1. Introduction
+Tabular learning utilizes structured information recorded in tables to predict target outcomes,
+finding broad applications across customer analytics, credit assessment, and business opera-
+tions (Borisov et al., 2024; Hollmann et al., 2025; Gardner et al., 2024). Traditional prediction
+pipelines rely heavily on labeled samples, using supervised training to learn the mapping
+relationships between features and labels (Grinsztajn et al., 2022; Gorishniy et al., 2025; Erickson
+et al., 2025). However, in many real-world business scenarios, the need for predictions often
+arises before actual business labels are available. For example, when a company launches a
+new product, it already has access to certain customer attributes and account information but
+needs to determine which customers to contact first before subscription results are available.
+This has given rise to the need for zero-label tabular prediction—that is, building a predictor
+using unlabeled records when the prediction target and feature meanings are known.
+The knowledge accumulated by large language models (LLMs) during pretraining can
+be combined with task objectives to provide priors for label-scarce tabular prediction (Bordt
+et al., 2024; Capstick et al., 2025). These priors are injected into the prediction pipeline in
+different ways: TabLLM (Hegselmann et al., 2023) converts tabular records into text for direct
+prediction, CLLM (Seedat et al., 2024) and SERSAL (Yan et al., 2025) generate synthetic data and
+pseudo-labels to train the model, FeatLLM (Han et al., 2024) generates rules and converts them
+into features to train a simple model, and LLM-Trees (Knauer et al., 2025) and ProtoLLM (Wang
+et al., 2025) generate decision trees and prototypes to make predictions.
+1
+arXiv:2609.39639v1  [cs.CL]  30 Sep 2026
+
+
+4
+8
+16
+32
+64
+128
+0.5
+0.6
+0.7
+AUC / AP score
+AUC
+AP
+4
+8
+16
+32
+64
+128
+0
+0.5
+1
+1.5
+Score difference (×100)
+AUC
+AP
+(a) Within-class permutation experiment
+(b) Value of data
+(c) Value of pairings
+Training rows
+Training rows
+Draw 3
+A
+B
+y
+60
+8
+0
+Draw 2
+A
+B
+y
+45
+5
+0
+Draw 1
+A
+B
+y
+20
+2
+0
+…
+…
+0
+30
+3
+1
+…
+…
+1
+Training data
+n rows each
+Shuffle within each true class
+label = 0
+Age
+20
+45
+60
+60
+20
+45
+Income
+2
+5
+8
+5
+8
+2
+label = 1
+Age
+30
+50
+70
+50
+70
+30
+Income
+3
+6
+9
+9
+3
+6
+Rejoin
+Original
+CatBoost
+Shuffled
+CatBoost
+Test data
+Keep original rows
+Figure 1: Cross-feature couplings in few-shot
+learning. (a) Within-class column permutation
+preserves feature–class associations while
+disrupting original pairings. (b) CatBoost
+performance with increasing training samples. (c)
+Gains from retaining original pairings (original -
+shuffled, ×100). Shaded regions indicate ±1
+standard error across 16 seeds.
+These methods raise a more fundamen-
+tal question: What information can be lever-
+aged in a few-shot setting? We distinguish
+between two types of information: ❶the rela-
+tionship between the value of a single feature
+and the class, and ❷the additional informa-
+tion provided by cross-feature couplings. To
+guide which type of information to elicit from
+LLMs for zero-label prediction, we conduct a
+within-class column-wise permutation exper-
+iment (Ojala and Garriga, 2010) on real-world
+datasets with labels. As illustrated in Figure 1,
+we independently permute the values of each
+feature within each class, thereby preserv-
+ing the marginal distribution of each feature
+within each class, but disrupting the original
+cross-feature pairings. We then train identical
+CatBoost models separately on the original
+and permuted data, and compare their per-
+formance on the same test set. We find that
+the average performance difference is close
+to zero for 4–16 training samples, suggesting
+that the model gains little additional predic-
+tive benefit from cross-feature couplings in
+this regime. This suggests prioritizing the re-
+lationship between individual feature values
+and the class when eliciting LLM priors, as
+priors on cross-feature relationships may be noisy in the absence of labels.
+Based on this intuition, we propose Marginal Response Surface Elicitation (MARS), a
+method that transforms the domain priors of LLMs into a reusable zero-label predictor.
+MARS selects representative values for each feature from unlabeled data and, combining
+task descriptions with feature semantics, obtains class support scores for each value and
+weights for each feature. Subsequently, it constructs feature response functions through median
+aggregation and employs their weighted sum for prediction. The entire process requires no
+ground-truth labels or local model training, and predicting new samples does not require
+calling the LLM again.
+Comprehensive experiments across tabular benchmarks and LLMs of different sizes show
+that MARS is ❶powerful: MARS achieves the best average AUC and AP among all baselines,
+including direct LLM prompting; ❷efficient: MARS does not require any LLM API calls during
+inference, with end-to-end API call costs amounting to only 9.6% of ProtoLLM; ❸transferable:
+MARS achieves better average AUC and AP than direct prompting on both Qwen3.5-4B and
+Qwen3.5-9B. In summary, our contributions are as follows:
+• Mechanistic Analysis: The average benefit of within-class column permutation is close to
+zero in the few-shot regime, providing direct empirical support for the hypothesis that the
+LLM prior is informative at the feature level, but not at the instance level.
+• Method Design: We propose MARS, which converts feature-level LLM priors into response
+functions through median aggregation and combines them via weighted summation into a
+reusable predictor requiring no ground-truth labels, local model training, or test-time LLM
+queries.
+2
+
+
+• Experimental Evaluation: On eight benchmark tasks, MARS achieves 1.97/6.21 higher
+average AUC/AP than direct prompting while largely reducing end-to-end costs com-
+pared to other high-performing baselines; cross-model experiments further demonstrate the
+transferability of our method.
+2. Related Work
+Few-Shot Tabular Learning.
+Few-shot tabular learning aims to achieve strong predictive
+performance with limited labeled data. To alleviate label scarcity, pretraining methods learn
+transferable feature representations from unlabeled data and adapt them to target tasks using
+a small number of labeled examples (Yoon et al., 2020; Bahri et al., 2022; Nam et al., 2023).
+Cross-task pretraining instead learns general predictive capabilities across large collections of
+tabular tasks and uses a few labeled examples as context to predict on new tasks (Hollmann
+et al., 2025; Grinsztajn et al., 2026; Qu et al., 2026). These approaches reduce target-task
+annotation requirements through pretraining, whereas we investigate how to leverage LLM
+domain knowledge to construct predictors without target-task labels.
+LLM-Based Tabular Learning.
+LLMs can leverage task descriptions and feature semantics to
+apply domain knowledge acquired during pretraining to tabular prediction. Direct-inference
+methods represent tabular records as text and use LLMs to generate class predictions (Hegsel-
+mann et al., 2023; Slack and Singh, 2023; Gardner et al., 2024). Knowledge-transfer methods
+instead convert LLM knowledge into training data or feature representations for learning
+downstream predictors (Seedat et al., 2024; Yan et al., 2025; Han et al., 2024; Shi et al., 2025).
+Another line of work uses LLMs to construct or refine predictors, encoding prior knowledge as
+decision rules or class prototypes for subsequent local prediction (Knauer et al., 2025; Ye et al.,
+2025; Wang et al., 2025). MARS transforms LLM domain knowledge into feature response
+functions and their weights, combining their weighted outputs into a reusable zero-label
+predictor. It requires neither downstream model training nor test-time LLM queries.
+3. Method
+Figure 2 illustrates the overall pipeline of MARS. MARS first selects representative values for
+each feature from unlabeled reference data (Section 3.1), and then prompts the LLM with the
+task description and feature semantics to obtain a support score for each value and a feature
+weight (Section 3.2). Subsequently, MARS aggregates multiple responses to construct reusable
+feature response functions. When predicting new samples, it computes each feature’s response
+via numerical interpolation or categorical lookup tables, and then aggregates the scores using
+the feature weights to obtain a final prediction score, without querying the LLM (Section 3.3).
+3.1. Representative Value Selection
+Let U be the unlabeled reference table with p features. For each feature j, MARS selects mj
+representative values aj1, . . . , ajmj as anchors, queries the LLM for their scores, and uses the
+scores to build the feature’s response function.
+Tabular features are either numerical or categorical.
+For a numerical feature, MARS
+computes the empirical quantiles at {0.05, 0.20, 0.35, 0.50, 0.65, 0.80, 0.95} using the non-missing
+values in U and removes duplicates to obtain at most seven anchors. For a categorical feature,
+MARS stores up to 20 of the most frequent values and their frequencies. The feature name,
+type, and anchors are then sent to the LLM together with the task description.
+3
+
+
+Task:
+Will the client
+subscribe?
+LLM
+For each feature value:
+which class, and
+how much support?
+Feature summaries
+duration
+campaign
+poutcome
+success
+failure
+other
+Reference data
+duration
+campaign
+poutcome
+45
+1
+success
+120
+2
+failure
+300
+1
+other
+60
+3
+failure
+...
+...
+...
+(unlabeled)
+5 whole-table queries
+[score]
+[weight]
+[score]
+[weight]
+[score]
+[weight]
+All feature
+per reply
+1
+[score]
+[weight]
+[scores]
+[weight]
+[score]
+[weight]
+All feature
+per reply
+2
+[score]
+[weight]
+[score]
+[weight]
+[score]
+[weight]
+All feature
+per reply
+3
+[score]
+[weight]
+[score]
+[weight]
+[score]
+[weight]
+All feature
+per reply
+4
+[score]
+[weight]
+[score]
+[weight]
+[score]
+[weight]
+All feature
+per reply
+5
+Coordinatewise median
+Cached functions + weights
+New row (x)
+duration =
+120
+campaign =
+2
+poutcome =
+failure
+Feature evaluators (cached)
+f₁(x)
+f₂(x)
+f₃(x)
+f₁(duration)
++
+0
+−
+duration
+f₂(campaign)
++
+0
+−
+campaign
+f₃(poutcome)
++
+0
+−
+success
+failure
+other
+× w₁
+× w₂
+× w₃
+Interpolate
+(piecewise linear,
+rising)
+Interpolate
+(piecewise linear,
+falling)
+Lookup
+(category
+values)
+Σ
+Prediction score
+s(x) = Σ
+j wj fj(xj)
+120
+2
+failure
+Figure 2: Overview of MARS. MARS aggregates five LLM responses by the median and caches the
+resulting feature response functions and weights. New samples are scored by evaluating these functions
+at their feature values and summing the weighted responses.
+3.2. Marginal Response Elicitation
+MARS combines the task and feature descriptions into a single prompt and formulates the
+binary classification task as a yes/no question where “yes” represents the positive class. We
+query the LLM R = 5 times using the same prompt, covering all features each time, and ask
+the LLM to first explain the meaning of the positive class and provide typical examples in 1–2
+sentences before scoring each feature.
+In the r-th response, the LLM provides a support score z(r)
+jℓ∈[−3, 3] for each anchor ajℓof
+feature j. Positive, negative, and zero values represent support for the positive class, negative
+class, and neutrality, respectively, while the absolute value indicates support strength. The
+prompt requires that all features use a uniform log-odds scale, where +1 and −1 approximately
+correspond to multiplying and dividing the odds of the positive class by e, respectively.
+The LLM also assigns an importance score b(r)
+j
+∈[0, 10] to each feature, which measures its
+importance in distinguishing classes relative to other features; a score of 0 indicates that the
+feature is not important. Unlike the support scores assigned to individual values, this score is
+uniform across the entire feature and is subsequently used to calculate the global weight.
+We request the LLM to return the importance scores of each feature and the support scores
+arranged in the order of the anchors in JSON format. The complete prompt is provided in
+Appendix A.
+3.3. Response Aggregation and Prediction
+Let Vj be the set of response indices for feature j. MARS then aggregates the anchor support
+scores and feature importance scores using the median, to obtain the final anchor support score
+4
+
+
+Table 1: AUC/AP (↑) on eight tabular benchmarks. Best scores are bold; † denotes test-time LLM
+queries.
+Method
+Labels
+Bank
+Blood
+Credit-G
+Diabetes
+Heart
+Cultivars
+Myocardial
+NHANES
+Avg.
+LogReg
+4
+.526/.162
+.282/.168
+.601/.796
+.545/.432
+.508/.553
+.584/.610
+.486/.230
+.544/.165
+.509/.389
+XGBoost
+4
+.500/.117
+.500/.240
+.500/.700
+.500/.351
+.500/.554
+.500/.500
+.500/.225
+.500/.160
+.500/.356
+CatBoost
+4
+.562/.166
+.364/.198
+.518/.729
+.411/.355
+.565/.636
+.638/.619
+.469/.257
+.569/.208
+.512/.396
+STUNT
+4
+.509/.123
+.427/.229
+.461/.690
+.731/.591
+.908/.921
+.480/.589
+.579/.309
+.425/.132
+.565/.448
+TabPFN-3
+4
+.564/.169
+.402/.219
+.611/.793
+.484/.360
+.703/.693
+.633/.597
+.487/.285
+.531/.177
+.552/.412
+TabICLv2
+4
+.633/.197
+.382/.217
+.546/.744
+.560/.411
+.750/.763
+.642/.623
+.523/.280
+.530/.190
+.571/.428
+TabFM
+4
+.396/.092
+.437/.239
+.576/.750
+.579/.371
+.506/.556
+.576/.568
+.417/.189
+.617/.233
+.513/.375
+DeLTa
+4
+.703/.252
+.357/.203
+.395/.624
+.552/.414
+.509/.574
+.534/.570
+.477/.218
+.452/.155
+.498/.376
+FeatLLM
+4
+.667/.226
+.411/.255
+.472/.693
+.760/.583
+.839/.861
+.662/.621
+.608/.334
+.585/.242
+.626/.477
+Direct†
+0
+.841/.463
+.683/.353
+.596/.773
+.808/.693
+.894/.885
+.593/.586
+.666/.320
+.690/.303
+.721/.547
+TabuLa-8B†
+0
+.808/.417
+.590/.310
+.419/.673
+.717/.612
+.767/.760
+.443/.466
+.623/.372
+.444/.148
+.601/.470
+LLM-Trees
+0
+.580/.213
+.612/.302
+.593/.744
+.733/.560
+.802/.766
+.537/.524
+.593/.283
+.598/.213
+.631/.451
+ProtoLLM
+0
+.820/.392
+.725/.448
+.660/.818
+.870/.757
+.881/.904
+.598/.684
+.594/.318
+.687/.261
+.729/.573
+MARS (ours)
+0
+.884/.630
+.693/.427
+.610/.790
+.858/.757
+.927/.940
+.586/.604
+.673/.443
+.698/.283
+.741/.609
+¯zjℓand the final feature weight wj:
+¯zjℓ= median
+r∈Vj
+clip[−3,3]
+ z(r)
+jℓ
+
+,
+wj = 1
+10 max
+ 
+0, median
+r∈Vj
+b(r)
+j
+!
+.
+(1)
+The median is robust to outliers. If there are no responses for a feature, it is not used in the
+prediction.
+MARS then constructs the feature response function fj using the anchors and the aggregated
+support scores. For numerical features, fj is a piecewise linear function defined as
+fj(v) = ¯zjℓ+
+v −ajℓ
+aj,ℓ+1 −ajℓ
+ ¯zj,ℓ+1 −¯zjℓ
+
+,
+(2)
+for ajℓ≤v ≤aj,ℓ+1. For values outside the range of the anchors, the function is extended using
+the response at the closest anchor. For categorical features, fj is a lookup table defined as
+fj(v) =
+(
+¯zjℓ,
+v = ajℓ,
+ℓ= 1, . . . , mj,
+0,
+otherwise.
+(3)
+Given a new instance x = (x1, . . . , xp), the MARS score is computed as
+s(x) = ∑
+j: Vj̸=∅
+wj fj(xj).
+(4)
+A higher score indicates stronger support for the positive class. The resulting model is a
+nonlinear additive model, where each feature is modeled using a nonlinear function, and
+the nonlinear functions are combined additively. Note that the model is constructed using a
+finite number of queries to the LLM, and can be used to score new instances without further
+querying the LLM.
+4. Experiments
+4.1. Experimental Setup
+Tasks and Benchmarks. Following FeatLLM (Han et al., 2024) and ProtoLLM (Wang et al., 2025),
+we evaluate MARS on eight tabular benchmark tasks covering financial services (Bank (Moro
+5
+
+
+et al., 2011), Credit-G (Hofmann, 1994)), healthcare (Blood (Yeh et al., 2009), Diabetes (Smith
+et al., 1988), Heart (fedesoriano, 2021), Myocardial (Golovenkin et al., 2020), NHANES (NA,
+2019)), and agriculture (Cultivars (de Oliveira et al., 2023)). The evaluation metrics are ROC-
+AUC (AUC) and average precision (AP).
+Baselines. We compare with three groups of baselines: (1) supervised learning, including
+LogReg, XGBoost (Chen and Guestrin, 2016), and CatBoost; (2) few-shot tabular learning,
+including STUNT (Nam et al., 2023), TabPFN-3 (Grinsztajn et al., 2026), TabICLv2 (Qu et al.,
+2026), TabFM (Google Research, 2026), DeLTa (Ye et al., 2025), and FeatLLM (Han et al., 2024);
+(3) zero-label prediction, including Direct (direct LLM prompting), TabuLa-8B (Gardner et al.,
+2024), LLM-Trees (Knauer et al., 2025), and ProtoLLM (Wang et al., 2025). The first two groups
+of baselines are provided with 4 labeled examples (2 per class) for both training and model
+selection. The third group of baselines, as well as MARS, do not use any task-specific labels for
+prediction.
+Implementation Details. In the main experiments, we use DeepSeek-V4-Flash-0731 with
+high-intensity thinking as the backbone LLM. We also use Qwen3.5-4B and Qwen3.5-9B to
+compare MARS with Direct, with native thinking, temperature=1.0, top-p=0.95, top-k=20,
+presence penalty=1.5. For a fair comparison, MARS uses the same unlabeled reference data as
+ProtoLLM, with R = 5 queries executed per task. Appendices B and C provide the fixed data
+protocol and implementation settings.
+4.2. Predictive Performance
+Table 2: Eight-task ablation and backbone averages.
+Changes (pp) are relative to Direct with the same
+backbone. Best scores per backbone are bold.
+Method
+Avg. AUC ↑
+Avg. AP ↑
+DeepSeek-V4-Flash-0731
+Direct
+.7213
+.5471
+MARS
+.7411 ↑1.97
+.6091 ↑6.21
+w/o feature weights
+.7363 ↑1.50
+.5966 ↑4.95
+w/o response aggregation
+.7358 ↑1.45
+.6002 ↑5.32
+w/o support strength
+.7094 ↓1.19
+.5554 ↑0.83
+Qwen3.5-4B
+Direct
+.5745
+.4366
+MARS
+.6713 ↑9.69
+.5257 ↑8.91
+Qwen3.5-9B
+Direct
+.6364
+.4794
+MARS
+.6695 ↑3.31
+.5148 ↑3.54
+As shown in Table 1, MARS achieves the best
+average AUC and AP across all eight tasks,
+outperforming Direct by 1.97 and 6.21 per-
+centage points, and the strongest baseline
+ProtoLLM by 1.17 and 3.64 percentage points,
+respectively. Across both metrics, MARS sur-
+passes Direct on seven tasks each, demon-
+strating that these gains are not confined
+to isolated tasks.
+Table 2 further presents
+the results on backbones of different scales:
+on Qwen3.5-4B and Qwen3.5-9B, the average
+AUC/AP of MARS outperforms Direct with
+the corresponding backbones by 9.69/8.91
+and 3.31/3.54 percentage points, respectively,
+indicating that feature-level prior elicitation
+sustains its predictive advantage across both model scales.
+6
+
+
+4.3. Efficiency and Sensitivity Analysis
+0
+2
+4
+6
+API cost (CNY)
+45
+55
+65
+75
+Avg. AUC (%)
+0
+2
+4
+6
+API cost (CNY)
+35
+45
+55
+65
+Avg. AP (%)
+1
+2
+3
+4
+5
+R
+0.0
+0.3
+0.6
+0.9
+Gain (pp)
+AUC
+AP
+MARS
+LLM-Trees
+ProtoLLM
+FeatLLM
+Direct
+DeLTa
+Figure 3: Cost–performance trade-offs and response
+sensitivity. (a,b) Mean cost and performance; upper
+left is better. (c) AUC/AP gains over one LLM
+response (R = 1).
+Figure 3(a,b) compares the average predictive
+performance and API costs of different meth-
+ods across the eight tasks. We account for
+actual token consumption based on the offi-
+cial DeepSeek API peak-hour pricing. The
+average task cost of MARS is 0.564 yuan,
+amounting to only 9.6% of ProtoLLM and
+lower than Direct’s 1.065 yuan, while achiev-
+ing higher average AUC and AP. The LLM
+queries of MARS are concentrated exclusively
+in the predictor construction stage; once con-
+structed, new samples can be processed via
+local computation without additional LLM calls.
+Figure 3(c) further analyzes the impact of the number of responses R. For each R, we evalu-
+ate all subsets of size R from the existing five responses and report the average performance.
+Increasing the number of responses from 1 to 5 increases the mean AUC and AP by 0.53 and
+0.89 percentage points, respectively, with diminishing gains for larger R.
+4.4. Ablation Study
+Table 2 examines the roles of feature weights, multi-response aggregation, and support strength
+by uniformly setting feature weights wj to 1, using only a single response (R = 1), and replacing
+aggregated anchor scores with their signs (−1/0/ + 1), respectively. In the support-strength
+ablation, sign replacement is applied before interpolation or lookup, with feature weights
+unchanged. Compared to the full MARS, all three settings degrade the average AUC and AP.
+Removing support strength causes the most pronounced drops, demonstrating that the degree
+of support conveys predictive information beyond the direction of support.
+4.5. Case Study
+One cached predictor, two records
+Task:
+Bank
+subscription
+Two test records
+Functions + weights (cached)
+No new
+LLM calls
+Record A
+Call duration633 s
+Previous outcome
+unknown
+Record B
+Call duration206 s
+Previous outcome
+unknown
+A completed
+call record
+A different
+completed call record
+Call-duration response
+w = 1.0
+-2
+0
++2
+0
+400
+800
+Duration (s)
+Support
+A: +1.70
+B: +0.07
+Previous outcome
+w = 0.9
+unknown
+−0.20
+failure
+−0.80
+other
+−0.20
+success
++2.50
+Same category, same support
+Other
+14 features
+(···)
+These features also use cached
+functions and weights.
+Σ
+Separate sum
+for each
+record
+Same
+functions
+for both
+records
+s(x) =
+Σ
+j
+wj fj (xj)
+Record A
+Duration
++1.70
+Previous outcome
+−0.18
+Other 14 features
+−0.01
+Score
++1.51
+Observed: yes
+Record B
+Duration
++0.07
+Previous outcome
+−0.18
+Other 14 features
+−0.44
+Score
+−0.55
+Observed: no
+Same cached predictor,
+different inputs, different scores.
+Figure 4: Case study on Bank. Two records are
+scored using the same cached response functions
+and feature weights, without further LLM queries.
+Figure 4 illustrates how MARS translates
+LLM domain priors into feature-level predic-
+tive contributions. The same response func-
+tion assigns support scores of 1.70 and 0.07 to
+call durations of 633 and 206 seconds, respec-
+tively, capturing how specific values affect
+positive-class support strength. The shared
+previous outcome, unknown, contributes the
+same weighted value of −0.18 to both records.
+These positive and negative contributions
+combine with those of the other features to
+produce different final scores. By modeling
+the direction and strength of value-specific
+support and combining responses with fea-
+ture weights, MARS turns the LLM’s semantic judgments into decomposable predictive
+contributions.
+7
+
+
+5. Conclusion
+We propose MARS for zero-label tabular prediction, transforming feature-level LLM priors into
+response functions and combining them through weighted summation to construct a reusable
+predictor. Experiments on eight benchmark tasks show that MARS achieves the highest average
+AUC and AP among the compared methods while remaining cost-efficient. Future work will
+explore how to reliably incorporate cross-feature interactions to further improve predictive
+performance.
+Authors and Affiliations
+Liangyu Teng1,2, Yicheng Ding1, Jing Liu3, Hengsong Liu1,2, Juncen Guo1,2, Hongru Li1,2,
+Jingyu Zhang1,2, Liang Song1,2*
+1 College of Intelligent Robotics and Advanced Manufacturing, Fudan University, Shanghai, China
+2 International Networking Systems of Artificial Intelligence Limited, Macau
+3 College of Future Information Technology, Fudan University, Shanghai, China
+References
+D. Bahri, H. Jiang, Y. Tay, and D. Metzler. SCARF: Self-supervised contrastive learning using
+random feature corruption. In ICLR, 2022. URL https://openreview.net/pdf?id=CuV_qYkm
+Kb3.
+S. Bordt, H. Nori, V. Rodrigues, B. Nushi, and R. Caruana. Elephants never forget: Memorization
+and learning of tabular data in large language models.
+In COLM, 2024.
+URL https:
+//openreview.net/forum?id=HLoWN6m4fS.
+V. Borisov, T. Leemann, K. Seßler, J. Haug, M. Pawelczyk, and G. Kasneci. Deep neural networks
+and tabular data: A survey. IEEE TNNLS, 35(6):7499–7519, 2024. doi: 10.1109/TNNLS.2022.3
+229161.
+A. Capstick, R. Krishnan, and P. Barnaghi. AutoElicit: Using large language models for
+expert prior elicitation in predictive modelling. In ICML, pages 6746–6777, 2025. URL
+https://proceedings.mlr.press/v267/capstick25a.html.
+T. Chen and C. Guestrin. XGBoost: A scalable tree boosting system. In KDD, pages 785–794,
+2016. doi: 10.1145/2939672.2939785.
+B. R. de Oliveira et al. Dataset: Forty soybean cultivars from subsequent harvests. TAES, 2023.
+doi: 10.46420/TAES.e230005. URL https://editorapantanal.com.br/journal/index.php/taes/
+en/article/view/8. Art. no. e230005.
+N. Erickson et al. TabArena: A living benchmark for machine learning on tabular data.
+In NeurIPS, volume 38, pages 17285–17350, 2025.
+doi: 10.52202/085713-0519.
+URL
+https://proceedings.neurips.cc/paper_files/paper/2025/hash/1697e3fb412da11dc948824
+9f9e7bbc9-Abstract-Datasets_and_Benchmarks_Track.html.
+fedesoriano. Heart failure prediction dataset. Kaggle, ver. 1 [Data set], Sep. 2021. URL
+https://www.kaggle.com/datasets/fedesoriano/heart-failure-prediction. [Online].
+Available: https://www.kaggle.com/datasets/fedesoriano/heart-failure-prediction.
+*Corresponding author
+8
+
+
+J. Gardner, J. C. Perdomo, and L. Schmidt. Large scale transfer learning for tabular data
+via language modeling. In NeurIPS, volume 37, pages 45155–45205, 2024. URL https:
+//proceedings.neurips.cc/paper_files/paper/2024/hash/4fd5cfd2e31bebbccfa5ffa354c04
+bdc-Abstract-Conference.html.
+S. E. Golovenkin et al. Trajectories, bifurcations, and pseudo-time in large clinical datasets:
+Applications to myocardial infarction and diabetes data.
+GigaScience, 9(11), 2020.
+doi:
+10.1093/gigascience/giaa128. URL https://academic.oup.com/gigascience/article/9/11/gi
+aa128/6006352. Art. no. giaa128.
+Google Research. TabFM: Tabular foundation models. GitHub, ver. 1.0.0 [Software], 2026. URL
+https://github.com/google-research/tabfm. [Online]. Available: https://github.com/googl
+e-research/tabfm.
+Y. Gorishniy, A. Kotelnikov, and A. Babenko. TabM: Advancing tabular deep learning with
+parameter-efficient ensembling. In ICLR, pages 77899–77935, 2025. URL https://proceeding
+s.iclr.cc/paper_files/paper/2025/hash/c1ba41c694834aeef91ae161711d4939-Abstract-Con
+ference.html.
+L. Grinsztajn, E. Oyallon, and G. Varoquaux. Why do tree-based models still outperform
+deep learning on typical tabular data? In NeurIPS, volume 35, pages 507–520, 2022. doi:
+10.52202/068431-0037. URL https://proceedings.neurips.cc/paper_files/paper/2022/hash
+/0378c7692da36807bdec87ab043cdadc-Abstract-Datasets_and_Benchmarks.html.
+L. Grinsztajn et al. TabPFN-3: Technical report. arXiv:2605.13986, 2026. URL https://arxiv.org/
+abs/2605.13986.
+S. Han, J. Yoon, S. O. Arik, and T. Pfister. Large language models can automatically engineer
+features for few-shot tabular learning. In ICML, pages 17454–17479, 2024. URL https:
+//proceedings.mlr.press/v235/han24f.html.
+S. Hegselmann, A. Buendia, H. Lang, M. Agrawal, X. Jiang, and D. Sontag. TabLLM: Few-shot
+classification of tabular data with large language models. In AISTATS, pages 5549–5581, 2023.
+URL https://proceedings.mlr.press/v206/hegselmann23a.html.
+Hans Hofmann. Statlog (German Credit Data). UCI Machine Learning Repository, 1994. DOI:
+https://doi.org/10.24432/C5NC77.
+N. Hollmann et al. Accurate predictions on small data with a tabular foundation model. Nature,
+637(8045):319–326, 2025. doi: 10.1038/s41586-024-08328-6. URL https://www.nature.com/a
+rticles/s41586-024-08328-6.
+R. Knauer et al. ‘Oh LLM, I’m Asking Thee, Please Give Me a Decision Tree’: Zero-shot decision
+tree induction and embedding with large language models. In KDD, pages 1196–1206, 2025.
+doi: 10.1145/3711896.3736818. URL https://dl.acm.org/doi/10.1145/3711896.3736818.
+S. Moro, R. M. S. Laureano, and P. Cortez. Using data mining for bank direct marketing: An
+application of the CRISP-DM methodology. In ESM, 2011. URL https://ciencia.iscte-iul.pt/
+publications/using-data-mining-for-bank-direct-marketing-an-application-of-the-crisp-d
+m-methodology/344.
+NA NA. National Health and Nutrition Health Survey 2013-2014 (NHANES) Age Prediction
+Subset. UCI Machine Learning Repository, 2019. DOI: https://doi.org/10.24432/C5BS66.
+J. Nam, J. Tack, K. Lee, H. Lee, and J. Shin. STUNT: Few-shot tabular learning with self-
+generated tasks from unlabeled tables. In ICLR, 2023. URL https://openreview.net/forum?i
+d=_xlsjehDvlY.
+9
+
+
+M. Ojala and G. C. Garriga. Permutation tests for studying classifier performance. JMLR, 11
+(62):1833–1863, 2010. URL https://www.jmlr.org/papers/v11/ojala10a.html.
+J. Qu, D. Holzmüller, G. Varoquaux, and M. Le Morvan. TabICLv2: A better, faster, scalable,
+and open tabular foundation model. In ICML, 2026. URL https://arxiv.org/abs/2602.11139.
+N. Seedat, N. Huynh, B. van Breugel, and M. van der Schaar. Curated LLM: Synergy of
+LLMs and data curation for tabular augmentation in low-data regimes. In ICML, pages
+44060–44092, 2024. URL https://proceedings.mlr.press/v235/seedat24a.html.
+R. Shi, H. Gu, H. Ye, Y. Dai, X. Shen, and X. Wang. Latte: Transfering LLMs’ latent-level
+knowledge for few-shot tabular learning. In IJCAI, pages 6173–6181, 2025. doi: 10.24963/ijc
+ai.2025/687. URL https://www.ijcai.org/proceedings/2025/687.
+D. Slack and S. Singh. TABLET: Learning from instructions for tabular data. arXiv:2304.13188,
+2023. doi: 10.48550/arXiv.2304.13188. URL https://arxiv.org/abs/2304.13188.
+J. W. Smith, J. E. Everhart, W. C. Dickson, W. C. Knowler, and R. S. Johannes. Using the ADAP
+learning algorithm to forecast the onset of diabetes mellitus. In SCAMC, pages 261–265, 1988.
+URL https://pmc.ncbi.nlm.nih.gov/articles/PMC2245318/.
+P. Wang, D. Wang, H. Zhao, H. Ye, D. Guo, and Y. Chang. LLM empowered prototype
+learning for zero and few-shot tasks on tabular data. arXiv:2508.09263, 2025. URL https:
+//arxiv.org/abs/2508.09263.
+J. Yan et al. Small models are LLM knowledge triggers for medical tabular prediction. In ICLR,
+pages 37337–37352, 2025. URL https://proceedings.iclr.cc/paper_files/paper/2025/hash/5
+c8236f62e33b5224634069e64cb271a-Abstract-Conference.html.
+H. Ye, J. Li, H. Zhao, D. Guo, and Y. Chang. LLM meeting decision trees on tabular data.
+In NeurIPS, volume 38, pages 130884–130920, 2025. doi: 10.52202/085713-3938. URL
+https://proceedings.neurips.cc/paper_files/paper/2025/hash/ab3b2b8d2bb4a1be648a91d
+150a3b87a-Abstract-Conference.html.
+I.-C. Yeh, K.-J. Yang, and T.-M. Ting. Knowledge discovery on RFM model using Bernoulli
+sequence. ESWA, 36(3):5866–5871, 2009. doi: 10.1016/j.eswa.2008.07.018. URL https:
+//www.sciencedirect.com/science/article/pii/S0957417408004508.
+J. Yoon, Y. Zhang, J. Jordon, and M. van der Schaar. VIME: Extending the success of self- and
+semi-supervised learning to tabular domain. In NeurIPS, volume 33, pages 11033–11043,
+2020. URL https://proceedings.neurips.cc/paper_files/paper/2020/file/7d97667a3e056aca
+b9aaf653807b4a03-Paper.pdf.
+10
+
+
+A. Prompting Protocol
+MARS uses the following system and user messages for all three backbones. The user message
+substitutes the binary task question for {question} and the feature summaries for {fields}.
+MARS Prompt Template
+System message
+You are a domain expert. Using only your knowledge of the domain, you quantify
+,→how each field of a table relates to the target described in the
+,→question. You have no labelled examples. Answer with a single JSON object
+,→and nothing else.
+User message
+Task question: {question}
+Answering "yes" is the positive class.
+Fields, each with reference points computed from unlabelled rows (seven
+,→quantiles for numeric fields; levels with relative frequencies for
+,→categorical fields): {fields}
+First, in one or two sentences, restate what the positive class means and
+,→describe a typical positive case.
+Then, for each field, give the log-odds of the positive class at each of its
+,→reference points, on a common scale: 0.0 is no evidence, +1.0 roughly
+,→multiplies the odds by e, -1.0 roughly divides them by e; keep values
+,→within [-3, 3]. Values need not follow a straight line across the
+,→reference points. Keep the sign of each value consistent with your
+,→description: a value typical of a positive case gets a positive log-odds.
+For each field also give discriminative_strength in [0, 10]: how strongly it
+,→separates the classes relative to the other fields; 0 means irrelevant.
+Answer with exactly this JSON object:
+{"positive_class_means": "<one sentence>",
+"typical_positive_case": "<one sentence>",
+"fields": [
+{"name": "<field name exactly as given>",
+"discriminative_strength": <0-10>,
+"logit_at_points": [<one number per reference point, same order>]}
+]}
+For a numerical feature, its summary gives the feature name, type, and ordered reference
+values. For a categorical feature, it gives the retained levels and their relative frequencies.
+Numerical anchors are rounded to six decimal places before duplicate removal; their textual
+values use general numeric formatting.
+Categorical frequencies are displayed as integer
+percentages. The prompt’s logit_at_points and discriminative_strength correspond to
+the anchor support scores and feature importance in Section 3.2.
+11
+
+
+B. Benchmark and Evaluation Protocol
+B.1. Datasets and Prediction Tasks
+We evaluate MARS on eight binary classification tasks spanning financial services, healthcare,
+and agriculture. Table 3 summarizes the dataset sizes and feature types. Bank, Blood, Credit-G,
+Diabetes, Heart, and Myocardial use the processed datasets released with FeatLLM (Han
+et al., 2024), retaining their feature names, types, and task questions and mapping no/yes
+to 0/1. Cultivars and NHANES use their public dataset releases. The prediction tasks and
+dataset-specific preparation are described below.
+Table 3: Benchmark sizes. Num./Cat. counts numerical and categorical input features; the target column
+is excluded.
+Task
+Rows
+Features
+Num./Cat.
+Test rows
+Bank
+45,211
+16
+7/9
+800
+Blood
+748
+4
+4/0
+150
+Credit-G
+1,000
+20
+7/13
+200
+Diabetes
+768
+8
+8/0
+154
+Heart
+918
+11
+6/5
+184
+Cultivars
+320
+10
+7/3
+64
+Myocardial
+686
+91
+7/84
+138
+NHANES
+2,278
+7
+4/3
+456
+1. Bank. A telephone-marketing dataset (Moro et al., 2011) for predicting whether a customer
+subscribes to a term deposit using customer background and contact records.
+2. Blood. A blood-donation dataset (Yeh et al., 2009) for predicting whether an individual
+donates blood based on past donation records, including donation recency, frequency, and
+cumulative volume.
+3. Credit-G. A credit-assessment dataset (Hofmann, 1994) for classifying individual credit risk
+using account status, credit history, and loan information.
+4. Diabetes. A diabetes classification dataset (Smith et al., 1988) that uses clinical features such
+as glucose level, body mass index, and age to predict whether a patient has diabetes.
+5. Heart. A heart-disease classification dataset (fedesoriano, 2021) that combines clinical
+features such as chest pain type, blood pressure, and heart rate to predict the presence of
+heart disease.
+6. Cultivars. A dataset of soybean cultivars and field observations (de Oliveira et al., 2023)
+for predicting whether grain yield (GY) exceeds the fixed dataset median of 3397.276724
+kg/ha using cultivar information and plant traits. Grain yield itself is excluded from the
+inputs; Season, Cultivar, and Repetition are categorical features. We split individual
+observations rather than holding out entire cultivars, so the same cultivar may appear in
+both the training and test partitions.
+7. Myocardial. Clinical records of myocardial infarction patients (Golovenkin et al., 2020). We
+use the chronic-heart-failure classification task, with patient history and clinical measure-
+ments as inputs, retaining the released history feature ZSN_A.
+8. NHANES. A health and nutrition survey dataset (NA, 2019) for predicting whether a
+participant belongs to the age group of 65 years or older from questionnaire responses,
+physical examination results, and biochemical measurements. Age (RIDAGEYR), the age-
+group label (age_group), and the participant identifier (SEQN) are excluded from the inputs.
+12
+
+
+B.2. Splits, Label Access, and Metrics
+We use an 80/20 stratified split with random seed 0. From the training partition, two examples
+per class are reserved for the four-label comparators. The remaining training features form
+the unlabeled reference pool. The same support examples and test records are shared by
+the methods. For test partitions larger than 800 rows, we sample approximately 800 rows
+proportionally by class with seed 0; unused test records are not moved into the reference pool.
+Table 3 gives the resulting evaluation sizes, totaling 2,146 records.
+Labels are used by the evaluator to define the split, select the four comparator examples,
+and compute metrics. MARS receives only the task question and reference features. Its
+prompt, anchor selection, aggregation, and prediction do not access support or test labels. The
+comparison uses no additional labeled validation set.
+We compute ROC-AUC and average precision from the continuous prediction scores and
+average task-level metrics with equal task weights. The main table reports this fixed split. The
+five elicitation responses are repeated LLM requests, not five data-split seeds. For response-
+count sensitivity, every subset of size R from the five cached responses is evaluated, first
+averaging over subsets within each task and then over tasks. The single-response ablation
+averages the five one-response models.
+C. Hyperparameters and Implementation Details
+C.1. MARS Construction Settings
+The construction settings in Table 4 are shared by the eight tasks and three backbones. MARS
+constructs response functions by aggregation and interpolation and elicits feature weights from
+the LLM, without a task-specific optimizer, learning rate, or training schedule. For each feature,
+we aggregate valid replies whose score vectors contain exactly one finite value per anchor.
+Table 4: MARS construction settings used in the reported experiments.
+Setting
+Value
+Task-specific labeled examples
+0
+LLM responses per task
+R = 5, all retained features per response
+Numerical quantiles
+0.05, 0.20, 0.35, 0.50, 0.65, 0.80, 0.95
+Numerical anchor preparation
+Round to six decimals, remove duplicates; omit features with
+fewer than two anchors
+Categorical levels
+Up to 20 most frequent levels
+Anchor score clipping
+[−3, 3], before aggregation
+Feature importance requested
+[0, 10]
+Aggregation
+Coordinatewise median over valid feature responses
+Feature weight
+max(0, median b(r)
+j )/10
+Numerical prediction
+Piecewise linear interpolation, endpoint extension
+Categorical prediction
+Lookup; unseen levels contribute 0
+C.2. LLM Generation Settings
+Table 5 records the generation settings for MARS. DeepSeek uses the API model identifier
+deepseek-v4-flash, recorded as DeepSeek-V4-Flash-0731 in the experiment. Thinking is
+enabled with high reasoning effort and JSON-object output. Temperature and top-p were not
+13
+
+
+explicitly set in these requests. Qwen3.5-4B and Qwen3.5-9B use their native thinking template
+with the same sampling settings as each other.
+Table 5: MARS generation settings. “Not set” means the request contains no override for that parameter.
+Parameter
+DeepSeek-V4-Flash
+Qwen3.5-4B / 9B
+Thinking
+Enabled; high effort
+Native template enabled
+Maximum output tokens
+32,768
+32,768
+Temperature
+Not set
+1.0
+Top-p
+Not set
+0.95
+Top-k
+Not set
+20
+Min-p
+Not set
+0.0
+Presence penalty
+Not set
+1.5
+Repetition penalty
+Not set
+1.0
+Frequency penalty
+Not set
+0.0
+Qwen inference uses bfloat16, tensor parallel size 1, engine seed 0, a maximum context
+length of 81,920 tokens, and GPU-memory utilization 0.92. The engine allows at most 8
+sequences and 4,096 batched tokens, with chunked prefill and prefix caching enabled.
+14
