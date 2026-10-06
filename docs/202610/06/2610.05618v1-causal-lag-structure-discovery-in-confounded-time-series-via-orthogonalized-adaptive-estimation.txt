@@ -1,0 +1,6218 @@
+Title: Causal Lag Structure Discovery in Confounded Time Series via Orthogonalized Adaptive Estimation
+
+URL Source: https://arxiv.org/pdf/2610.05618v1
+
+Published Time: Tue, 06 Oct 2026 02:33:41 GMT
+
+Number of Pages: 48
+
+Markdown Content:
+# Causal Lag Structure Discovery in Confounded Time Series via Orthogonalized Adaptive Estimation 
+
+Hong Kiat Tan 1,∗ Isaac-Neil Zanoria 2 James Chen 1 Haoyang Lyu 1 Mihai Cucuringu 1,3,41Department of Mathematics, University of California, Los Angeles 
+
+> 2
+
+Department of Electrical and Computer Engineering, University of California, Los Angeles 
+
+> 3
+
+Oxford-Man Institute of Quantitative Finance, University of Oxford 
+
+> 4
+
+Department of Statistics, University of Oxford 
+
+## Abstract 
+
+Finding which variables cause which others in multivariate time series, and at what lags, is cen-tral to science and policy, yet existing methods force a choice between flexible confounder adjust-ment, data-driven lag selection, and inference that controls the false discovery rate (FDR). ORACLE-VARX does all three in one pipeline. First, dou-ble/debiased machine learning (DML) removes nonlinear confounder effects from the outcomes and the lagged series. Second, adaptive causal lag estimation (ACLE) picks the lag order at each time step by sequential significance tests, tracking regime changes. Third, entry-wise z-tests with Benjamini–Hochberg correction select di-rected edges at a target FDR. We prove that in each rolling window, the debiased coefficients are asymptotically normal around a window-averaged target, so their z-tests are asymptotically valid. On a synthetic benchmark with time-varying struc-ture and nonlinear confounding, ORACLE-VARX (LightGBM) tracks the true lag order best (RMSE 
+
+0.96 vs 1.1–1.5), has edge FDR 0.047 , close to PCMCI ( 0.045 ) and below VAR ( 0.129 ) and VAR-LiNGAM ( 0.187 ), and forecasts better than all three. On nine U.S. sector ETFs with macroeco-nomic confounders, it yields interpretable causal graphs whose lag order rises in high-volatility regimes. 
+
+§ HK-Tan/ORACLE-VARX 
+
+## 1 INTRODUCTION 
+
+Causal discovery, learning which variables directly influ-ence which others from observational data, is a cornerstone 
+
+> ∗
+
+Correspondence to: maxtanhk@g.ucla.edu 
+
+of scientific reasoning (Pearl, 2009). For time series, one must determine not only which variables are causally linked, but also the lags at which those effects operate. Such lag-annotated graphs arise across domains: lead–lag relation-ships among financial assets signal information flow and systemic risk (Lo and MacKinlay, 1990; Billio et al., 2012); climate teleconnections link weather patterns across distant regions (Wallace and Gutzler, 1981); and neural connectiv-ity studies seek directed interactions at millisecond resolu-tion (Brovelli et al., 2004; Seth et al., 2015). In each setting, recovering the causal lag structure is the first step toward reliable prediction, intervention, and policy evaluation. Time series pose challenges that generic causal discov-ery methods do not address. Autocorrelation inflates the effective number of tests, complicating inference. The true lag order may be unknown and time-varying. More-over, exogenous confounders often enter through nonlin-ear channels. Classical Granger causality and VAR meth-ods (Granger, 1969; Sims, 1980; Lütkepohl, 2005) assume a single, fixed lag order and either ignore confounders or in-clude them linearly. Temporal structure-learning methods— PCMCI (Runge et al., 2019), DYNOTEARS (Pamfil et al., 2020), CD-NOTS (Sadeghi et al., 2025), VAR-LiNGAM (Hyvärinen et al., 2010)—each address some of these issues, but none handles all of (a) nonlinear confound-ing, (b) adaptive lag order selection, and (c) FDR-controlled edge discovery with entry-wise confidence intervals. As a concrete illustration, consider a system of three endoge-nous time series Y (1)  
+
+> t
+
+, Y (2)  
+
+> t
+
+, Y (3)  
+
+> t
+
+driven by a lag-1 cycle 
+
+Y (3) → Y (1) → Y (2) → Y (3) (each edge with coefficient 
+
+0.60 ), where additional self-effects at lags 2 and 3 decay lin-early to zero over time, producing three successive regimes (6 edges, then 5, then only the lag-1 cycle). Three exoge-nous confounders enter through distinct nonlinear functions (tanh, quadratic, sine), creating correlated noise that cannot be removed by linear regression. The challenge is: given observed trajectories of Yt and Wt, can we simultaneously discover (i) which directed edges exist, (ii) at which lags they operate, and (iii) provide valid statistical inference arXiv:2610.05618v1 [stat.ME] 4 Oct 2026 Causal Lag Structure Discovery in Confounded Time Series                        
+
+> t−3t−2t−1tY(1)
+> Y(2)
+> Y(3)
+> Y(1)
+> Y(2)
+> Y(3)
+> Y(1)
+> Y(2)
+> Y(3)
+> Y(1)
+> Y(2)
+> Y(3)
+> 0.60 0.60 0.60 0.60 0.60 0.60 0.60 0.60 0.60
+> a(t)a(t)
+> a(t)a(t)
+> b(t)
+> Wt
+> Lag-1 cycle (0.60) Lag-2 self, a(t)↓0
+> Lag-3 self, b(t)↓0
+> Nonlinear confounders
+
+Figure 1: An example of a time-unrolled causal graph of a 3-variable system. Solid blue arrows show the lag-1 cycle (coefficient 0.60 ). Dashed red and dotted green arrows show lag-2 and lag-3 self-effects a(t) and b(t) that decay to zero (Section 5.1). Gray dashed arrows indicate nonlinear con-founder effects. that controls false discoveries? Figure 1 depicts this data-generating process as a time-unrolled acyclic digraph. We propose ORACLE-VARX (Orthogonalized Regression for Adaptive Causal Lag Estimation in VARX), a frame-work that addresses all three challenges within a unified inferential framework. Our contributions are: 1. We introduce DML orthogonalization for VAR co-efficients , applying double/debiased machine learn-ing (Chernozhukov et al., 2018) to residualize both outcomes and treatments against nonlinear confounder effects via flexible first-stage learners and time-series cross-fitting, yielding √T -consistent and asymptoti-cally normal coefficient estimates (Section 3.2). 2. We propose adaptive causal lag estimation (ACLE) ,a two-stage procedure that combines sequential signifi-cance testing across a grid of significance levels with rolling validation-based tuning to select the lag order 
+
+ˆpt at each time step, tracking regime changes in the underlying causal structure without requiring p to be fixed a priori (Section 3.3). 3. We perform FDR-controlled edge discovery via entry-wise z-tests on the debiased coefficients, corrected by the Benjamini–Hochberg procedure, yielding di-rected causal graphs with false discovery rate control at level q.4. We establish formal guarantees , proving local asymp-totic normality of the debiased coefficients in each rolling window, around a window-averaged target and with valid standard errors (Theorem 1), extending the DML framework of Chernozhukov et al. (2018) to the VARX setting, and connecting zero debiased coeffi-cients to Granger non-causality (Proposition A.13). 5. We provide empirical validation on both synthetic and real data. On a synthetic benchmark with time-varying structure and nonlinear confounding, ORACLE-VARX closely tracks the true lag order with near-unit RMSE across five first-stage learners. On nine U.S. sector ETFs with macroeconomic confounders, the ACLE adaptive lag procedure alone achieves an annualized Sharpe ratio of approximately 1.3 on open-to-close returns, a setting where broad market indices earn near-zero returns (Haghani et al., 2024), and the re-sulting causal graphs yield interpretable lead–lag struc-ture whose adaptive lag order rises in high-volatility regimes (Sections 5.1–5.2). 
+
+## 2 RELATED WORK 
+
+Granger causality and VAR models. Classical Granger causality (Granger, 1969) tests whether past values of one series improve the prediction of another beyond the target’s own history, and remains the most widely used framework for analyzing lead–lag effects in multivariate time series. Sims (1980) popularized vector autoregressive (VAR) mod-els as a flexible, data-driven tool for macroeconomic analy-sis, and Lütkepohl (2005) codified the statistical theory for estimation, testing, and lag selection—mostly under linear dynamics and a fixed, globally chosen lag order. Sparse VAR extensions handle high-dimensional settings: Basu and Michailidis (2015) analyzed ℓ1-penalized estimation with non-asymptotic guarantees under stability conditions, and Davis et al. (2016) fit sparse VARs in two stages via par-tial spectral coherence. Uematsu and Yamagata (2025) test each lag coefficient of a large VAR with debiased-LASSO statistics and control the FDR across edges, but in a linear, stationary VAR of known order. All of these methods as-sume that confounders enter linearly or are absent, and none adapts the lag order over time. 
+
+Causal discovery for time series. PCMCI (Runge et al., 2019) combines PC-style parent selection with conditional independence tests (optionally nonlinear) that handle auto-correlation, but it neither adapts the active lags over time nor gives lag coefficients with confidence intervals (Ta-ble 2 compares it and VAR-LiNGAM with ours). VAR-LiNGAM (Hyvärinen et al., 2010) uses non-Gaussianity to identify contemporaneous and lagged structure, but assumes linear effects and no hidden confounders. TiMINo (Peters et al., 2013) establishes identifiability under independent noise and nonlinear relationships, but its algorithm rules out feedback loops between series. DYNOTEARS (Pamfil et al., 2020) learns structure by continuous optimization but gives no inference on individual edges. CD-NOTS (Sadeghi et al., 2025) handles nonstationarity by detecting mechanism changes, but assumes every hidden confounder is a smooth Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+function of time. Recent ML-based Granger and conditional independence tests for time series (Angelis et al., 2025; Wieck-Sosa et al., 2025) adjust for confounders flexibly, and Shi and Shah (2026) also search over the lag depth, one pair of series at a time. These tests detect links but give no lag coefficients with confidence intervals. 
+
+Double/debiased machine learning. Robinson (1988) showed that in a partially linear model, nonparametric nui-sance fits (regressions on the confounders) followed by OLS give √T -consistent estimates of the linear part. Cher-nozhukov et al. (2018) generalized this into DML: Neyman orthogonal scores and cross-fitting allow ML first stages that converge fast enough, while keeping asymptotically normal inference. Recent works extend DML to dependent data (Ciganovic et al., 2026; Yu et al., 2026). For high-dimensional VARs, Hecq et al. (2023) and Adamek et al. (2023) give LASSO-based inference with a fixed lag order. Closest to our work, Ballinari and Wehrli (2024) prove DML consistency for impulse response functions under α-mixing, showing that blocked cross-fitting preserves asymptotic va-lidity (see Remark 1). We apply their cross-fitting theory to VAR coefficient matrices and add ACLE and BH-FDR control. Yu et al. (2026) allow vector outcomes and treat-ments; with the lags as treatments and instruments, their estimator reduces to our single-window one. They assume time-invariant nuisance functions; Theorem 1 covers drift-ing ones for our window average. ORACLE-VARX is, to our knowledge, the first to combine nonparametric DML debiasing, adaptive lag discovery, and FDR-controlled edge selection, with a confidence interval per lag coefficient. 
+
+## 3 METHODOLOGY 
+
+3.1 The VARX Model and Its Partially Linear Extension 
+
+Assume that we have n endogenous time series with 
+
+Yt = (Y (1)  
+
+> t
+
+, . . . , Y (n) 
+
+> t
+
+)⊤ ∈ Rn for t = 1, . . . , T , to-gether with d-dimensional exogenous confounders Wt =(W1,t , . . . , W d,t )⊤ ∈ Rd.
+
+Linear VARX. The standard linear VARX( p) model is 
+
+Yt =
+
+> p
+
+X
+
+> k=1
+
+Ak Yt−k +
+
+> p
+
+X
+
+> k=1
+
+Bk Wt−k + εt, (1) where Ak ∈ Rn×n are lag-k coefficient matrices encoding causal effects among the endogenous variables, Bk ∈ Rn×d
+
+capture linear confounder effects, and εt is a zero-mean innovation. For simplicity, we use the same lag order p for both endogenous and exogenous terms. 
+
+Partially linear VARX. To allow flexible confounder ad-justment, we generalize to a partially linear VARX :
+
+Yt =
+
+> p∗
+
+X
+
+> k=1
+
+Ak Yt−k + g(Wt−1, . . . , Wt−p) + εt, (2) where g : Rd·p → Rn is an unknown, potentially non-linear nuisance function, p∗ is the true (unknown) maxi-mum causal lag order, p ≥ p∗ is the lag order used in the model, and E[εt | Yt−1, . . . , Wt−p] = 0. The effect of lagged Y on current Y remains linear—yielding inter-pretable, testable coefficients—while the confounder effect is left fully flexible. This is the model underlying OR-VARX and ORACLE-VARX, and we can recover the standard lin-ear VARX (1) when g is linear. 
+
+Definition 1 (Causal Lag Graph) . The causal lag graph G =(V, E ) has vertex set V = {Y (1) , . . . , Y (n)} and directed, lag-annotated edge set E = (Y (j) → Y (i), k ) : Ak[i, j ]̸ =0 . An edge (Y (j) → Y (i), k ) means Y (j) at lag k Granger-causes Y (i).
+
+Goal. Recover G from observational data—that is, deter-mine which entries Ak[i, j ] are nonzero, at which lags k,and for which directed pairs (j, i ) while providing valid statistical inference for each edge, while making minimal assumptions on the nuisance function g.
+
+3.2 DML for VAR: Orthogonalization Procedure 
+
+Following the double/debiased machine learning (DML) framework of Chernozhukov et al. (2018), we cast the par-tially linear VARX (2) into a treatment-effect setup. 
+
+DML formulation. Define the stacked treatment and 
+
+stacked confounders :
+
+Tt := 
+
+
+
+Yt−1
+
+...
+
+Yt−p
+
+ ∈ Rnp , Ct := 
+
+
+
+Wt−1
+
+...
+
+Wt−p
+
+ ∈ Rdp .
+
+(3) Let Θ ∈ Rnp ×n denote the stacked coefficient ma-trix formed by vertically stacking A⊤ 
+
+> 1
+
+, . . . , A⊤ 
+
+> p
+
+, so that 
+
+Θ⊤Tt = P 
+
+> k
+
+AkYt−k. Then (2) becomes the partially linear model 
+
+Yt = Θ⊤Tt + g(Ct) + Ut, (4) 
+
+Tt = gT (Ct) + Vt, (5) where g : Rdp → Rn and gT : Rdp → Rnp are nuisance functions, Ut is the structural innovation with 
+
+E[Ut | Ct, Tt] = 0, and Vt is the treatment residual with 
+
+E[Vt | Ct] = 0. The residualization below uses the out-come’s prediction from the confounders, gY (Ct) := E[Yt |
+
+Ct] = Θ⊤gT (Ct) + g(Ct). The parameter of interest is 
+
+Θ (equivalently, the individual Ak matrices), and the nui-sance functions gY , gT are treated as infinite-dimensional parameters that must be estimated. 
+
+Three-step DML procedure. 
+
+1. Cross-fitted nuisance estimation. Using flexible ma-chine learning methods (extra trees, gradient boosting, Causal Lag Structure Discovery in Confounded Time Series 
+
+random forests, or a foundational model), estimate ˆgY
+
+and ˆgT via time-series cross-fitting .2. Residualization. Form the residualized outcome and treatment: 
+
+˜Yt := Yt − ˆgY (Ct), ˜Tt := Tt − ˆgT (Ct). (6) 3. Orthogonalized OLS. Estimate the debiased coefficient matrix by ordinary least squares on the residualized data: 
+
+ˆΘ =
+
+P 
+
+> t
+
+˜Tt ˜T⊤
+
+> t
+
+−1P 
+
+> t
+
+˜Tt ˜Y⊤
+
+> t
+
+
+
+. (7) The estimator (7) satisfies Neyman orthogonality (Sec-tion 4), so first-stage estimation errors in ˆgY and ˆgT affect 
+
+ˆΘ only at second order. This permits flexible ML learners in the first stage without sacrificing inferential validity. 
+
+Time-series cross-fitting. Note that standard K-fold cross-validation violates temporal ordering and induces de-pendence between training and test sets. Hence, we instead use a blocked rolling window split : fold k trains on the inter-val [sk, s k + ntrain ) and tests on [sk + ntrain , s k + ntrain +
+
+ntest ), with sk+1 = sk + ntest so that folds tile without overlap. Nuisance residuals ˜Yt and ˜Tt are computed and aggregated only on the test folds, for which the second-stage OLS (7) then uses only these out-of-sample residuals ac-cordingly. We memoize the first stage: because the blocks lie on one grid shared by all windows, each block is fit once and reused by every window that overlaps it. This needs over 
+
+200 × fewer first-stage fits than recomputing each window, and a full synthetic run (all 2,595 windows, one tree-based learner) takes 6–17 minutes on a 10-core Apple M5 laptop CPU, with no GPU (Appendix D.3). 
+
+Standard errors and inference. After obtaining ˆΘ, we compute standard errors using the classical OLS variance formula on the residualized data: 
+
+dVar( ˆΘ·i) = ˆ σ2
+
+> i
+
+P 
+
+> t
+
+˜Tt ˜T⊤
+
+> t
+
+−1
+
+, (8) for each equation i, where ˆΘ·i is the i-th column of ˆΘ,
+
+ˆσ2 
+
+> i
+
+= ( Teff − np )−1 P
+
+> t
+
+( ˜Yt,i − ˆΘ⊤·i ˜Tt)2 and Teff is the number of out-of-sample residualized observations. Under conditionally homoskedastic innovations this is the correct asymptotic variance, with no HAC correction (Theorem 1). The diagonal of dVar( ˆΘ) then provides entry-wise standard errors, enabling z-tests for the hypothesis H0 : Ak[i, j ] = 0 
+
+on every potential edge in the causal graph. 
+
+Remark 1 (Buffer Zones) . Time-series DML theory often inserts buffer zones of kT observations (e.g. kT = ⌊T /K ⌋)between training and test folds (Ballinari and Wehrli, 2024). We use adjacent windows ( kT = 0 ). The nuisance functions themselves drift over time, so a buffer would make every nuisance fit staler, and it would drop kT observations from every training fold. Our theory (Section 4) does not use a buffer: it assumes directly that the cross-fitted nuisance errors are negligible (condition (N), Appendix A.1). 
+
+3.3 Lag Order Selection 
+
+The lag order p controls the number of coefficient matrices 
+
+A1, . . . , Ap to estimate. Fixing p a priori is problematic: setting it too low misses genuine edges at higher lags, while setting it too high inflates the parameter count and increases false positives. The true lag order may also shift over time. We consider two data-driven approaches. 
+
+RMSE-based lag selection. For methods without signif-icance testing (VAR, VARX, OR-VARX), we iterate over candidate lags p ∈ { 1, . . . , p max }, compute rolling fore-casts ˆY(p) 
+
+> s
+
+for each, and select the lag minimizing root mean squared forecast error on a trailing validation window of v days. Concretely, define the rolling validation RMSE for any candidate lag p as 
+
+RMSE v (p; t) = 
+
+vuut 1
+
+v
+
+> t−1
+
+X
+
+> s=t−v
+
+Ys − ˆY(p)
+
+> s
+> 2
+
+, (9) and set ˆpt = arg min p∈{ 1,...,p max } RMSE v (p; t). This is simple and assumption-free but ignores the statistical evi-dence for individual edges. 
+
+Adaptive Causal Lag Estimation (ACLE). ACLE uses statistical significance to decide when to stop adding lags, so it tracks causal signal strength, not only forecast accuracy. It works with both OLS-VAR and DML coefficients. 
+
+Stage 1: Significance-based lag selection. For each rolling window centred at time t, we evaluate candidate lags p ∈ { 2, . . . , p max } via sequential hypothesis testing. Figure 2 illustrates the procedure. For each candidate lag p ∈ { 2, . . . , p max }, we test 
+
+H0 : Ap[i, j ] = 0 for all (i, j ) pairs simultaneously. Entry-wise z-statistics zi,j = ˆAp[i, j ] / ˆs( ˆAp[i, j ]) are com-puted from the pmax fit, and Benjamini–Hochberg FDR correction (Benjamini and Hochberg, 1995) at level α deter-mines whether any entry of Ap is significant. If none is, we stop and set pα = p − 1. This yields a candidate lag pα for each α. Because α governs the sensitivity of lag detection, we evaluate a grid α ∈ { α1, . . . , α M }, producing candidate lags {pα1 , . . . , p αM }.
+
+Stage 2: Validation-based α-selection. To select the op-timal significance level α∗ 
+
+> t
+
+without an a priori choice, we apply the same rolling validation criterion (9), now over the 
+
+α-grid rather than over raw lag candidates: 
+
+α∗ 
+
+> t
+
+= arg min  
+
+> α∈{ α1,...,α M}
+
+RMSE v (pα; t), (10) Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Lags 1 to p−1 
+
+> T(p−1)
+> W
+> Yt
+
+A1: p−1
+
+Testing lag p 
+
+> T(p−1)
+> W
+> Yt
+> Yt−p
+
+A1: p−1
+
+Ap
+
+Figure 2: Sequential lag testing in ACLE. Left: the model with lags 1, . . . , p −1. Right: testing H0 : Ap = 0 on the lag-p block. If rejected at level α, lag p is retained and we proceed to p+1 ; otherwise we stop and set pα = p−1.where pα is the lag selected by Stage 1 at level α. The final adaptively selected lag is ˆpt = pα∗ 
+
+> t
+
+.The selected lag ˆpt may vary as the rolling window advances: when higher-order self-effects decay to zero, ACLE tracks the change by reducing ˆpt.
+
+3.4 ORACLE-VARX: Full Pipeline 
+
+The complete ORACLE-VARX pipeline combines the three components above into a unified framework for causal lag discovery. For each rolling window at time t:1. Input: Time series {Ys, Ws} in the current window, maximum lag pmax , first-stage learner L.2. Nuisance estimation: For each candidate p ∈{1, . . . , p max }, run DML with rolling cross-fitting (Sec-tion 3.2) to estimate nuisance functions ˆg(p) 
+
+> Y
+
+and ˆg(p) 
+
+> T
+
+,then form residuals ˜Y(p) 
+
+> t
+
+and ˜T(p) 
+
+> t
+
+.3. Orthogonalized regression: Compute ˆΘ(p)
+
+and its stan-dard errors via (7)–(8) for each candidate p.4. Lag selection: For non-adaptive methods, select ˆpt via RMSE minimization (9). For ACLE methods, run se-quential significance testing on the pmax fit across the 
+
+α-grid (Stage 1), then select α∗ 
+
+> t
+
+via rolling validation (10) (Stage 2) to obtain ˆpt = pα∗ 
+
+> t
+
+.5. BH-FDR edge discovery: From the pmax fit ˆΘ(pmax )
+
+,compute z-scores zk,i,j = ˆAk[i, j ] / ˆs( ˆAk[i, j ]) for all 
+
+k ∈ { 1, . . . , ˆpt} and (i, j ) pairs. Apply the Benjamini– Hochberg procedure (Benjamini and Hochberg, 1995) at level q across all n2 ˆpt tests. 6. Output: Causal lag graph ˆGt with lag-annotated edges, and day-t forecasts ˆYt.The full pseudocode is given in Algorithm 1 (Ap-pendix D.2). 
+
+3.5 Method Hierarchy 
+
+Table 1 displays the nested hierarchy of methods evaluated in this paper. The experiments in Section 5 evaluate every row of Table 1, allowing us to attribute performance gains to each individual component. Table 1: Hierarchy of methods. Each row adds one capabil-ity relative to the row above. “RMSE” lag selection picks the lag order minimizing rolling validation RMSE (9) over 
+
+{1, . . . , p max }; “ACLE” uses significance-based sequential testing with validation-based α-tuning (Section 3.3).                      
+
+> Method Lag Sel. Conf. Adj. DML
+> VAR RMSE None –VARX RMSE Linear –ACLE-VAR ACLE None –ACLE-VARX ACLE Linear –OR-VARX RMSE Nonlinear ✓
+> ORACLE-VARX ACLE Nonlinear ✓
+
+## 4 THEORETICAL ANALYSIS 
+
+The coefficients in our setting drift over time, so we study a single rolling window. We use the stacked form of Sec-tion 3.2 with p = pmax lags and let the coefficients vary slowly: Θt = Θ(t/T ) for a function Θ : [0 , 1] → Rnp ×n,so that Yt = Θ⊤ 
+
+> t
+
+Tt + gt(Ct) + εt. Fix u0 ∈ (0 , 1] and the window W = {t0 − Tw + 1 , . . . , t 0}, t0 = ⌊u0T ⌋, on which the second-stage OLS (7) is run. 
+
+What a window estimates. Let Vt = Tt − E[Tt | Ct]
+
+be the part of the lags that the confounders cannot predict, and Jt = E[VtV⊤ 
+
+> t
+
+]. The window estimate targets 
+
+¯Θ =
+
+ X 
+
+> t∈W
+
+Jt
+
+−1 X
+
+> t∈W
+
+Jt Θt, (11) a weighted average of the coefficients over the window. These weights make the drift cancel exactly in the estimation error, since P 
+
+> t∈W
+
+Jt(Θt − ¯Θ) = 0 , and ¯Θ lies within 
+
+O(Tw/T ) of Θ(u0) (Lemma A.3). 
+
+Assumption 1. We assume the following conditions: 
+
+(M) E[εt | F t−1] = 0, where Ft−1 = σ(Ys, Ws : s < t ):given the observed past, the innovation is unpredictable (all confounders are observed and pmax ≥ p∗). 
+
+(S) Θ is Lipschitz and λmin (Jt) ≥ cJ > 0: coefficients drift slowly and confounder-adjusted lags are not collinear. 
+
+(W) Tw → ∞ and Tw = O(T 2/3).
+
+(R) The regularity conditions (D), (H), (N) of Appendix A.1 hold: bounded moments and short memory, conditionally homoskedastic innovations, and the usual DML requirement Causal Lag Structure Discovery in Confounded Time Series 
+
+that the cross-fitted nuisance errors are small (a product rate) and uncorrelated with εt and Vt.
+
+Theorem 1 (Local asymptotic normality) . Under Assump-tion 1, for every entry (r, i ) of Θ, with ˆsri the standard error from (8) ,
+
+ˆΘri − ¯Θri 
+
+ˆsri d
+
+−→ N (0 , 1) .
+
+If moreover Tw = o(T 2/3), then ¯Θri may be replaced by 
+
+Θri (u0).
+
+Proof idea. We first write the error exactly as √Tw( ˆΘ −
+
+¯Θ) = ˆJ−1(S0 + R), where ˆJ = T −1
+
+> w
+
+P 
+
+> t∈W
+
+˜Tt ˜T⊤ 
+
+> t
+
+is close to the average of the Jt. The leading term S0 =
+
+T −1/2
+
+> w
+
+P 
+
+> t∈W
+
+Vtε⊤ 
+
+> t
+
+is a sum of martingale differences, so a martingale central limit theorem applies with no autoco-variance (HAC) terms. The remainder R collects the drift, whose mean cancels by (11), and the nuisance errors, which enter only through products or terms uncorrelated with the innovations (Neyman orthogonality), so they vanish un-der (N) (Appendix A.2). Last, Tw ˆs2 
+
+> ri
+
+is close to the limiting variance, since the residual variance is consistent and the noise variance drifts slowly (Appendix A.3). 
+
+Lag selection. ACLE is a heuristic; we do not prove that it selects the true lag. Theorem 1 explains why it tracks the lag order: if Ak = 0 on the window for all lags above some 
+
+p∗, their z-statistics stay of order one, while every lag block with Ak(u0)̸ = 0 has an entry whose |z| grows like √Tw.With a fixed Stage 1 level α, a zero lag is still added with probability bounded away from zero, so α must shrink with 
+
+Tw; if it shrinks slowly enough that its cutoff grows more slowly than √Tw, true lags are still detected. ACLE does not fix α: Stage 2 picks it from a grid by validation, letting the data set the level. A formal consistency result covering the BH step and this data-driven α is left to future work. 
+
+From coefficients to causal edges. Theorem 1 gives valid 
+
+p-values for each entry of ¯Θ (of Ak(u0) if Tw = o(T 2/3)); BH’s FDR guarantee also needs independent or positively dependent (PRDS) p-values (Benjamini and Hochberg, 1995; Benjamini and Yekutieli, 2001). Under causal suf-ficiency, meaning every common cause of the series is ob-served in Wt, a zero entry of Ak is equivalent to Granger non-causality at lag k (Proposition A.13, given a non-degeneracy condition). A hidden variable breaks this, be-cause its effect is absorbed into the lag coefficients (Fig-ure 6): a hidden common cause of two series creates a spuri-ous edge, and a hidden mediator makes an indirect link look direct. The coefficients then estimate the best linear lead– lag predictor from the observed variables, not direct causal effects, and their p-values lose the guarantee of Theorem 1. This happens for VAR and ACLE-VAR, which ignore the confounders in our benchmark, and for the ETFs, where many common causes are unobserved (Section 5.2). 
+
+## 5 EXPERIMENTS 
+
+We evaluate the full method hierarchy from Table 1 on two complementary benchmarks: a synthetic time-varying system with known ground truth (Section 5.1), and a fi-nancial application to ETF markets with macroeconomic confounders (Section 5.2). The synthetic benchmark is our primary experiment, providing controlled evaluation of lag recovery, coefficient estimation, and false positive control. The financial application demonstrates that the framework discovers interpretable causal structure in real data. 
+
+5.1 Synthetic Benchmark Data-generating process. We construct a three-variable (n = 3 ) partially linear VARX process whose causal struc-ture is depicted in Figure 1. The lag-1 coefficient matrix is 
+
+A1 =
+
+
+
+0 0 0.60 0.60 0 00 0.60 0
+
+ ,
+
+and time-varying self-effects at lags 2 and 3 decay linearly to zero: A2[1 , 1]( t) = A2[2 , 2]( t) = 0 .30 · max(0 , 1 −
+
+t/ 2000) and A3[3 , 3]( t) = 0 .30 · max(0 , 1 − t/ 1000) , cre-ating three regimes ( p∗(t) = 3 , 2, 1). Three independent AR(1) confounders ( ρW = 0 .5) enter through nonlinear nuisance functions: 
+
+g1(W) = tanh(2 W1)+ W 22 +sin( πW 3)2.2 ,g2(W) = ReLU( W1−0.5)+sin( πW 2)+ W 23 
+
+> 2.1
+
+, (12) 
+
+g3(W) = W1W2+tanh( W3)+cos( πW 1)1.7 ,
+
+each entering the i-th structural equation as νλ · gi(Wt−1).Key parameters: T = 3000 , noise scale ν = 0 .1, con-founder strength λ = 1 .0.
+
+Observability conditions. All three confounders always drive the data; the observability level sets how many of them a method is given: All (3 confounders observed), Partial-2 
+
+(2 observed), Partial-1 (1 observed), and None (no con-founders; of our methods, only VAR and ACLE-VAR apply). Below All, confounders that drive the data are left out of the model, which violates causal sufficiency (Section 4), so the FDR guarantee for causal edges no longer applies. The main text therefore reports All, and keeps VAR and ACLE-VAR (None) only as the reference for ignoring the confounders altogether; Appendix B.1 reports Partial-2 and Partial-1. 
+
+Methods. We evaluate all six method variants from Ta-ble 1, plus PCMCI (linear test, with an OLS refit) and VAR-LiNGAM, refit in every window (Appendix B.2). For DML methods, we compare five first-stage learners: Extra Trees, Random Forest, LightGBM, XGBoost, and TabPFN-2.5 (Hollmann et al., 2025; Grinsztajn et al., 2025). TabPFN is a transformer pretrained on millions of synthetic tabu-lar datasets that performs inference via in-context learning, Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Table 2: Synthetic benchmark results (All confounders ob-served unless noted). ET: Extra Trees; LGBM: LightGBM; TP: TabPFN. FDR: BH at q = 0 .05 . Bold: best per column; lower is better except for Power.                                     
+
+> Method Lag Coeff. Fcst. FDR Power RMSE MAE MAE ↑
+> No confounders
+> VAR 1.475 0.060 0.110 0.129 0.655 ACLE-VAR 1.006 0.066 0.109 0.147 0.661
+> All confounders, no DML
+> VARX 1.239 0.063 0.109 0.076 0.650 ACLE-VARX 1.099 0.069 0.108 0.080 0.651
+> All confounders, causal discovery
+> PCMCI + OLS 1.214 0.065 0.108 0.045 0.685
+> VAR-LiNGAM 1.132 0.070 0.107 0.187 0.641
+> All confounders, DML
+> OR-VARX, ET 1.212 0.063 0.095 0.094 0.649 OR-VARX, LGBM 1.288 0.067 0.102 0.045 0.666 OR-VARX, TP 1.159 0.067 0.091 0.056 0.660 ORACLE-VARX, ET 1.073 0.063 0.094 0.101 0.652 ORACLE-VARX, LGBM 0.962 0.058 0.101 0.047 0.673 ORACLE-VARX, TP 0.981 0.060 0.091 0.066 0.673
+
+achieving strong performance on small tabular datasets with-out hyperparameter tuning, which is the regime of our DML cross-fitting folds. We set pmax = 5 , a value larger than the true maximum lag of the data generating procedure. 
+
+Metrics. We evaluate five complementary metrics: 1. Lag RMSE :
+
+q
+
+T −1out 
+
+P
+
+> t
+
+(ˆ pt − p∗(t)) 2, measuring how well the method tracks the true time-varying lag order. For RMSE-based methods, ˆpt is the validation-selected lag. 2. Coefficient MAE (nonzero edges): average | ˆAk[i, j ]−
+
+A∗
+
+> k
+
+[i, j ]( t)| over true nonzero entries, measuring signal recovery. 3. Forecast MAE : out-of-sample prediction error. 4. FDR and Power : the share of edges in ˆGt (BH at level 
+
+q = 0 .05 over all n2 ˆpt entries) that are false, and the share of true edges found. An edge is true if its window-averaged coefficient is nonzero, since this average is what the estimates target (Theorem 1). 
+
+Results. Finding 1: ACLE consistently improves lag track-ing. Adaptive lag selection reduces lag RMSE regardless of the base method (Table 2). The improvement is 32% for VAR, 11% for VARX, and 11% for OR-VARX with Ex-tra Trees. It holds for every learner and observability level (Table 4; Figures 3–4). 
+
+Finding 2: Adjusting for confounders lowers the FDR, by an amount that depends on the learner. Ignoring the con-
+
+Figure 3: Estimated vs. true edge coefficients over time for ORACLE-VARX (Extra Trees, all confounders). Each panel shows one edge; the black line is the true coeffi-cient A∗
+
+> k
+
+[i, j ]( t) and the colored line is the rolling estimate 
+
+ˆAk[i, j ]( t). Vertical dashed lines mark regime boundaries (t = 1000 , t = 2000 ). founders, BH edge discovery overshoots its target of 0.05 :FDR is 0.129 for VAR. Most false edges are lag-1 self-loops, which the autocorrelated confounders induce: each series appears to predict itself. Adjusting for the confounders in VARX and DML cuts FDR to 0.045–0.080 at similar power (Table 2), except with ET (0.094–0.101). Our theory needs the first-stage fits to be accurate enough (condition (N), Ap-pendix A.1). We suspect that ET, with our hyperparameters, falls short of this: the confounding it leaves in the residuals inflates the edge tests. 
+
+Finding 3 (tentative): TabPFN is a strong first-stage learner without tuning. Among the five DML learners at full observ-ability, ORACLE-VARX with TabPFN has the best forecast MAE (0.091), the best edge power together with LightGBM (both 0.673), the second-lowest FDR (0.066, after Light-GBM’s 0.047; the other three learners are at 0.10–0.12), and the second-best lag RMSE (0.981, after LightGBM’s 0.962; Table 4). This validates TabPFN as an effective “plug-and-play” nuisance function estimator for DML, requiring no hyperparameter tuning. 
+
+Finding 4: PCMCI finds edges as well as ours, but tracks lags and forecasts worse. PCMCI has the low-est FDR (0.045) and highest power (0.685), close to ORACLE-VARX with LGBM (0.047, 0.673). ORACLE-VARX (LGBM, TP) is better on lag RMSE (0.96–0.98 vs 1.21), coefficient MAE (0.058–0.060 vs 0.065) and forecast MAE (0.091–0.101 vs 0.108). This PCMCI uses a linear test. We did not run its nonlinear version, which suits non-linear confounding like ours: it would take about 30 hours per configuration on 9 cores, against about 1 minute for the linear one (Appendix D.3). 
+
+5.2 Financial ETF Application Data. We apply ORACLE-VARX to daily open-to-close returns of nine U.S. sector ETFs (XLY, XLP, XLE, XLF, XLV, XLI, XLB, XLK, XLU), covering January 2000 to December 2020 ( T ≈ 5,200 trading days). Ten macroe-Causal Lag Structure Discovery in Confounded Time Series 
+
+Figure 4: Lag tracking: estimated ˆpt (blue) vs. true p∗(t)
+
+(black step function) over time. Left : ACLE-VAR (no con-founders). Right : ORACLE-VARX (Extra Trees, all con-founders). The lag RMSE of every method is in Table 4. 
+
+Figure 5: ETF application (ORACLE-VARX, Extra Trees, 
+
+all10 confounders). Blue step function: adaptively se-lected lag order ˆpt over time (2004–2020). Orange dashed line: 21-day realized volatility of the S&P 500 (right axis). The lag order spikes during the 2008 financial crisis and COVID-2020, rising with the volatility. conomic confounders serve as exogenous variables: VIX, the Federal Funds Rate, 5-Year inflation expectations, WTI crude oil, the Economic Policy Uncertainty index, BBB cor-porate spreads, 10-Year real yield, the broad U.S. Dollar Index, the emerging market Dollar Index, and gold volatility. The model is estimated with a rolling window of 504 days (≈ 2 years) and pmax = 10 ; see Table 10 in Appendix D for full details. 
+
+Causal structure discovery. Unlike the synthetic bench-mark, no ground truth is available for the ETF application. We therefore focus on qualitative properties of the discov-ered causal structure. 
+
+The detected lag order tracks market regimes. Figure 5 plots the selected lag order ˆpt against the 21-day realized volatility of the S&P 500 (SPY), the standard deviation of its daily returns over the past 21 days. In calm markets (e.g., 2004– 2006, 2013–2014), ˆpt ≈ 1: lead–lag relationships are weak and short-lived. During the 2008 financial crisis and the COVID-19 shock in early 2020, ˆpt spikes to 3–5: the lag structure elongates as shocks propagate through the financial system, consistent with the well-documented increase in cross-market equity correlations in bear markets (Longin and Solnik, 2001). 
+
+Portfolio performance. Table 3 reports Sharpe ratios of a long-short portfolio weighted by the forecasts (Appendix C). ACLE generally raises the Sharpe ratio, and the best port-folio comes from ACLE-VAR, with neither DML nor con-founders. On these data, causal sufficiency is badly violated: Table 3: ETF Sharpe ratios (weighted strategy, 2004–2020) by confounder set; VAR and ACLE-VAR use none.                     
+
+> Method vix macro5 all10
+> VAR 1.08 ACLE-VAR 1.32
+> VARX 1.11 0.43 0.75 ACLE-VARX 1.07 0.81 0.86 OR-VARX, ET 0.71 0.71 0.67 ORACLE-VARX, ET 0.83 0.85 0.68 ORACLE-VARX, TP 0.70 0.74 0.36
+
+each sector ETF pools many stocks driven by many common factors, most of them unobserved, and, as in Figure 6b, they create lag links that are not causal but still predict. ACLE tunes its lag order on validation forecasts, so it keeps these links with a short lag order. DML, in turn, no longer yields causal coefficients once sufficiency fails, and its first stage adds parameters to fit from 504 noisy days. 
+
+## 6 CONCLUSION 
+
+We introduced ORACLE-VARX, a framework for causal lag discovery in multivariate time series whose confounders act nonlinearly and whose lag structure drifts over time. It combines (i) double machine learning, which removes the confounders’ nonlinear effects before the VAR coefficients are estimated, (ii) ACLE, which picks the lag order in each rolling window by sequential significance testing tuned on validation data, and (iii) Benjamini–Hochberg edge selec-tion. We proved that in each rolling window the debiased coefficients are asymptotically normal around a window-averaged target, with valid standard errors, even though the coefficients drift; under causal sufficiency, a zero coefficient means Granger non-causality. We validated it on synthetic data with known ground truth and on nine U.S. sector ETFs. 
+
+## 7 FUTURE WORK 
+
+Three directions stand out. First, a formal consistency re-sult for ACLE, covering the BH step and the validation-chosen level (Section 4). Second, weakening causal suffi-ciency: hidden confounders turn lag coefficients into pre-dictive rather than causal quantities (Figure 6), so richer, high-dimensional confounder sets, or tests that flag hidden confounding, would let more of the discovered edges be read causally. Third, extending the model to a structural VAR (SVAR) with contemporaneous effects (Lütkepohl, 2005) could distinguish direct lagged effects from effects transmitted through same-time links, at the cost of extra identifying assumptions. Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+AI use statement 
+
+In this work, we used generative AI tools to state the main theorem and its assumptions precisely and to write its proof (Appendix A), to implement the method and the experi-ments, and to give feedback on the experimental design and its engineering, such as reusing repeated model fits. We have not used generative AI tools to propose the research question or the method, to generate the synthetic data (the authors wrote the functions that simulate it), or to clean the finan-cial data (done before this project used coding agents), and translation and qualitative data analysis are not applicable to this work. We asked AI tools to comment on the results, but their comments listed details without picking out the main story, so the interpretations in the paper are our own. Additionally, we used generative AI tools to draft parts of the paper, which the authors then heavily rewrote, to create Figures 1, 2 and 6, to edit the text for readability, and to find related work and check every reference against its source. We have reviewed all AI-assisted work. One author, trained in mathematical analysis, checked every step and bound of the proofs by hand; Appendix E describes this workflow with an example. The authors read the main mathematical and statistical functions of the code and checked that the outputs are correct or as expected. We take responsibility for the final content of this work, including text, claims, or artifacts produced with the aid of generative AI. 
+
+References 
+
+Robert Adamek, Stephan Smeekes, and Ines Wilms. Lasso inference for high-dimensional time series. Journal of Econometrics , 235(2):1114–1143, 2023. doi: 10.1016/j. jeconom.2022.08.008. Emmanouil Angelis, Francesco Quinzan, Ashkan Soley-mani, Patrick Jaillet, and Stefan Bauer. Double ma-chine learning based structure identification from tem-poral data. Transactions on Machine Learning Research ,2025. URL https://openreview.net/forum? id=4iHAoFVM2K .Scott R. Baker, Nicholas Bloom, and Steven J. Davis. Mea-suring economic policy uncertainty. The Quarterly Jour-nal of Economics , 131(4):1593–1636, 2016. Daniele Ballinari and Alexander Wehrli. Semipara-metric inference for impulse response functions us-ing double/debiased machine learning. arXiv preprint arXiv:2411.10009 , 2024. Sumanta Basu and George Michailidis. Regularized esti-mation in sparse high-dimensional time series models. 
+
+The Annals of Statistics , 43(4):1535–1567, 2015. doi: 10.1214/15-AOS1315. Yoav Benjamini and Yosef Hochberg. Controlling the false discovery rate: a practical and powerful approach to mul-tiple testing. Journal of the Royal Statistical Society: Series B (Methodological) , 57(1):289–300, 1995. Yoav Benjamini and Daniel Yekutieli. The control of the false discovery rate in multiple testing under dependency. 
+
+The Annals of Statistics , 29(4):1165–1188, 2001. Patrick Billingsley. Probability and Measure . Wiley, New York, third edition, 1995. Monica Billio, Mila Getmansky, Andrew W. Lo, and Loriana Pelizzon. Econometric measures of connectedness and systemic risk in the finance and insurance sectors. Journal of Financial Economics , 104(3):535–559, 2012. doi: 10. 1016/j.jfineco.2011.12.010. Leo Breiman. Random forests. Machine Learning , 45(1): 5–32, 2001. Andrea Brovelli, Mingzhou Ding, Anders Ledberg, Yonghong Chen, Richard Nakamura, and Steven L. Bressler. Beta oscillations in a large-scale sensorimo-tor cortical network: Directional influences revealed by Granger causality. Proceedings of the National Academy of Sciences , 101(26):9849–9854, 2004. doi: 10.1073/pnas.0308538101. Center for Research in Security Prices, LLC. CRSP US Stock Databases. An Affiliate of the University of Chicago Booth School of Business, 2024. Tianqi Chen and Carlos Guestrin. XGBoost: A scalable tree boosting system. In Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Dis-covery and Data Mining , pages 785–794, 2016. Victor Chernozhukov, Denis Chetverikov, Mert Demirer, Esther Duflo, Christian Hansen, Whitney Newey, and James Robins. Double/debiased machine learning for treatment and structural parameters. The Econometrics Journal , 21(1):C1–C68, 2018. Milos Ciganovic, Federico D’Amario, and Massimiliano Tancioni. Double machine learning for time series. The Econometrics Journal , 2026. doi: 10.1093/ectj/utag019. Advance access, article utag019. Richard A. Davis, Pengfei Zang, and Tian Zheng. Sparse vector autoregressive modeling. Journal of Computa-tional and Graphical Statistics , 25(4):1077–1096, 2016. doi: 10.1080/10618600.2015.1092978. Federal Reserve Bank of St. Louis. FRED, Fed-eral Reserve Economic Data. https://fred. stlouisfed.org , n.d. Series VIXCLS, DFF, T5YIE, DCOILWTICO, USEPUINDXD, BAMLC0A4CBBB, DFII10, DTWEXBGS, DTWEXEMEGS, GVZCLS. Pierre Geurts, Damien Ernst, and Louis Wehenkel. Ex-tremely randomized trees. Machine Learning , 63(1):3–42, 2006. Clive W. J. Granger. Investigating causal relations by econo-metric models and cross-spectral methods. Econometrica ,37(3):424–438, 1969. doi: 10.2307/1912791. Léo Grinsztajn, Klemens Flöge, Oscar Key, Felix Birkel, Philipp Jund, Brendan Roof, Benjamin Jäger, Dominik Causal Lag Structure Discovery in Confounded Time Series 
+
+Safaric, Simone Alessi, Adrian Hayler, Mihir Manium, Rosen Yu, Felix Jablonski, Shi Bin Hoo, Anurag Garg, Jake Robertson, Magnus Bühler, Vladyslav Moroshan, Lennart Purucker, Clara Cornu, Lilly Charlotte Wehrhahn, Alessandro Bonetto, Bernhard Schölkopf, Sauraj Gamb-hir, Noah Hollmann, and Frank Hutter. TabPFN-2.5: Ad-vancing the state of the art in tabular foundation models. 
+
+arXiv preprint arXiv:2511.08667 , 2025. Victor Haghani, Vladimir Ragulin, and Richard Dewey. Night moves: Is the overnight drift the grandmother of all market anomalies? Journal of Investment Management ,22(2), 2024. Alain Hecq, Luca Margaritella, and Stephan Smeekes. Granger causality testing in high-dimensional VARs: A post-double-selection procedure. Journal of Financial Econometrics , 21(3):915–958, 2023. doi: 10.1093/jjfinec/ nbab023. Noah Hollmann, Samuel Müller, Lennart Purucker, Ar-jun Krishnakumar, Max Körfer, Shi Bin Hoo, Robin Ti-bor Schirrmeister, and Frank Hutter. Accurate predic-tions on small data with a tabular foundation model. 
+
+Nature , 637(8045):319–326, 2025. doi: 10.1038/ s41586-024-08328-6. Aapo Hyvärinen, Kun Zhang, Shohei Shimizu, and Patrik O. Hoyer. Estimation of a structural vector autoregression model using non-Gaussianity. Journal of Machine Learn-ing Research , 11(56):1709–1731, 2010. Takashi Ikeuchi, Mayumi Ide, Yan Zeng, Takashi Nicholas Maeda, and Shohei Shimizu. Python package for causal discovery based on LiNGAM. Journal of Machine Learn-ing Research , 24(14):1–8, 2023. Guolin Ke, Qi Meng, Thomas Finley, Taifeng Wang, Wei Chen, Weidong Ma, Qiwei Ye, and Tie-Yan Liu. Light-GBM: A highly efficient gradient boosting decision tree. In Advances in Neural Information Processing Systems ,volume 30, pages 3146–3154, 2017. Andrew W. Lo and A. Craig MacKinlay. When are con-trarian profits due to stock market overreaction? The Review of Financial Studies , 3(2):175–205, 1990. doi: 10.1093/rfs/3.2.175. François Longin and Bruno Solnik. Extreme correlation of international equity markets. The Journal of Finance , 56 (2):649–676, 2001. doi: 10.1111/0022-1082.00340. Helmut Lütkepohl. New Introduction to Multiple Time Se-ries Analysis . Springer, Berlin, 2005. doi: 10.1007/ 978-3-540-27752-1. Roxana Pamfil, Nisara Sriwattanaworachai, Shaan Desai, Philip Pilgerstorfer, Konstantinos Georgatzis, Paul Beau-mont, and Bryon Aragam. DYNOTEARS: Structure learning from time-series data. In Proceedings of the Twenty Third International Conference on Artificial In-telligence and Statistics , volume 108 of Proceedings of Machine Learning Research , pages 1595–1605. PMLR, 2020. Judea Pearl. Causality: Models, Reasoning, and Infer-ence . Cambridge University Press, New York, 2nd edition, 2009. doi: 10.1017/CBO9780511803161. Fabian Pedregosa, Gaël Varoquaux, Alexandre Gramfort, Vincent Michel, Bertrand Thirion, Olivier Grisel, Mathieu Blondel, Peter Prettenhofer, Ron Weiss, Vincent Dubourg, Jake Vanderplas, Alexandre Passos, David Cournapeau, Matthieu Brucher, Matthieu Perrot, and Édouard Duches-nay. Scikit-learn: Machine learning in Python. Journal of Machine Learning Research , 12(85):2825–2830, 2011. Jonas Peters, Dominik Janzing, and Bernhard Schölkopf. Causal inference on time series using restricted structural equation models. In Advances in Neural Information Processing Systems , volume 26. Curran Associates, Inc., 2013. Peter M. Robinson. Root-N-consistent semiparametric regression. Econometrica , 56(4):931–954, 1988. doi: 10.2307/1912705. Jakob Runge, Peer Nowack, Marlene Kretschmer, Seth Flaxman, and Dino Sejdinovic. Detecting and quanti-fying causal associations in large nonlinear time series datasets. Science Advances , 5(11):eaau4996, 2019. doi: 10.1126/sciadv.aau4996. Agathe Sadeghi, Achintya Gopal, and Mohammad Fesang-hary. Causal discovery from nonstationary time series. 
+
+International Journal of Data Science and Analytics , 19 (1):33–59, 2025. doi: 10.1007/s41060-024-00679-7. Anil K. Seth, Adam B. Barrett, and Lionel Barnett. Granger causality analysis in neuroscience and neuroimaging. The Journal of Neuroscience , 35(8):3293–3297, 2015. doi: 10.1523/JNEUROSCI.4399-14.2015. Jieru Shi and Rajen D. Shah. Conditional independence testing in time series. arXiv preprint arXiv:2609.20772 ,2026. doi: 10.48550/arXiv.2609.20772. Christopher A. Sims. Macroeconomics and reality. Econo-metrica , 48(1):1–48, 1980. doi: 10.2307/1912017. Yoshimasa Uematsu and Takashi Yamagata. Discovering the network Granger causality in large vector autoregressive models. Journal of the American Statistical Association ,120(552):2385–2396, 2025. doi: 10.1080/01621459.2025. 2450836. John M. Wallace and David S. Gutzler. Teleconnections in the geopotential height field during the Northern Hemi-sphere winter. Monthly Weather Review , 109(4):784– 812, 1981. doi: 10.1175/1520-0493(1981)109<0784: TITGHF>2.0.CO;2. Michael Wieck-Sosa, Michel F. C. Haddad, and Aaditya Ramdas. The dynamic generalized covariance measure for conditional independence testing with nonstationary time series. arXiv preprint arXiv:2504.21647 , 2025. Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Shibo Yu, Yan Chen, Jin-Hong Du, and Guodong Li. Semi-parametric inference for dynamic causal effects from ob-servational time series. arXiv preprint arXiv:2609.27531 ,2026. doi: 10.48550/arXiv.2609.27531. Causal Lag Structure Discovery in Confounded Time Series via Orthogonalized Adaptive Estimation: Supplementary Materials 
+
+Our code, the synthetic and public data, and the per-run results are available at https://github.com/HK-Tan/ ORACLE-VARX . Two licensed inputs, the CRSP returns and the ICE BofA spread, are not included; the repository’s 
+
+README.md explains how to obtain them. 
+
+## A FULL PROOFS 
+
+A.1 Setting, notation and assumptions Roadmap. This subsection fixes the notation and states the assumptions used in all later proofs. It then proves the basic facts that every later proof uses: • Lemma A.1 bounds the moments of every random vector that appears. It comes first because the other lemmas need its integrability and its constant KJ .• Lemma A.2 rewrites the cross-fitted residuals as “true residual plus nuisance error”. This is the algebra behind every later decomposition. • Lemma A.3 collects the facts we need about the target ¯Θ.• Limits fixes the notation op, Op and d
+
+−→; standard matrix and probability rules are named where they are used. • Lemma A.4 is the one law of large numbers used throughout. 
+
+Data and filtration. We observe a time series (Yt, Wt), t = 1 , . . . , T , of length T . Here Yt ∈ Rn collects the n
+
+endogenous series, whose lagged effects on each other we estimate, and Wt ∈ Rd collects the d observed exogenous confounders (Section 3.1). All limits are as T → ∞ . The distribution may change with T (a triangular array ); we suppress 
+
+T in the notation. Write Xt := ( Y⊤ 
+
+> t
+
+, W⊤ 
+
+> t
+
+)⊤. Let (Ft) be a filtration to which the data are adapted, i.e. Xt is Ft-measurable for every t. Think of Ft as the information available at time t. For example, Ft = σ(Xs : s ≤ t), the observed past, as in the main text. 
+
+The model. The maximal lag p := pmax is fixed. For t > p , the endogenous series follow the partially linear VARX (2) of the main text, written with all p lags and with coefficients that may drift over time: 
+
+Yt =
+
+> p
+
+X
+
+> k=1
+
+Ak(t/T ) Yt−k + gt(Wt−1, . . . , Wt−p) + εt. (A.1) The three terms are: • Ak(t/T ) ∈ Rn×n, the lag-k coefficient matrix . Its entry Ak[i, j ] is the effect of (Yt−k)j on (Yt)i. These matrices are what we estimate. Theorem 1 does not need a true lag order: lags above it simply have Ak = 0 .• gt, an unknown and possibly nonlinear effect of the lagged confounders. • εt ∈ Rn, the innovation. Assumption (M) below says that it is unpredictable from the past. 
+
+Why Ak(t/T ). The coefficients may drift over time. We index the drift by rescaled time u = t/T ∈ [0 , 1] : each Ak is a function Ak : [0 , 1] → Rn×n, and the coefficient at time t is Ak(t/T ). As T grows, neighbouring times t and t + 1 differ by only 1/T in u, so the coefficients change slowly from step to step. Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Block form of the model. We now write (A.1) as one regression. Set the treatment Tt (the stacked lags of Y, whose effects we estimate) and the control Ct (the stacked lags of the confounders W) as in (3) of the main text: 
+
+Tt := 
+
+
+
+Yt−1
+
+...
+
+Yt−p
+
+ ∈ Rnp , Ct := 
+
+
+
+Wt−1
+
+...
+
+Wt−p
+
+ ∈ Rdp . (A.2) Both are functions of Xt−1, . . . , X t−p, hence Ft−1-measurable. Stack the p coefficient matrices into one block matrix, 
+
+Θ(u) := 
+
+
+
+A1(u)⊤
+
+...
+
+Ap(u)⊤
+
+ ∈ Rnp ×n, Θt := Θ(t/T ). (A.3) Block k of Θ (rows (k − 1) n + 1 , . . . , kn ) is A⊤ 
+
+> k
+
+; we call it lag block k. In entries, Θ(k−1) n+j, i = Ak[i, j ]. Block multiplication of (A.3) and (A.2) gives the sum in (A.1) as one product, 
+
+Θ⊤ 
+
+> t
+
+Tt =  A1(t/T ) · · · Ap(t/T )
+
+Yt−1
+
+...
+
+Yt−p
+
+ =
+
+> p
+
+X
+
+> k=1
+
+Ak(t/T ) Yt−k. (A.4) Writing gt(Ct) for gt(Wt−1, . . . , Wt−p), the model (A.1) becomes 
+
+Yt = Θ⊤ 
+
+> t
+
+Tt + gt(Ct) + εt, (A.5) a linear regression on the treatment plus a nonlinear function of the control. This is (4) of the main text, with drifting coefficients. 
+
+Equation i. Since Yt ∈ Rn, (A.5) is n scalar regressions, one per coordinate. Equation i is coordinate i:
+
+(Yt)i = ( Θt)⊤·i Tt +  gt(Ct) 
+
+> i
+
++ ( εt)i, (A.6) where Θ·i ∈ Rnp is column i of Θ, the coefficients of all np regressors for the outcome (Yt)i. So in an entry Θri , the column i names the equation (which series is the outcome), and the row r = ( k − 1) n + j names the regressor (series j at lag k). All n equations share the same regressors Tt.
+
+Nuisance functions and residuals. The nuisance functions gT,t : Rdp → Rnp and gY,t : Rdp → Rn are the best predictions of Tt and Yt from the controls alone, as gT and gY in Section 3.1: 
+
+gT,t (Ct) = E[Tt | Ct], gY,t (Ct) = E[Yt | Ct] almost surely . (A.7) Both conditional expectations exist because Tt and Yt are integrable under (D)(i) below. Each is a function of Ct because it depends on the data only through Ct.The oracle regressor residual is the part of the treatment that the controls cannot predict; it is Vt in (5) of the main text. We define it together with its second-moment matrix: 
+
+Vt := Tt − gT,t (Ct), Jt := E[VtV⊤ 
+
+> t
+
+] ∈ Rnp ×np . (A.8) The entries of Jt are finite by Lemma A.1 below. 
+
+Window. Fix u0 ∈ (0 , 1] . Let t0 := ⌊u0T ⌋ and W := {t0 − Tw + 1 , . . . , t 0}, a block of Tw consecutive times. Unless said otherwise, every sum P 
+
+> t
+
+or P 
+
+> W
+
+runs over t ∈ W . Two facts about the window are used repeatedly. (a) The window eventually lies in {p + 1 , . . . , T }. Since u0T − 1 < t 0 ≤ u0T ≤ T ,
+
+t0 − Tw + 1 > u 0T − Tw = T
+
+
+
+u0 − Tw
+
+T
+
+
+
+,
+
+and Tw/T → 0 by (W) (see “What (W) does” after the assumptions). Since u0 > 0, for all T with Tw/T ≤ u0/2 and 
+
+T > 2p/u 0 we get 
+
+t0 − Tw + 1 > T 
+
+
+
+u0 − Tw
+
+T
+
+
+
+≥ T u0
+
+2 > p. 
+
+Both conditions hold for all large T . All statements below are for such T , so Tt and Ct are defined for every t ∈ W .Causal Lag Structure Discovery in Confounded Time Series 
+
+(b) Every window time is close to u0. For t ∈ W we have t0 − Tw + 1 ≤ t ≤ t0, so 
+
+0 ≤ u0T − t0 ≤ u0T − t ≤ u0T − (t0 − Tw + 1) < 1 + Tw − 1 = Tw.
+
+Dividing by T , tT − u0 < Tw
+
+T for every t ∈ W . (A.9) Also, two window times s, t satisfy |s − t| ≤ Tw − 1.
+
+Cross-fitting. Each t ∈ W has fitted nuisance functions ˆgT, (t) : Rdp → Rnp and ˆgY, (t) : Rdp → Rn, produced by a learner trained on data before the test block that contains t. The proofs never use how they were trained; they use only assumption (N) below, and that each ˆgT, (t)(Ct) and ˆgY, (t)(Ct) is a random vector (measurable), so that ˆJ, ˆΘ and the events built from them are well defined. The cross-fitted residuals are the residuals (6) of the main text, with the fold of t made explicit: ˜Tt := Tt − ˆgT, (t)(Ct), ˜Yt := Yt − ˆgY, (t)(Ct), (A.10) and the nuisance errors, evaluated at the data point, are 
+
+∆T,t := ˆ gT, (t)(Ct)−gT,t (Ct) ∈ Rnp , ∆Y,t := ˆ gY, (t)(Ct)−gY,t (Ct) ∈ Rn, ∆g,t := Θ⊤ 
+
+> t
+
+∆T,t −∆Y,t ∈ Rn. (A.11) 
+
+Estimator. Recall the estimator (7) of the main text, OLS of ˜Yt on ˜Tt over the window: 
+
+ˆΘ =
+
+ X 
+
+> t∈W
+
+˜Tt ˜T⊤
+
+> t
+
+−1 X 
+
+> t∈W
+
+˜Tt ˜Y⊤
+
+> t
+
+
+
+.
+
+Dividing both sums by Tw (the factors cancel) gives the form we use. Let 
+
+ˆJ := 1
+
+Tw
+
+X
+
+> t∈W
+
+˜Tt ˜T⊤ 
+
+> t
+
+, ˆΘ := ˆJ−1 1
+
+Tw
+
+X
+
+> t∈W
+
+˜Tt ˜Y⊤ 
+
+> t
+
+on the event { ˆJ invertible }. (A.12) If ˆJ is not invertible (for example, if the residualised lags happen to be exactly collinear in this sample), the formula has no value. To speak of probabilities and limits of ˆΘ, it must be a random variable, that is, have a value at every outcome, so there we set ˆΘ := 0 . This is a placeholder, not an estimate, and any other value would do: P ( ˆJ invertible ) → 1 (Lemma A.6), so the placeholder never affects a limit. 
+
+Standard errors and z-statistics. Recall the standard errors (8) of the main text, which are what the code computes: for equation i, dVar( ˆΘ·i) = ˆ σ2
+
+> i
+
+ P  
+
+> t
+
+˜Tt ˜T⊤
+
+> t
+
+−1. In detail, let ˆet := ˜Yt − ˆΘ⊤ ˜Tt ∈ Rn be the residual and, for Tw > np (true for all large T , since Tw → ∞ by (W)), 
+
+ˆσ2 
+
+> i
+
+:= 1
+
+Tw − np 
+
+X
+
+> t∈W
+
+(ˆ et)2 
+
+> i
+
+. (A.13) On the event { ˆJ invertible } we have P 
+
+> t∈W
+
+˜Tt ˜T⊤ 
+
+> t
+
+= Tw ˆJ, hence  P  
+
+> t∈W
+
+˜Tt ˜T⊤
+
+> t
+
+−1 = ˆJ−1/T w, and 
+
+ˆsri := 
+
+
+
+ˆσ2
+
+> i
+
+h X 
+
+> t∈W
+
+˜Tt ˜T⊤
+
+> t
+
+−1i
+
+> rr
+
+1/2
+
+=
+
+ ˆσ2 
+
+> i
+
+[ ˆJ−1]rr 
+
+Tw
+
+1/2
+
+, zri := ˆΘri 
+
+ˆsri 
+
+. (A.14) This is the usual OLS standard error for column i of ˆΘ, i.e. for equation i in (A.6): writing X for the Tw × np matrix with rows ˜T⊤ 
+
+> t
+
+, so that X⊤X = P 
+
+> t∈W
+
+˜Tt ˜T⊤ 
+
+> t
+
+, it is the square root of entry (r, r ) of ˆσ2 
+
+> i
+
+(X⊤X)−1. We do not assume that it is correct here; Lemma A.12 shows that it has the right scale. (If ˆJ is singular or ˆsri = 0 , set ˆsri := 1 and zri := 0 .Lemmas A.6 and A.12 show that this event has probability tending to 0, so the convention never affects a limit.) 
+
+Target. Recall the window target (11) of the main text, ¯Θ =  P  
+
+> t∈W
+
+Jt
+
+−1 P 
+
+> t∈W
+
+JtΘt, a Jt-weighted average of the coefficients over the window. Dividing both sums by Tw gives the form we use: 
+
+¯J := 1
+
+Tw
+
+X
+
+> t∈W
+
+Jt, ¯Θ := ¯J−1 1
+
+Tw
+
+X
+
+> t∈W
+
+JtΘt, Dt := Θt − ¯Θ ∈ Rnp ×n. (A.15) Lemma A.3(i) shows that ¯J is invertible, so ¯Θ is well defined. Both ¯Θ and Dt are deterministic. Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Norms. |·| is the Euclidean norm of a vector, ∥·∥ the operator norm of a matrix, and |·| F the Frobenius norm. er is the r-th unit vector, and λmin (M ) is the smallest eigenvalue of a symmetric matrix M . For a random vector Z we write 
+
+M8(Z) := ( E|Z|8)1/8.
+
+Assumptions. Assumption 1 of the main text consists of (M), (S), (W) and the regularity conditions (D), (H), (N). They are stated precisely here. 
+
+(M) Model. For p < t ≤ T , the model (A.5) holds (equivalently (A.1)), where gt : Rdp → Rn is Borel, εt is integrable, and E[εt | F t−1] = 0 a.s. In words: given the past, the innovation is unpredictable. 
+
+(S) Smoothness and identification. There are constants L < ∞ and cJ > 0, not depending on t or T , such that (i) Θ
+
+is L-Lipschitz: ∥Θ(u) − Θ(v)∥ ≤ L|u − v| for all u, v ∈ [0 , 1] ; and (ii) every Jt is uniformly positive definite: 
+
+λmin (Jt) ≥ cJ for all t and T .
+
+(W) Window size. Tw → ∞ and T 3/2 
+
+> w
+
+/T = O(1) , i.e. Tw = O(T 2/3).
+
+(D) Moments and short memory. (i) KX := sup T sup t E|Xt|8 < ∞. (ii) For some constant CD < ∞,
+
+sup 
+
+> T
+
+sup 
+
+> t
+
+max 
+
+> 1≤a,b ≤np
+
+X
+
+> h≥0
+
+Cov  (Vt)a(Vt)b, (Vt+h)a(Vt+h)b
+
+ ≤ CD ,
+
+sup 
+
+> T
+
+sup 
+
+> t
+
+max 
+
+> 1≤a,b ≤n
+
+X
+
+> h≥0
+
+Cov  (εt)a(εt)b, (εt+h)a(εt+h)b
+
+ ≤ CD .
+
+(A.16) 
+
+(H) Conditional variance. E[εtε⊤ 
+
+> t
+
+| F t−1] = Σ ε(t/T ) a.s. for all p < t ≤ T , where Σε : [0 , 1] → Rn×n is deterministic, 
+
+∥Σε(u) − Σε(v)∥ ≤ Lε|u − v|, and λmin (Σ ε(u)) ≥ cε > 0 for all u, v ∈ [0 , 1] .
+
+(N) Nuisance accuracy. (N1) The learners are consistent, with a product rate: 
+
+1
+
+Tw
+
+X
+
+> W
+
+|∆T,t |2 p
+
+−→ 0, (A.17) 
+
+1
+
+Tw
+
+X
+
+> W
+
+|∆Y,t |2 p
+
+−→ 0, (A.18) 
+
+pTw
+
+ 1
+
+Tw
+
+X
+
+> W
+
+|∆T,t |21/2 1
+
+Tw
+
+X
+
+> W
+
+|∆g,t |21/2 p
+
+−→ 0. (A.19) (N2) The learner errors are asymptotically uncorrelated with the noise and with Vt:
+
+1
+
+√Tw
+
+X
+
+> W
+
+∆T,t ε⊤
+
+> tp
+
+−→ 0, (A.20) 
+
+1
+
+√Tw
+
+X
+
+> W
+
+Vt∆⊤
+
+> g,t p
+
+−→ 0. (A.21) 
+
+Why (S)(ii) is needed. It says that no combination of the lags is a function of the confounders. Suppose instead that 
+
+x⊤Tt = h(Ct) for some x̸ = 0 and some function h. Then for any b ∈ Rn, replacing Θt by Θt + xb ⊤ and gt by gt − b h 
+
+leaves (A.5) unchanged, since (xb ⊤)⊤Tt = b x ⊤Tt = b h (Ct). So Θt could not be recovered from the data. This is exactly the case x⊤Jtx = E(x⊤Vt)2 = 0 . Requiring λmin (Jt) ≥ cJ > 0 also rules out the nearly collinear case, uniformly in t
+
+and T .
+
+What (W) does. The window must be long enough to average out the noise, and short enough that the coefficients barely move inside it. • Tw → ∞ gives enough terms for the laws of large numbers and the central limit theorem. • Tw/T → 0: the window is a vanishing fraction of the series, so it shrinks to the single point u0 in rescaled time. This follows from (W) because Tw/T = ( T 3/2 
+
+> w
+
+/T ) · T −1/2 
+
+> w
+
+is a bounded factor times a factor that tends to 0.Causal Lag Structure Discovery in Confounded Time Series 
+
+• T 3/2 
+
+> w
+
+/T = O(1) is where the exponent 2/3 comes from. Across the window, u = t/T ranges over an interval of length Tw/T , so by (S)(i) the coefficients drift by O(Tw/T ). The estimation noise is of order T −1/2 
+
+> w
+
+. The drift is at most of the order of the noise exactly when (Tw/T )T −1/2 
+
+> w
+
+= T 3/2 
+
+> w
+
+/T stays bounded. With Tw = o(T 2/3) the drift is negligible, which is why Theorem 1 can then be centred at Θ(u0).
+
+What (D)(ii) does. It bounds the variance of window sums of the entries of VtV⊤ 
+
+> t
+
+and εtε⊤ 
+
+> t
+
+. For independent terms the variance of a sum of Tw terms grows like Tw automatically; for dependent terms it need not, and (D)(ii) is what restores this. With it, Chebyshev’s inequality gives a law of large numbers for the window averages (Lemma A.4), which in turn gives 
+
+ˆJ ≈ ¯J and ˆσ2 
+
+> i
+
+≈ ¯σ2 
+
+> i
+
+. Fix one entry, say ft := ( Vt)1(Vt)2 for all t, so that (A.16) gives P
+
+> h≥0
+
+|Cov( ft, f t+h)| ≤ CD . The computation is one line: expanding the square and counting each pair s ≤ t once, 
+
+Var 
+
+ X 
+
+> t∈W
+
+ft
+
+
+
+= X
+
+> s,t ∈W
+
+Cov( fs, f t) ≤ 2 X
+
+> s∈W
+
+X
+
+> h≥0
+
+|Cov( fs, f s+h)| ≤ 2CD Tw,
+
+so the window average has variance at most 2CD /T w, and by Chebyshev P  |T −1
+
+> w
+
+P
+
+> t
+
+(ft −Eft)| > η  ≤ 2CD /(η2Tw) → 0
+
+for every η > 0. It is called short memory because the covariances are summable in the lag h: values far apart in time are nearly uncorrelated, so the series “forgets” its past quickly. (Under long memory the sum is infinite, and averages converge more slowly or not at all.) 
+
+Notation in (H). The subscript ε in Σε, Lε, cε is only a label, “of the noise εt”. The only argument of Σε is rescaled time u.(H) is the analogue of (S) for the noise: its covariance drifts slowly (Lipschitz in u) and stays away from singular, and it does not depend on the past. 
+
+What (N) does. (N) is the only place where the machine-learning step enters. Recall that ∆T,t and ∆Y,t in (A.11) are the learners’ errors at the data point, and ∆g,t = Θ⊤ 
+
+> t
+
+∆T,t − ∆Y,t is the error they cause in the outcome equation. With perfect learners (all ∆ = 0 ), the estimation error would be driven by the main term S0 = T −1/2
+
+> w
+
+P 
+
+> t
+
+Vtε⊤ 
+
+> t
+
+alone, plus the drift of 
+
+Θt. With learner errors, ˜Tt = Vt − ∆T,t and ˜Yt picks up ∆g,t (Lemma A.2), and multiplying out creates three extra sums (Lemma A.5): 
+
+1
+
+√Tw
+
+X
+
+> t
+
+∆T,t ε⊤ 
+
+> t
+
+, 1
+
+√Tw
+
+X
+
+> t
+
+Vt∆⊤
+
+> g,t
+
+, 1
+
+√Tw
+
+X
+
+> t
+
+∆T,t ∆⊤
+
+> g,t
+
+.
+
+• (A.20) and (A.21) in (N2) say that the first two tend to 0. Each pairs a learner error with a mean-zero term ( εt or Vt), so it is small when the errors are asymptotically uncorrelated with the noise and with Vt.• (A.19) in (N1) handles the third sum, a product of two errors. By Cauchy–Schwarz its size is at most √Tw times the root-mean-square of ∆T, · times that of ∆g, ·. This is the usual DML product rate : it holds, for example, if both root-mean-square errors are o(T −1/4 
+
+> w
+
+), much slower than the parametric rate T −1/2 
+
+> w
+
+. Orthogonalization is what makes the learner errors enter only through such products. • (A.17) and (A.18) in (N1) say that each learner is consistent on average over the window: its mean squared error at the data points tends to 0. It is used for ˆJ ≈ ¯J, for ˆσ2 
+
+> i
+
+≈ ¯σ2 
+
+> i
+
+, and for the drift terms. (N) is a condition on the learners as they are actually run; we do not verify it for particular learners (Remark 1). 
+
+Constants. C, C ′, . . . denote constants that depend only on the constants in the assumptions (namely L, cJ , KX , CD , Lε, cε
+
+and ∥Θ(0) ∥) and on n, d, p ; never on T or t.
+
+Conditional expectations. We use the standard rules (the tower property, taking out what is known, conditional Jensen) and name each one where it is used. For random vectors they apply entry by entry. Conditioning on a random vector C means conditioning on σ(C).
+
+Lemma A.1 (Moments) . Assume (M) and (D)(i). Recall from (D)(i) that KX = sup T sup t E|Xt|8 < ∞ bounds the eighth moment of the data Xt = ( Y⊤ 
+
+> t
+
+, W⊤ 
+
+> t
+
+)⊤. Put K8 := 2 8p8KX and KJ := K1/48 = 4 p2K1/4 
+
+> X
+
+. For all T and all p < t ≤ T ,
+
+E|Tt|8 ≤ K8, E|Vt|8 ≤ K8, E|εt|8 ≤ K8, ∥Jt∥ ≤ KJ .
+
+Consequently, for Z ∈ { Tt, Vt, εt} and 0 < q ≤ 8, E|Z|q ≤ Kq/ 88 ; in particular E|Z|2 ≤ KJ and E|Z|4 ≤ K1/28 . If (S)(ii) also holds, then every eigenvalue of Jt lies in [cJ , K J ]: the lower bound is assumed and the upper bound comes from this lemma. In particular cJ ≤ KJ .
+
+In words, every random vector in the model has a bounded eighth moment, with one constant for all t and T .Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Proof. Recall M8(Z) := ( E|Z|8)1/8, the L8 norm of |Z|. We first record two tools. (i) Minkowski for random vectors. For random vectors Z1, Z 2, M8(Z1 + Z2) ≤ M8(Z1) + M8(Z2).(ii) Conditioning does not increase the eighth moment. If Z ∈ Rm has E|Z|8 < ∞ and G is a σ-field, then E|E[Z | G ]|8 ≤
+
+E|Z|8.
+
+For (i). The scalar Minkowski inequality says that for real random variables U, W , (E|U + W |8)1/8 ≤ (E|U |8)1/8 +(E|W |8)1/8; this is the triangle inequality for the norm of L8. For vectors, 
+
+M8(Z1 + Z2) ≤ M8
+
+ |Z1| + |Z2| ≤ M8(Z1) + M8(Z2).
+
+The first step holds because |Z1 + Z2| ≤ | Z1| + |Z2| pointwise and x 7 → x8 is increasing on [0 , ∞); the second is the scalar inequality with U = |Z1| and W = |Z2|.
+
+For (ii). For a scalar Z this is conditional Jensen with ϕ(x) = x8, followed by the tower property. For a vector, |Z|8 is not a function of a single entry, so we cannot apply the scalar rule directly. Instead we go through the squares, which we can handle entry by entry and then add up. Each entry Zj is square-integrable: EZ2 
+
+> j
+
+≤ E|Z|2 ≤ (E|Z|8)1/4 < ∞, by Jensen’s inequality for the concave map x 7 → x1/4. Conditional Jensen with ϕ(x) = x2, applied to the scalar Zj , gives 
+
+(E[Zj | G ]) 2 ≤ E[Z2 
+
+> j
+
+| G ], and summing over j,
+
+|E[Z | G ]|2 =
+
+> m
+
+X
+
+> j=1
+
+(E[Zj | G ]) 2 ≤
+
+> m
+
+X
+
+> j=1
+
+E[Z2 
+
+> j
+
+| G ] = E[|Z|2 | G ].
+
+Both sides are nonnegative (the conditional expectation of a nonnegative variable is a.s. nonnegative), and x 7 → x4 is increasing on [0 , ∞), so we may raise this to the fourth power. Then conditional Jensen with the convex map ϕ(x) = x4 on 
+
+[0 , ∞), applied to the scalar |Z|2, gives 
+
+|E[Z | G ]|8 ≤  E[|Z|2 | G ]4 ≤ E[|Z|8 | G ].
+
+Take expectations and use the tower property: E|E[Z | G ]|8 ≤ E E [|Z|8 | G ] = E|Z|8.With these two tools, we now prove the lemma. Steps 1–3 bound the eighth moments of Tt, Vt and εt in turn; Step 4 derives the lower moments; Step 5 bounds Jt.
+
+Step 1: Tt. Since |Tt|2 = Ppk=1 |Yt−k|2 ≤  P pk=1 |Yt−k|2 and |Yt−k| ≤ | Xt−k| for each k (since Yt−k is part of 
+
+Xt−k = ( Y⊤
+
+> t−k
+
+, W⊤
+
+> t−k
+
+)⊤), 
+
+|Tt| ≤ 
+
+> p
+
+X
+
+> k=1
+
+|Xt−k|.
+
+Here t − k ≥ 1 because t > p . Since |Tt| is at most this sum, M8(Tt) ≤ M8
+
+ P 
+
+> k
+
+|Xt−k|. By (D)(i), E|Xs|8 ≤ KX
+
+for every time s (and every T ), that is, M8(Xs) ≤ K1/8 
+
+> X
+
+for every s. Applying (i) p − 1 times and then this bound with 
+
+s = t − 1, . . . , t − p, we get M8(Tt) ≤ Ppk=1 M8(Xt−k) ≤ pK 1/8 
+
+> X
+
+. So E|Tt|8 ≤ p8KX ≤ K8.
+
+Step 2: Vt. By (ii) with G = σ(Ct), E|gT,t (Ct)|8 = E|E[Tt | Ct]|8 ≤ E|Tt|8. Recall from (A.8) that Vt = Tt −gT,t (Ct).Apply (i) with Z1 = Tt and Z2 = −gT,t (Ct) (note M8(−Z) = M8(Z)) for the first inequality below; the bound just shown for the second; and Step 1 for the third: 
+
+M8(Vt) ≤ M8(Tt) + M8
+
+ gT,t (Ct) ≤ 2M8(Tt) ≤ 2pK 1/8 
+
+> X
+
+,
+
+so E|Vt|8 ≤ 28p8KX = K8.
+
+Step 3: εt. First, gt(Ct) = Yt − Θ⊤ 
+
+> t
+
+Tt − εt by (M), and each term on the right is integrable ( Yt and Tt by (D)(i) and Step 1, εt by (M)); so gt(Ct) is integrable. Now take E[ · | F t−1] of (A.5). The vector Θ⊤ 
+
+> t
+
+Tt + gt(Ct) is Ft−1-measurable (Θt is deterministic, gt is Borel and Tt, Ct are Ft−1-measurable), so by taking out what is known it is its own conditional expectation; and E[εt | F t−1] = 0 by (M). Hence 
+
+E[Yt | F t−1] = Θ⊤ 
+
+> t
+
+Tt + gt(Ct), so εt = Yt − E[Yt | F t−1] a.s. As in Step 2: apply (i) with Z1 = Yt and Z2 = −E[Yt | F t−1] for the first inequality below; (ii) with G = Ft−1 for the second; and |Yt| ≤ | Xt| with (D)(i) for the third: 
+
+M8(εt) ≤ M8(Yt) + M8
+
+ E[Yt | F t−1] ≤ 2M8(Yt) ≤ 2K1/8 
+
+> X
+
+,Causal Lag Structure Discovery in Confounded Time Series 
+
+so E|εt|8 ≤ 28KX ≤ K8 (as p ≥ 1). 
+
+Step 4: lower moments. For 0 < q ≤ 8 the map x 7 → xq/ 8 is concave on [0 , ∞), so Jensen’s inequality gives E|Z|q =
+
+E(|Z|8)q/ 8 ≤ (E|Z|8)q/ 8 ≤ Kq/ 88 . With q = 2 and q = 4 this is K1/48 = KJ and K1/28 .
+
+Step 5: Jt. Its entries are finite, since |E[( Vt)l(Vt)b]| ≤ E|Vt|2 ≤ KJ by Step 4. Jt is symmetric and positive semidefinite (x⊤Jtx = E(x⊤Vt)2 ≥ 0). For such a matrix the operator norm is the largest eigenvalue, ∥Jt∥ = max |x|=1 x⊤Jtx. For 
+
+|x| = 1 , Cauchy–Schwarz gives (x⊤Vt)2 ≤ | x|2|Vt|2 = |Vt|2, so 
+
+x⊤Jtx = E(x⊤Vt)2 ≤ E|Vt|2 ≤ KJ .
+
+Hence ∥Jt∥ ≤ KJ . Finally, by (S)(ii), cJ ≤ λmin (Jt) ≤ ∥ Jt∥ ≤ KJ .
+
+Lemma A.2 (Residual identities and a martingale difference) . Assume (M), (D)(i), and (W) (the last only so that the window lies in {p + 1 , . . . , T }). For all large T , on one event of probability one, the following hold for every t ∈ W :
+
+Yt − gY,t (Ct) = Θ⊤ 
+
+> t
+
+Vt + εt, (A.22) 
+
+˜Tt = Vt − ∆T,t , (A.23) 
+
+˜Yt = Θ⊤ 
+
+> t
+
+˜Tt + ∆ g,t + εt. (A.24) 
+
+Moreover: (i) Vt is Ft−1-measurable and εt is Ft-measurable. (ii) For any deterministic a ∈ Rnp and any i ∈ { 1, . . . , n }, the scalars ξt := a⊤Vt (εt)i form a martingale difference sequence with respect to (Ft): each ξt is Ft-measurable and integrable, and E[ξt | F t−1] = 0 a.s. (In words: given the past, the next term has mean zero.) (iii) Eξ2 
+
+> t
+
+≤ | a|2K1/28 , and E[ξsξt] = 0 for s̸ = t. So the ξt are uncorrelated and E P  
+
+> t∈W
+
+ξt
+
+2 = P 
+
+> t∈W
+
+Eξ2 
+
+> t
+
+.
+
+In words, after partialling out the confounders, the model becomes a plain linear regression of residual on residual, and cross-fitting adds only the explicit error terms ∆T,t and ∆g,t .
+
+Proof. Step 1: identity (A.22) . All terms of (A.5) are integrable (Lemma A.1 and Step 3 of its proof). Take E[ · | Ct] of (A.5) term by term. • E[Yt | Ct] = gY,t (Ct) by definition. Since Θt is a deterministic matrix, linearity gives E[Θ⊤ 
+
+> t
+
+Tt | Ct] = Θ⊤ 
+
+> t
+
+E[Tt |
+
+Ct] = Θ⊤ 
+
+> t
+
+gT,t (Ct).• gt(Ct) is a Borel function of Ct, so E[gt(Ct) | Ct] = gt(Ct) by taking out what is known. • σ(Ct) ⊆ F t−1 because Ct is Ft−1-measurable. By the tower property and (M), E[εt | Ct] = EE[εt | F t−1] Ct
+
+ =
+
+E[0 | Ct] = 0.Therefore gY,t (Ct) = Θ⊤ 
+
+> t
+
+gT,t (Ct) + gt(Ct) a.s. Subtract this from (A.5): 
+
+Yt − gY,t (Ct) = Θ⊤ 
+
+> t
+
+Tt + gt(Ct) + εt − Θ⊤ 
+
+> t
+
+gT,t (Ct) − gt(Ct)= Θ⊤
+
+> t
+
+ Tt − gT,t (Ct) + εt = Θ⊤ 
+
+> t
+
+Vt + εt.
+
+Each t gives one null set on which this may fail. W is finite, and a finite union of null sets is a null set, so (A.22) holds for all t ∈ W on one event of probability one. We work on this event from now on. 
+
+Step 2: identity (A.23) . Add and subtract gT,t (Ct):
+
+˜Tt = Tt − ˆgT, (t)(Ct) =  Tt − gT,t (Ct) −  ˆgT, (t)(Ct) − gT,t (Ct) = Vt − ∆T,t .
+
+This is pure algebra and holds everywhere. Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Step 3: identity (A.24) . Add and subtract gY,t (Ct), then use (A.22), then Vt = ˜Tt + ∆ T,t from (A.23): 
+
+˜Yt =  Yt − gY,t (Ct) −  ˆgY, (t)(Ct) − gY,t (Ct) = Θ⊤ 
+
+> t
+
+Vt + εt − ∆Y,t 
+
+= Θ⊤
+
+> t
+
+  ˜Tt + ∆ T,t 
+
+ + εt − ∆Y,t = Θ⊤ 
+
+> t
+
+˜Tt +  Θ⊤ 
+
+> t
+
+∆T,t − ∆Y,t 
+
+ + εt
+
+= Θ⊤ 
+
+> t
+
+˜Tt + ∆ g,t + εt.
+
+Step 4: part (i). Tt and Ct are functions of Xt−1, . . . , X t−p, and gT,t is Borel, so Vt = Tt − gT,t (Ct) is Ft−1-measurable. By (M), read as an identity between random vectors, εt = Yt − Θ⊤ 
+
+> t
+
+Tt − gt(Ct) is a Borel function of Xt, . . . , X t−p,hence Ft-measurable. 
+
+Step 5: part (ii). By part (i), ξt is Ft-measurable. Next we bound E|ξt|. By Cauchy–Schwarz for vectors, |a⊤Vt| ≤ | a|| Vt|;also |(εt)i| ≤ | εt|. Then Cauchy–Schwarz for expectations and Lemma A.1 ( E|Vt|2 ≤ KJ , E|εt|2 ≤ KJ ) give 
+
+E|ξt| ≤ | a| E|Vt| | εt| ≤ | a| E|Vt|21/2 E|εt|21/2 ≤ | a|K1/2 
+
+> J
+
+K1/2 
+
+> J
+
+= |a|KJ < ∞.
+
+Hence ξt is integrable. Since a⊤Vt is Ft−1-measurable (part (i)), taking out what is known and (M) give 
+
+E[ξt | F t−1] = a⊤Vt E[( εt)i | F t−1] = a⊤Vt · 0 = 0 .
+
+Step 6: part (iii). Squaring |ξt| ≤ | a|| Vt|| εt| from Step 5, then Cauchy–Schwarz for expectations and Lemma A.1 (E|Z|4 ≤ K1/28 ), 
+
+Eξ2 
+
+> t
+
+≤ | a|2 E|Vt|2|εt|2 ≤ | a|2 E|Vt|41/2 E|εt|41/2 ≤ | a|2 K1/48 K1/48 = |a|2K1/28 .
+
+Now let s < t . The product ξsξt is integrable (Cauchy–Schwarz and the bound just shown), and ξs is Fs-measurable, hence 
+
+Ft−1-measurable. By the tower property, taking out what is known and part (ii), 
+
+E[ξsξt] = EE[ξsξt | F t−1] = Eξs E[ξt | F t−1] = E[ξs · 0] = 0 .
+
+Expanding the square, E P  
+
+> t
+
+ξt
+
+2 = P 
+
+> t
+
+Eξ2 
+
+> t
+
++ P 
+
+> s̸=t
+
+E[ξsξt] = P 
+
+> t
+
+Eξ2 
+
+> t
+
+.
+
+Lemma A.3 (The target) . Assume (M), (D)(i), (S), and (W) (the last only so that the window lies in {p + 1 , . . . , T }). For all large T :(i) ¯J is symmetric, λmin ( ¯J) ≥ cJ and ∥ ¯J∥ ≤ KJ . Hence ¯J is invertible and ∥ ¯J−1∥ ≤ 1/c J .(ii) P 
+
+> t∈W
+
+JtDt = 0 .(iii) max t∈W ∥Dt∥ ≤ wT := L KJ
+
+cJ
+
+Tw
+
+T .(iv) ∥ ¯Θ − Θ(u0)∥ ≤ wT .
+
+In words, ¯Θ is a weighted average of the true coefficient matrices Θt over the window, so it lies within O(Tw/T ) of each of them and of Θ(u0).
+
+Example. For n = p = 1 all matrices are numbers, Jt = EV2 
+
+> t
+
+> 0 and ¯Θ = P 
+
+> t
+
+JtΘt/ P 
+
+> t
+
+Jt: a weighted average of Θt
+
+with positive weights. A weighted average of numbers that all lie within L(Tw − 1) /T of each other is itself within that distance of each of them. The lemma is the matrix version of this, where the weights are matrices and the ratio KJ /c J pays for their not being scalars. 
+
+Proof. Part (i). Each Jt is symmetric, so ¯J is. For any x, (S)(ii) gives x⊤Jtx ≥ cJ |x|2, so 
+
+x⊤ ¯Jx = 1
+
+Tw
+
+X
+
+> t∈W
+
+x⊤Jtx ≥ 1
+
+Tw
+
+X
+
+> t∈W
+
+cJ |x|2 = cJ |x|2,
+
+and hence λmin ( ¯J) = min |x|=1 x⊤ ¯Jx ≥ cJ . By the triangle inequality and Lemma A.1, ∥ ¯J∥ ≤ T −1
+
+> w
+
+P
+
+> t
+
+∥Jt∥ ≤ KJ . A symmetric matrix with all eigenvalues at least cJ > 0 is invertible, and the eigenvalues of its inverse are the reciprocals, all at most 1/c J ; so ∥ ¯J−1∥ ≤ 1/c J .Causal Lag Structure Discovery in Confounded Time Series 
+
+A key identity. Let M ∈ Rnp ×n be any fixed matrix. Since ¯J−1 ¯J = I and ¯J = T −1
+
+> w
+
+P 
+
+> t
+
+Jt,
+
+M = ¯J−1 ¯JM = ¯J−1 1
+
+Tw
+
+X
+
+> t∈W
+
+JtM. 
+
+Subtracting this from the definition of ¯Θ,
+
+¯Θ − M = ¯J−1 1
+
+Tw
+
+X
+
+> t∈W
+
+JtΘt − ¯J−1 1
+
+Tw
+
+X
+
+> t∈W
+
+JtM = ¯J−1 1
+
+Tw
+
+X
+
+> t∈W
+
+Jt(Θt − M ). (A.25) 
+
+Part (ii). Using P 
+
+> t
+
+Jt = Tw ¯J and the definition (A.15) of ¯Θ,
+
+X
+
+> t∈W
+
+JtDt = X
+
+> t∈W
+
+JtΘt −
+
+ X 
+
+> t∈W
+
+Jt
+
+ ¯Θ = X
+
+> t∈W
+
+JtΘt − Tw ¯J ¯J−1 1
+
+Tw
+
+X
+
+> t∈W
+
+JtΘt = 0 .
+
+Part (iii). Fix s ∈ W and take M = Θs in (A.25). For t ∈ W , (S)(i) and |t − s| ≤ Tw − 1 give ∥Θt − Θs∥ ≤ L|t − s|/T ≤
+
+L(Tw − 1) /T . By ∥AB ∥ ≤ ∥ A∥∥ B∥, the triangle inequality, part (i) and Lemma A.1, 
+
+∥Ds∥ = ∥ ¯Θ − Θs∥ ≤ ∥ ¯J−1∥ 1
+
+Tw
+
+X
+
+> t∈W
+
+∥Jt∥ ∥ Θt − Θs∥≤ 1
+
+cJ
+
+· 1
+
+Tw
+
+X
+
+> t∈W
+
+KJ · L Tw − 1
+
+T = L KJ
+
+cJ
+
+Tw − 1
+
+T ≤ wT .
+
+Since s ∈ W was arbitrary, this proves (iii). 
+
+Part (iv). Take M = Θ(u0) in (A.25). For t ∈ W , both t/T and u0 lie in [0 , 1] , so (S)(i) and (A.9) give ∥Θt − Θ(u0)∥ ≤ 
+
+L|t/T − u0| ≤ L T w/T . Exactly as in part (iii), 
+
+∥ ¯Θ − Θ(u0)∥ ≤ 1
+
+cJ
+
+· 1
+
+Tw
+
+X
+
+> t∈W
+
+KJ · L Tw
+
+T = L KJ
+
+cJ
+
+Tw
+
+T = wT .
+
+Limits. All limits are as T → ∞ . Let XT be random (a scalar, or a vector or matrix measured in a norm). • Convergence in probability , XTp
+
+−→ 0, also written XT = op(1) : P (|XT | > ϵ ) → 0 for every ϵ > 0. In words: large values become rare. For vectors and matrices this is the same as entry by entry. • Bounded in probability , XT = Op(1) : for every η > 0 there are M and T0 with P (|XT | > M ) ≤ η for all T ≥ T0. In words: XT does not escape to infinity. For deterministic aT > 0, XT = op(aT ) means XT /a T = op(1) , and similarly for Op.• Convergence in distribution , XTd
+
+−→ N (0 , 1) : P (XT ≤ x) → Φ( x) for every x ∈ R, where Φ is the standard normal distribution function. Standard matrix inequalities and the usual rules for these limits (sums and products, Markov’s and Chebyshev’s inequalities, Slutsky’s lemma) are named where they are used. 
+
+Lemma A.4 (Law of large numbers on the window) . Let ft, t ∈ W , be scalar random variables with Ef 2 
+
+> t
+
+< ∞ and P
+
+> h≥0
+
+|Cov( ft, f t+h)| ≤ CD for every t (the sum over those h with t + h ∈ W suffices). Let bt be deterministic with 
+
+|bt| ≤ B, where B does not depend on T or t. Then 
+
+E
+
+ X 
+
+> t∈W
+
+bt (ft − Eft)
+
+2
+
+≤ 2B2CD Tw, equivalently E
+
+ 1
+
+Tw
+
+X
+
+> t∈W
+
+bt (ft − Eft)
+
+2
+
+≤ 2B2CD
+
+Tw
+
+. (A.26) 
+
+Consequently, under (W), T −1
+
+> w
+
+P 
+
+> t∈W
+
+bt(ft − Eft) p
+
+−→ 0. By (D)(ii) and Lemma A.1, every entry of VtV⊤ 
+
+> t
+
+and every entry of εtε⊤ 
+
+> t
+
+satisfies the hypotheses on ft.Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+In words, a weighted window average of a short-memory sequence stays within O(T −1/2 
+
+> w
+
+) of its mean. 
+
+Proof. Write ¯ft := ft − Eft, so that E[ ¯fs ¯ft] = Cov( fs, f t), which is finite because Ef 2 
+
+> t
+
+< ∞. Expanding the square, 
+
+E
+
+ X 
+
+> t∈W
+
+bt ¯ft
+
+2
+
+= X
+
+> s∈W
+
+X
+
+> t∈W
+
+bsbt Cov( fs, f t) ≤ X
+
+> s∈W
+
+X
+
+> t∈W
+
+|bs|| bt| | Cov( fs, f t)| ≤ B2 X
+
+> s∈W
+
+X
+
+> t∈W
+
+|Cov( fs, f t)|.
+
+Split the double sum into the pairs with t ≥ s and the pairs with t < s . In the first group write t = s + h with h ≥ 0; in the second, swap the names and write s = t + h with h ≥ 1. Using Cov( fs, f t) = Cov( ft, f s),
+
+X
+
+> s∈W
+
+X
+
+> t∈W
+
+|Cov( fs, f t)| = X
+
+> s∈W
+
+X
+
+> h≥0
+> s+h∈W
+
+|Cov( fs, f s+h)| + X
+
+> t∈W
+
+X
+
+> h≥1
+> t+h∈W
+
+|Cov( ft, f t+h)|≤ X
+
+> s∈W
+
+CD + X
+
+> t∈W
+
+CD = 2 CD Tw.
+
+Combining the two displays gives the first inequality in (A.26); dividing by T 2 
+
+> w
+
+gives the second. For the consequence, fix η > 0. By Chebyshev’s inequality and (A.26), 
+
+P
+
+ 1
+
+Tw
+
+X
+
+> t∈W
+
+bt ¯ft > η 
+
+
+
+≤ 1
+
+η2 E
+
+ 1
+
+Tw
+
+X
+
+> t∈W
+
+bt ¯ft
+
+2
+
+≤ 2B2CD
+
+η2 Tw
+
+−→ 0,
+
+because Tw → ∞ by (W). Finally, for ft = ( Vt)l(Vt)b we have Ef 2 
+
+> t
+
+≤ E|Vt|4 ≤ K1/28 , and for ft = ( εt)i(εt)j we have Ef 2 
+
+> t
+
+≤ E|εt|4 ≤ K1/28
+
+(Lemma A.1, using |(Vt)l(Vt)b| ≤ | Vt|2 and likewise for εt); the covariance bound is (D)(ii). 
+
+A.2 Proof of Theorem 1: asymptotic normality 
+
+We restate the theorem, with the quantities of Appendix A.1. 
+
+Theorem 1 (restated). Assume (M), (S), (W), (D), (H), (N) of Appendix A.1. Let ˆΘ be the estimator (A.12) , ¯Θ the window target (A.15) , and ˆsri the standard error (A.14) . Then for every entry (r, i ),
+
+ˆΘri − ¯Θri 
+
+ˆsri d
+
+−→ N (0 , 1) . (A.27) 
+
+If moreover Tw = o(T 2/3), then ¯Θri may be replaced by Θri (u0).
+
+Roadmap. This section proves that each entry of √Tw( ˆΘ − ¯Θ), divided by a deterministic scale √vT,ri , is asymptotically 
+
+N (0 , 1) (Proposition A.10). The steps, in order: • Lemma A.5 (pure algebra): write √Tw( ˆΘ − ¯Θ) exactly as ˆJ−1 times the sum of one main term S0 and six remainders. • Lemma A.6: ˆJ is close to the deterministic matrix ¯J.• Lemma A.7: the six remainders vanish. • Theorem A.8 and Lemma A.9: S0 satisfies a central limit theorem. The first is the cited martingale CLT; the second checks its conditions. • Proposition A.10: combine the above. Each lemma uses only the ones before it, so the final proof is a short chain of citations. The standard error, which replaces 
+
+vT,ri by an estimate, is treated in Appendix A.3. 
+
+Conventions for this section. Throughout, P 
+
+> t
+
+means P 
+
+> t∈W
+
+, a sum of exactly Tw terms. Both Tt and Vt have length 
+
+np . All statements are for T large enough that the window lies in {p + 1 , . . . , T }; this is the range in which the lemmas of Appendix A.1 hold, and it is all that a limit as T → ∞ needs. Recall from Lemma A.1 that, with K8 := 2 8p8KX and 
+
+KJ := K1/48 , for every t ∈ W and 0 < s ≤ 8,
+
+E|Vt|s ≤ Ks/ 88 , E|εt|s ≤ Ks/ 88 , ∥Jt∥ ≤ KJ ;Causal Lag Structure Discovery in Confounded Time Series 
+
+we use s = 2 (K1/48 = KJ ), s = 4 (K1/28 ) and s = 8 . The matrices Dt = Θt − ¯Θ are deterministic, because Θt = Θ(t/T )
+
+is a fixed matrix and ¯Θ is built from the deterministic Jt and Θt. By Lemma A.3(iii), max t∥Dt∥ ≤ wT = L(KJ /c J ) Tw/T .Two consequences of (W) are used repeatedly: 
+
+wT = L KJ
+
+cJ
+
+· T 3/2
+
+> w
+
+T · 1
+
+√Tw
+
+−→ 0, pTw wT = L KJ
+
+cJ
+
+· T 3/2
+
+> w
+
+T ≤ Cw for all large T, (A.28) where Cw < ∞ is a constant: the first because T 3/2 
+
+> w
+
+/T = O(1) and Tw → ∞ , the second because T 3/2 
+
+> w
+
+/T = O(1) .
+
+Step 1: an exact decomposition Lemma A.5 (Error decomposition) . Assume (M), (S), (W) and (D)(i), so that the identities of Lemma A.2 hold and ¯J is invertible (Lemma A.3(i)). For all large T , almost surely on the event { ˆJ invertible },
+
+pTw ( ˆΘ − ¯Θ) = ˆJ−1 S0 + R1 + R2 + R3 + R4a + R4b + R4c
+
+, (A.29) 
+
+where all terms are np × n matrices: 
+
+S0 = 1
+
+√Tw
+
+X
+
+> t
+
+Vtε⊤ 
+
+> t
+
+, R1 = − 1
+
+√Tw
+
+X
+
+> t
+
+∆T,t ε⊤ 
+
+> t
+
+, R2 = 1
+
+√Tw
+
+X
+
+> t
+
+Vt∆⊤
+
+> g,t
+
+,R3 = − 1
+
+√Tw
+
+X
+
+> t
+
+∆T,t ∆⊤
+
+> g,t
+
+, R4a = 1
+
+√Tw
+
+X
+
+> t
+
+(VtV⊤ 
+
+> t
+
+− Jt)Dt, R4b = − 1
+
+√Tw
+
+X
+
+> t
+
+(Vt∆⊤ 
+
+> T,t
+
++ ∆ T,t V⊤ 
+
+> t
+
+)Dt,R4c = 1
+
+√Tw
+
+X
+
+> t
+
+∆T,t ∆⊤
+
+> T,t
+
+Dt.
+
+In words, the estimation error splits exactly, with no approximation, into one main term and six remainders, all multiplied by the same matrix ˆJ−1.
+
+Proof. A scalar example first. Take n = p = 1 , so every matrix is a number; write ˜vt = ˜Tt, vt = Vt, θt = Θt. Then 
+
+ˆθ = P 
+
+> t
+
+˜vt ˜yt/ P 
+
+> t
+
+˜v2 
+
+> t
+
+and ˜yt = θt ˜vt + ∆ g,t + εt, so 
+
+ˆθ − ¯θ =
+
+P 
+
+> t
+
+˜v2 
+
+> t
+
+(θt − ¯θ) + P 
+
+> t
+
+˜vt∆g,t + P 
+
+> t
+
+˜vtεt
+
+P 
+
+> t
+
+˜v2
+
+> t
+
+.
+
+Substituting ˜vt = vt − ∆T,t , the last sum gives S0 and R1, the middle sum gives R2 and R3, and the first sum (the drift of the coefficient inside the window) gives R4a, R 4b, R 4c after its mean part cancels. The matrix computation below is the same. 
+
+Where the identities hold. By Lemma A.2, for all large T there is one event of probability one on which the identities 
+
+˜Tt = Vt − ∆T,t , ˜Yt = Θ⊤ 
+
+> t
+
+˜Tt + ∆ g,t + εt (A.30) hold for all t ∈ W at once. We fix an outcome in this event at which ˆJ is invertible. Everything below is algebra at this outcome. 
+
+Step (a): the cross product. Transposing the second identity in (A.30) gives ˜Y⊤ 
+
+> t
+
+= ˜T⊤ 
+
+> t
+
+Θt + ∆ ⊤ 
+
+> g,t
+
++ ε⊤ 
+
+> t
+
+. Multiplying on the left by the column ˜Tt, ˜Tt ˜Y⊤ 
+
+> t
+
+= ˜Tt ˜T⊤ 
+
+> t
+
+Θt + ˜Tt∆⊤ 
+
+> g,t
+
++ ˜Ttε⊤ 
+
+> t
+
+.
+
+Step (b): the last two products. Insert ˜Tt = Vt − ∆T,t :
+
+˜Tt∆⊤ 
+
+> g,t
+
+= Vt∆⊤ 
+
+> g,t
+
+− ∆T,t ∆⊤
+
+> g,t
+
+, ˜Ttε⊤ 
+
+> t
+
+= Vtε⊤ 
+
+> t
+
+− ∆T,t ε⊤ 
+
+> t
+
+.
+
+Step (c): the first product. Write Θt = ¯Θ + Dt, so ˜Tt ˜T⊤ 
+
+> t
+
+Θt = ˜Tt ˜T⊤ 
+
+> t
+
+¯Θ + ˜Tt ˜T⊤ 
+
+> t
+
+Dt. Expanding the Gram product with 
+
+˜Tt = Vt − ∆T,t ,
+
+˜Tt ˜T⊤ 
+
+> t
+
+= ( Vt − ∆T,t )( Vt − ∆T,t )⊤ = VtV⊤ 
+
+> t
+
+− Vt∆⊤ 
+
+> T,t
+
+− ∆T,t V⊤ 
+
+> t
+
++ ∆ T,t ∆⊤
+
+> T,t
+
+,Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+and adding and subtracting Jt in the first term, 
+
+˜Tt ˜T⊤ 
+
+> t
+
+Dt = ( VtV⊤ 
+
+> t
+
+− Jt)Dt + JtDt − (Vt∆⊤ 
+
+> T,t
+
++ ∆ T,t V⊤ 
+
+> t
+
+)Dt + ∆ T,t ∆⊤
+
+> T,t
+
+Dt.
+
+Step (d): the exact cancellation. P 
+
+> t
+
+JtDt = 0 by Lemma A.3(ii). The term that appears in Step (c) is JtDt, with 
+
+Jt = E[VtV⊤ 
+
+> t
+
+]; it cancels because ¯Θ is built with these same weights. Any other weights would leave a deterministic bias. 
+
+Step (e): collect. Average Step (a) over t ∈ W and insert Steps (b) to (d). Since ¯Θ does not depend on t, T −1
+
+> w
+
+P 
+
+> t
+
+˜Tt ˜T⊤ 
+
+> t
+
+¯Θ =ˆJ ¯Θ. Writing 1 
+
+> Tw
+
+= 1√Tw
+
+· 1√Tw
+
+and matching each sum with its definition, 
+
+1
+
+Tw
+
+X
+
+> t
+
+˜Tt ˜Y⊤ 
+
+> t
+
+= ˆJ ¯Θ + 1
+
+Tw
+
+X
+
+> t
+
+(VtV⊤ 
+
+> t
+
+− Jt)Dt + 1
+
+Tw
+
+X
+
+> t
+
+JtDt
+
+| {z }
+
+> =0
+
+− 1
+
+Tw
+
+X
+
+> t
+
+(Vt∆⊤ 
+
+> T,t
+
++ ∆ T,t V⊤ 
+
+> t
+
+)Dt + 1
+
+Tw
+
+X
+
+> t
+
+∆T,t ∆⊤
+
+> T,t
+
+Dt
+
++ 1
+
+Tw
+
+X
+
+> t
+
+Vt∆⊤ 
+
+> g,t
+
+− 1
+
+Tw
+
+X
+
+> t
+
+∆T,t ∆⊤ 
+
+> g,t
+
++ 1
+
+Tw
+
+X
+
+> t
+
+Vtε⊤ 
+
+> t
+
+− 1
+
+Tw
+
+X
+
+> t
+
+∆T,t ε⊤
+
+> t
+
+= ˆJ ¯Θ + 1
+
+√Tw
+
+ R4a + R4b + R4c + R2 + R3 + S0 + R1
+
+.
+
+Step (f): solve. Since ˆJ is invertible, ˆΘ = ˆJ−1T −1
+
+> w
+
+P 
+
+> t
+
+˜Tt ˜Y⊤ 
+
+> t
+
+. Multiplying Step (e) on the left by ˆJ−1 and using 
+
+ˆJ−1 ˆJ ¯Θ = ¯Θ,
+
+ˆΘ = ¯Θ + 1
+
+√Tw
+
+ˆJ−1 S0 + R1 + R2 + R3 + R4a + R4b + R4c
+
+.
+
+Subtracting ¯Θ and multiplying by √Tw gives (A.29). 
+
+Step 2: the Gram matrix Lemma A.6 (Gram matrix) . Assume (M), (S), (W), (D) and (A.17) in (N1). Let ET := {λmin ( ˆJ) ≥ cJ /2} ( ˆJ is symmetric, so λmin ( ˆJ) is defined). Then: (i) ∥ ˆJ − ¯J∥ p
+
+−→ 0;(ii) P (ET ) → 1, and on ET the matrix ˆJ is invertible with ∥ ˆJ−1∥ ≤ 2/c J ;(iii) on ET , ∥ ˆJ−1 − ¯J−1∥ ≤ (2 /c 2 
+
+> J
+
+)∥ ˆJ − ¯J∥. Hence for every ϵ > 0, P  ET ∩ {∥ ˆJ−1 − ¯J−1∥ ≤ ϵ} → 1. This is what “ ˆJ−1 − ¯J−1 p
+
+−→ 0” means here; the value of ˆJ−1 off ET is irrelevant because P (EcT ) → 0.
+
+In words, the empirical Gram matrix ˆJ of the cross-fitted residuals is close to the average true Gram matrix ¯J, so it is invertible with a bounded inverse, and its inverse is close to ¯J−1.
+
+Proof. Step (a): split ˆJ. By (A.23), ˜Tt = Vt − ∆T,t , and by the expansion in Step (c) of Lemma A.5 (pure algebra from (A.23), valid at every outcome), 
+
+ˆJ = 1
+
+Tw
+
+X
+
+> t
+
+˜Tt ˜T⊤ 
+
+> t
+
+= 1
+
+Tw
+
+X
+
+> t
+
+VtV⊤ 
+
+> t
+
+− G − G⊤ + Q, G := 1
+
+Tw
+
+X
+
+> t
+
+Vt∆⊤
+
+> T,t
+
+, Q := 1
+
+Tw
+
+X
+
+> t
+
+∆T,t ∆⊤
+
+> T,t
+
+,
+
+using ∆T,t V⊤ 
+
+> t
+
+= ( Vt∆⊤
+
+> T,t
+
+)⊤. Subtracting ¯J,
+
+ˆJ − ¯J =
+
+ 1
+
+Tw
+
+X
+
+> t
+
+VtV⊤ 
+
+> t
+
+− ¯J
+
+
+
+− G − G⊤ + Q. 
+
+We show that each of the four pieces is op(1) .Causal Lag Structure Discovery in Confounded Time Series 
+
+Step (b): the oracle part. Fix l, b ∈ { 1, . . . , np } and let ft := ( Vt)l(Vt)b, an entry of VtV⊤ 
+
+> t
+
+. Since Jt = E[VtV⊤ 
+
+> t
+
+],
+
+(Jt)lb = Eft, and since ¯J = T −1
+
+> w
+
+P 
+
+> t
+
+Jt,
+
+ 1
+
+Tw
+
+X
+
+> t
+
+VtV⊤ 
+
+> t
+
+− ¯J
+
+ 
+
+> lb
+
+= 1
+
+Tw
+
+X
+
+> t
+
+ ft − Eft
+
+.
+
+By (D)(ii) and Lemma A.1, ft satisfies the hypotheses of Lemma A.4 (as noted at the end of that lemma), so Lemma A.4 with all weights equal to 1 (so B = 1 ) gives E T −1
+
+> w
+
+P
+
+> t
+
+(ft − Eft)2 ≤ 2CD /T w. Summing over the (np )2 entries, 
+
+E 1
+
+Tw
+
+X
+
+> t
+
+VtV⊤ 
+
+> t
+
+− ¯J 2
+
+> F
+
+≤ 2( np )2CD
+
+Tw
+
+, so P
+
+ 1
+
+Tw
+
+X
+
+> t
+
+VtV⊤ 
+
+> t
+
+− ¯J F
+
+> ϵ 
+
+
+
+≤ 2( np )2CD
+
+ϵ2Tw
+
+−→ 0
+
+by Chebyshev’s inequality and Tw → ∞ (W). 
+
+Step (c): the cross term G. By the triangle inequality for |·| F , then |ab ⊤|F = |a| | b|, then Cauchy–Schwarz for averages, 
+
+|G|F ≤ 1
+
+Tw
+
+X
+
+> t
+
+|Vt∆⊤
+
+> T,t
+
+|F = 1
+
+Tw
+
+X
+
+> t
+
+|Vt| | ∆T,t | ≤ 
+
+ 1
+
+Tw
+
+X
+
+> t
+
+|Vt|21/2 1
+
+Tw
+
+X
+
+> t
+
+|∆T,t |21/2
+
+.
+
+First factor: E T −1
+
+> w
+
+P
+
+> t
+
+|Vt|2 ≤ max t E|Vt|2 ≤ K1/48 (conventions above), so T −1
+
+> w
+
+P
+
+> t
+
+|Vt|2 = Op(1) by Markov’s inequality, and so is its square root. Second factor: T −1
+
+> w
+
+P
+
+> t
+
+|∆T,t |2 p
+
+−→ 0 by (A.17) in (N1), so is its square root. Since 
+
+Op(1) · op(1) = op(1) , |G|F = op(1) , and |G⊤|F = |G|F .
+
+Step (d): the quadratic term Q. By the triangle inequality and |ab ⊤|F = |a| | b|, |Q|F ≤ T −1
+
+> w
+
+P
+
+> t
+
+|∆T,t |2 p
+
+−→ 0 by (A.17) in (N1). 
+
+Step (e): proof of (i). Since ∥M ∥ ≤ | M |F , ∥ ˆJ − ¯J∥ ≤ | ˆJ − ¯J|F , and by the triangle inequality this is at most the sum of the Frobenius norms of the four pieces. Each is op(1) by Steps (b) to (d), so the sum is op(1) too. 
+
+Step (f): proof of (ii). Recall ET = {λmin ( ˆJ) ≥ cJ /2} from the statement. We use Weyl’s inequality, in the form for symmetric A, B , λmin (A) ≥ λmin (B) − ∥ A − B∥: moving a symmetric matrix by ∥A − B∥ in operator norm moves its smallest eigenvalue by at most that much. Both ˆJ and ¯J are symmetric (averages of symmetric matrices), and λmin ( ¯J) ≥ cJ
+
+by Lemma A.3(i). So 
+
+λmin ( ˆJ) ≥ cJ − ∥ ˆJ − ¯J∥.
+
+In particular, at every outcome with ∥ ˆJ − ¯J∥ ≤ cJ /2 we get λmin ( ˆJ) ≥ cJ /2, that is, {∥ ˆJ − ¯J∥ ≤ cJ /2} ⊆ ET . Taking complements, P (EcT ) ≤ P (∥ ˆJ − ¯J∥ > c J /2) → 0 by (i). On ET , since ˆJ is symmetric with λmin ( ˆJ) > 0, ˆJ is invertible with ∥ ˆJ−1∥ = 1 /λ min ( ˆJ) ≤ 2/c J .
+
+Step (g): proof of (iii). On ET both inverses exist: ˆJ is invertible on ET by (ii), and ¯J is invertible at every outcome because 
+
+λmin ( ¯J) ≥ cJ > 0 (Lemma A.3(i)), so all its eigenvalues are positive. Then 
+
+ˆJ−1 − ¯J−1 = ˆJ−1 ¯J ¯J−1 − ˆJ−1 ˆJ ¯J−1 = ˆJ−1( ¯J − ˆJ) ¯J−1.
+
+By ∥AB ∥ ≤ ∥ A∥ ∥ B∥, ∥A−1∥ = 1 /λ min (A) for a symmetric positive definite A, and λmin ( ¯J) ≥ cJ ,
+
+∥ ˆJ−1 − ¯J−1∥ ≤ ∥ ˆJ−1∥ ∥ ¯J − ˆJ∥ ∥ ¯J−1∥ ≤ 2
+
+cJ
+
+· ∥ ˆJ − ¯J∥ · 1
+
+cJ
+
+.
+
+Therefore ET ∩ {∥ ˆJ − ¯J∥ ≤ c2 
+
+> J
+
+ϵ/ 2} ⊆ ET ∩ {∥ ˆJ−1 − ¯J−1∥ ≤ ϵ}, and the probability of the left event is at least 
+
+1 − P (EcT ) − P (∥ ˆJ − ¯J∥ > c 2 
+
+> J
+
+ϵ/ 2) , which tends to 1 by (ii) and (i). 
+
+Step 3: the remainders Lemma A.7 (Remainders vanish) . Assume (M), (S), (W), (D), (N). Then |R1|F , |R2|F , |R3|F , |R4a|F , |R4b|F and |R4c|F
+
+(the remainders defined in (A.29) of Lemma A.5) all tend to 0 in probability. 
+
+In words, the nuisance-error terms and the coefficient-drift terms are all negligible after the √Tw scaling. Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Proof. R1 and R2. R1 = −T −1/2
+
+> w
+
+P 
+
+> t
+
+∆T,t ε⊤ 
+
+> t
+
+and R2 = T −1/2
+
+> w
+
+P 
+
+> t
+
+Vt∆⊤ 
+
+> g,t
+
+tend to 0 in probability directly by (A.20) and (A.21) in (N2). 
+
+R3. By the triangle inequality, |ab ⊤|F = |a| | b|, and Cauchy–Schwarz for sums, 
+
+|R3|F ≤ 1
+
+√Tw
+
+X
+
+> t
+
+|∆T,t ∆⊤
+
+> g,t
+
+|F = 1
+
+√Tw
+
+X
+
+> t
+
+|∆T,t | | ∆g,t | ≤ 1
+
+√Tw
+
+X 
+
+> t
+
+|∆T,t |21/2X 
+
+> t
+
+|∆g,t |21/2
+
+= Tw
+
+√Tw
+
+ 1
+
+Tw
+
+X
+
+> t
+
+|∆T,t |21/2 1
+
+Tw
+
+X
+
+> t
+
+|∆g,t |21/2
+
+= pTw
+
+ 1
+
+Tw
+
+X
+
+> t
+
+|∆T,t |21/2 1
+
+Tw
+
+X
+
+> t
+
+|∆g,t |21/2
+
+.
+
+The last expression tends to 0 in probability by the product rate (A.19) in (N1). 
+
+R4a. Fix an entry (l, i ), l ∈ { 1, . . . , np }, i ∈ { 1, . . . , n }. Writing out the matrix product, 
+
+(R4a)li = 1
+
+√Tw
+
+X
+
+> tnp
+
+X
+
+> b=1
+
+ (Vt)l(Vt)b − (Jt)lb 
+
+(Dt)bi = pTwnp X
+
+> b=1
+
+χlbi , χlbi := 1
+
+Tw
+
+X
+
+> t
+
+(Dt)bi 
+
+ f lb t − Ef lb t
+
+,
+
+with f lb t := ( Vt)l(Vt)b and Ef lb t = ( Jt)lb . The weights (Dt)bi are deterministic, and |(Dt)bi | ≤ ∥ Dt∥ ≤ wT . The first inequality holds because an entry is at most the operator norm: by Cauchy–Schwarz, |(Dt)bi | = |e⊤ 
+
+> b
+
+(Dtei)| ≤ | eb| | Dtei| ≤ ∥Dt∥. The second is Lemma A.3(iii). The variable f lb t is an entry of VtV⊤ 
+
+> t
+
+, so it satisfies the hypotheses of Lemma A.4. That lemma asks for a weight bound B that does not depend on T , while wT does, so we rescale the weights. If L = 0 ,then wT = 0 , so every Dt = 0 and R4a = 0 ; there is nothing to prove. If L > 0, then wT > 0, and the rescaled weights 
+
+βt := ( Dt)bi /w T (for the fixed b, i ) are deterministic with |βt| ≤ 1. Since χlbi = wT · T −1
+
+> w
+
+P 
+
+> t
+
+βt(f lb t − Ef lb t ), Lemma A.4 with weights βt and B = 1 gives 
+
+Eχ2 
+
+> lbi
+
+= w2 
+
+> T
+
+E
+
+ 1
+
+Tw
+
+X
+
+> t
+
+βt
+
+ f lb t − Ef lb t
+
+2
+
+≤ w2 
+
+> T
+
+· 2CD
+
+Tw
+
+= 2w2 
+
+> T
+
+CD
+
+Tw
+
+.
+
+By Cauchy–Schwarz with the all-ones vector,  P np b=1 χlbi 
+
+2 ≤ np Pnp b=1 χ2
+
+> lbi
+
+, so 
+
+E(R4a)2 
+
+> li
+
+= Tw E
+
+ np X
+
+> b=1
+
+χlbi 
+
+2
+
+≤ Tw · np · np · 2w2 
+
+> T
+
+CD
+
+Tw
+
+= 2( np )2CD w2 
+
+> T
+
+.
+
+Summing over the np · n entries, E|R4a|2 
+
+> F
+
+≤ np · n · 2( np )2CD w2 
+
+> T
+
+= 2 n4p3CD w2 
+
+> T
+
+. Since wT → 0 by (A.28), Chebyshev’s inequality gives P (|R4a|F > ϵ ) ≤ 2n4p3CD w2 
+
+> T
+
+/ϵ 2 → 0.
+
+R4b. For each t, by |AB |F ≤ | A|F ∥B∥ and |ab ⊤|F = |a| | b|,
+
+|Vt∆⊤
+
+> T,t
+
+Dt|F ≤ | Vt∆⊤
+
+> T,t
+
+|F ∥Dt∥ = |Vt| | ∆T,t | ∥ Dt∥ ≤ wT |Vt| | ∆T,t |,
+
+and in the same way |∆T,t V⊤ 
+
+> t
+
+Dt|F ≤ wT |Vt| | ∆T,t |. By the triangle inequality and then Cauchy–Schwarz for averages, 
+
+|R4b|F ≤ 1
+
+√Tw
+
+X
+
+> t
+
+2wT |Vt| | ∆T,t | = 2 pTw wT · 1
+
+Tw
+
+X
+
+> t
+
+|Vt| | ∆T,t |≤ 2 pTw wT
+
+| {z }
+
+> ≤Cw
+
+·
+
+ 1
+
+Tw
+
+X
+
+> t
+
+|Vt|21/2
+
+| {z }
+
+> Op(1)
+
+·
+
+ 1
+
+Tw
+
+X
+
+> t
+
+|∆T,t |21/2
+
+| {z }
+
+> op(1)
+
+.
+
+The first factor is deterministic and bounded for large T by (A.28), which uses (W), so it is Op(1) . The second is Op(1) and the third is op(1) , exactly as in Step (c) of Lemma A.6 (Markov and (N1)). Applying Op(1) · op(1) = op(1) twice, first to the product of the second and third factors and then to the first factor times that product, |R4b|F = op(1) .
+
+R4c. For each t, by |AB |F ≤ | A|F ∥B∥ and |ab ⊤|F = |a| | b|, |∆T,t ∆⊤
+
+> T,t
+
+Dt|F ≤ | ∆T,t |2∥Dt∥ ≤ wT |∆T,t |2. So 
+
+|R4c|F ≤ 1
+
+√Tw
+
+X
+
+> t
+
+wT |∆T,t |2 = pTw wT · 1
+
+Tw
+
+X
+
+> t
+
+|∆T,t |2 ≤ Cw · 1
+
+Tw
+
+X
+
+> t
+
+|∆T,t |2
+
+for large T , by (A.28). The average tends to 0 in probability by (A.17) in (N1), so |R4c|F = op(1) (a bounded number times an op(1) term). Causal Lag Structure Discovery in Confounded Time Series 
+
+Step 4: the central limit theorem for the main term 
+
+We use the following martingale central limit theorem. A martingale difference sequence with respect to increasing σ-fields 
+
+G0 ⊆ G 1 ⊆ · · · is a sequence x1, x 2, . . . with xk Gk-measurable, integrable, and E[xk | G k−1] = 0 : a fair-game increment, whose expected value given everything seen so far is zero. 
+
+Theorem A.8 (Martingale central limit theorem) . This is Billingsley (1995), Theorem 35.12 (p. 476), with σ = 1 . For each 
+
+T let xT, 1, . . . , x T,k T be real random variables and GT, 0 ⊆ G T, 1 ⊆ · · · ⊆ G T,k T be σ-fields, with GT, 0 = {∅ , Ω} trivial. No relation between the σ-fields of different T is required. Assume: (a) each xT,k is GT,k -measurable, Ex2 
+
+> T,k
+
+< ∞, and E[xT,k | G T,k −1] = 0 almost surely; (b) PkT 
+
+> k=1
+
+E[x2 
+
+> T,k
+
+| G T,k −1] p
+
+−→ 1;(c) for every η > 0, PkT 
+
+> k=1
+
+Ex2
+
+> T,k
+
+1{| xT,k | ≥ η} → 0 (Lindeberg’s condition: no single term carries a non-negligible share of the variance). Then PkT 
+
+> k=1
+
+xT,k d
+
+−→ N (0 , 1) .
+
+Two remarks match this statement to the book’s. The book uses infinite rows and pads a finite row itself with xT,k := 0 ,
+
+GT,k := GT,k T for k > k T ; its side condition that the row sums converge almost surely then holds trivially. The book also allows any limit σ2 > 0 in (b), with conclusion P 
+
+> k
+
+xT,k d
+
+−→ σ N (0 , 1) ; we take σ = 1 . Its Lindeberg condition is exactly our (c). 
+
+Lemma A.9 (CLT for the main term) . Assume (M), (S), (W), (D), (H). Fix an entry (r, i ), r ∈ { 1, . . . , np }, i ∈ { 1, . . . , n }.Let a := ¯J−1er ∈ Rnp and 
+
+vT,ri := 1
+
+Tw
+
+X
+
+> t
+
+Σε,ii (t/T ) a⊤Jta. 
+
+(a) cv ≤ vT,ri ≤ Cv , with cv := cεcJ /K 2 
+
+> J
+
+and Cv := K1/48 KJ /c 2 
+
+> J
+
+.(b) ( ¯J−1S0)ri /√vT,ri d
+
+−→ N (0 , 1) .(c) E|S0|2 
+
+> F
+
+≤ n2p K 1/28 , so S0 = Op(1) .
+
+In words, after multiplication by the fixed matrix ¯J−1, each entry of the main term S0 is asymptotically normal with an explicit variance, and S0 as a whole stays bounded in probability. Part (b) is the result; parts (a) and (c) are bounds that later proofs also use (Proposition A.10 and Lemma A.12). 
+
+Proof. Plan. Part (b) is Theorem A.8 applied to the normalised summands xT,k = ξtk /pTwvT,ri of Step (b1), where 
+
+ξt = a⊤Vt(εt)i. We check the theorem’s three conditions: condition (a), each summand is a fair-game increment, follows from (M) (Step (b2)); condition (b), the conditional variances add up to 1, follows from the law of large numbers, Lemma A.4 (Step (b3)); condition (c), Lindeberg’s condition, follows from fourth moments (Step (b4)). Part (a) of the lemma comes first, so that we may divide by vT,ri . Part (c) is a direct variance count (Step (c)). 
+
+Step (a): the bounds on vT,ri . First, the size of a. Since λmin ( ¯J) ≥ cJ (Lemma A.3(i)), we have ∥ ¯J−1∥ ≤ 1/c J ,so |a| ≤ ∥ ¯J−1∥ | er | ≤ 1/c J . Since er = ¯Ja and ∥ ¯J∥ ≤ KJ (Lemma A.3(i)), 1 = |er | ≤ ∥ ¯J∥ | a| ≤ KJ |a|, so 
+
+|a| ≥ 1/K J . Second, the quadratic form. By (S)(ii) and the spectral theorem, a⊤Jta ≥ cJ |a|2, and by Lemma A.1, 
+
+a⊤Jta ≤ ∥ Jt∥ | a|2 ≤ KJ |a|2. Third, the noise variance. By (H), Σε,ii (t/T ) = e⊤ 
+
+> i
+
+Σε(t/T )ei ≥ λmin (Σ ε(t/T )) ≥ cε.For the upper bound, take the (i, i ) entry in (H): E[( εt)2 
+
+> i
+
+| F t−1] = Σ ε,ii (t/T ) a.s., and the right side is a deterministic number. Taking expectations (the expectation of a constant is the constant) gives the first equality below, the tower property 
+
+EE[X | F t−1] = EX gives the second, and (εt)2 
+
+> i
+
+≤ | εt|2 and Lemma A.1 give the two inequalities: 
+
+Σε,ii (t/T ) = EE[( εt)2 
+
+> i
+
+| F t−1] = E(εt)2 
+
+> i
+
+≤ E|εt|2 ≤ K1/48 . (A.31) Combining the three, 
+
+vT,ri ≥ 1
+
+Tw
+
+X
+
+> t
+
+cε cJ |a|2 ≥ cεcJ
+
+1
+
+K2
+
+> J
+
+= cv , vT,ri ≤ 1
+
+Tw
+
+X
+
+> t
+
+K1/48 KJ |a|2 ≤ K1/48 KJ
+
+1
+
+c2
+
+> J
+
+= Cv .Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Step (b1): the sum as a martingale. Put ξt := a⊤Vt (εt)i. The (r, i ) entry of a matrix M is Mri = e⊤ 
+
+> r
+
+M e i: e⊤ 
+
+> r
+
+picks row r
+
+and ei picks column i. We split the product this way because each factor simplifies. Since ¯J is symmetric, so is ¯J−1, and 
+
+e⊤ 
+
+> r
+
+¯J−1 = ( ¯J−1er )⊤ = a⊤. Also S0ei = T −1/2
+
+> w
+
+P 
+
+> t
+
+Vt(εt)i (column i of S0). Hence 
+
+( ¯J−1S0)ri 
+
+√vT,ri 
+
+= e⊤ 
+
+> r
+
+¯J−1S0ei
+
+√vT,ri 
+
+= 1
+
+pTwvT,ri 
+
+X
+
+> t
+
+ξt.
+
+The vector a depends on T but is deterministic for each T , so by Lemma A.2(ii) {ξt} is a martingale difference sequence with respect to {F t}: ξt is Ft-measurable, integrable, and E[ξt | F t−1] = 0 . List the window as tk := t0 − Tw + k,
+
+k = 1 , . . . , T w, and set 
+
+xT,k := ξtk
+
+pTwvT,ri 
+
+, GT, 0 := {∅ , Ω}, GT,k := Ftk (k ≥ 1) .
+
+Then PTw 
+
+> k=1
+
+xT,k = ( ¯J−1S0)ri /√vT,ri , and the σ-fields increase: the trivial σ-field is contained in every σ-field, and 
+
+Ftk−1 ⊆ F tk . The index k and the σ-fields GT,k only relabel the window to match the notation of Theorem A.8. We check conditions (a), (b), (c) of Theorem A.8, with kT = Tw.Two moment bounds are needed. By Cauchy–Schwarz in Rnp , |a⊤Vt| ≤ | a| | Vt|, and |(εt)i| ≤ | εt|. So, by Cauchy– Schwarz for expectations ( E[U W ] ≤ (EU 2)1/2(EW 2)1/2 for U, W ≥ 0), the lower moments above, and |a| ≤ 1/c J ,
+
+Eξ2 
+
+> t
+
+≤ | a|2 E|Vt|2|εt|2 ≤ | a|2 E|Vt|41/2 E|εt|41/2 ≤ K1/48 K1/48
+
+c2
+
+> J
+
+= K1/28
+
+c2
+
+> J
+
+, (A.32) 
+
+Eξ4 
+
+> t
+
+≤ | a|4 E|Vt|4|εt|4 ≤ | a|4 E|Vt|81/2 E|εt|81/2 ≤ K8
+
+c4
+
+> J
+
+. (A.33) 
+
+Step (b2): condition (a). xT,k is a constant times ξtk , hence Ftk = GT,k -measurable, and Ex2 
+
+> T,k
+
+< ∞ by (A.32). For k ≥ 2,
+
+GT,k −1 = Ftk −1 (because tk−1 = tk − 1), so E[xT,k | G T,k −1] = E[ξtk | F tk −1]/pTwvT,ri = 0 . For k = 1 , conditioning on the trivial σ-field is plain expectation, and by the tower property ExT, 1 = EE[ξt1 | F t1−1]/pTwvT,ri = 0 .
+
+Step (b3): condition (b), the conditional variance. Let qt := (a⊤Vt)2 Σε,ii (t/T ). Since Vt is Ft−1-measurable (Lemma A.2(i)), so is (a⊤Vt)2; taking it out of the conditional expectation (the product ξ2 
+
+> t
+
+is integrable by (A.32)) and using (H), 
+
+E[ξ2 
+
+> t
+
+| F t−1] = ( a⊤Vt)2 E[( εt)2 
+
+> i
+
+| F t−1] = ( a⊤Vt)2 Σε,ii (t/T ) = qt.
+
+So for k ≥ 2, E[x2 
+
+> T,k
+
+| G T,k −1] = qtk /(TwvT,ri ). For k = 1 , E[x2 
+
+> T, 1
+
+| G T, 0] = Eξ2 
+
+> t1
+
+/(TwvT,ri ) = Eqt1 /(TwvT,ri ) by the tower property. (Theorem A.8, like the book, fixes GT, 0 trivial, so the first conditional variance is the number Eqt1 , while the others are the random qtk .) Summing, and then adding and subtracting qt1 so that every t ∈ W appears in one sum, 
+
+> Tw
+
+X
+
+> k=1
+
+E[x2 
+
+> T,k
+
+| G T,k −1] = 1
+
+TwvT,ri 
+
+
+
+Eqt1 +
+
+> Tw
+
+X
+
+> k=2
+
+qtk
+
+
+
+= 1
+
+TwvT,ri 
+
+X
+
+> t
+
+qt
+
+| {z }
+
+> first term
+
++ Eqt1 − qt1
+
+TwvT,ri 
+
+| {z }
+
+> second term
+
+. (A.34) We show that the first term tends to 1 (this is where the law of large numbers enters) and the second, a single leftover term, tends to 0. The first term. Let 
+
+ΓT := 1
+
+Tw
+
+X
+
+> t
+
+Σε,ii (t/T ) VtV⊤ 
+
+> t
+
+− Jt
+
+ ∈ Rnp ×np .
+
+Since qt = Σ ε,ii (t/T ) a⊤VtV⊤ 
+
+> t
+
+a and vT,ri = T −1
+
+> w
+
+P 
+
+> t
+
+Σε,ii (t/T ) a⊤Jta,
+
+1
+
+Tw
+
+X
+
+> t
+
+qt − vT,ri = a⊤ΓT a. Causal Lag Structure Discovery in Confounded Time Series 
+
+Since E[VtV⊤ 
+
+> t
+
+] = Jt, each entry (Γ T )bc = T −1
+
+> w
+
+P 
+
+> t
+
+Σε,ii (t/T ) (Vt)b(Vt)c − E[( Vt)b(Vt)c] is a weighted window average of a centred entry of VtV⊤ 
+
+> t
+
+. The weights Σε,ii (t/T ) are deterministic and lie in (0 , K 1/48 ] by (A.31), so (D)(ii) and Lemma A.4 with B = K1/48 give E(Γ T )2 
+
+> bc
+
+≤ 2K1/28 CD /T w. Summing over the (np )2 entries, 
+
+E|ΓT |2 
+
+> F
+
+≤ (np )2 2K1/28 CD
+
+Tw
+
+−→ 0
+
+by (W), so |ΓT |Fp
+
+−→ 0 by Chebyshev’s inequality. By Cauchy–Schwarz, ∥M ∥ ≤ | M |F and |a| ≤ 1/c J (Step (a)), 
+
+|a⊤ΓT a| ≤ | a| | ΓT a| ≤ | a|2|ΓT |F ≤ | ΓT |F /c 2 
+
+> J
+
+. Hence the first term of (A.34) is 
+
+vT,ri + a⊤ΓT avT,ri 
+
+= 1 + a⊤ΓT avT,ri 
+
+, a⊤ΓT avT,ri 
+
+≤ |ΓT |F
+
+c2 
+
+> J
+
+cvp
+
+−→ 0
+
+by part (a). The second term. qt1 ≥ 0 and Eqt1 = Σ ε,ii (t1/T ) a⊤Jt1 a ≤ Cv by the bounds of Step (a). So 
+
+E Eqt1 − qt1
+
+TwvT,ri 
+
+≤ Eqt1 + Eqt1
+
+Twcv
+
+≤ 2Cv
+
+cv Tw
+
+−→ 0,
+
+and the second term is op(1) by Markov’s inequality. Adding, the sum (A.34) tends to 1 in probability. 
+
+Step (b4): condition (c), Lindeberg via fourth moments. For real x and η > 0, x21{| x| ≥ η} ≤ x4/η 2: if |x| < η the left side is 0, and if |x| ≥ η then 1 ≤ x2/η 2. Taking expectations and using (A.33) and vT,ri ≥ cv ,
+
+> Tw
+
+X
+
+> k=1
+
+Ex2
+
+> T,k
+
+1{| xT,k | ≥ η} ≤ 1
+
+η2
+
+> Tw
+
+X
+
+> k=1
+
+Eξ4
+
+> tk
+
+T 2
+
+> w
+
+v2
+
+> T,ri
+
+≤ 1
+
+η2 · Tw · K8
+
+c4 
+
+> J
+
+T 2 
+
+> w
+
+c2
+
+> v
+
+= K8
+
+η2c4 
+
+> J
+
+c2
+
+> v
+
+· 1
+
+Tw
+
+−→ 0
+
+by (W). Theorem A.8 now gives P 
+
+> k
+
+xT,k d
+
+−→ N (0 , 1) , which is (b). 
+
+Step (c): the second moment of S0. Fix an entry (b, i ). Then (S0)bi = T −1/2
+
+> w
+
+P
+
+> t
+
+(Vt)b(εt)i, and the summands (Vt)b(εt)i
+
+are the ξt of Lemma A.2(ii) with a = eb (so |a| = 1 ). By Lemma A.2(iii) they are uncorrelated (fair-game increments at different times are uncorrelated) with second moments at most K1/28 . Hence 
+
+E(S0)2 
+
+> bi
+
+= 1
+
+Tw
+
+E
+
+X 
+
+> t
+
+(Vt)b(εt)i
+
+2
+
+= 1
+
+Tw
+
+X
+
+> t
+
+E(Vt)2 
+
+> b
+
+(εt)2
+
+> i
+
+ ≤ 1
+
+Tw
+
+· Tw · K1/28 = K1/28 .
+
+Summing over the np · n = n2p entries, E|S0|2 
+
+> F
+
+≤ n2p K 1/28 . By Chebyshev, P (|S0|F > M ) ≤ n2pK 1/28 /M 2 for every 
+
+M > 0 and every T , so S0 = Op(1) .
+
+Step 5: assembly 
+
+The last tool is Slutsky’s lemma in its simplest form: if NTd
+
+−→ Z and UTp
+
+−→ 0, then NT + UTd
+
+−→ Z. In words, adding a term that vanishes in probability does not change a limit in distribution. 
+
+Proposition A.10 (Asymptotic normality at the window target) . Assume (M), (S), (W), (D), (H), (N). For every entry (r, i ),
+
+√Tw ( ˆΘri − ¯Θri )
+
+√vT,ri d
+
+−→ N (0 , 1) , and pTw | ˆΘ − ¯Θ|F = Op(1) .
+
+In words, each entry of the estimation error, scaled by √Tw and by the deterministic standard deviation √vT,ri , is asymptotically standard normal. 
+
+Proof. Let ET = {λmin ( ˆJ) ≥ cJ /2} as in Lemma A.6, and R := R1 + R2 + R3 + R4a + R4b + R4c. By the triangle inequality, |R|F ≤ | R1|F + |R2|F + |R3|F + |R4a|F + |R4b|F + |R4c|F ; each term is op(1) by Lemma A.7, so |R|Fp
+
+−→ 0.
+
+Where we work. Recall from (A.12) that the formula for ˆΘ needs ˆJ−1; where ˆJ is singular we set ˆΘ := 0 only so that ˆΘ is defined at every outcome (any value would do). On ET , ˆJ is invertible (Lemma A.6(ii)), so ˆΘ is given by the formula and Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Lemma A.5 applies. Off ET we use no bound at all: P (EcT ) → 0, so what happens there cannot affect a limit. The argument below therefore needs only bounds on ET , plus the vanishing term P (EcT ).
+
+Split the error. On ET , by Lemma A.5, adding and subtracting ¯J−1S0,
+
+pTw( ˆΘ − ¯Θ) = ˆJ−1(S0 + R) = ¯J−1S0 + ( ˆJ−1 − ¯J−1)S0 + ˆJ−1R. 
+
+Take entry (r, i ) and divide by √vT,ri . Define, on the whole sample space, 
+
+ZT := 
+
+√Tw( ˆΘri − ¯Θri )
+
+√vT,ri 
+
+, NT := ( ¯J−1S0)ri 
+
+√vT,ri 
+
+, UT := ZT − NT .
+
+On ET , UT = ( ˆJ−1 − ¯J−1)S0 + ˆJ−1R
+
+> ri
+
+/√vT,ri .
+
+Bound UT on ET . By |Mri | ≤ ∥ M ∥ (an entry is at most the operator norm), then ∥AB ∥ ≤ ∥ A∥ ∥ B∥ and ∥M ∥ ≤ | M |F ,then Lemma A.6(ii)–(iii) and vT,ri ≥ cv (Lemma A.9(a)), 
+
+|UT | ≤ ∥( ˆJ−1 − ¯J−1)S0∥ + ∥ ˆJ−1R∥√cv
+
+≤ ∥ ˆJ−1 − ¯J−1∥ | S0|F + ∥ ˆJ−1∥ | R|F
+
+√cv
+
+≤ 1
+
+√cv
+
+ 2
+
+c2
+
+> J
+
+∥ ˆJ − ¯J∥ | S0|F + 2
+
+cJ
+
+|R|F
+
+
+
+=: ¯ ρT .
+
+The bound ¯ρT is defined on the whole sample space and ¯ρTp
+
+−→ 0: ∥ ˆJ − ¯J∥ = op(1) (Lemma A.6(i)) times |S0|F = Op(1) 
+
+(Lemma A.9(c)) is op(1) (as Op(1) · op(1) = op(1) ); |R|F = op(1) ; and so the sum is op(1) . Therefore, for every ϵ > 0,
+
+P (|UT | > ϵ ) ≤ P (EcT ) + P (ET ∩ {| UT | > ϵ }) ≤ P (EcT ) + P (¯ ρT > ϵ ) −→ 0,
+
+so UTp
+
+−→ 0.
+
+Conclude the first claim. NTd
+
+−→ N (0 , 1) by Lemma A.9(b), and UTp
+
+−→ 0. By Slutsky’s lemma, ZT = NT + UTd
+
+−→ N (0 , 1) .
+
+The second claim. On ET , by Lemma A.5, |AB |F ≤ ∥ A∥ | B|F , the triangle inequality and Lemma A.6(ii), 
+
+pTw | ˆΘ − ¯Θ|F = | ˆJ−1(S0 + R)|F ≤ ∥ ˆJ−1∥ |S0|F + |R|F
+
+ ≤ 2
+
+cJ
+
+ |S0|F + |R|F
+
+.
+
+Given δ > 0, choose M with 16 n2pK 1/28 /(c2 
+
+> J
+
+M 2) ≤ δ. If the right side exceeds M , then |S0|F > c J M/ 4 or |R|F >cJ M/ 4. So, using Chebyshev with Lemma A.9(c) for S0,
+
+P  p Tw| ˆΘ − ¯Θ|F > M  ≤ P (EcT ) + 16 n2pK 1/28
+
+c2 
+
+> J
+
+M 2 + P  |R|F > c J M/ 4 ≤ δ + o(1) ,
+
+since P (EcT ) → 0 and |R|Fp
+
+−→ 0. Hence the probability is at most 2δ for all large T , which is the definition of Op(1) .Proposition A.10 divides by the deterministic scale √vT,ri , which is unknown in practice. Appendix A.3 shows that 
+
+Tw ˆs2 
+
+> ri
+
+− vT,ri p
+
+−→ 0, which completes the proof of Theorem 1. 
+
+A.3 Standard errors, and completion of the proof of Theorem 1 Roadmap. Appendix A.2 showed that √Tw( ˆΘri − ¯Θri ) is approximately N (0 , v T,ri ) (Proposition A.10). The code does not know vT,ri ; it divides by its own standard error ˆsri from (A.14). This section shows that Tw ˆs2 
+
+> ri
+
+is close to vT,ri , so the division gives the right scale. The steps, in order: • Lemma A.11: the residual variance ˆσ2 
+
+> i
+
+is close to the average true noise variance ¯σ2 
+
+> i
+
+.• Lemma A.12: ˆσ2 
+
+> i
+
+[ ˆJ−1]rr is then close to vT,ri , because under (H) the noise variance changes only slowly over the window. • Completion of the proof of Theorem 1: Slutsky’s lemma turns Proposition A.10 into the theorem. Causal Lag Structure Discovery in Confounded Time Series 
+
+Conventions. All statements are for T large enough that Tw > np , which holds eventually because Tw → ∞ by (W). The formula (A.14) for ˆsri (the main-text formula (8)) needs ˆJ to be invertible, and it gives a positive number only if ˆσ2 
+
+> i
+
+> 0. We use the convention of Appendix A.1: if ˆJ is singular or the formula gives ˆsri = 0 , then ˆsri := 1 and zri := 0 . So ˆsri > 0
+
+always, and every ratio with ˆsri in the denominator is defined. The convention never matters for a limit: it can only act off the event ˜ET of Lemma A.12, whose probability tends to 1 and on which the formula holds and is positive, and what happens off an event whose probability tends to one never affects a limit in probability. For a random matrix, “ = Op(1) ”and “ p
+
+−→ 0” are meant entry by entry, as in Limits in Appendix A.1; this is the same as saying that the Frobenius norm is 
+
+Op(1) , or p
+
+−→ 0.Standard matrix and probability rules are named where they are used. 
+
+Lemma A.11 (The residual variance is consistent) . Let ¯σ2 
+
+> i
+
+:= T −1
+
+> w
+
+P 
+
+> t∈W
+
+Σε,ii (t/T ) and KJ the constant of Lemma A.1. Under Assumption 1, for every i ∈ { 1, . . . , n },
+
+cε ≤ ¯σ2 
+
+> i
+
+≤ KJ and ˆσ2 
+
+> i
+
+− ¯σ2
+
+> ip
+
+−→ 0.
+
+In words, the code’s residual variance for equation i settles down to the average true noise variance of equation i over the window. 
+
+Proof. Fix i. We write ⟨x⟩ := T −1
+
+> w
+
+P 
+
+> t∈W
+
+xt for the window average of a sequence xt. The plan: the residual is the true noise plus a remainder (Step 1); the remainder is small because ˆΘ is close to every Θt in the window and the nuisance errors are small (Steps 2–3); the squared true noise averages to ¯σ2 
+
+> i
+
+(Step 4); and the cross term and the degrees-of-freedom factor are then handled (Steps 5–6). Step 0 records bounds on ¯σ2 
+
+> i
+
+used later. 
+
+Step 0 (bounds on ¯σ2 
+
+> i
+
+). Fix t ∈ W and put u := t/T ∈ [0 , 1] . By (H), Σε(u) equals the symmetric matrix E[εtε⊤ 
+
+> t
+
+| F t−1]
+
+almost surely, so Σε(u) is symmetric. By (H) and e⊤ 
+
+> i
+
+Ae i ≥ λmin (A) for a symmetric A, Σε,ii (u) = e⊤ 
+
+> i
+
+Σε(u)ei ≥
+
+λmin (Σ ε(u)) ≥ cε. Taking expectations in (H) (tower property), then Lemma A.1, 
+
+Σε,ii (u) = E(εt)2 
+
+> i
+
+≤ E|εt|2 ≤ KJ .
+
+Since ¯σ2 
+
+> i
+
+is the average of these numbers over t ∈ W , cε ≤ ¯σ2 
+
+> i
+
+≤ KJ .
+
+Step 1 (residual identity). Recall (A.24): ˜Yt = Θ⊤ 
+
+> t
+
+˜Tt + ∆ g,t + εt. Substituting this into the residual ˆet = ˜Yt − ˆΘ⊤ ˜Tt of (A.13) gives 
+
+ˆet = Θ⊤ 
+
+> t
+
+˜Tt + ∆ g,t + εt − ˆΘ⊤ ˜Tt = εt + ρt, where ρt := ∆ g,t + ( Θt − ˆΘ)⊤ ˜Tt.
+
+This is pure algebra on the probability-one event of Lemma A.2 and holds for every value of ˆΘ, including the convention 
+
+ˆΘ = 0 when ˆJ is singular. Taking coordinate i: (ˆ et)i = ( εt)i + ( ρt)i.
+
+Step 2 (the coefficient gap is uniformly small). Let δT := max t∈W ∥Θt − ˆΘ∥. For each t ∈ W , by the triangle inequality, the definition Dt = Θt − ¯Θ, and Lemma A.3(iii), 
+
+∥Θt − ˆΘ∥ ≤ ∥ Θt − ¯Θ∥ + ∥ ¯Θ − ˆΘ∥ = ∥Dt∥ + ∥ ˆΘ − ¯Θ∥ ≤ wT + ∥ ˆΘ − ¯Θ∥.
+
+The right side does not depend on t, so it also bounds δT . Since ∥M ∥ ≤ | M |F ,
+
+∥ ˆΘ − ¯Θ∥ ≤ | ˆΘ − ¯Θ|F = T −1/2 
+
+> w
+
+ZT , ZT := pTw ( ˆΘ − ¯Θ) F .
+
+Hence 0 ≤ δT ≤ wT + T −1/2 
+
+> w
+
+ZT . Here ZT = Op(1) by Proposition A.10. Both wT = L(KJ /c J ) Tw/T and T −1/2 
+
+> w
+
+are deterministic and tend to 0 by (W) (which gives Tw/T → 0 and Tw → ∞ ). So T −1/2 
+
+> w
+
+ZTp
+
+−→ 0 (a vanishing number times an Op(1) term), and hence δTp
+
+−→ 0.
+
+Step 3 (the remainder is small on average). Since (ρt)i is a coordinate of ρt, (ρt)2 
+
+> i
+
+≤ | ρt|2. Expanding ρt and using 
+
+|x + y|2 ≤ 2|x|2 + 2 |y|2, then |M ⊤x| ≤ ∥ M ∥ | x| with the definition of δT , then ˜Tt = Vt − ∆T,t from (A.23) and the same inequality again: 
+
+|ρt|2 ≤ 2|∆g,t |2 + 2 (Θt − ˆΘ)⊤ ˜Tt
+
+> 2
+
+≤ 2|∆g,t |2 + 2 δ2 
+
+> T
+
+| ˜Tt|2
+
+= 2 |∆g,t |2 + 2 δ2 
+
+> T
+
+|Vt − ∆T,t |2
+
+≤ 2|∆g,t |2 + 4 δ2 
+
+> T
+
+|Vt|2 + 4 δ2 
+
+> T
+
+|∆T,t |2.Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Averaging over t ∈ W (δT does not depend on t): 
+
+⟨ρ2
+
+> ·,i
+
+⟩ ≤ 2⟨| ∆g, ·|2⟩ + 4 δ2 
+
+> T
+
+⟨| V·|2⟩ + 4 δ2 
+
+> T
+
+⟨| ∆T, ·|2⟩. (A.35) We treat the three averages in turn. (i) ⟨| ∆T, ·|2⟩ p
+
+−→ 0 by (A.17) in (N1). (ii) ⟨| ∆g, ·|2⟩ p
+
+−→ 0. In words: the outcome-equation error ∆g,t = Θ⊤ 
+
+> t
+
+∆T,t − ∆Y,t is built from the two learner errors with bounded coefficients, so it is small when they are. In detail, let ∥Θ∥∞ := sup u∈[0 ,1] ∥Θ(u)∥; by (S)(i), ∥Θ(u)∥ ≤ ∥Θ(0) ∥+Lu , so ∥Θ∥∞ ≤ ∥ Θ(0) ∥+L < ∞. By the triangle inequality, |M ⊤x| ≤ ∥ M ∥ | x| and (x+y)2 ≤ 2x2 +2 y2,
+
+|∆g,t |2 ≤  ∥Θ∥∞|∆T,t | + |∆Y,t |2 ≤ CΘ
+
+ |∆T,t |2 + |∆Y,t |2, CΘ := 2 max( ∥Θ∥2
+
+> ∞
+
+, 1) .
+
+Averaging, 0 ≤ ⟨| ∆g, ·|2⟩ ≤ CΘ
+
+ ⟨| ∆T, ·|2⟩ + ⟨| ∆Y, ·|2⟩. Both averages on the right tend to 0 in probability, by (A.17) and (A.18) in (N1), so the right side does too, and hence so does the left side. (iii) ⟨| V·|2⟩ = Op(1) . By Lemma A.1, E|Vt|2 ≤ KJ for every t, so by linearity E⟨| V·|2⟩ = ⟨E|V·|2⟩ ≤ KJ for every T .So it is Op(1) by Markov’s inequality. Since δTp
+
+−→ 0 (Step 2), also δ2
+
+> Tp
+
+−→ 0. Since op(1) · Op(1) = op(1) , δ2 
+
+> T
+
+⟨| V·|2⟩ p
+
+−→ 0 (using (iii)) and δ2 
+
+> T
+
+⟨| ∆T, ·|2⟩ p
+
+−→ 0
+
+(using (i); a term tending to 0 in probability is Op(1) ). With (ii), the right side of (A.35) tends to 0 in probability, hence so does ⟨ρ2
+
+> ·,i
+
+⟩.
+
+Step 4 (the true noise averages to ¯σ2 
+
+> i
+
+). First, the mean of each term. The variable (εt)2 
+
+> i
+
+≤ | εt|2 is integrable, since 
+
+E|εt|2 ≤ KJ by Lemma A.1. By the tower property and (H) (the conditional expectation of the (i, i ) entry is the (i, i ) entry of the conditional expectation), 
+
+E (εt)2 
+
+> i
+
+= EE[( εt)2 
+
+> i
+
+| F t−1] = EΣε,ii (t/T ) = Σ ε,ii (t/T ),
+
+the last step because Σε is deterministic. Averaging, ⟨E ε2
+
+> ·,i
+
+⟩ = ¯ σ2 
+
+> i
+
+. Next, ft := ( εt)2 
+
+> i
+
+is the (i, i ) entry of εtε⊤ 
+
+> t
+
+, so it satisfies the hypotheses of Lemma A.4 (finite second moment by Lemma A.1, covariance bound by (D)(ii); see the last sentence of Lemma A.4). Lemma A.4 with weights bt ≡ 1 (so B = 1 ) gives 
+
+E ⟨ε2
+
+> ·,i
+
+⟩ − ¯σ2
+
+> i
+
+2 = E
+
+ 1
+
+Tw
+
+X
+
+> t∈W
+
+ (εt)2 
+
+> i
+
+− E (εt)2
+
+> i
+
+2
+
+≤ 2CD
+
+Tw
+
+.
+
+By Chebyshev’s inequality, for every ϵ > 0,
+
+P  |⟨ ε2
+
+> ·,i
+
+⟩ − ¯σ2 
+
+> i
+
+| > ϵ  ≤ E ⟨ε2
+
+> ·,i
+
+⟩ − ¯σ2
+
+> i
+
+2
+
+ϵ2 ≤ 2CD
+
+Tw ϵ2 −→ 0
+
+by (W). So ⟨ε2
+
+> ·,i
+
+⟩ − ¯σ2
+
+> ip
+
+−→ 0. Since 0 ≤ ¯σ2 
+
+> i
+
+≤ KJ (Step 0), also ⟨ε2
+
+> ·,i
+
+⟩ = Op(1) (a bounded number plus an op(1) term). 
+
+Step 5 (the residual average). Square the identity of Step 1, (ˆ et)2 
+
+> i
+
+= (( εt)i + ( ρt)i)2 = ( εt)2 
+
+> i
+
++ 2( εt)i(ρt)i + ( ρt)2 
+
+> i
+
+, and average: 
+
+⟨ˆe2
+
+> ·,i
+
+⟩ − ¯σ2 
+
+> i
+
+=  ⟨ε2
+
+> ·,i
+
+⟩ − ¯σ2
+
+> i
+
+ + 2 ⟨ε·,i ρ·,i ⟩ + ⟨ρ2
+
+> ·,i
+
+⟩.
+
+The first term p
+
+−→ 0 by Step 4 and the last p
+
+−→ 0 by Step 3. For the middle term, Cauchy–Schwarz for averages gives 
+
+⟨ε·,i ρ·,i ⟩ ≤ ⟨ ε2
+
+> ·,i
+
+⟩1/2 ⟨ρ2
+
+> ·,i
+
+⟩1/2,
+
+where the first factor is Op(1) (Step 4, taking square roots) and the second p
+
+−→ 0 (Step 3, taking square roots). So the product 
+
+> p
+
+−→ 0 (Op(1) · op(1) = op(1) ), and so does the middle term. Adding up: ⟨ˆe2
+
+> ·,i
+
+⟩ − ¯σ2
+
+> ip
+
+−→ 0. As in Step 4, it follows that 
+
+⟨ˆe2
+
+> ·,i
+
+⟩ = Op(1) .
+
+Step 6 (degrees of freedom). By definition ˆσ2 
+
+> i
+
+= ( Tw − np )−1 P 
+
+> t∈W
+
+(ˆ et)2 
+
+> i
+
+= Tw  
+
+> Tw−np
+
+⟨ˆe2
+
+> ·,i
+
+⟩. The −np is the usual OLS degrees-of-freedom correction ( np regressors per equation), and it is what the code uses; for the limit any fixed shift c would do, since Tw/(Tw − c) → 1. Hence 
+
+ˆσ2 
+
+> i
+
+− ¯σ2 
+
+> i
+
+=
+
+ Tw
+
+Tw − np − 1
+
+
+
+⟨ˆe2
+
+> ·,i
+
+⟩ +  ⟨ˆe2
+
+> ·,i
+
+⟩ − ¯σ2
+
+> i
+
+ = np Tw − np ⟨ˆe2
+
+> ·,i
+
+⟩ +  ⟨ˆe2
+
+> ·,i
+
+⟩ − ¯σ2
+
+> i
+
+.Causal Lag Structure Discovery in Confounded Time Series 
+
+The deterministic factor np/ (Tw − np ) → 0 by (W), and ⟨ˆe2
+
+> ·,i
+
+⟩ = Op(1) , so the first term p
+
+−→ 0. The second p
+
+−→ 0 by Step 5. Adding, ˆσ2 
+
+> i
+
+− ¯σ2
+
+> ip
+
+−→ 0.
+
+Lemma A.12 (The standard error has the right scale) . Assume Assumption 1. Fix an entry (r, i ), let a = ¯J−1er and 
+
+vT,ri = T −1
+
+> w
+
+P 
+
+> t∈W
+
+Σε,ii (t/T ) a⊤Jta as in Lemma A.9, and let cv ≤ vT,ri ≤ Cv be the bounds of Lemma A.9(a). With 
+
+ET = {λmin ( ˆJ) ≥ cJ /2} the event of Lemma A.6, let 
+
+˜ET := ET ∩ ˆσ2 
+
+> i
+
+≥ cε/2 , GT := ˜ET ∩ |Tw ˆs2 
+
+> ri
+
+− vT,ri | ≤ cv /2 .
+
+(a) Tw ˆs2 
+
+> ri
+
+− vT,ri p
+
+−→ 0.(b) P ( ˜ET ) → 1 and P (GT ) → 1. On ˜ET (so also on GT ⊆ ˜ET ), ˆJ is invertible and Tw ˆs2 
+
+> ri
+
+= ˆ σ2 
+
+> i
+
+[ ˆJ−1]rr > 0, so the convention for ˆsri and zri is not used. On GT , moreover, √Tw ˆsri ≥ pcv /2.(c) 1GT
+
+√vT,ri 
+
+√Tw ˆsri 
+
+− 1 p
+
+−→ 0.
+
+In words, √Tw times the code’s standard error is close to √vT,ri , the true standard deviation from Lemma A.9, and it stays bounded away from zero. 
+
+Proof. Throughout the proof we write 
+
+v := vT,ri , h := [ ˆJ−1]rr = e⊤ 
+
+> r
+
+ˆJ−1er (on ˜ET ), ¯h := [ ¯J−1]rr = e⊤ 
+
+> r
+
+¯J−1er , (A.36) so h and ¯h are the (r, r ) diagonal entries of the two inverses, written also as quadratic forms in the unit vector er (as in Lemma A.9); we use whichever form is shorter. The plan: Tw ˆs2 
+
+> ri
+
+= ˆ σ2 
+
+> i
+
+h on the good event ˜ET (Step 0). We compare ˆσ2 
+
+> i
+
+h
+
+with v through the middle term ¯σ2 
+
+> i
+
+¯h: the gap v − ¯σ2 
+
+> i
+
+¯h is deterministic and small because the noise variance changes slowly (Steps 1–2), and the gap ˆσ2 
+
+> i
+
+h − ¯σ2 
+
+> i
+
+¯h is small in probability by Lemmas A.11 and A.6 (Step 3). Steps 4–6 then read off (a), (b) and (c). 
+
+Step 0 (the event ˜ET ). First we show that P ( ˜ET ) → 1, by showing that the complement ˜EcT = EcT ∪ { ˆσ2 
+
+> i
+
+< c ε/2}
+
+has probability tending to 0. Lemma A.11 gives ¯σ2 
+
+> i
+
+≥ cε, so if ˆσ2 
+
+> i
+
+< c ε/2 then ¯σ2 
+
+> i
+
+− ˆσ2 
+
+> i
+
+> c ε − cε/2 = cε/2. Thus 
+
+{ˆσ2 
+
+> i
+
+< c ε/2} ⊆ {| ˆσ2 
+
+> i
+
+− ¯σ2 
+
+> i
+
+| > c ε/2}, and by a union bound 
+
+P ( ˜EcT ) ≤ P (EcT ) + P  |ˆσ2 
+
+> i
+
+− ¯σ2 
+
+> i
+
+| > c ε/2 −→ 0,
+
+by Lemma A.6(ii) for the first term and Lemma A.11 for the second. Second, what holds on ˜ET . The matrix ˆJ =
+
+T −1
+
+> w
+
+P 
+
+> t∈W
+
+˜Tt ˜T⊤ 
+
+> t
+
+is symmetric with λmin ( ˆJ) ≥ cJ /2, so (by its spectral decomposition) it is invertible, ∥ ˆJ−1∥ ≤ 2/c J ,and h = e⊤ 
+
+> r
+
+ˆJ−1er ≥ λmin ( ˆJ−1) > 0 (by (A.36), and since a quadratic form in a unit vector is at least the smallest eigenvalue). Hence the formula (A.14) applies and gives ˆσ2 
+
+> i
+
+h/T w ≥ (cε/2) h/T w > 0, so the convention is not used and 
+
+Tw ˆs2 
+
+> ri
+
+= ˆ σ2 
+
+> i
+
+h on ˜ET . (A.37) 
+
+Step 1 (rewrite ¯σ2 
+
+> i
+
+¯h as a window average). Since ¯J is symmetric, so is ¯J−1, and a⊤ = e⊤ 
+
+> r
+
+¯J−1. Hence 
+
+a⊤ ¯Ja = e⊤ 
+
+> r
+
+¯J−1 ¯J ¯J−1er = e⊤ 
+
+> r
+
+¯J−1er = ¯h by (A.36) .
+
+Since ¯J = T −1
+
+> w
+
+P 
+
+> t∈W
+
+Jt, linearity gives a⊤ ¯Ja = T −1
+
+> w
+
+P 
+
+> t∈W
+
+a⊤Jta. Therefore 
+
+¯σ2 
+
+> i
+
+¯h = 1
+
+Tw
+
+X
+
+> t∈W
+
+¯σ2 
+
+> i
+
+a⊤Jta. 
+
+Step 2 (the deterministic gap v − ¯σ2 
+
+> i
+
+¯h). Subtracting Step 1 from the definition of v,
+
+v − ¯σ2 
+
+> i
+
+¯h = 1
+
+Tw
+
+X
+
+> t∈W
+
+ Σε,ii (t/T ) − ¯σ2
+
+> i
+
+ a⊤Jta. Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+We bound the two factors. For t ∈ W , since ¯σ2 
+
+> i
+
+is the average of Σε,ii (t′/T ) over t′ ∈ W ,
+
+Σε,ii (t/T ) − ¯σ2 
+
+> i
+
+= 1
+
+Tw
+
+X
+
+> t′∈W
+
+ Σε,ii (t/T ) − Σε,ii (t′/T ).
+
+By |Mii | ≤ ∥ M ∥ and the Lipschitz bound in (H), each summand satisfies 
+
+|Σε,ii (t/T ) − Σε,ii (t′/T )| ≤ ∥ Σε(t/T ) − Σε(t′/T )∥ ≤ Lε
+
+|t − t′|
+
+T ≤ Lε
+
+Tw − 1
+
+T ,
+
+since two indices in W differ by at most Tw − 1. An average of Tw numbers of absolute value at most Lε(Tw − 1) /T has absolute value at most Lε(Tw − 1) /T , so 
+
+|Σε,ii (t/T ) − ¯σ2 
+
+> i
+
+| ≤ Lε
+
+Tw − 1
+
+T ≤ Lε
+
+Tw
+
+T (t ∈ W ).
+
+The second factor is nonnegative: a is deterministic and Jt = E[VtV⊤ 
+
+> t
+
+], so a⊤Jta = E[( a⊤Vt)2] ≥ 0. Hence 
+
+|v − ¯σ2 
+
+> i
+
+¯h| ≤ 1
+
+Tw
+
+X
+
+> t∈W
+
+|Σε,ii (t/T ) − ¯σ2 
+
+> i
+
+| a⊤Jta ≤ Lε
+
+Tw
+
+T · 1
+
+Tw
+
+X
+
+> t∈W
+
+a⊤Jta = Lε
+
+Tw
+
+T ¯h, 
+
+using Step 1 in the last equality. Finally ¯h ≤ ∥ ¯J−1∥ ≤ 1/c J by |Mrr | ≤ ∥ M ∥ and Lemma A.3(i). So 
+
+|v − ¯σ2 
+
+> i
+
+¯h| ≤ Lε
+
+cJ
+
+· Tw
+
+T −→ 0, (A.38) because Tw/T → 0 by (W). 
+
+Step 3 (the random gap, on ˜ET ). On ˜ET , by (A.37), Tw ˆs2 
+
+> ri
+
+= ˆ σ2 
+
+> i
+
+h. Add and subtract ¯σ2 
+
+> i
+
+h:
+
+ˆσ2 
+
+> i
+
+h − ¯σ2 
+
+> i
+
+¯h = ˆ σ2 
+
+> i
+
+h − ¯σ2 
+
+> i
+
+h + ¯ σ2 
+
+> i
+
+h − ¯σ2 
+
+> i
+
+¯h = (ˆ σ2 
+
+> i
+
+− ¯σ2 
+
+> i
+
+) h + ¯ σ2 
+
+> i
+
+(h − ¯h).
+
+On ˜ET , |h| ≤ ∥ ˆJ−1∥ ≤ 2/c J (an entry is at most the operator norm; Step 0). Also ˜ET ⊆ ET , so Lemma A.6(iii) applies on 
+
+˜ET and, with the same fact, 
+
+|h − ¯h| = [ ˆJ−1 − ¯J−1]rr ≤ ∥ ˆJ−1 − ¯J−1∥ ≤ 2
+
+c2
+
+> J
+
+∥ ˆJ − ¯J∥.
+
+With 0 < ¯σ2 
+
+> i
+
+≤ KJ (Lemma A.11) and the triangle inequality: 
+
+1 ˜ET Tw ˆs2 
+
+> ri
+
+− ¯σ2 
+
+> i
+
+¯h ≤ 2
+
+cJ
+
+|ˆσ2 
+
+> i
+
+− ¯σ2 
+
+> i
+
+| + 2KJ
+
+c2
+
+> J
+
+∥ ˆJ − ¯J∥.
+
+The first term p
+
+−→ 0 by Lemma A.11 (times the constant 2/c J ). The second term p
+
+−→ 0 by Lemma A.6(i) (times the constant 
+
+2KJ /c 2 
+
+> J
+
+). Adding, 1 ˜ET |Tw ˆs2 
+
+> ri
+
+− ¯σ2 
+
+> i
+
+¯h| p
+
+−→ 0.
+
+Step 4 (proof of (a)). By the triangle inequality, 
+
+1 ˜ET |Tw ˆs2 
+
+> ri
+
+− v| ≤ 1 ˜ET |Tw ˆs2 
+
+> ri
+
+− ¯σ2 
+
+> i
+
+¯h| + |¯σ2 
+
+> i
+
+¯h − v|.
+
+The first term p
+
+−→ 0 by Step 3; the second is deterministic and → 0 by (A.38). So the left side p
+
+−→ 0. Since P ( ˜ET ) → 1 by Step 0, and what happens off ˜ET does not affect the limit, we get Tw ˆs2 
+
+> ri
+
+− v p
+
+−→ 0.
+
+Step 5 (proof of (b)). P ( ˜ET ) → 1 and the statement about ˜ET were shown in Step 0. By a union bound, 
+
+P (GcT ) ≤ P ( ˜EcT ) + P  |Tw ˆs2 
+
+> ri
+
+− v| > c v /2 −→ 0,
+
+by Step 0 and part (a). On GT , using v ≥ cv , Tw ˆs2 
+
+> ri
+
+≥ v − cv /2 ≥ cv − cv /2 = cv /2; taking square roots gives √Tw ˆsri ≥ pcv /2.
+
+Step 6 (proof of (c)). On GT put x := √Tw ˆsri , so x ≥ pcv /2 > 0 by (b), and √v ≥ √cv . Using √v − x =(v − x2)/(√v + x) and √v + x ≥ √cv ,
+
+√vx − 1 = |√v − x|
+
+x = |v − x2|
+
+(√v + x) x ≤ |v − x2|√cv
+
+pcv /2 =
+
+√2
+
+cv
+
+Tw ˆs2 
+
+> ri
+
+− v .
+
+So 1GT |√v/x − 1| ≤ (√2/c v )|Tw ˆs2 
+
+> ri
+
+− v| p
+
+−→ 0 by part (a). Causal Lag Structure Discovery in Confounded Time Series 
+
+Completion of the proof of Theorem 1. The proof is now a short chain: Proposition A.10 gives the normal limit on the scale √vT,ri , Lemma A.12 swaps that scale for the code’s standard error, and Lemma A.3(iv) controls the recentring. 
+
+Proof of Theorem 1. Fix (r, i ) and let GT be the event of Lemma A.12, so P (GT ) → 1 and ˆsri > 0 on GT .
+
+Step 1 (the t-ratio). Let QT := ( ˆΘri − ¯Θri )/ˆsri and 
+
+XT := 
+
+√Tw ( ˆΘri − ¯Θri )
+
+√vT,ri 
+
+, YT := 1 + 1GT
+
+ √vT,ri 
+
+√Tw ˆsri 
+
+− 1
+
+
+
+.
+
+On GT , multiplying and dividing by √Tw
+
+√vT,ri ,
+
+QT =
+
+√Tw ( ˆΘri − ¯Θri )
+
+√vT,ri 
+
+·√vT,ri 
+
+√Tw ˆsri 
+
+= XT YT on GT .
+
+Now XTd
+
+−→ N (0 , 1) by Proposition A.10, YTp
+
+−→ 1 by Lemma A.12(c), and UT := QT − XT YTp
+
+−→ 0, since P (GT ) → 1
+
+and UT = 0 on GT . ( QT = XT YT holds only on GT ; the term UT makes QT = XT YT + UT hold at every outcome.) To use Slutsky’s lemma in the additive form stated before Proposition A.10, write 
+
+QT = XT + XT (YT − 1) + UT
+
+.
+
+A sequence that converges in distribution is Op(1) , so XT = Op(1) ; with YT − 1 p
+
+−→ 0 this gives XT (YT − 1) = op(1) ,since Op(1) · op(1) = op(1) . So the bracket is op(1) , and by Slutsky’s lemma, QTd
+
+−→ N (0 , 1) . This is the first claim of the theorem. 
+
+Step 2 (the bias bound). Lemma A.3(iv) gives ∥ ¯Θ − Θ(u0)∥ ≤ wT = C T w/T with C := L K J /c J . This bound is used in Step 3. 
+
+Step 3 (recentring at Θ(u0)). Assume Tw = o(T 2/3), i.e. Tw/T 2/3 → 0. Raising to the power 3/2 (a continuous map with 
+
+0 7 → 0) gives T 3/2 
+
+> w
+
+/T = ( Tw/T 2/3)3/2 → 0. Write 
+
+ˆΘri − Θri (u0)ˆsri 
+
+= QT + U ′ 
+
+> T
+
+, U ′ 
+
+> T
+
+:= bT
+
+ˆsri 
+
+, bT := ¯Θri − Θri (u0),
+
+where bT is deterministic. By |Mri | ≤ ∥ M ∥ and Step 2, |bT | ≤ ∥ ¯Θ − Θ(u0)∥ ≤ C T w/T . On GT , by Lemma A.12(b), √Tw ˆsri ≥ pcv /2, so 
+
+1GT |U ′ 
+
+> T
+
+| = 1GT
+
+√Tw |bT |√Tw ˆsri 
+
+≤
+
+r 2
+
+cv
+
+C T 3/2
+
+> w
+
+T −→ 0.
+
+Since P (GT ) → 1, U ′
+
+> Tp
+
+−→ 0. By Step 1 and Slutsky’s lemma, ( ˆΘri − Θri (u0)) /ˆsri d
+
+−→ N (0 , 1) . So ¯Θri may be replaced by Θri (u0).
+
+A.4 Definitions and Proof of Proposition A.13 Proposition A.13 (Connection to Granger Non-Causality) . Assume the stationary partially linear model (4) –(5) with Tt
+
+square-integrable and J := E[VtV⊤ 
+
+> t
+
+] positive definite. Under causal sufficiency (i.e., Wt contains all common causes of 
+
+Yt and its lags), the entry Ak[i, j ] = 0 as estimated by DML-VAR if and only if Y (j) does not Granger-cause Y (i) at lag 
+
+k, conditional on the full information set Ft−1 = σ(Yt−1, Yt−2, . . . , Wt−1, Wt−2, . . . ). For the direction from Granger non-causality to Ak[i, j ] = 0 , assume also the non-degeneracy condition : Y (j) 
+
+> t−k
+
+is not almost surely a function of the other variables in Ft−1.
+
+Proposition A.13 connects the algebraic condition Ak[i, j ] = 0 (a statement about model coefficients) to the statistical concept of Granger non-causality (a statement about predictive information). Before proving the result, we state precise definitions of the key concepts. These definitions formalize the central insight of Granger (1969): causes precede and help predict their effects .Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Key Definitions. Definition 2 (Full Information Set) . The full information set available at time t − 1 is the σ-algebra generated by the entire observable history: 
+
+Ft−1 = σ Yt−1, Yt−2, . . . , Wt−1, Wt−2, . . . .
+
+This includes every endogenous variable Y (s) 
+
+> t−ℓ
+
+and every exogenous variable Wr,t −ℓ for all s, r and all lags ℓ ≥ 1.
+
+Definition 3 (Granger Causality; Granger (1969)) . Variable Y (j) Granger-causes variable Y (i) with respect to the informa-tion set Ft−1 if there exists some lag k ≥ 1 such that 
+
+EY (i) 
+
+> t
+
+| F t−1
+
+̸ = EY (i) 
+
+> t
+
+| F t−1 \ { Y (j)
+
+> t−k
+
+}.
+
+In words: Y (j) Granger-causes Y (i) if at least one past value Y (j) 
+
+> t−k
+
+carries predictive information about Y (i) 
+
+> t
+
+that is not already contained in the remaining variables. Removing that one lagged value from the information set strictly worsens the optimal (mean-squared-error) forecast of Y (i) 
+
+> t
+
+.
+
+Definition 4 (Granger Non-Causality at Lag k). Variable Y (j) does not Granger-cause variable Y (i) at lag k with respect to Ft−1 if 
+
+EY (i) 
+
+> t
+
+| F t−1
+
+ = EY (i) 
+
+> t
+
+| F t−1 \ { Y (j)
+
+> t−k
+
+}.
+
+That is, the specific value Y (j) 
+
+> t−k
+
+adds no marginal predictive information about Y (i) 
+
+> t
+
+beyond what is already known from all other variables. Note that this is a lag-specific concept: Y (j) may Granger-cause Y (i) at lag 1 but not at lag 2, for example. Equivalently, Y (j) Granger-causes Y (i) at lag k if removing Y (j) 
+
+> t−k
+
+from the conditioning set does change the optimal forecast of Y (i) 
+
+> t
+
+.
+
+Definition 5 (Causal Sufficiency) . The exogenous variable set Wt satisfies causal sufficiency for the endogenous system Yt
+
+if every common cause of any pair of variables in Yt (at any lag) is either (i) already included in Yt itself, or (ii) contained in Wt. Formally, there exists no unobserved stochastic process Ut such that Ut simultaneously causes both Y (j) 
+
+> t−k
+
+and Y (i)
+
+> t
+
+for any i, j ∈ { 1, . . . , n } and any k ≥ 1.
+
+Remark 2 (Why Causal Sufficiency Matters) . Causal sufficiency is the critical bridge between statistical Granger causality (a statement about prediction) and structural causality (a statement about direct causal mechanisms). Without it, the equivalence in Proposition A.13 can fail. Figure 6 shows the failure (panel b) and a hidden variable that does not cause one (panel c): • Spurious edges (false positives): An unobserved common cause U of both Y (j) and Y (i) induces a statistical association between them. Since U is not in Wt, DML cannot control for it. The estimator attributes U ’s confounding effect to a direct Y (j) → Y (i) link, yielding ˆAk[i, j ]̸ = 0 even when no direct causal relationship exists. • Hidden mediators (indirect edges, not a failure): An unobserved mediator U lies on the sole causal pathway from 
+
+Y (j) to Y (i) (i.e., Y (j) → U → Y (i)), and no direct Y (j) → Y (i) edge exists. A mediator is not a common cause, so Definition 5 still holds, and the edge is not lost: with U unobserved, the past of Y (j) carries U ’s signal. The edge is real and Y (j) does Granger-cause Y (i); only reading it as a direct mechanism would be wrong. 
+
+Proof. We now prove the equivalence stated in Proposition A.13. The proof has two directions: showing that a zero coefficient implies Granger non-causality (the “easier” direction), and that Granger non-causality implies a zero coefficient (which requires causal sufficiency and the non-degeneracy condition). 
+
+Proof of Proposition A.13. Setup and notation. Recall the partially linear VAR model (2). For a specific outcome variable 
+
+Y (i), the model reads: 
+
+Y (i) 
+
+> t
+
+=
+
+> p
+
+X
+
+> ℓ=1
+> n
+
+X
+
+> s=1
+
+Aℓ[i, s ] Y (s)
+
+> t−ℓ
+
+| {z } 
+
+> linear in lagged Y
+
++ g(i)(Ct)
+
+| {z }
+
+> nonlinear in confounders
+
++ ε(i)
+
+> t
+
+|{z} 
+
+> innovation
+
+, (A.39) where Ct = ( W⊤
+
+> t−1
+
+, . . . , W⊤
+
+> t−p
+
+)⊤ stacks the lagged confounders and E[ε(i) 
+
+> t
+
+| F t−1] = 0 .Causal Lag Structure Discovery in Confounded Time Series 
+
+Y (j) 
+
+> t−k
+
+Y (i)
+
+> t
+
+Wt    
+
+> Ak[i, j ]ˆAk[i, j ]̸= 0 ✓
+
+(a) Causal sufficiency holds  
+
+> Wtobserved and controlled by DML. True causal effect correctly identified.
+
+Y (j) 
+
+> t−k
+
+Y (i)
+
+> t
+
+Ut   
+
+> ˆAk[i, j ]̸= 0 ×
+
+(b) Spurious edge (false positive)          
+
+> Utunobserved common cause. No direct Y(j)→Y(i)edge exists, but omitted Ucreates a spurious one.
+
+Y (j) 
+
+> t−k
+
+Y (i)
+
+> t
+
+Ut   
+
+> ˆAk[i, j ]̸= 0 (indirect)
+
+(c) Hidden mediator (edge kept)         
+
+> Utunobserved mediator on the sole causal path Y(j)→U→Y(i).Edge is found, but it is indirect.
+
+Observed variable Unobserved variable True causal edge Confounder effect Correctly inferred Incorrectly inferred Hidden (from unobs.) 
+
+Figure 6: Three scenarios illustrating the role of causal sufficiency in Proposition A.13. (a) When all confounders are observed ( Wt), DML correctly controls for them and the estimated coefficient ˆAk[i, j ] reflects the true causal relationship. 
+
+(b) An unobserved common cause Ut (dashed circle) of Y (j) and Y (i) creates a spurious association: DML estimates 
+
+ˆAk[i, j ]̸ = 0 even though no direct causal link exists. (c) An unobserved mediator Ut on the sole causal pathway from Y (j)
+
+to Y (i): the indirect effect Y (j) → U → Y (i) is not lost. It appears as a nonzero ˆAk[i, j ] at the lag where the two steps add up, so the edge is real but indirect. Causal sufficiency (Definition 5) rules out scenario (b) by requiring that all common causes are observed; scenario (c) does not violate it, because a mediator is not a common cause. The full information set (Definition 2) is Ft−1 = σ(Yt−1, Yt−2, . . . , Wt−1, Wt−2, . . . ). Taking the conditional expectation of (A.39) with respect to Ft−1 and using the zero-mean innovation property, we obtain 
+
+EY (i) 
+
+> t
+
+| F t−1
+
+ =
+
+> p
+
+X
+
+> ℓ=1
+> n
+
+X
+
+> s=1
+
+Aℓ[i, s ] Y (s) 
+
+> t−ℓ
+
++ g(i)(Ct). (A.40) This is the best prediction (in the L2 sense) of Y (i) 
+
+> t
+
+given all available past information. Notice that this expression has two parts: a linear part that depends on lagged Y through the coefficients Aℓ[i, s ], and a nonparametric part g(i)(Ct) that depends only on the confounders. The coefficient Ak[i, j ] captures the direct, linear contribution of Y (j) 
+
+> t−k
+
+to the forecast of 
+
+Y (i) 
+
+> t
+
+.
+
+Direction (a): Zero coefficient ⇒ Granger non-causality. 
+
+Goal: Show that if Ak[i, j ] = 0 , then Y (j) does not Granger-cause Y (i) at lag k (Definition 4). 
+
+Proof of direction (a): Suppose Ak[i, j ] = 0 . We need to show that removing Y (j) 
+
+> t−k
+
+from the conditioning set does not change the conditional expectation of Y (i) 
+
+> t
+
+. Expanding (A.40), we can isolate the contribution of Y (j)
+
+> t−k
+
+:
+
+EY (i) 
+
+> t
+
+| F t−1
+
+ = Ak[i, j ] Y (j) 
+
+> t−k
+
++ X
+
+> (ℓ,s )̸=( k,j )
+
+Aℓ[i, s ] Y (s) 
+
+> t−ℓ
+
++ g(i)(Ct)
+
+| {z }  
+
+> does not depend on Y(j)
+> t−k
+
+= 0 · Y (j) 
+
+> t−k
+
++ X
+
+> (ℓ,s )̸=( k,j )
+
+Aℓ[i, s ] Y (s) 
+
+> t−ℓ
+
++ g(i)(Ct)= X
+
+> (ℓ,s )̸=( k,j )
+
+Aℓ[i, s ] Y (s) 
+
+> t−ℓ
+
++ g(i)(Ct). (A.41) Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Since Ak[i, j ] = 0 , the term involving Y (j) 
+
+> t−k
+
+vanishes. The remaining expression in (A.41) depends only on variables in 
+
+Ft−1 \ { Y (j)
+
+> t−k
+
+}. In particular, the confounder term g(i)(Ct) depends only on lagged W and is completely unaffected by 
+
+Y (j)
+
+> t−k
+
+. Therefore: 
+
+EY (i) 
+
+> t
+
+| F t−1
+
+ = EY (i) 
+
+> t
+
+| F t−1 \ { Y (j)
+
+> t−k
+
+},
+
+which is exactly the definition of Granger non-causality at lag k (Definition 4). □ (Direction a) 
+
+Intuition: This direction is straightforward—if the coefficient is zero, then Y (j) 
+
+> t−k
+
+simply does not appear in the prediction formula. Removing it from the information set has no effect. Note that this direction does not require causal sufficiency: it holds regardless of whether there are unobserved variables. 
+
+Direction (b): Granger non-causality ⇒ zero coefficient. 
+
+Goal: Show that if Y (j) does not Granger-cause Y (i) at lag k, then Ak[i, j ] = 0 .
+
+This is the harder direction. It requires three conditions: (i) the model (2) is correctly specified, (ii) causal sufficiency holds, and (iii) the non-degeneracy condition of Proposition A.13 holds. The proof proceeds in three steps. 
+
+Step 1: Correct model specification under causal sufficiency. 
+
+Under causal sufficiency (Definition 5), all common causes of Yt are either in Yt itself or in Wt. This means that the partially linear model (2) captures all relevant sources of variation in Y (i) 
+
+> t
+
+: the lagged endogenous variables Yt−1, . . . , Yt−p
+
+account for direct causal effects, and the confounder function g(i)(Ct) absorbs the effect of every exogenous common cause. There is no omitted variable, so equation (A.40) is the true conditional expectation: 
+
+EY (i) 
+
+> t
+
+| F t−1
+
+ =
+
+> p
+
+X
+
+> ℓ=1
+> n
+
+X
+
+> s=1
+
+Aℓ[i, s ] Y (s) 
+
+> t−ℓ
+
++ g(i)(Ct) (exact, not an approximation) .
+
+Step 2: Unique decomposition via DML orthogonality. 
+
+We use the stacked notation of (3). Let Θ·i ∈ Rnp be column i of Θ, so that the linear part of (A.40) is Θ⊤·i Tt. Entry 
+
+r := ( k − 1) n + j of Θ·i is Θri = Ak[i, j ], the coefficient on (Tt)r = Y (j)
+
+> t−k
+
+. Let Vt := Tt − gT (Ct) be the treatment residual of (5): the part of the lags that the confounders cannot predict. Since Tt is square-integrable (and so, by stationarity, is Yt), every expectation below is finite. By construction Vt is orthogonal to every square-integrable function of Ct, and its second-moment matrix is the J of Proposition A.13: 
+
+EVt | Ct
+
+ = 0, J = EVtV⊤
+
+> t
+
+.
+
+This orthogonality is critical because it ensures a unique decomposition of the conditional expectation into its linear and nonparametric parts. To see why, suppose two coefficient vectors Θ·i, Θ′·i and two nuisance functions g(i), g′(i) yield the same conditional expectation: 
+
+Θ⊤·i Tt + g(i)(Ct) = Θ′⊤ ·i Tt + g′(i)(Ct) a.s. Rearranging, multiplying on the left by the vector Vt and taking expectations gives 
+
+EVtT⊤
+
+> t
+
+  Θ·i − Θ′·i
+
+ = E
+
+h
+
+Vt
+
+ g′(i)(Ct) − g(i)(Ct)i
+
+= 0,
+
+where the last equality uses E[Vt | Ct] = 0 (the orthogonality property): a residual with conditional mean zero is uncorrelated with every square-integrable function of Ct, and g′(i)(Ct) − g(i)(Ct) = ( Θ·i − Θ′·i)⊤Tt is one. The same property simplifies the left-hand side. Since Tt = gT (Ct) + Vt,
+
+EVtT⊤
+
+> t
+
+ = EVt gT (Ct)⊤| {z } 
+
+> =0
+
++ EVtV⊤
+
+> t
+
+ = J, so J  Θ·i − Θ′·i
+
+ = 0.
+
+By the assumption of Proposition A.13, J is positive definite, hence invertible, which forces Θ·i = Θ′·i (and then 
+
+g(i)(Ct) = g′(i)(Ct) a.s.). Hence the whole coefficient vector of equation i, and in particular its entry Ak[i, j ], is uniquely identified . We project on all of Vt at once because projecting on the single component (Vt)r would leave cross terms with the other components, which need not vanish unless J is diagonal. Causal Lag Structure Discovery in Confounded Time Series 
+
+Step 3: Granger non-causality forces the coefficient to zero. 
+
+Now suppose that Y (j) does not Granger-cause Y (i) at lag k (Definition 4): 
+
+EY (i) 
+
+> t
+
+| F t−1
+
+ = EY (i) 
+
+> t
+
+| F t−1 \ { Y (j)
+
+> t−k
+
+}.
+
+The right-hand side is a function of the variables in Ft−1 \ { Y (j)
+
+> t−k
+
+} only, that is, of the past without Y (j)
+
+> t−k
+
+. By Step 1, the left-hand side equals Θ⊤·i Tt + g(i)(Ct). In the linear component Θ⊤·i Tt, the only term that involves Y (j) 
+
+> t−k
+
+is Θri (Tt)r =
+
+Ak[i, j ] Y (j)
+
+> t−k
+
+; every other entry of Tt is a different variable of the past. The confounder component g(i)(Ct) depends only on Ct = ( W⊤
+
+> t−1
+
+, . . . , W⊤
+
+> t−p
+
+)⊤, which does not include Y (j)
+
+> t−k
+
+. So the non-causality equation reads 
+
+Ak[i, j ] Y (j) 
+
+> t−k
+
++  other terms of Θ⊤·i Tt
+
+ + g(i)(Ct)
+
+| {z }  
+
+> does not involve Y(j)
+> t−k
+
+= EY (i) 
+
+> t
+
+| F t−1 \ { Y (j)
+
+> t−k
+
+}| {z }  
+
+> does not involve Y(j)
+> t−k
+
+a.s. Moving the middle term to the right-hand side, the equality says 
+
+Ak[i, j ] Y (j) 
+
+> t−k
+
+= a function of the other variables in Ft−1 a.s. If Ak[i, j ]̸ = 0 , dividing by it would make Y (j) 
+
+> t−k
+
+itself almost surely a function of the other variables in Ft−1. The non-degeneracy condition of Proposition A.13 rules this out, so Ak[i, j ] = 0 . (Positive definiteness of J, discussed after (S)(ii) in Appendix A.1, does not give this by itself: Y (j) 
+
+> t−k
+
+could be a nonlinear function of the other lags, or of lags beyond p.) Finally, this Ak[i, j ] is also the coefficient that DML-VAR estimates. In the stationary model the coefficients do not change over time, Θt = Θ, so the window target (A.15) is ¯Θ = ¯J−1 ¯J Θ = Θ. Under the conditions of Theorem 1, the estimator 
+
+ˆΘ is centred on ¯Θ, which here equals Θ, and entry r of Θ is Ak[i, j ]. □ (Direction b) 
+
+Summary. Causal sufficiency (Definition 5) rules out the spurious-edge failure mode: 1. There are no unobserved common causes ⇒ no omitted variable bias ⇒ no spurious edges. 2. Unobserved mediators are not ruled out, and need not be: the indirect effect shows up as a nonzero coefficient at the lag where the two steps add up, so no edge is masked (Remark 2). Under causal sufficiency and the non-degeneracy condition, the partially linear model (2) is correctly specified, the DML coefficients are uniquely identified, and the equivalence Ak[i, j ] = 0 ⇐⇒ Granger non-causality at lag k holds exactly. 
+
+## B COMPLETE EXPERIMENTAL RESULTS 
+
+Table 4 reports all evaluation metrics for every method, observability level, and first-stage learner combination in the synthetic benchmark. 
+
+B.1 Partial Observability 
+
+At Partial-2 and Partial-1 the data are still generated by all three confounders, but the method is given only two or one of them. The hidden confounders then act like the hidden common cause of Figure 6: they are autocorrelated and drive every series at lag 1, so they create spurious lagged links between the observed series. This violates causal sufficiency, one of the assumptions under which edges are causal (Remark 2) and BH’s FDR guarantee holds (Section 4). These levels therefore test robustness outside the method’s assumptions, not its guarantees. The two causal-discovery baselines of Appendix B.2 (PCMCI and VAR-LiNGAM) rely on the same assumption. Lag recovery barely changes: across learners and levels, the lag RMSE of ORACLE-VARX stays within 0.92–1.16 (LightGBM: 0.962 with all confounders, 1.052 with two, 1.068 with one), and the adaptive methods stay well ahead of their non-adaptive counterparts (Extra Trees with one confounder: OR-VARX 1.532 → ORACLE-VARX 1.045, a 32% improvement). Edge discovery degrades, as expected once causal sufficiency fails: the FDR of ORACLE-VARX (LightGBM) rises from 0.047 (All) to 0.084 (Partial-2) and 0.180 (Partial-1), at similar power (Table 4). Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Table 4: Complete synthetic benchmark results. All metrics are averaged over the rolling evaluation window. Obs.: observ-ability level. FDR, Power and F1 use BH at level q = 0 .05 . VARX treats the observed confounders as extra series; its lag ˆpt
+
+is chosen on the equations of the n target series only, and only their edges are scored. Bold indicates the best value in each column. 
+
+Method Obs. Nonzero MAE ↓ Fcst. MAE ↓ Lag RMSE ↓ FDR ↓ Power ↑ F1 ↑
+
+Non-DML methods 
+
+VAR none 0.0605 0.1100 1.475 0.129 0.655 0.734 ACLE-VAR none 0.0655 0.1094 1.006 0.147 0.661 0.730 VARX all 0.0627 0.1092 1.239 0.076 0.650 0.755 ACLE-VARX all 0.0691 0.1081 1.099 0.080 0.651 0.754 VARX partial-2 0.0604 0.1098 1.292 0.096 0.647 0.745 ACLE-VARX partial-2 0.0679 0.1091 1.060 0.108 0.651 0.743 VARX partial-1 0.0601 0.1093 1.386 0.108 0.648 0.739 ACLE-VARX partial-1 0.0659 0.1084 1.030 0.122 0.654 0.738 
+
+DML methods: Extra Trees 
+
+OR-VARX all 0.0627 0.0945 1.212 0.094 0.649 0.749 ORACLE-VARX all 0.0626 0.0943 1.073 0.101 0.652 0.749 OR-VARX partial-2 0.0595 0.0988 1.232 0.085 0.652 0.753 ORACLE-VARX partial-2 0.0607 0.0984 1.033 0.096 0.656 0.751 OR-VARX partial-1 0.0572 0.1097 1.532 0.152 0.662 0.724 ORACLE-VARX partial-1 0.0620 0.1088 1.045 0.175 0.671 0.719 
+
+DML methods: Random Forest 
+
+OR-VARX all 0.0715 0.0961 1.247 0.103 0.650 0.741 ORACLE-VARX all 0.0647 0.0958 1.107 0.117 0.652 0.736 OR-VARX partial-2 0.0621 0.1013 1.371 0.100 0.651 0.746 ORACLE-VARX partial-2 0.0617 0.1004 1.029 0.114 0.655 0.743 OR-VARX partial-1 0.0606 0.1129 1.619 0.155 0.658 0.718 ORACLE-VARX partial-1 0.0642 0.1125 1.164 0.186 0.665 0.707 
+
+DML methods: LightGBM 
+
+OR-VARX all 0.0665 0.1023 1.288 0.045 0.666 0.779 ORACLE-VARX all 0.0579 0.1007 0.962 0.047 0.673 0.784 
+
+OR-VARX partial-2 0.0687 0.1068 1.311 0.072 0.651 0.757 ORACLE-VARX partial-2 0.0643 0.1048 1.052 0.084 0.655 0.755 OR-VARX partial-1 0.0582 0.1130 1.303 0.169 0.651 0.713 ORACLE-VARX partial-1 0.0661 0.1121 1.068 0.180 0.660 0.714 
+
+DML methods: XGBoost 
+
+OR-VARX all 0.1057 0.1111 1.609 0.081 0.667 0.762 ORACLE-VARX all 0.0797 0.1103 1.037 0.103 0.671 0.752 OR-VARX partial-2 0.0958 0.1205 1.745 0.084 0.652 0.753 ORACLE-VARX partial-2 0.0802 0.1194 0.937 0.106 0.650 0.743 OR-VARX partial-1 0.0777 0.1354 2.165 0.131 0.654 0.732 ORACLE-VARX partial-1 0.0660 0.1384 0.915 0.173 0.661 0.717 
+
+DML methods: TabPFN 
+
+OR-VARX all 0.0671 0.0913 1.159 0.056 0.660 0.770 ORACLE-VARX all 0.0601 0.0910 0.981 0.066 0.673 0.775 OR-VARX partial-2 0.0594 0.0980 1.222 0.064 0.650 0.761 ORACLE-VARX partial-2 0.0606 0.0973 1.023 0.076 0.654 0.758 OR-VARX partial-1 0.0588 0.1080 1.423 0.150 0.659 0.727 ORACLE-VARX partial-1 0.0618 0.1078 1.023 0.167 0.667 0.723 Causal Lag Structure Discovery in Confounded Time Series 
+
+B.2 Causal-Discovery Baselines Setup. We run PCMCI (Runge et al., 2019) and VAR-LiNGAM (Hyvärinen et al., 2010) from scratch in every rolling window. PCMCI (tigramite 5.2.10.1) first prunes each variable’s candidate parents with a screening step at the default level 
+
+0.2, then tests each remaining link conditional on the selected parents; we use its linear partial-correlation test (ParCorr). VAR-LiNGAM (lingam 1.13.0, defaults) fits a VAR whose lag order is chosen by BIC within 1, . . . , 5, and then prunes it with the adaptive lasso, a penalised refit that sets small coefficients to exactly zero. Both use lags 1, . . . , p max = 5 , the 
+
+n = 3 series and the observed confounders as variables, and only rows before output day t: PCMCI’s regression targets are rows t − 200 , . . . , t − 1, the targets of VAR at pmax , and VAR-LiNGAM fits VAR’s 205-row window. As for every method, only links among the n series are scored. • Edges. PCMCI’s p-values for the n2pmax links go through the same per-window BH step at q = 0 .05 . VAR-LiNGAM’s edges are its nonzero pruned lag coefficients; adaptive-lasso pruning has no FDR control. • Coefficients and forecasts. PCMCI returns a graph, not a model, so we refit each series by OLS on its discovered parents (plus confounder links with p ≤ 0.05 ), and take its lag order to be the largest lag with a discovered edge. VAR-LiNGAM forecasts from its fitted model; its VAR has no intercept, so each window is centred first. Table 5 scores them on the DML methods’ days (Table 4); the code is scripts/run_cd_baselines.py .Table 5: Causal-discovery baselines on the synthetic benchmark, with ORACLE-VARX at full observability for reference. Same days and metrics as Table 4.                                                                              
+
+> Method Obs. Nonzero MAE ↓Fcst. MAE ↓Lag RMSE ↓FDR ↓Power ↑F1 ↑
+> PCMCI + OLS refit all 0.0646 0.1081 1.214 0.045 0.685 0.792 PCMCI + OLS refit partial-2 0.0664 0.1089 1.223 0.052 0.672 0.780 PCMCI + OLS refit partial-1 0.0664 0.1083 1.211 0.052 0.672 0.780 PCMCI + OLS refit none 0.0657 0.1091 1.136 0.066 0.673 0.775 VAR-LiNGAM all 0.0704 0.1074 1.132 0.187 0.641 0.703 VAR-LiNGAM partial-2 0.0710 0.1082 1.132 0.196 0.641 0.697 VAR-LiNGAM partial-1 0.0709 0.1081 1.132 0.209 0.641 0.692 VAR-LiNGAM none 0.0703 0.1091 1.132 0.216 0.641 0.690 ORACLE-VARX, LightGBM all 0.0579 0.1007 0.962 0.047 0.673 0.784 ORACLE-VARX, TabPFN all 0.0601 0.0910 0.981 0.066 0.673 0.775
+
+Results. With all confounders observed, PCMCI and ORACLE-VARX (LightGBM) find edges about equally well (FDR 0.045 vs 0.047, power 0.685 vs 0.673), and ORACLE-VARX is better at what it is built for: forecasts (MAE 0.091 with TabPFN vs 0.108), the lag order (RMSE 0.96–0.98 vs 1.21) and the coefficients (nonzero MAE 0.058–0.060 vs 0.065). PCMCI tests every lag up to pmax , while our edges are tested only within the selected lag order ˆpt, so an under-selected lag also hides its edges; running our BH step on the saved z-statistics over all pmax lags instead gives FDR 0.023, power 0.676 and F1 0.797 (LightGBM). Below All, PCMCI’s FDR stays near 0.05 (0.052 at Partial-2 and Partial-1; 0.062 at None on VAR’s days, against 0.129 for VAR), while ours rises (Appendix B.1); both methods are then outside their causal-sufficiency assumption. VAR-LiNGAM’s BIC picks lag 1 on every scored day, its pruned edges have FDR 0.19–0.22, and its forecasts are about as accurate as VARX’s. Its distinctive step, identifying same-day effects from non-Gaussian noise, has nothing to work on here: the benchmark has no same-day effects and Gaussian structural noise, so its lagged edges are pruned VAR coefficients without FDR control. 
+
+## C ETF TRADING RESULTS 
+
+C.1 Portfolio Construction 
+
+We evaluate the economic value of the discovered causal structure through a simple long-short trading strategy. At each trading day t, the model produces one-day-ahead log return forecasts ˆri,t for each ETF i. We consider three portfolio construction rules: Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Naive (sign-based). Positions are determined solely by the sign of the forecast: 
+
+wi,t = sgn(ˆ ri,t )
+
+Pnj=1 | sgn(ˆ rj,t )| .
+
+Weighted (magnitude-scaled). Position sizes are proportional to the magnitude of the forecasted return, so that assets with stronger predicted moves receive larger allocations: 
+
+wi,t = ˆri,t 
+
+Pnj=1 |ˆrj,t | .
+
+Top-q (quantile-filtered). Only assets whose absolute forecast exceeds the q-th quantile of {| ˆrj,t |} nj=1 are traded, that is, the ⌊n(1 − q)⌋ assets with the largest absolute forecasts. Among the selected assets, positions are sign-based and equally weighted. We report results for q ∈ { 0.25 , 0.50 , 0.75 }, which trade 6, 4 and 2 of the 9 ETFs. The labels “Top 25%”, “Top 50%” and “Top 75%” in the tables name this quantile threshold, not the share of assets traded: Top 75% is the most concentrated book. All strategies have unit gross exposure (positions are normalized so that P 
+
+> i
+
+|wi,t | = 1 each day) and are rebalanced daily. The net exposure Gt = P 
+
+> i
+
+wi,t is generally not zero, so we offset it with an opposite position in SPY, which makes the combined book dollar-neutral: 
+
+radj ,t = X
+
+> i
+
+wi,t ri,t − Gt · bt,
+
+where ri,t and bt are the simple open-to-close returns of ETF i and of SPY on day t. This is a dollar hedge, not a beta hedge: it treats each sector ETF as having unit beta to SPY, so some market exposure can remain. Transaction costs are not modeled. All returns are compounded multiplicatively: the cumulative return at day T is QTt=1 (1 + radj ,t ) − 1.
+
+C.2 Results 
+
+Table 6 reports annualized returns and Sharpe ratios for the weighted strategy across all methods using the all10 confounder preset (10 macroeconomic variables). Methods without confounders (VAR, ACLE-VAR) are included as baselines. A notable pattern emerges: simpler methods (ACLE-VAR, VARX) achieve higher Sharpe ratios than the DML-based methods. The DML forecast still uses the confounders, through the learned ˆE[Yt | W] term, but fitting that term and the lag effects from 504 noisy days adds variance; a short-lag VAR without confounders lets its lag coefficients absorb the predictable part of the confounding instead (Section 5.2). The primary contribution of ORACLE-VARX is the quality of the recovered causal graph, not forecast-based trading performance. Table 6: ETF portfolio performance (weighted strategy, market-adjusted). All DML methods use the all10 confounder preset (10 macroeconomic variables). Annualized return and Sharpe ratio are reported over the common test period (2004– 2020).                            
+
+> Method First-Stage Learner Ann. Return (%) Sharpe Ratio
+> VAR —5.93 1.08 ACLE-VAR —7.34 1.32 VARX —4.22 0.75 ACLE-VARX —4.80 0.86 OR-VARX Extra Trees 3.51 0.67 ORACLE-VARX Extra Trees 3.55 0.68 OR-VARX TabPFN 2.40 0.47 ORACLE-VARX TabPFN 1.82 0.36
+
+C.3 Full Strategy Comparison 
+
+Tables 7–9 disaggregate the results across all five trading strategies and all three confounder presets. Each cell reports the annualized return (%) and Sharpe ratio, separated by a slash. Methods without confounders (VAR, ACLE-VAR) are repeated across tables for ease of comparison. Causal Lag Structure Discovery in Confounded Time Series 
+
+Table 7: Full strategy performance: vix confounder preset. Each cell shows Ann. Return (%) / Sharpe Ratio (market-adjusted, 2004–2020). VAR and ACLE-VAR use no confounders and are included as baselines. Best Sharpe per column in bold .
+
+Method Learner Naive Weighted Top 50% Top 25% Top 75% 
+
+VAR — 4.32 / 1.04 5.93 / 1.08 6.16 / 0.95 5.12 / 1.01 8.41 / 0.86 ACLE-VAR — 4.64 / 1.15 7.34 / 1.32 8.54 / 1.31 6.73 / 1.31 10.14 / 1.04 
+
+VARX OLS 3.35 / 0.83 6.00 / 1.11 7.16 / 1.10 5.59 / 1.09 8.98 / 0.92 ACLE-VARX OLS 3.09 / 0.78 5.83 / 1.07 6.47 / 1.00 5.85 / 1.14 8.76 / 0.90 OR-VARX LightGBM 1.94 / 0.51 2.55 / 0.50 2.63 / 0.45 1.99 / 0.43 2.04 / 0.26 OR-VARX XGBoost 0.98 / 0.27 1.43 / 0.29 2.07 / 0.36 1.79 / 0.38 3.21 / 0.38 OR-VARX Extra Trees 2.99 / 0.77 3.74 / 0.71 4.02 / 0.65 2.75 / 0.57 5.59 / 0.59 OR-VARX Random Forest 2.71 / 0.71 3.70 / 0.72 4.81 / 0.78 3.51 / 0.73 5.73 / 0.62 OR-VARX TabPFN 2.82 / 0.73 3.47 / 0.68 3.25 / 0.54 3.66 / 0.75 3.71 / 0.43 ORACLE-VARX LightGBM 0.65 / 0.18 1.44 / 0.29 2.49 / 0.42 1.65 / 0.35 1.52 / 0.20 ORACLE-VARX XGBoost 0.16 / 0.06 0.38 / 0.10 0.78 / 0.15 0.85 / 0.19 0.85 / 0.14 ORACLE-VARX Extra Trees 2.39 / 0.63 4.33 / 0.83 4.48 / 0.73 5.05 / 1.02 5.76 / 0.61 ORACLE-VARX Random Forest 2.48 / 0.65 3.67 / 0.70 4.00 / 0.65 2.85 / 0.60 3.89 / 0.44 ORACLE-VARX TabPFN 2.13 / 0.56 3.57 / 0.70 4.89 / 0.80 4.67 / 0.94 4.55 / 0.51 
+
+Table 8: Full strategy performance: macro5 confounder preset. Each cell shows Ann. Return (%) / Sharpe Ratio (market-adjusted, 2004–2020). Best Sharpe per column in bold .
+
+Method Learner Naive Weighted Top 50% Top 25% Top 75% 
+
+VAR — 4.32 / 1.04 5.93 / 1.08 6.16 / 0.95 5.12 / 1.01 8.41 / 0.86 ACLE-VAR — 4.64 / 1.15 7.34 / 1.32 8.54 / 1.31 6.73 / 1.31 10.14 / 1.04 
+
+VARX OLS 0.87 / 0.23 2.34 / 0.43 2.51 / 0.40 1.51 / 0.32 2.99 / 0.35 ACLE-VARX OLS 1.99 / 0.48 4.66 / 0.81 5.25 / 0.79 3.56 / 0.69 7.87 / 0.82 OR-VARX LightGBM 0.11 / 0.05 0.47 / 0.11 −0.94 / −0.12 −0.36 / −0.05 0.52 / 0.10 OR-VARX XGBoost −0.21 / −0.03 −0.83 / −0.12 −0.95 / −0.12 −0.16 / −0.01 −2.96 / −0.27 OR-VARX Extra Trees 2.12 / 0.55 3.72 / 0.71 5.70 / 0.90 3.37 / 0.70 6.14 / 0.66 OR-VARX Random Forest 0.21 / 0.07 2.11 / 0.41 3.51 / 0.57 2.22 / 0.46 4.76 / 0.53 OR-VARX TabPFN 2.43 / 0.63 2.86 / 0.54 2.74 / 0.45 3.55 / 0.71 3.95 / 0.45 ORACLE-VARX LightGBM 0.59 / 0.17 1.57 / 0.31 1.32 / 0.24 1.41 / 0.31 0.97 / 0.15 ORACLE-VARX XGBoost −0.67 / −0.15 −0.78 / −0.11 0.06 / 0.04 −0.23 / −0.02 −2.20 / −0.19 ORACLE-VARX Extra Trees 2.02 / 0.54 4.42 / 0.85 7.18 / 1.15 4.18 / 0.85 8.55 / 0.92 ORACLE-VARX Random Forest −0.38 / −0.08 1.56 / 0.32 2.74 / 0.47 1.13 / 0.25 5.14 / 0.59 ORACLE-VARX TabPFN 2.28 / 0.59 3.91 / 0.74 4.50 / 0.73 3.74 / 0.77 6.24 / 0.68 
+
+Table 9: Full strategy performance: all10 confounder preset. Each cell shows Ann. Return (%) / Sharpe Ratio (market-adjusted, 2004–2020). Best Sharpe per column in bold .
+
+Method Learner Naive Weighted Top 50% Top 25% Top 75% 
+
+VAR — 4.32 / 1.04 5.93 / 1.08 6.16 / 0.95 5.12 / 1.01 8.41 / 0.86 ACLE-VAR — 4.64 / 1.15 7.34 / 1.32 8.54 / 1.31 6.73 / 1.31 10.14 / 1.04 
+
+VARX OLS 1.87 / 0.46 4.22 / 0.75 5.03 / 0.77 3.45 / 0.66 7.27 / 0.77 ACLE-VARX OLS 1.89 / 0.47 4.80 / 0.86 5.68 / 0.86 3.38 / 0.65 5.98 / 0.66 OR-VARX LightGBM −0.44 / −0.09 0.13 / 0.05 −0.33 / −0.02 −0.46 / −0.07 1.44 / 0.19 OR-VARX XGBoost 0.79 / 0.21 0.29 / 0.08 0.64 / 0.13 0.15 / 0.06 −2.95 / −0.27 OR-VARX Extra Trees 2.52 / 0.65 3.51 / 0.67 4.52 / 0.74 3.26 / 0.68 4.35 / 0.49 OR-VARX Random Forest 0.44 / 0.13 1.21 / 0.25 1.44 / 0.26 0.60 / 0.15 6.74 / 0.73 OR-VARX TabPFN 1.94 / 0.52 2.40 / 0.47 3.25 / 0.53 2.01 / 0.43 1.55 / 0.20 ORACLE-VARX LightGBM 0.00 / 0.02 0.66 / 0.15 0.97 / 0.18 0.39 / 0.10 2.13 / 0.26 ORACLE-VARX XGBoost 1.02 / 0.27 0.90 / 0.19 1.49 / 0.26 1.16 / 0.26 −1.84 / −0.16 ORACLE-VARX Extra Trees 2.08 / 0.54 3.55 / 0.68 4.23 / 0.71 3.51 / 0.72 7.27 / 0.80 ORACLE-VARX Random Forest 0.48 / 0.15 0.90 / 0.20 1.08 / 0.21 0.50 / 0.13 3.74 / 0.44 ORACLE-VARX TabPFN 0.86 / 0.24 1.82 / 0.36 2.73 / 0.47 2.03 / 0.44 2.58 / 0.31 Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+C.4 Cumulative PnL 
+
+Figure 7 shows cumulative market-adjusted returns for three representative configurations, illustrating the five trading strategies over the full test period. 
+
+Discussion. Several patterns emerge from the full results. First , the OLS-based baselines (VAR, ACLE-VAR) consistently achieve the highest Sharpe ratios, confirming that DML debiasing trades predictive power for causal validity (Section 5). 
+
+Second , among DML first-stage learners, Extra Trees is the most consistent, and TabPFN is usually next: LightGBM and XGBoost frequently produce near-zero or negative returns, suggesting their nuisance estimates are less stable in the rolling-window setting. Third , the macro5 preset is generally the weakest for DML methods—with the notable exception of ORACLE-VARX with Extra Trees, which achieves the highest DML Sharpe ratio of 1.15 (Top 50% strategy under 
+
+macro5 ). Fourth , the quantile-filtered strategies (Top 25%, Top 50%, Top 75%) often outperform the naive and weighted strategies in annualized return, indicating that concentration on high-conviction signals is beneficial. 
+
+## D IMPLEMENTATION DETAILS 
+
+D.1 Experiment Configuration and Learner Hyperparameters 
+
+Table 10 summarizes the experiment configuration and first-stage learner hyperparameters for both benchmarks. We use Extra Trees (Geurts et al., 2006) and Random Forest (Breiman, 2001) from scikit-learn (Pedregosa et al., 2011), LightGBM (Ke et al., 2017), XGBoost (Chen and Guestrin, 2016) and TabPFN-2.5 (Hollmann et al., 2025; Grinsztajn et al., 2025). The causal-discovery baselines use the tigramite package for PCMCI (Runge et al., 2019) and the lingam 
+
+package for VAR-LiNGAM (Ikeuchi et al., 2023; Hyvärinen et al., 2010). The ETF open-to-close returns come from CRSP (Center for Research in Security Prices, LLC, 2024). Calculated based on data from CRSP US Stock Databases ©2024 Center for Research in Security Prices, LLC, An Affiliate of the University of Chicago Booth School of Business. All ten confounders come from FRED (Federal Reserve Bank of St. Louis, n.d.): the Economic Policy Uncertainty index is that of Baker et al. (2016), the BBB spread is an ICE BofA index (ICE Data Indices, LLC), and VIX and the gold volatility index are copyright of the Chicago Board Options Exchange. Appendix D.3 lists the versions we ran, and the code repository lists all dependencies in its requirements files. Table 10: Experiment configuration and first-stage learner hyperparameters. 
+
+Panel A: Experiment Configuration Parameter Synthetic ETF 
+
+pmax 5 10 
+
+α-grid {0.01 , 0.05 , 0.10 , 0.15 , 0.20 , 0.25 , 0.30 }
+
+OLS window 200 days 504 days Tree training window 200 days 504 days Validation days 20 21 Block length ntest (refit interval) 20 days 21 days 
+
+Panel B: First-Stage Learner Hyperparameters Learner Key Hyperparameters 
+
+Extra Trees n_estimators = 100 , max_features = 1 .0, max_depth = 5 
+
+Random Forest n_estimators = 100 , max_features = 1 .0, max_depth = 5 
+
+LightGBM n_estimators = 100 , learning_rate = 0 .1, max_depth = 5 , num_leaves = 31 
+
+XGBoost n_estimators = 100 , learning_rate = 0 .3, max_depth = 5 
+
+TabPFN Pretrained transformer; no tuning required. v2.5 weights ( tabpfn 6.3.2); one forward pass, no ensembling. Causal Lag Structure Discovery in Confounded Time Series 
+
+> (a) ACLE-VAR (no confounders)
+> (b) ORACLE-VARX (Extra Trees, all10)
+> (c) ORACLE-VARX (Extra Trees, macro5)
+
+Figure 7: Cumulative market-adjusted returns for three representative configurations. (a) The ACLE-VAR baseline achieves the highest Sharpe ratios overall (up to 1.32). (b) ORACLE-VARX with Extra Trees and the all10 preset—the configuration used for the lag-volatility analysis in Figure 5—produces stable, positive returns across all strategies. (c) The macro5 
+
+preset with Extra Trees yields the highest DML Sharpe ratio (1.15, Top 50% strategy) among all DML experiments. Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+D.2 Full Algorithm Algorithm 1: OR(ACLE)-VARX: Orthogonalized Causal Lag Discovery 
+
+Input: Time series {Yt, Wt}Tt=1 ; pmax ; window size Tw; α-grid {α1, . . . , α M }; validation window v; learner L; edge FDR level q
+
+Output: Sequence of causal lag graphs { ˆGt} and forecasts { ˆYt} 
+
+> 1
+
+for each rolling window ending at t = Tw, T w+1 , . . . , T do  
+
+> 2
+
+for p = 1 , . . . , p max do  
+
+> 3
+
+Build stacked treatment T(p) and confounders C(p); 
+
+> 4
+
+Run DML cross-fitting with learner L to obtain ˆg(p) 
+
+> Y
+
+, ˆg(p) 
+
+> T
+
+; 
+
+> 5
+
+Compute residuals ˜Y(p), ˜T(p) via (6);  
+
+> 6
+
+Estimate ˆΘ(p)
+
+and standard errors via (7)–(8);  
+
+> 7
+
+Forecast ˆY(p) 
+
+> t
+
+← ˆg(p) 
+
+> Y
+
+(Ct) + ˆΘ(p)⊤ T(p) 
+
+> t
+
+− ˆg(p) 
+
+> T
+
+(Ct); 
+
+> 8
+
+end 
+
+// Lag selection by ACLE (OR-VARX: RMSE (9) instead)  
+
+> 9
+
+for α ∈ { α1, . . . , α M } do  
+
+> 10
+
+pα ← sequential significance testing at level α for p = 2 , . . . , p max (lag 1 is always kept), using the z-scores of 
+
+ˆΘ(pmax )
+
+; 
+
+> 11
+
+end  
+
+> 12
+
+α∗ 
+
+> t
+
+← arg min α RMSE v (pα) via (10);  
+
+> 13
+
+ˆpt ← pα∗ 
+
+> t
+
+; ˆYt ← ˆY( ˆ pt) 
+
+> t
+
+;
+
+// Edge discovery with FDR control  
+
+> 14
+
+Compute zk,i,j = ˆAk[i, j ] / ˆs( ˆAk[i, j ]) for all (k, i, j ) with k ≤ ˆpt, from the pmax fit;  
+
+> 15
+
+Apply BH-FDR at level q to the n2 ˆpt z-scores;  
+
+> 16
+
+ˆGt ← edges surviving FDR threshold;  
+
+> 17
+
+end  
+
+> 18
+
+return { ˆGt, ˆYt}t;
+
+D.3 Computational Cost Reuse across windows. Algorithm 1 is written one window at a time, but the implementation shares work across windows. The blocked split of Section 3.2 puts the cross-fitting blocks on one grid of days that does not depend on the window: block k trains on [sk, s k + ntrain ), predicts the next ntest days, and sk+1 = sk + ntest . So, for each lag order p:1. each block’s nuisance models are fit once, predict their ntest days, and are discarded; 2. the out-of-sample residuals ( ˜Yt, ˜T(p) 
+
+> t
+
+) are stored once, one row per day; 3. the window ending at day t reads rows t − Tw, . . . , t − 1 of this array, so neighbouring windows share Tw − 1 of their 
+
+Tw rows; 4. batched least-squares calls solve (7) and (8) for all windows together. The reuse is exact: recomputing these residuals separately inside each window would give the same numbers. OR-VARX and ORACLE-VARX share this first stage, and every α in the grid reuses the same ( ˆΘ, cSE) ; only the z-tests and BH are rerun. There is no hyperparameter search (Table 10). 
+
+Number of first-stage fits. For each block and each p = 1 , . . . , p max , the first stage fits n single-output learners for Yt
+
+and np for the lags T(p) 
+
+> t
+
+, so S = Ppmax  
+
+> p=1
+
+n(p + 1) = n p max (pmax + 3) /2 fits per block. With F blocks, the implementation makes F · S fits. Table 11 compares this with two per-window alternatives: • (A) one fresh split per window : train once on the ntrain days before the window and predict its Tw days. This is a cheaper, different estimator, and costs about ntest times more fits. Causal Lag Structure Discovery in Confounded Time Series 
+
+• (B) the same estimator, recomputed per window : refit every block that covers the window. Its output equals ours, and it costs roughly Tw times more fits. Table 11: First-stage fits per run (one learner, one observation level). Ratios are relative to our implementation.                  
+
+> Synthetic ETF Windows 2,595 4,261 Blocks F140 228 Fits per block S60 585 Ours ( F·S)8,400 133,380 (A) fresh split per window 155,700 (18.5 ×)2,492,685 (18.7 ×)(B) same estimator per window 1,704,960 (203 ×)62,198,370 (466 ×)
+
+Wall-clock time. Table 12 times the full synthetic run (seed 42, all three confounders observed) on an Apple M5 laptop (10 CPU cores, 24 GB), one learner at a time with 9 threads (Python 3.12, PyTorch 2.14.1, scikit-learn 1.6.1, LightGBM 4.7, XGBoost 3.4). “Ours” covers the shared first stage, the batched OLS and OR-VARX over all 2,595 windows. Column (A) is measured on 10 evenly spaced windows and scaled to 2,595. Column (B) is computed as the measured time per block times the number of block fits (B) needs; it was not run. ORACLE-VARX adds 0.11–0.18 s on top of the shared first stage, and the four OLS baselines take 0.10–0.31 s each for all windows. Table 12: Wall-clock time of one synthetic run (Apple M5 laptop, CPU).                     
+
+> Learner Ours Per window (A) (B) Extra Trees 6.1 min 0.14 s 1.9 h 20.8 h Random Forest 9.4 min 0.22 s 2.4 h 31.8 h LightGBM 13.6 min 0.31 s 3.7 h 45.9 h XGBoost 17.1 min 0.40 s 6.1 h 57.9 h
+
+Estimating other settings. The first stage dominates, so the run time is roughly time ≈ F · S · cfit , F ≈ T − ntrain − pmax 
+
+ntest 
+
+,
+
+where cfit is the time of one single-output fit on ntrain rows. From Table 12, cfit is about 44 ms (Extra Trees), 67 ms (Random Forest), 97 ms (LightGBM) and 122 ms (XGBoost) on this laptop. For example, the 12 tree-based synthetic runs (4 learners 
+
+× 3 observation levels) take about 2.3 hours in total, if the partially observed runs cost the same as the fully observed one. Assuming the same cfit at ntrain = 504 , one ETF run with Extra Trees would take about 133 ,380 × 44 ms ≈ 1.6 hours; this is an extrapolation, not a measurement. 
+
+TabPFN. TabPFN needs no training, only a forward pass of the pretrained transformer. For each p, all (block, output) problems with the same test length are stacked into the transformer’s batch dimension, and split only as GPU memory requires. With 80 GB of GPU memory, the 8,400 single-output problems of a synthetic run need 10–12 forward passes, and the 133,380 of an ETF run need 104–496, depending on the number of confounders. The same predictions give both the residuals and the forecasts, so forecasting needs no extra passes. On one cloud NVIDIA A100 GPU (80 GB; PyTorch 2.14.1, TabPFN 6.3.2), a full synthetic run takes 48–57 s per observation level, 34–40 s of it in TabPFN. The ETF runs take 17 min ( vix ), 49 min ( macro5 ) and 88 min ( all10 ), almost all of it in TabPFN: more confounders mean more features per problem, so fewer problems fit in one pass. 
+
+Causal-discovery baselines. PCMCI and VAR-LiNGAM have no first stage to share across windows: each window is a new search, so a run costs the time per window times the number of windows. Table 13 times three evenly spaced windows of each (one for CMIknn on the ETF data), one window at a time in a single process on the same laptop, with all series and confounders as variables, lags 1, . . . , p max and default settings; VAR-LiNGAM keeps the lag fixed at pmax .The ETF problem has 19 variables (the 9 ETFs and the 10 all10 confounders), Tw = 504 and pmax = 10 . The code is 
+
+scripts/time_cd_baselines.py .Tan, Zanoria, Chen, Lyu, Cucuringu 
+
+Table 13: Time of the causal-discovery baselines on the Apple M5 laptop CPU (TabPFN: one A100 GPU). Baselines: one window at a time in one process, scaled to a full run (2,595 synthetic and 4,261 ETF windows); windows are independent, so these runs split evenly over cores. Ours uses 9 threads. CMIknn is PCMCI with the nonparametric conditional-mutual-information test.                          
+
+> Synthetic ETF ( all10 )Method Window Run Window Run PCMCI (ParCorr) 0.16 s 7 min 4.4–9.1 s 5–11 h PCMCI (CMIknn) 6.2–6.6 min 268–284 h >1 h >4,000 h VAR-LiNGAM 0.02 s 1 min 9–15 s 11–17 h Ours, Extra Trees 0.14 s 6.1 min –≈1.6 h ∗
+> Ours, TabPFN (A100) –48–57 s –88 min
+> ∗Extrapolated, not measured (see above).
+
+With linear tests the baselines are cheap: spread over 9 cores like ours, linear PCMCI and VAR-LiNGAM would take about a minute on the synthetic data and 0.6–1.9 hours on the ETF data, against 6.1 minutes and an extrapolated 1.6 hours for ORACLE-VARX with Extra Trees on the same laptop. The gap is in the nonlinear setting that ORACLE-VARX targets. PCMCI with the nonparametric CMIknn test, the variant suited to nonlinear confounding, takes over 6 minutes per synthetic window (about 30 hours for a synthetic run even on 9 cores) and did not finish one ETF window within an hour (over 450 hours for an ETF run on 9 cores). ORACLE-VARX handles nonlinear confounding with the reused first stage instead. 
+
+D.4 BH-FDR Procedure 
+
+Edge discovery converts each debiased coefficient ˆAk[i, j ] into a z-score: 
+
+zk,i,j = ˆAk[i, j ]ˆs( ˆAk[i, j ]) ,
+
+where ˆs is from the residualized OLS standard errors (8). Two-sided p-values are pk,i,j = 2(1 − Φ( |zk,i,j |)) . The Benjamini– Hochberg procedure is applied at level q = 0 .05 to all n2 · ˆpt p-values per window: 
+
+r∗ = max 
+
+n
+
+r : p(r) ≤ rm · q
+
+o
+
+,
+
+where m = n2 · ˆpt is the number of tests and p(1) ≤ · · · ≤ p(m) are the sorted p-values. The edges with the r∗ smallest 
+
+p-values are kept; if no r satisfies the inequality, no edge is kept. 
+
+## E USE OF AI IN THE THEORY 
+
+The result to prove came from the authors: we needed a locally stationary version of the DML central limit theorem, and expected its proof to follow the DML argument of Chernozhukov et al. (2018), with extra error terms from the time series (the drift of the coefficients inside the window, and dependence handled through martingale differences). The proofs in Appendix A were then produced by a multi-agent setup: Claude models (Opus 5.5 and Fable 5.1, by Anthropic) drafted the proofs and checked each other’s drafts adversarially, and Codex (by OpenAI, with the Astra model) gave an independent adversarial review. Opus was instructed to write the proofs so that they spell out every step and skip none, so that a reader can verify each step. The one external theorem used, the martingale central limit theorem, was checked against the printed page of Billingsley (1995). An author with a background in mathematical analysis then checked the proofs line by line, verifying every step by hand, including all bounds and constants, and asking questions wherever a step was unclear; answers that exposed a problem led to a fix. Apart from the example below and presentation changes, this review found no mathematical errors. 
+
+Example: an inconsistency found during review. In the proof of Theorem 1 (Step 1 of its completion in Appendix A.3), a display stated QT = XT YT , while the next sentence used QT = XT YT + UT with UTp
+
+−→ 0, where XTd
+
+−→ N (0 , 1) and 
+
+YTp
+
+−→ 1. While checking this step, the author asked why QT was first written as XT YT and then as XT YT + UT :Causal Lag Structure Discovery in Confounded Time Series 
+
+“I thought QT = XT YT , how is it then [ XT YT ] + UT again now?” 
+
+The first identity holds only on a high-probability event GT , and UT is the correction that makes the second hold at every outcome; the display did not say so. The fix labels the display “on GT ” and adds one sentence explaining UT .In resolving this, the assistant also noticed that the proof applied Slutsky’s lemma to the product XT YT , whereas the appendix stated the lemma only in its additive form; the step was rewritten as QT = XT + [ XT (YT − 1) + UT ] with 
+
+XT (YT − 1) = Op(1) · op(1) = op(1) , so the stated form applies.
