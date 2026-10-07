@@ -1,0 +1,809 @@
+Title: Coverage You Can Steer: Online Conformal Calibration for RL-Driven Hardware-Aware NAS
+
+URL Source: https://arxiv.org/pdf/2610.03127v1
+
+Published Time: Mon, 05 Oct 2026 01:02:18 GMT
+
+Number of Pages: 35
+
+Markdown Content:
+# Coverage You Can Steer: Online Conformal Calibration for RL-Driven Hardware-Aware NAS 
+
+Pedro Brandimarte 1,∗ pbrandimarte@vicomtech.org 
+
+Nerea Aranjuelo 1 naranjuelo@vicomtech.org 
+
+Marcos Nieto 1 mnieto@vicomtech.org 
+
+Oihana Otaegui 1 ootaegui@vicomtech.org 
+
+> 1
+
+Vicomtech Foundation, Basque Research and Technology Alliance (BRTA) Donostia-San Sebasti´ an, Spain 
+
+> ∗
+
+Corresponding author 
+
+## Abstract 
+
+Hardware-aware neural architecture search (NAS) is dominated by evaluation cost: every architecture must be trained before its reward is known. Conformal-prediction filters cut this cost by pruning candidates whose predicted-reward upper bound misses a threshold, with a distribution-free guarantee that at most a fraction δ are wrongly discarded. That guarantee assumes exchangeability between calibration and test candidates, which the surrounding reinforcement-learning (RL) loop violates: the policy’s proposals improve as search proceeds and, in layer-by-layer construction, shift within every episode. We replace one-shot quantile estimation with online feedback control (Adaptive Conformal Inference, with tuning-free, locally-adaptive, and group-conditional variants), restoring steerable coverage: dialing the target delivers it, monotonically and reproducibly, for arbitrary sequences. Across three neural-network architecture families and both single-step and sequential search (three seeds), it tracks every requested level to within ∼10 −3 while pruning 25–50% of evaluations at no measured accuracy cost, whereas static calibration loses control of its coverage and a Gaussian-process baseline stays conservative regardless of the request. Finally, used as an acquisition function on one constrained testbed, the same optimistic bound beats random search, a gain that fixed optimism already carries and online calibration sharpens. The source code is available at https://github.com/Vicomtech/rl-hw-nas .
+
+Keywords: neural architecture search, hardware-aware NAS, conformal prediction, adaptive conformal inference, distribution shift, reinforcement learning, edge AI 
+
+## 1 Introduction 
+
+Deploying deep neural networks on resource-constrained edge devices (microcontrollers with a few hundred kilobytes of SRAM, embedded accelerators with hard real-time latency budgets) has become a central requirement of practical machine learning. On-device inference avoids the latency, cost, energy and privacy penalties of round-tripping data to the cloud, but it confronts the designer with a multi-objective problem that hand design handles poorly: accuracy must be traded against memory footprint, inference latency and quantization precision, simultaneously and per device. The design spaces are combinatorial (depth, width, kernel sizes, connectivity and per-layer bit-widths multiply into millions of configurations), and the accuracy of a configuration can only be observed by training it. Hardware-aware  
+
+> ©2026 P. Brandimarte, N. Aranjuelo, M. Nieto and O. Otaegui. License: CC-BY 4.0, see https://creativecommons.org/licenses/by/4.0/ .arXiv:2610.03127v1 [cs.LG] 2 Oct 2026 Brandimarte, Aranjuelo, Nieto and Otaegui
+
+neural architecture search (HW-NAS) automates this exploration by optimizing a scalar reward that combines task accuracy with hardware penalties, and has repeatedly produced edge models that dominate hand-designed baselines (Tan et al., 2019; Wu et al., 2019; Cai et al., 2020; Lin et al., 2020). The search strategies behind these results fall into a few families. Reinforcement-learning controllers learn a proposal distribution over architectures from observed rewards (Zoph and Le, 2017; Tan et al., 2019); evolutionary methods mutate populations of strong candidates (Real et al., 2019); differentiable methods relax the discrete space and optimize architecture parameters by gradient descent (Liu et al., 2018); supernet approaches such as Once-for-All train one weight-sharing network from which sub-networks are extracted without retraining (Cai et al., 2020); and Bayesian optimization (BO) builds a probabilistic surrogate of the reward and proposes candidates by expected utility (White et al., 2021). Whatever the proposal mechanism, a common bottleneck dominates the wall-clock cost: candidate evaluation . Each proposed architecture must be trained (even if only partially, on a subset of data) before its reward is known, and a realistic search consumes hundreds to thousands of such evaluations. A large fraction of them are wasted on candidates that were never competitive, which is why evaluation-avoidance mechanisms (reward predictors, early-stopping proxies, weight sharing) are as important to practical NAS as the search strategy itself. More fundamentally, on moderate spaces, well-tuned random search remains a remarkably strong baseline that learned controllers often fail to beat (Li and Talwalkar, 2020), so the marginal value of a NAS method lies less in the cleverness of its proposer than in how efficiently and safely it spends the evaluation budget. MARCO (Fayyazi et al., 2026) made this explicit for edge HW-NAS: a multi-agent reinforcement-learning search over MCU-scale CNN spaces in which a conformal-prediction filter prunes unpromising candidates before training. A cheap surrogate predicts each candidate’s reward; a split-conformal offset (Vovk et al., 2022; Papadopoulos et al., 2002) widens that prediction into an upper bound that is guaranteed (with probability at least 1 − δ) not to fall below the true reward; candidates whose bound misses an acceptance threshold are discarded without training. The construction is attractive precisely because the guarantee is distribution-free: it requires no assumption about the surrogate’s error distribution. It requires something else instead: exchangeability between the calibration candidates and the candidates the filter subsequently judges. That assumption is violated by the search itself. A reinforcement-learning policy improves; the distribution of proposed architectures later in the search is not the warm-up distribution the filter was calibrated on, and it keeps moving for as long as the policy learns. In sequential, layer-by-layer formulations of the search the violation is compounded within every episode, as the filter is asked to judge partial networks that grow from shallow stubs to deep architectures in a handful of steps. Under this drift the static conformal guarantee silently degrades: the realized coverage of the bound detaches from the requested 1 − δ, in a direction and magnitude that depend on where calibration happened to occur. The practical consequences are the two failure modes a pruning filter can have: wasted evaluations (over-coverage: the bound is looser than requested, so junk is trained anyway) and false discards (under-coverage: genuinely strong candidates are pruned unseen, an error that, unlike a wasted evaluation, can cost the best architecture in the space). MARCO acknowledges the issue and mitigates it by periodically recalibrating the filter; as we show, this reduces the variance of the failure but 
+
+> 2Coverage You Can Steer
+
+not the failure itself, and re-estimating a single, stream-wide offset, however often, cannot correct the depth-dependent miscoverage a within-episode shift produces, because it never conditions on where in the episode the candidate sits. This paper replaces the static filter with an adaptive one, and then pushes the resulting machinery beyond filtering altogether. Adaptive Conformal Inference (ACI, Gibbs and Cand` es, 2021) does not estimate a quantile once but controls the coverage error by online feedback, updating the conformal offset after every evaluation. Its guarantee is of a different kind: long-run coverage converges to the requested 1 − δ for arbitrary candidate sequences (no exchangeability, no stationarity), which is precisely the form of guarantee that survives inside a reinforcement-learning loop. On top of this foundation we remove ACI’s single hyperparameter by expert aggregation (following Zaffran et al., 2022), obtain per-candidate interval widths through normalized conformal scores, and obtain group-conditional coverage (coverage that holds at every layer depth of the sequential search, not merely on stream average) through a Mondrian construction. Finally, we observe that a calibrated optimistic bound is exactly what an exploration strategy needs: the same machinery that gates evaluations can steer them. Used greedily, it yields a distribution-free analogue of the Gaussian-process upper confidence bound (GP-UCB) (Srinivas et al., 2010), whose optimism is continuously verified against realized outcomes rather than derived from model assumptions; used with lookahead, it plans over the layer-by-layer construction tree with AlphaZero-style search (Silver et al., 2018), whose leaves are valued by the calibrated bound instead of training runs. Our contributions are as follows: 1. Adaptive conformal filtering under policy drift. We replace the static split-conformal filter with ACI, which keeps coverage calibrated and steerable under the policy drift that leaves static conformal filtering not merely biased but out of control .Across three architecture families and datasets (LeNet/MNIST, ResNet/CIFAR-10, MobileNet/CIFAR-100), in both single-step and sequential search, the adaptive filter tracks every requested coverage level 1 − δ to within ∼10 −3 with across-seed deviation two orders of magnitude below the baselines, while the periodically-recalibrated static filter over- and under-covers uncontrollably, cannot be steered by δ, and on the one landscape with an isolated optimum falsely discards the best architecture. The filter needs no step-size tuning in its aggregated form on these streams and prunes 25–50% of evaluations at no measured cost in solution quality. 2. Conditional conformal extensions for structured search. A normalized filter yields per-candidate interval widths (the prerequisite for any conformal acquisition, since a global offset cannot rank exploration targets), and a Mondrian filter yields per-depth coverage in the sequential search, where we show marginal calibration conceals a systematic shallow-over/deep-under coverage imbalance that per-group adaptation corrects wherever the search visits a depth often enough to calibrate it. 3. From pruning to search: conformal acquisition. We turn the calibrated bound into the search’s proposal mechanism, greedy acquisition over sampled pools, an optimism-shaped sequential controller, and a conformal-optimistic Monte-Carlo tree search whose simulated completions are valued by the bound so that real training 
+
+> 3Brandimarte, Aranjuelo, Nieto and Otaegui
+
+is spent only on committed candidates. On one constrained testbed where most architectures are infeasible (one family, three seeds), greedy optimistic acquisition reaches higher best-reward than random search at every budget up to 1,000 evaluations (and is the most reproducible searcher we test) while an attribution ablation locates the mechanism in the optimism: fixed optimism carries most of the gain, its online calibration adds a final edge and a ∼6× variance reduction over pure exploitation, and tree search buys only an early-budget head start. Shaping the controller’s own reward toward the objective, by contrast, does not reliably beat the unshaped controller and can destabilize it. 4. A controller-agnostic framework and an honest controller analysis. All filters and proposers sit behind common interfaces over interchangeable model families and hardware cost models, so every claim is tested across architectures, datasets and both search formulations, the single-step bandit and the sequential Markov decision process (MDP). Within this framework we also report a negative result that sharpens the paper’s thesis: the reinforcement-learning controller itself, faithful to MARCO, does not outperform random search on these spaces, it demonstrably learns, but it optimizes the expected reward while search rewards the argmax. The value added by our method is therefore located where the evidence places it: not in the learned controller, but in the calibrated bound, which, as a filter, gives drift-robust control of the evaluation budget behind any proposal mechanism, and, as an acquisition function, is itself a proposer that beats random search where the controller does not. We further contrast the conformal bounds with the natural Bayesian-optimization alternative throughout: a Gaussian-process upper confidence bound at the same nominal level is confidently miscalibrated under search-induced drift (its realized coverage is pinned near 0.99 regardless of the requested level, and it cannot be steered), which turns the standard “why not BO?” objection into one of our clearest experimental illustrations of why distribution-free, feedback-controlled uncertainty is the right tool inside a learning search loop. The remainder of the paper is organized as follows. Section 2 reviews related work in hardware-aware NAS, conformal prediction and Bayesian optimization for architecture search. Section 3 details the methodology (the search problem, the controllers, the family of conformal filters and the conformal acquisition) together with the coverage guarantees each construction carries under drift. Section 4 reports the experiments: the headline calibration and steerability results, solution quality and false discards, the generality studies across families, datasets and search formulations, the controller comparison, and the directed search. Section 5 concludes with limitations and future directions. 
+
+## 2 Related Work 
+
+2.1 Hardware-aware neural architecture search 
+
+Hardware-aware NAS has grown into a broad subfield, surveyed and taxonomized by search space, search strategy and hardware cost-estimation approach (Benmeziane et al., 2021). Architecture search began as an accuracy-only problem solved with reinforcement learning 
+
+> 4Coverage You Can Steer
+
+at extravagant cost (Zoph and Le, 2017; Baker et al., 2017), and was quickly reoriented toward deployment constraints. MnasNet (Tan et al., 2019) folded measured mobile latency into the reward; ProxylessNAS (Cai et al., 2019) and FBNet (Wu et al., 2019) made latency differentiable through per-operator lookup tables; Once-for-All (Cai et al., 2020) decoupled training from search by extracting sub-networks from a single weight-sharing supernet; MCUNet (Lin et al., 2020) pushed the setting to microcontrollers, co-designing the architecture with the inference engine under kilobyte-scale memory budgets. Differentiable search over relaxed spaces (Liu et al., 2018) offers a third route, though its stability and its coupling to a specific supernet limit portability across cost models. Evolutionary NAS provides a fourth route, favored for treating resource budgets as explicit constraints, with recent frameworks making the constraint handling itself adaptive: Xie et al. (2026), for example, ramps a Params/FLOPs penalty across evolutionary generations and embeds structured filter pruning as a local operator. Our work operates in the MCU-scale regime of MCUNet and MARCO (small CNN spaces with per-layer quantization choices, evaluated against SRAM and latency budgets), but the contribution is orthogonal to search-space or cost-model design: we target the statistical machinery that decides which candidates are worth evaluating, and it applies unchanged across the families and oracles we test. 
+
+2.2 Reducing the evaluation cost 
+
+Since candidate training dominates NAS wall-clock time, a large literature attacks evaluation cost directly. Partial-training proxies truncate epochs and data; weight sharing amortizes training across candidates (Pham et al., 2018; Cai et al., 2020); learned performance predictors rank candidates from architecture features (White et al., 2021; Wen et al., 2020); zero-cost proxies score untrained networks from single minibatches (Mellor et al., 2021; Abdelfattah et al., 2021). A complementary family allocates evaluation resource adaptively rather than predicting outcomes: multi-fidelity bandits such as Hyperband cast configuration evaluation as pure-exploration bandit allocation, pouring successively more epochs or data into surviving candidates and early-stopping the rest (Li et al., 2017), the same research program that furnishes our random-search baseline (Li and Talwalkar, 2020). That line is orthogonal to ours: it decides how much to spend on a candidate, whereas our filter decides, with a calibrated error statement, whether to spend at all, and the two compose. What these methods share is that their predictions carry no calibrated error statement : a predictor used greedily will confidently mis-rank in regions it has not seen, and the cost of that failure (discarding the best architecture unseen) is invisible in average-error metrics. Our filter wraps exactly such a predictor (a small multilayer perceptron, MLP) in a conformal envelope, converting point predictions into bounds with a controlled false-discard rate; the guarantee, not the predictor, is the contribution, and better predictors tighten the resulting bounds without changing the argument. 
+
+2.3 Reinforcement-learning controllers, and how strong random search is 
+
+RL controllers for NAS span single-agent policy gradient (Zoph and Le, 2017), weight sharing (Pham et al., 2018), and Q-learning over layer sequences (Baker et al., 2017). MARCO (Fayyazi et al., 2026), our departure point, structures the controller as cooperating agents under centralized training / decentralized execution (CTDE; cf. MADDPG, Lowe et al., 
+
+> 5Brandimarte, Aranjuelo, Nieto and Otaegui
+
+2017; MAPPO, Yu et al., 2022): a hardware-configuration agent selects macro-architecture knobs and a quantization agent selects per-layer bit-widths, trained with proximal policy optimization (PPO) on a hardware-aware reward, with candidates built layer by layer in a sequential MDP. We reproduce this controller faithfully (including the per-layer formulation and per-step credit assignment) as the substrate for our filtering study. A parallel evaluation literature, however, has repeatedly found that well-tuned random search matches or beats learned NAS controllers on moderate spaces (Li and Talwalkar, 2020; Yang et al., 2020). Our results reproduce this finding for the MARCO controller and diagnose its mechanism (the policy optimizes expected reward while search rewards the argmax); rather than contradicting our approach, this finding relocates the value of NAS machinery to where our contribution sits (the calibrated, controller-agnostic management of the evaluation budget) and motivates the argmax-aligned acquisition search of our final contribution. 
+
+2.4 Bayesian optimization and optimism-based search 
+
+Bayesian optimization is the canonical sample-efficient search: a probabilistic surrogate (typically a Gaussian process, GP) plus an acquisition rule, with GP-UCB supplying optimism in the face of uncertainty and regret guarantees under correct model specification (Srinivas et al., 2010). BO has been adapted to architecture spaces through tailored kernels (Kandasamy et al., 2018) and neural predictors with ensemble uncertainty (White et al., 2021). The known weakness is that the uncertainty is model-based : coverage of GP credible intervals is an artifact of kernel and noise assumptions, and miscalibration under distribution shift is well documented. Closest to our acquisition track, Stanton et al. (2023) combine BO with conformal prediction sets to protect acquisition decisions against feedback covariate shift , the train/test distribution shift a design algorithm induces by choosing where to query (Fannjiang et al., 2022). Our setting differs in the drift source (an improving RL policy and within-episode depth shift, not only the feedback shift induced by acquisition itself), in the online mechanism (ACI’s feedback control rather than weighted split-conformal recalibration), and in the search space (discrete layer-by-layer construction, where the bound also drives tree search). We include GP-UCB at matched nominal levels as a baseline throughout, and find it confidently miscalibrated on the search stream (realized coverage pinned near 0.99 whatever level is requested), which empirically substantiates the case for distribution-free, feedback-controlled uncertainty inside a learning loop. 
+
+2.5 Tree search for architecture construction 
+
+Monte-Carlo tree search (MCTS) has been applied to NAS by AlphaX (Wang et al., 2020), which guides MCTS with a learned value predictor, and LaNAS (Wang et al., 2021), which learns to partition the space to focus sampling. These works establish that the layer-by-layer construction process is a natural planning tree; they evaluate leaves with surrogate predictors but attach no calibrated statement to the values that guide exploration, and they spend real evaluations by fixed schedules. Our conformal-optimistic MCTS keeps the AlphaZero-style structure (Silver et al., 2018), with priors from the controller and values backed up through PUCT (predictor-weighted upper confidence bounds for trees, the AlphaZero selection rule), but values every simulated completion with a calibrated optimistic bound whose coverage is controlled online under drift, and spends real training runs only on committed candidates, 
+
+> 6Coverage You Can Steer
+
+with the bound’s online updates closing the loop between planning optimism and realized outcomes. 
+
+2.6 Conformal prediction on non-exchangeable data 
+
+Conformal prediction converts any predictor into set- or interval-valued predictions with finite-sample marginal coverage, assuming only exchangeability (Vovk et al., 2022; Shafer and Vovk, 2008); the split (inductive) construction makes it cheap enough to deploy around learned models (Papadopoulos et al., 2002; Lei et al., 2018). Locally-adaptive scores normalize by a difficulty estimate to obtain per-input interval widths (Papadopoulos et al., 2008), Mondrian (group-conditional) constructions give per-group validity at the cost of per-group data (Vovk et al., 2022; Bostr¨ om and Johansson, 2020), and recent work characterizes the interpolation between marginal and fully conditional guarantees (Gibbs et al., 2025). The frontier relevant to us is coverage without exchangeability: reweighting handles known covariate shift (Tibshirani et al., 2019), robust variants bound the coverage gap under bounded drift (Barber et al., 2023), and Adaptive Conformal Inference (Gibbs and Cand` es, 2021) abandons distributional assumptions altogether, controlling long-run coverage on arbitrary sequences by online updates. An active line of follow-ups builds on ACI: removing its step size by expert aggregation (Zaffran et al., 2022), strengthening its regret and coverage dynamics (Bhatnagar et al., 2023; Gibbs and Cand` es, 2024; Angelopoulos et al., 2023), and analyzing decaying-step-size variants that trade drift-tracking for convergence (Angelopoulos et al., 2024), a trade our constant-step-size choice deliberately refuses. Applications of conformal methods inside sequential decision loops are emerging: safe autonomous decisions (Lekeufack et al., 2024), online prediction under semi-bandit feedback (Ge et al., 2025), and conformal BO (Stanton et al., 2023). The semi-bandit setting shares a censored-feedback structure with our own filter, which observes rewards only for the candidates it accepts. Architecture search, however, has seen conformal prediction only in MARCO’s static form, where it filters candidates under an exchangeability assumption the surrounding RL loop violates. To our knowledge, this work is the first to bring online conformal inference into a NAS loop (matching the guarantee to the drift the search actually produces), the first to measure and correct its depth-conditional coverage in sequential construction, and the first to use the resulting calibrated bound as the search’s acquisition function. 
+
+## 3 Methodology 
+
+We address hardware-aware neural architecture search on edge devices, where the dominant cost is candidate evaluation: every proposed architecture must be (partially) trained before its reward can be observed. Our method couples a multi-agent reinforcement-learning search controller, in the style of MARCO (Fayyazi et al., 2026), with a conformal-prediction early-filter that prunes unpromising candidates before training. Our central departure from MARCO is the filter itself: static split-conformal calibration assumes exchangeability between calibration and test candidates, an assumption that reinforcement-learning policy improvement violates by construction. We replace it with adaptive conformal inference, which maintains a distribution-free coverage guarantee on the non-stationary candidate stream, and we extend it with tuning-free, locally-adaptive and group-conditional variants. 
+
+> 7Brandimarte, Aranjuelo, Nieto and Otaegui
+
+Finally, we show how the same calibrated machinery converts from a pruning rule into an acquisition function that steers the search directly. This section is organized as follows. Section 3.1 formalizes the search problem: objective, search spaces, evaluation proxy and hardware cost model. Section 3.2 describes the search controllers. Section 3.3 develops the conformal evaluation filter and its adaptive variants, together with the Gaussian-process baseline. Section 3.4 turns the calibrated bound into a search acquisition. Section 3.5 defines the evaluation protocol, and Section 3.6 summarizes the coverage guarantees each method carries. 
+
+3.1 Problem formulation 
+
+3.1.1 Hardware-aware objective 
+
+Given a model family’s discrete design space A and a target device with a latency budget 
+
+TB and a memory budget MB , we seek a⋆ = arg max a∈A R(a), where the hardware-aware reward of a candidate architecture ‘ a’ combines task accuracy with soft hardware penalties: 
+
+R(a) = A(a) − λ T (a)
+
+TB
+
+− ν max 
+
+
+
+0, M (a) − MB
+
+MB
+
+
+
+, (1) with A(a) ∈ [0 , 1] the accuracy under the evaluation proxy (Sec. 3.1.3), T (a) the estimated inference latency, and M (a) the estimated memory footprint (weights plus peak activations). Equation (1) follows MARCO’s reward with one modification: the memory term is a 
+
+continuous soft barrier rather than a binary indicator, so that the penalty is informative in the neighbourhood of the budget instead of switching discontinuously across it. We use 
+
+λ = 0 .2 and ν = 1 .0; budgets are set per device regime (e.g. TB = 0 .3 ms and MB = 512 kB for the MCU-scale spaces, tightened to MB = 256 kB on the constrained testbed used for the search-efficiency experiments). 
+
+3.1.2 Search spaces 
+
+We instantiate the method on two space types with complementary roles. The macro families are searched in the single-step bandit formulation of Sec. 3.2.1: they expose the filter to a single drift source (policy improvement) and are cheap enough (one evaluation per candidate) for wide multi-seed, multi-level calibration sweeps. The per-layer family is built step by step in the sequential MDP of Sec. 3.2.2: it adds a second, faster drift source (the within-episode growth of the partial network) and is where coverage can be studied 
+
+conditional on construction depth .
+
+Macro (single-decision) families. One decision produces a complete architecture. Three small CNN families span three classic convolutional block types: plain convolutions (a LeNet-like family, MNIST), residual blocks (a ResNet-like family, CIFAR-10), and depthwise-separable convolutions (a MobileNet-like family, CIFAR-100). The knobs are depth (number of blocks), base channel width, kernel size {3, 5}, skip connections on/off, pooling type 
+
+{max , avg }, and a per-block quantization bit-width bi ∈ { 4, 8}.
+
+Per-layer (sequential) family. A heterogeneous space in which each layer t carries its own (kernel t, channels t, b t), together with global skip/pooling choices; depth ranges are family-specific (LeNet-like 2–4, MobileNet-like 4–12, ResNet-like 8–20). With a branching factor of roughly 20 choices per layer at depths up to 20, the space contains on the order of 
+
+> 8Coverage You Can Steer
+
+20 20 terminal architectures, and (crucially for calibration) the candidate distribution shifts 
+
+within each episode as the partial network deepens. 
+
+3.1.3 Evaluation proxy and quantization 
+
+Evaluating A(a) by full training is infeasible inside a search loop, so we use the standard partial-training proxy: each candidate is trained for E epochs on a fixed, seed-determined random fraction ρ of the training set (identical for all candidates, so the proxy ranks them on equal footing), and A(a) is its top-1 accuracy on the held-out evaluation split. The default setting is ( E, ρ ) = (5 , 0.1). For search-quality comparisons we additionally employ a stronger proxy ( E, ρ ) = (15 , 0.3): as Section 4 shows, the weak-proxy reward landscape of the ResNet-like family collapses to an isolated optimum typically found by chance during warm-up, which cannot separate search methods; the stronger proxy restores a climbable landscape. Coverage results are reported on the proxy each experiment ran on, calibration measures bound-versus-outcome tracking and is therefore largely proxy-agnostic. Bit-width choices are made accuracy-relevant through fake post-training quantization (PTQ, Jacob et al., 2018): after proxy training, each block’s weights are quantized to its chosen bi before scoring, so low bit-widths reduce cost and potentially accuracy, rather than receiving cost-model credit for free. 
+
+3.1.4 Analytical hardware cost model 
+
+A deterministic MCU-style oracle of our own construction maps a candidate to ( T, M ), from first-principles accounting: per-layer parameter and multiply-accumulate counts with bit-width scaling, and memory as weight storage plus the peak activation footprint, the two quantities that bind on microcontroller deployments (Lin et al., 2020). For layer i with cin 
+
+input channels, cout output channels, kernel size k, spatial resolution si (halved per stage), and bit-width bi, the parameter count is 
+
+Pi =
+
+
+
+cin k2 + cin cout depthwise-separable block, 
+
+cin cout k2 plain convolutional block, 
+
+cin cout k2 + c2
+
+> out
+
+k2 residual block, (plus cin cout for a residual skip projection), and the memory and latency estimates are 
+
+M (a) = P 
+
+> i
+
+Pi · bi
+
+> 8
+
+| {z }
+
+> weight bytes
+
++ max i cout,i s2 
+
+> i
+
+· bi
+
+> 8
+
+| {z }
+
+> peak activations
+
+,T (a) ∝ P 
+
+> i
+
+Pi s2 
+
+> i
+
+· bi 
+
+> 8
+
+.
+
+(2) The model is not calibrated to a specific device, but it is monotone in every design knob, which is what the search dynamics and the budget-binding regime require. A truncated (first-t-layers) configuration is costed under the same spatial schedule used to build it, so partial networks in the sequential MDP are costed consistently. 
+
+3.2 Search controllers 
+
+The controllers in this subsection are not a contribution of this work: the reinforcement-learning controller reproduces prior work and the rest are standard baselines. We describe 
+
+> 9Brandimarte, Aranjuelo, Nieto and Otaegui
+
+them because they are the source of the difficulty our method addresses, each controller generates the drifting, non-exchangeable candidate stream that the filter of Sec. 3.3 must survive. That filter is deliberately policy-agnostic : it interacts with the search only through proposed candidates and observed rewards, so it applies unchanged to every controller described here. 
+
+3.2.1 Multi-agent PPO: single-step formulation 
+
+Following MARCO’s CTDE design, two actors factorize the decision: a hardware-configura-tion agent (HCA) samples the macro-architecture knobs, and a quantization agent (QA) samples per-block bit-widths autoregressively, conditioned on the HCA’s choices. The single-step collapse of this design is ours, not MARCO’s (their formulation is the sequential MDP of Sec. 3.2.2): one joint decision emits a complete architecture, which is evaluated to a reward, a horizon-1 MDP (equivalently, a single-step bandit), deliberately simple so that policy improvement is the only drift source. Given a batch of rewards r1: N and a learned scalar baseline V , both actors share the normalized advantage ˆAj = (rj − V ) − mean j (rj − V )std j (rj − V ) + ε ,
+
+and each actor m ∈ { HCA , QA } minimizes its own PPO clipped surrogate (Schulman et al., 2017) on that shared advantage, stated here as a loss, the negative of the original maximization objective: 
+
+Lm = − Ej
+
+h
+
+min  ρ(m) 
+
+> j
+
+ˆAj , clip  ρ(m) 
+
+> j
+
+, 1−ϵ, 1+ ϵ ˆAj
+
+i
+
+, (3) with ρ(m) 
+
+> j
+
+= πm(aj )/π old  
+
+> m
+
+(aj ) and total loss P 
+
+> m
+
+Lm + cv 1
+
+> N
+
+P 
+
+> j
+
+(V − rj )2 − cH H[π], where the value term regresses the scalar baseline V toward the batch’s rewards (its minimizer is their mean) and H[π] is the mean entropy of the actors’ distributions, the standard bonus that discourages premature concentration of the proposals (clipping ϵ = 0 .2, value coefficient 
+
+cv = 0 .5, entropy coefficient cH = 0 .01, four update epochs per batch). 
+
+3.2.2 Sequential per-layer MDP 
+
+The MARCO-faithful sequential formulation builds each network layer by layer. The state st
+
+encodes the partial architecture, the layer specifications chosen so far, the current position, and cumulative cost features. At each step the HCA selects the current layer’s (kernel, channels) and the QA its bit-width; the episode terminates at a sampled target depth. The 
+
+per-step reward applies Eq. (1) to the partial network built so far, evaluated with the proxy, providing temporal-difference credit assignment. A state-conditioned critic Vϕ(s) is trained to the one-step temporal-difference (TD) target rt + γRL Vϕ(st+1 ), and the advantage is the corresponding TD(0) error with discount γRL = 0 .99: ˆAt = rt + γRL Vϕ(st+1 ) (1 − dt) − Vϕ(st), (4) where dt indicates episode termination; advantages are normalized as above and each actor minimizes the clipped surrogate of Eq. (3). A terminal-only variant evaluates only the 
+
+> 10 Coverage You Can Steer
+
+completed network (one real evaluation per episode), which places the sequential controller on the same evaluation currency as complete-network search baselines when budgets must be matched. 
+
+3.2.3 Search baselines 
+
+Random search samples A uniformly; despite its simplicity it is a strong NAS baseline (Li and Talwalkar, 2020). Regularized evolution (Real et al., 2019) mutates tournament winners from an aging population. Both are matched to the RL arms on the number of real 
+
+evaluations consumed. 
+
+3.3 Conformal evaluation filtering 
+
+3.3.1 The filtering loop 
+
+Candidate evaluation is the search bottleneck, so we prune before training. All filters share a common interface with three parts. First, they are calibrated on a warm-up set. Second, they expose a per-candidate reward upper bound U (x), computed from the candidate’s feature encoding x = x(a) (defined together with the surrogate below). Third, after each real evaluation they receive the candidate’s features x and its measured reward r = R(a)(Eq. (1)) as feedback. What each filter does with that feedback (a per-step offset update, a periodic recalibration, or no change after warm-up) is specified per filter below. The filtered search loop proceeds as follows: 1. Warm-up. The first W candidates are always evaluated (the filter is inactive), forming the initial calibration set. 2. Filtering. Thereafter, a proposed candidate is evaluated if and only if U (x) ≥ τ ,where τ is the user-chosen acceptance threshold on the reward; otherwise it is pruned 
+
+(never trained) and the policy receives a fixed rejection reward rrej = −1. 3. Feedback. Every real evaluation ( x, r ) is fed back to the filter (updating it to the filter-specific degree above). The rule is one-sided by design: the filter must guarantee that pruning rarely discards a candidate whose true reward would have reached τ , i.e. that r ≤ U (x) holds with probability at least 1 − δ, where δ ∈ (0 , 1) is the user-specified tolerated failure rate of the bound. Empirical coverage is measured on the post-warm-up evaluated stream as the fraction of candidates with r ≤ U (x); the pruned fraction is the evaluation saving. In the sequential MDP the filter gates each step’s partial-network evaluation, and coverage is additionally reported conditional on layer depth , where the within-episode distribution shift is strongest. For uncensored measurement of depth-conditional coverage we use a no-prune audit mode in which every candidate is evaluated (pruning disabled) while the filter otherwise runs exactly as in a live search, so coverage is observable at depths that a realistic τ would otherwise censor. 
+
+3.3.2 Reward surrogate 
+
+The surrogate g(x) is a three-layer multilayer perceptron (hidden width 64, ReLU), trained by mean-squared error, matching MARCO’s surrogate. Its input is the family-specific 
+
+> 11 Brandimarte, Aranjuelo, Nieto and Otaegui
+
+feature encoding x(a): each categorical knob is one-hot encoded and the per-block bit-widths become one binary flag per block, zero-padded to the family’s maximum depth, giving a fixed dimension d per family (e.g. d = 23 for the ResNet-like family); the sequential space encodes per-layer slots for all possible layers plus cumulative-context features. Whenever a filter is (re)calibrated, the available data is split: the surrogate is fit on the first half and nonconformity scores are computed on the held-out second half, following split (inductive) conformal prediction (Papadopoulos et al., 2002). The split is essential for validity, residuals computed on the surrogate’s own training data understate its generalization error. 
+
+3.3.3 Static split-conformal baselines 
+
+Given held-out absolute residuals {| ri −g(xi)|} ni=1 , the split conformal offset is their empirical (1 − δ)-quantile, 
+
+α = Q1−δ
+
+ { | ri − g(xi)| } ni=1 
+
+, U (x) = g(x) + α. (5) If calibration and test candidates are exchangeable, split conformal prediction guarantees 
+
+P{r ≤ U (x)} ≥ 1 − δ (Vovk et al., 2022; Lei et al., 2018). We use the plain empirical quantile rather than the finite-sample-corrected level; at our calibration sizes the difference is negligible relative to the drift effects under study. We evaluate two static variants: 
+
+• Calibrate-once (split ): α is fixed after warm-up. 
+
+• Periodically recalibrated (split-recal ): every P = 50 evaluated candidates, the surrogate is re-fit and Eq. (5) is recomputed on all data observed so far (warm-up plus accepted candidates). Periodic recalibration is MARCO’s stated mitigation of distribution shift; their paper specifies no period, so P = 50 is an inferred setting, documented here. The exchangeability premise is precisely what RL search violates: the candidate distribution at step t is the current policy’s proposal distribution, not the warm-up distribution, and it keeps moving as the policy improves. In the sequential MDP the violation is compounded within each episode, since shallow and deep partial networks are drawn from visibly different distributions. Periodic recalibration tracks this shift only with a lag and offers no guarantee between recalibrations. 
+
+3.3.4 Adaptive conformal inference 
+
+Adaptive Conformal Inference (ACI, Gibbs and Cand` es, 2021) abandons the fixed quantile and controls coverage online. We use an additive-offset parametrization: after each real evaluation, with the miscoverage indicator err t = 1{rt > g (xt) + αt}, the offset is updated 
+
+αt+1 = αt + γ  err t − δ, γ = 0 .05 , (6) rising by γ(1 − δ) on each miscoverage and decaying by γδ otherwise; its fixed point is exactly a miscoverage rate of δ. Equation (6) is online subgradient descent on the pinball loss at level 1 − δ of the bound residual, and the standard ACI telescoping argument applies directly: summing Eq. (6) over t,
+
+1
+
+T
+
+> T
+
+X
+
+> t=1
+
+err t − δ = |αT +1 − α1|
+
+γ T ≤ Cγ T , (7) 
+
+> 12 Coverage You Can Steer
+
+where C is finite whenever the rewards (hence the offsets) are bounded. Long-run empirical coverage therefore converges to 1 − δ for an arbitrary data sequence (no exchangeability, stationarity or distributional assumption), which is exactly the guarantee that survives RL-induced drift. The step size is deliberately constant : a decaying γ would recover a static quantile in the limit and forfeit the ability to track persistent shift (Angelopoulos et al., 2024). The offset is initialized from the split calibration of Eq. (5) at the end of warm-up. 
+
+3.3.5 AgACI: removing the step size 
+
+ACI leaves a single hyperparameter, γ. To remove it we run K ACI experts, one per step size 
+
+γk on the fixed grid {0.01 , 0.02 , 0.05 , 0.1, 0.2}, each maintaining its own offset α(k) 
+
+> t
+
+by Eq. (6), and aggregate them by exponential weighting: the working offset is ¯ αt = P 
+
+> k
+
+w(k) 
+
+> t
+
+α(k) 
+
+> t
+
+and the bound is U (x) = g(x) + ¯ αt. After each evaluation, expert k incurs the pinball loss of its own bound at level 1 − δ,
+
+ℓ(k) 
+
+> t
+
+= ℓ1−δ
+
+ rt − (g(xt) + α(k) 
+
+> t
+
+),ℓ1−δ(z) = 
+
+(
+
+(1 − δ) z z ≥ 0,
+
+−δ z z < 0,
+
+and the weights follow Hedge (Freund and Schapire, 1997) with the anytime learning rate 
+
+ηt = p8 ln K/t (Cesa-Bianchi and Lugosi, 2006) applied to per-step min–max-normalized losses ˜ℓ(k) 
+
+> t
+
+=  ℓ(k) 
+
+> t
+
+−min j ℓ(j)
+
+> t
+
+/  max j ℓ(j) 
+
+> t
+
+−min j ℓ(j)
+
+> t
+
+ ∈ [0 , 1], the range for which the anytime rate carries its guarantee (weights are left unchanged when all experts tie): 
+
+w(k) 
+
+> t+1
+
+∝ w(k) 
+
+> t
+
+exp   − ηt ˜ℓ(k)
+
+> t
+
+. (8) Nothing is tuned: the grid, the rate schedule and the loss are fixed a priori. This construction follows the expert-aggregation principle of AgACI (Zaffran et al., 2022), in a simplified form: we aggregate the experts’ offsets into a single bound, whereas Zaffran et al. aggregate the experts’ interval bounds themselves. 
+
+3.3.6 Normalized conformal: a per-candidate width 
+
+Every global-offset filter shares a structural limitation: since U (x) = g(x) + α adds the 
+
+same offset to every candidate, the bound ranks candidates identically to g(x) and carries no per-candidate uncertainty information; moreover, its marginal coverage can conceal under-coverage on a systematically harder sub-population. The locally-adaptive (normalized) filter (Papadopoulos et al., 2008; Lei et al., 2018) divides the nonconformity score by a per-candidate difficulty scale u(x) > 0: 
+
+si = |ri − g(xi)|
+
+u(xi) ,q = Q1−δ
+
+ {si},U (x) = g(x) + q u (x),
+
+(9) with the ACI recursion of Eq. (6) now applied to the multiplier q, driven by the normalized miscoverage event rt > g (xt) + qt u(xt). The difficulty scale is supplied by a mean-absolute-deviation (MAD) surrogate: a second network h(x), of the same architecture as g, is fit to 
+
+> 13 Brandimarte, Aranjuelo, Nieto and Otaegui
+
+the mean network’s absolute residuals |r − g(x)|, and 
+
+u(x) = max  h(x), ε u
+
+, εu = 10 −3, (10) where the floor guards against degenerate scales. Coverage remains marginal, but the interval width q u (x) now varies per candidate, this width is the exploration signal consumed by the acquisition search of Sec. 3.4. 
+
+3.3.7 Mondrian conformal: group-conditional coverage 
+
+Where a group-conditional guarantee is needed (our motivating case is layer depth in the sequential MDP, whose hardest partial networks are the least predictable) we use a Mondrian construction (Vovk et al., 2022; Bostr¨ om and Johansson, 2020): one ACI offset per group 
+
+k = group( x), 
+
+U (x) = g(x) + αgroup( x),αk, t +1 = αk,t + γ 1{rt > g (xt) + αk,t } − δ, (11) updating only the observed candidate’s group. At calibration, αk is set from the group’s own residual quantile when the group has at least nmin = 10 calibration points; rarer or unseen groups fall back to the global offset of Eq. (5). Each sufficiently-observed group then inherits the guarantee of Eq. (7) within the group , at the price of slower adaptation (each offset learns only from its own group’s stream) and of the explicit small-group fallback. 
+
+3.3.8 Gaussian-process baseline 
+
+The natural objection to a surrogate-plus-offset bound is that it resembles a Bayesian optimization surrogate mean plus uncertainty, why not simply use a Gaussian process? We make the comparison measurable by placing a GP behind the same filter interface: a GP with a radial-basis-function (RBF) plus white-noise kernel (hyperparameters by marginal likelihood, re-fit online on all evaluated data) prunes on its upper confidence bound (Srinivas et al., 2010) at the same nominal level as the conformal arms, 
+
+U (x) = μ(x) + κ σ (x), κ = Φ −1(1 − δ). (12) Here μ(x) and σ(x) are the GP’s posterior mean and standard deviation at x, and Φ is the standard normal cumulative distribution function, so κ is the one-sided (1 − δ) normal quantile ( κ ≈ 1.28 at δ = 0 .1) and Eq. (12) is the GP’s nominal 1 − δ upper bound, the same target the conformal arms are held to. The contrast this baseline isolates: σ(x) is 
+
+model-based (it inherits the kernel’s stationarity and the Gaussian residual assumption), so the realized coverage of Eq. (12) carries no distribution-free guarantee, and there is no mechanism forcing it toward 1 − δ on a drifting, non-exchangeable stream. The adaptive filters, by contrast, enforce Eq. (7) on any stream. 
+
+3.4 Conformal acquisition: from pruning to directed search 
+
+The filters of Sec. 3.3 gate evaluations proposed by an external controller. The same calibrated bound can instead steer the search: the normalized bound U (x) = g(x) + q u (x) of Eq. (9) is a distribution-free analogue of GP-UCB, optimism in the face of uncertainty, with 
+
+> 14 Coverage You Can Steer
+
+optimism whose realized coverage is actively controlled rather than assumed. Three proposal mechanisms share a single loop: a warm-up of W uniformly-sampled evaluations calibrates the filter, after which each step proposes one candidate, evaluates it, and re-fits the surrogate and offset on all accumulated data (with the online ACI update applied between re-fits). 
+
+(a) Greedy acquisition. Here greedy refers to the optimization of the acquisition (a myopic, one-step argmax of the bound with no lookahead, contrasting the tree search of (c)), not to exploitation: the bound U it maximizes is the optimistic one of Eq. (9), whose q u (x)term rewards exploration. Each step draws a cheap pool of S = 64 candidates uniformly from the space and evaluates the pool’s bound-argmax: 
+
+anext = arg max  
+
+> a∈pool
+
+U  x(a). (13) No policy and no tree, the minimal test of whether calibrated optimism alone directs search. 
+
+(b) Optimism-shaped reinforcement learning. The sequential controller of Sec. 3.2.2, trained on a reward shaped toward the search objective. Plain PPO maximizes the expected reward, which concentrates the policy on the high-probability-mass region, whereas architecture search seeks the argmax , which lives in the tail. The shaped per-step training reward combines improvement over the incumbent (an expected-improvement analogue) with an intrinsic optimism bonus: ˜rt = max  0, r t − rbest 
+
+> <t
+
+ + β q u (xt), β = 0 .1, (14) where rbest  
+
+> <t
+
+is the best raw reward observed before step t; incumbent tracking and all reported metrics use the raw reward. As Sec. 4.6 reports, this shaping does not reliably improve on the unshaped controller and can destabilize it; we include it as a tested negative rather than a proposer we advocate. 
+
+(c) Conformal-optimistic tree search. In the sequential space the construction process is itself a tree: a node is a partial network, an edge is the next layer’s choice, and a leaf is a complete architecture. An AlphaZero-style planner (Silver et al., 2018) selects each proposal. The tree is descended by the PUCT rule 
+
+a = arg max  
+
+> a′
+
+Q(s, a ′) + cpuct P (a′ | s)
+
+pP  
+
+> b
+
+N (s, b ) + 1 1 + N (s, a ′) , (15) with cpuct = 1 .4, where Q is the mean backed-up value, N the visit count and P the policy prior. The step that makes tree search affordable in a ∼10 3-evaluation regime is the leaf value: leaves are valued by the calibrated optimistic bound U , never by training ,each simulation completes the partial network and backs up its bound, so thousands of simulations cost no training at all. After Nsim = 200 simulations the visit-count-greedy leaf is committed and receives the single real evaluation of that step; real evaluations re-fit the surrogate and the ACI state, closing the loop under drift. Tree search for NAS is not itself new (AlphaX, Wang et al., 2020); the novel element is the calibrated-optimistic leaf value with conformally-controlled coverage on a policy-drifting stream. The greedy (a) and tree-search (c) proposers, with the random, evolution and PPO baselines, are matched on the number of real (complete-net) evaluations consumed; the optimism-shaped controller (b) uses the sequential per-step currency and is compared against its unshaped counterpart at matched episodes, separately. 
+
+> 15
+
+Brandimarte, Aranjuelo, Nieto and Otaegui 
+
+Table 1: Default implementation settings.                                                                 
+
+> Component Setting Reward, Eq. (1) λ= 0 .2, ν= 1 .0Proxy (E, ρ ) = (5 ,0.1); (15 ,0.3) for search-quality experiments Surrogate MLP d→64 →64 →1, ReLU; MSE, Adam, lr 10 −2, 300 epochs Calibration split 1/2 surrogate fit, 1 /2 score quantile Warm-up 100 candidates (filtered search); W= 40 (acquisition search) ACI, Eq. (6) γ= 0 .05, constant AgACI, Eq. (8) grid {0.01 ,0.02 ,0.05 ,0.1,0.2}; anytime Hedge Recalibrated split period P= 50 Mondrian, Eq. (11) group = layer depth; nmin = 10, global fallback Normalized, Eqs. (9)–(10) MAD scale, floor εu= 10 −3
+> GP baseline, Eq. (12) RBF + white kernel, online re-fit, κ= Φ −1(1 −δ)PPO, Eqs. (3)–(4) ϵ= 0 .2, cv= 0 .5, cH= 0 .01, 4 epochs, lr 5 ×10 −4;γRL = 0 .99 Rejection reward rrej =−1Acquisition, Sec. 3.4 pool S= 64; Nsim = 200, cpuct = 1 .4; β= 0 .1
+
+3.5 Evaluation protocol 
+
+• Coverage. The fraction of post-warm-up evaluated candidates with r ≤ U (x); reported marginally and, in the sequential MDP, conditional on layer depth (measured in the no-prune audit mode of Sec. 3.3.1 to avoid censoring). 
+
+• Calibration error and steerability. |coverage − (1 − δ)|, swept over 
+
+δ ∈ {0.05 , 0.1, 0.2, 0.3}. A filter is steerable if its realized coverage moves monotonically with the requested level, the operational property a practitioner needs from the δ dial. 
+
+• Evaluation saving. The pruned fraction of proposed candidates (filtered search), or the best reward reached at matched evaluation budgets (directed search). 
+
+• Solution quality. The best accuracy/reward discovered, compared across filters at fixed seed: a miscalibrated bound harms solution quality only by falsely discarding 
+
+top candidates, which this comparison exposes directly. 
+
+• Reproducibility. Across-seed standard deviation of coverage (three seeds for the calibration sweeps; eight for the depth-conditional audits, whose per-depth estimates are far noisier because each depth group holds only a fraction of the stream). Default settings are summarized in Table 1. 
+
+3.6 Summary of coverage guarantees 
+
+The methods carry three coverage statements of strictly decreasing assumption strength, which we state explicitly because the experiments test exactly these distinctions: 1. Split conformal, Eq. (5) : finite-sample marginal coverage under exchangeability , an assumption violated by construction in RL-driven search. Periodic recalibration miti-gates the violation but lags the drift and provides no guarantee between recalibrations. 
+
+16 Coverage You Can Steer 
+
+2. ACI and its normalized form, Eqs. (6) and (9) : distribution-free long-run 
+
+coverage, Eq. (7), valid for arbitrary sequences, including policy-improvement drift and the within-episode depth shift of the sequential MDP. The guarantee is marginal over the stream and holds for any single online offset, whether global (ACI) or locally scaled by the u(x) of Eq. (10) (normalized). The tuning-free AgACI aggregate of Eq. (8) is a weaker case: each of its K experts carries this guarantee, but the weighted-average offset ¯ αt = P 
+
+> k
+
+w(k) 
+
+> t
+
+α(k) 
+
+> t
+
+is not itself an ACI iterate and does not inherit Eq. (7) exactly; the aggregation is instead competitive with the best fixed γ in hindsight (anytime-Hedge regret), and empirically tracks 1 − δ to within ∼0.004 mean error. 3. Mondrian ACI, Eq. (11) : the guarantee of Eq. (7) per group , degrading gracefully to the marginal guarantee when a group lacks data. The GP bound, Eq. (12), carries no distribution-free coverage statement and serves as the foil. The acquisition search of Sec. 3.4 inherits statement 2 for its exploration signal: the optimism bonus q u (x) is not a posterior credence but a quantity whose realized coverage is continuously driven toward 1 − δ.
+
+## 4 Experiments 
+
+We evaluate five questions, each mapped to a subsection: (E1) Which filters deliver calibrated, steerable, and reproducible coverage at the requested level (Sec. 4.2)? (E2) Does pruning cost solution quality, and which filters falsely discard the optimum (Sec. 4.3)? (E3) Do the guarantees survive the stronger, within-episode drift of the sequential per-layer MDP, and does group-conditional adaptation close the depth-conditional gap (Sec. 4.4)? (E4) Does the reinforcement-learning controller itself add search efficiency over uninformed baselines (Sec. 4.5)? (E5) Does the calibrated bound, used as an acquisition function, direct search better than random exploration (Sec. 4.6)? 
+
+4.1 Experimental setup Benchmark grid. Three architecture families, each paired with its standard dataset: a LeNet-like family on MNIST, a ResNet-like family on CIFAR-10, and a depthwise-separable MobileNet-like family on CIFAR-100 (search spaces of Sec. 3.1.2; per-block bit-widths {4, 8}
+
+throughout, applied by fake post-training quantization). 
+
+Search and budgets. Bandit experiments run the CTDE-PPO controller for 50 itera-tions × 20 trials = 1,000 proposed candidates, the first 100 forming the warm-up/calibration set. Sequential experiments run 150 construction episodes with per-step evaluation. The reward, Eq. (1), uses λ = 0 .2, ν = 1 .0, with MCU-scale budgets ( MB = 512 kB; TB = 0 .3 ms), tightened to MB = 256 kB for the directed-search experiments (Sec. 4.6). The acceptance threshold τ is calibrated per family to the reward distribution of an unfiltered probe run, since τ is a location within the family’s reward distribution, not a transferable constant: 
+
+τ = 0 .35 for ResNet-like, 0 .89 for LeNet-like (the valley of its bimodal reward mass), and 0.18 for MobileNet-like. 
+
+Filter arms. adaptive (ACI, γ = 0 .05), agaci (tuning-free aggregation), split 
+
+(calibrate-once split conformal), split-recal (periodically recalibrated split conformal, 
+
+> 17
+
+Brandimarte, Aranjuelo, Nieto and Otaegui 0.7 0.8 0.9 1.0             
+
+> requested coverage 1 −δ
+> 0.6 0.7 0.8 0.9 1.0
+> realized coverage
+> ResNet-like (CIFAR-10)
+> 0.7 0.8 0.9 1.0
+> requested coverage 1 −δ
+> LeNet-like (MNIST)
+> 0.7 0.8 0.9 1.0
+> requested coverage 1 −δ
+> MobileNet-like (CIFAR-100)
+> adaptive agaci split split-recal gpbo
+
+Figure 1: Realized coverage vs requested target 1 − δ, per filter arm and family (points = seed mean, error bars = across-seed standard deviation; grey line = ideal calibration). The adaptive and tuning-free (agaci) filters lie on the diagonal with tight bars, calibrated and reproducible. GP-UCB is pinned near 0.99 regardless of the request. Calibrate-once split barely tracks the target (under-covering at tight requests, over-covering at loose ones), and its large error bars (absent from the means alone) are the reproducibility failure: biased and uncontrolled at once. Table 2: Calibration error |coverage − (1 − δ)| over the δ-sweep, ResNet-like/CIFAR-10.                             
+
+> arm mean |err |max |err |steerable? max std
+> adaptive 0.001 0.002 monotone 0.002 agaci 0.004 0.008 monotone 0.011 split 0.041 0.087 non-monotone 0.165
+> split-recal 0.065 0.128 over-covers, drifts 0.063 gpbo 0.156 0.290 pinned ≈0.99 0.010
+
+the faithful MARCO baseline), gpbo (GP-UCB at the same nominal level), and none (no filtering). All arms share the surrogate architecture, warm-up data and controller; within an experiment, all arms run the same code version and seeds. 
+
+4.2 Calibration, steerability and reproducibility 
+
+Table 2 reports the five-arm δ-sweep on ResNet-like/CIFAR-10, while Table 3 gives the per-target coverages behind it. Figure 1 plots the same comparison across all three families: the calibrated arms lie on the diagonal, the Gaussian-process bound is pinned flat near the top, and the static arms scatter. 
+
+ResNet-like/CIFAR-10 (weak proxy, τ = 0 .35 , seeds 0/1/2). Table 2 shows that the adaptive filter is calibrated and steerable : it tracks every requested level to within 
+
+∼10 −3, monotonically (dial δ, receive that coverage), with across-seed deviation of ∼0.002. Its tuning-free form loses almost nothing: AgACI matches ACI to within 0.004 with no chosen step size, closing the objection that the calibration rests on a fortunate γ. Every baseline, by contrast, fails in its own characteristic way, each visible in the remaining rows 
+
+18 Coverage You Can Steer 
+
+Table 3: Realized coverage per requested target, ResNet-like/CIFAR-10.                         
+
+> arm 0.95 0.90 0.80 0.70 adaptive 0.949 0.900 0.798 0.701 agaci 0.942 0.900 0.805 0.702 split 0.923 0.813 0.839 0.789 split-recal 0.965 0.939 0.876 0.828 gpbo 0.999 0.994 0.990 0.990
+
+of Table 2 and the per-target coverages of Table 3. Calibrate-once split conformal is biased and uncontrolled : its mean coverage barely tracks the requested level (under-covering at tight targets, over-covering at loose ones, the systematic, bias-like part), and it carries seed deviation up to 0.165: at δ = 0 .2 individual seeds spanned 0.61–0.98, one run violating the guarantee while another wastes evaluations (the uncontrolled part). Periodic recalibration halves that variance but remains unsteerable: relaxing the target from 0.95 to 0.70 moves its coverage only from 0.965 to 0.828, a growing miss that reaches 0.128. GP-UCB is 
+
+confidently miscalibrated : pinned at ≈0.99 for every requested level with tight seed variance, reliable delivery of a coverage nobody asked for, and the δ dial barely moves its prune rate (0 .36 → 0.42 across the sweep). 
+
+LeNet-like/MNIST (weak proxy, τ = 0 .89 , seeds 0/1/2). The same sweep on the second family replicates the picture: adaptive mean |err | 0.001 (max seed std 0.001), agaci 0.003 (monotone, no γ), split 0.046 with seed std up to 0.165 and non-monotone coverage, split-recal 0.044 (over-covering and stalling at 0.774 against the 0.70 target), gpbo 0.149, and its savings do not respond to the dial either, prune rate frozen at ≈0.33 for every δ.Notably, split’s mean coverage barely responds to the dial (0 .843 /0.854 /0.805 /0.725 as the target falls 0 .95 → 0.70): it under-covers at tight targets and over-covers at loose ones, the 
+
+same direction as on the ResNet-like family. The systematic part of the miss is thus bias-like (a roughly fixed operating point that does not track the requested level, a steerability failure) while the large seed-to-seed swings above (std up to 0.165) are the reproducibility failure. A usable filter must pass both; split passes neither. 
+
+MobileNet-like/CIFAR-100 (strong proxy, τ = 0 .18 , seeds 0/1/2). The third family completes the grid with the same ranking: adaptive mean |err | 0.002 (seed std 
+
+≤ 0.001), agaci 0.004 (monotone, no step size chosen), split-recal 0.054 (over-covering with the miss growing to 0.114 and stalling at 0.814 against the 0.70 target), and gpbo 0.134, pinned at 0.95–0.98 with its prune rate frozen at 0.56–0.58 across every requested level. Calibrate-once split is again the most erratic across seeds (std up to 0.153), and shows the same systematic tilt as the other families (under-covering at tight targets, 0.917 vs 0.95, over-covering at loose ones, 0.783 vs 0.70), biased and uncontrolled here too. Across the three families the tuning-free filter’s mean calibration error is 0.004 / 0.003 / 0.004 against the fixed-γ filter’s 0.001 / 0.001 / 0.002. 
+
+Coverage dynamics under drift. The aggregate numbers understate the static filters’ failure mode, which the running-coverage trajectories expose directly (Figure 2, mean and min–max band over three seeds). The adaptive arm converges from initial over-coverage down to the target and hugs it for the remainder of the search, continuously tightening the offset as the policy drifts, with a negligible across-seed band; the tuning-free arm follows      
+
+> 19 Brandimarte, Aranjuelo, Nieto and Otaegui 0100 200 300 400 500
+> evaluated candidate (post-warm-up)
+> 0.5 0.6 0.7 0.8 0.9 1.0
+> coverage
+> adaptive agaci split split-recal gpbo target 1
+
+Figure 2: Cumulative running coverage over the evaluated stream (ResNet-like/CIFAR-10, weak proxy, δ = 0 .1; all five arms). Lines are the mean across three seeds, and shaded bands are the min–max across seeds, the reproducibility axis. The adaptive filter converges to the 0.90 target and tracks it under policy drift with a negligible seed band; the tuning-free (agaci) filter tracks it slightly more loosely, since the averaged offset does not inherit the single-offset guarantee exactly. The two static bounds settle off-target in opposite directions, calibrate-once split under-covers while the recalibrating baseline over-covers with a wide seed band ( ∼0.91–0 .99), and the Gaussian-process bound is pinned near 0.99. the same trajectory a touch more loosely as the aggregated offset re-equilibrates under drift. The static bounds instead settle off-target (calibrate-once split overtaken downward as the policy improves, GP-UCB pegged near 1.0, periodically-recalibrated split drifting into over-coverage) and, unlike the adaptive arm, carry a wide across-seed band (split-recal spanning ∼0.91–0 .99): the reproducibility failure the seed deviations of Table 2 report, here visible over the whole stream rather than at a single endpoint. 
+
+The savings frontier. Coverage control is purchasing power over evaluations: at matched calibration, relaxing δ converts risk into savings. On the LeNet-like family the adaptive arm prunes 30.3% of candidates at δ = 0 .05 rising monotonically to 39.5% at 
+
+δ = 0 .3; on the ResNet-like family, 26.8% rising to 36.3%. The steerability failures above are also efficiency failures. Split-recal over-covers at loose δ and evaluates candidates the user asked it to prune; GP-UCB fails the other way, its prune rate is decoupled from δ (frozen at 
+
+≈0.33 on LeNet-like and 0.56–0.58 on MobileNet-like), so its savings do not track the dial. 
+
+The second dial: τ at fixed δ. Sweeping the acceptance threshold τ ∈ { 0.25 . . . 0.45 }
+
+at fixed δ = 0 .1 (ResNet-like family, three seeds) shows the two controls are orthogonal for the adaptive filter: pruning rises monotonically with τ (0 .200 → 0.262 → 0.352 → 0.486 across the in-mass range, with the discard band at the calibrated operating points matching the 22–32% reported in prior work, Fayyazi et al., 2026), while realized coverage stays 
+
+> 20 Coverage You Can Steer
+
+0.899–0.901 with seed deviation ≤ 0.002 at every τ inside the reward mass: the savings dial moves without touching the risk. The static baselines cannot decouple the dials: the periodically-recalibrated filter’s coverage climbs monotonically with τ (0 .897 → 0.981), driven ever deeper into over-coverage by the acceptance-conditioning of the measure as the bar rises. The sweep’s top end also delineates the operating envelope : at τ = 0 .45 (in the upper tail of the reward mass, pruning ∼73%) control loosens for every arm (the evaluated stream thins), and for the first time the tight, correctly-calibrated bounds pay a small solution-quality price (best accuracy 0.489/0.482 vs the 0.497 ceiling), while the looser static bounds keep the peak only by pruning too little, the same over-coverage that wastes evaluations everywhere else. This is the guarantee working as specified: 1 − δ bound coverage licenses discarding δ of above-τ candidates, and with τ at the ceiling the optimum’s neighbourhood is the above-τ set. This is why τ is calibrated into the reward mass, where the sweep shows the dial is free. 
+
+4.3 Solution quality: pruning is free, miscalibration is not 
+
+Across every δ, seed and family, the adaptive and agaci arms discover the same best architecture as the unfiltered baseline, pruning 25–50% of evaluations costs no measured solution quality. The same held for every filter except one : on the ResNet-like family, the faithful MARCO baseline ( split-recal ) consistently returned a strictly worse optimum (best accuracy 0.481 vs 0.505 for every other arm, across seeds and δ). The per-trial logs identify the mechanism directly: its recalibration-churned, miscalibrated bound falsely discarded the best architecture (pruned it, never trained it) on every seed. The cross-family pattern shows when this failure actually costs anything, and the answer is the shape of the landscape. It hurts the final result only where the optimum is isolated :on the ResNet-like family’s single sharp peak, split-recal ’s best accuracy falls 0 .024 below every other arm. Where instead a cluster of near-optimal architectures exists, as in the LeNet-like family’s flat ≈0.98 plateau (penalty ≈0.002) and the MobileNet-like family’s upper cluster (penalty 0), a false discard still leaves an equally good neighbour, so the final accuracy is unchanged. Calibration is thus cheap insurance: it costs almost nothing in solution quality, and its value shows up precisely on the landscapes where the search cannot afford to lose a single needle. 
+
+Measured false-discard rates. Beyond the end-to-end case above, we measure false-discard rates directly by offline replay : each filter is replayed over the fully-evaluated unfiltered stream of each family, with features rebuilt from logged configurations, calibrated on the warm-up prefix, updated only on candidates it accepts, so the information flow matches a live run while every pruned candidate’s true reward is known. The replay reframes the claim (Table 4). For the calibrated filters the false-discard rate tracks the dialed risk ,rising smoothly with δ and staying near the requested level; calibrate-once split instead leaves it uncontrolled : on the LeNet-like family the rate overshoots the dial at tight targets (0.11 at δ=0 .05) and then detaches from it, plateauing near 0 .20, all while under-covering (coverage 0 .77 down to 0 .66) and pruning ≈40% of the stream. Under the weak proxy, every arm sits near zero on the MobileNet-like/CIFAR-100 landscape, so the table lists the two families where the arms separate. 
+
+> 21
+
+Brandimarte, Aranjuelo, Nieto and Otaegui 
+
+Table 4: Prune rate, false-discard rate, and realized coverage vs requested δ (offline replay over the no-prune streams, three-seed means; each cell lists δ =0.05 / 0.10 / 0.20 / 0.30). False discard is the share of pruned candidates whose true reward reached τ . Calibrated arms track the dialed δ in coverage while their false-discard rate rises with it; calibrate-once split is uncontrolled (false discard overshoots the dial to ≈0.20 on MNIST while under-covering); GP-UCB keeps false discards near zero by over-covering (coverage ≈1.0) and cannot dial its prune rate. On MobileNet-like/CIFAR-100 all arms are near zero under the weak proxy (omitted).                                      
+
+> arm prune false-discard coverage
+> ResNet-like / CIFAR-10 (τ= 0 .35) adaptive 0.260/0.369/0.488/0.519 0.066/0.090/0.176/0.194 0.950/0.900/0.800/0.700 agaci 0.261/0.406/0.452/0.491 0.072/0.106/0.121/0.142 0.949/0.900/0.800/0.699 split 0.253/0.373/0.385/0.450 0.067/0.100/0.099/0.099 0.973/0.867/0.831/0.738 split-recal 0.370/0.423/0.510/0.579 0.048/0.087/0.113/0.149 0.954/0.903/0.815/0.765 gpbo 0.526/0.534/0.547/0.564 0.000/0.019/0.037/0.063 1.000/1.000/0.999/0.999
+> LeNet-like / MNIST (τ= 0 .89) adaptive 0.319/0.366/0.380/0.387 0.008/0.046/0.078/0.104 0.949/0.899/0.800/0.700 agaci 0.362/0.373/0.377/0.379 0.049/0.052/0.061/0.069 0.950/0.898/0.798/0.698 split 0.402/0.432/0.440/0.440 0.114/0.190/0.204/0.204 0.774/0.752/0.731/0.661 split-recal 0.352/0.374/0.377/0.375 0.041/0.059/0.058/0.055 0.953/0.924/0.880/0.820 gpbo 0.351/0.351/0.351/0.351 0.000/0.000/0.000/0.000 0.995/0.995/0.994/0.985
+
+Calibrated filtering therefore does not necessarily yield a lower false-discard rate, but a 
+
+controlled one that tracks the dialed δ; calibrate-once split’s rate is instead detached from δ
+
+and unreproducible, carrying across-seed spread up to ±0.10 in false-discard rate and ±0.16 in coverage against the calibrated arms’ ±0.001 coverage. Over-coverage further muddies any raw comparison, since it mechanically reduces false discards by wasting evaluations (at matched realized coverage an over-covering arm can even show a lower raw rate than a correctly-calibrated one), which is why the dialed level, not the raw count, is the meaningful quantity. The Gaussian-process bound is the limiting case of that mechanism: replayed on the same streams, its coverage is welded to 0.985–1.000 and its prune rate barely responds to δ, with false discards near zero, an over-coverage the δ dial cannot trade back for savings. ( Replay is off-policy, on the unfiltered run’s stream, with three seeds for the CIFAR-10 and MNIST streams. Even here, the optimum was pruned on one of three seeds by both 
+
+split-recal and gpbo at the loosest target δ=0 .3; with only three seeds we read this as corroboration rather than a false-discard rate. It complements, rather than reproduces, the live optimum discard above, which occurred on the baseline’s own policy stream. ) 
+
+4.4 Sequential search: depth-conditional coverage 
+
+The sequential per-layer MDP subjects the filter to drift on two timescales: policy im-provement across episodes, and (far faster) the within-episode walk from shallow to deep partial networks. Marginal coverage can hide a systematic imbalance across that walk, so we measure coverage conditional on layer depth , using the no-prune audit (Sec. 3.3.1; all candidates evaluated, filter updates live) to observe all depths uncensored. We compare 
+
+22 Coverage You Can Steer 5 10 15 20        
+
+> layer depth
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> achieved coverage
+> ResNet-like (CIFAR-10)
+> 1234
+> layer depth
+> LeNet-like (MNIST)
+> 2.5 5.0 7.5 10.0 12.5
+> layer depth
+> MobileNet-like (CIFAR-100)
+> target 0.90 adaptive mondrian split-recal
+
+Figure 3: Coverage conditional on construction depth (target 0.90, no-prune audits, eight seeds): ResNet-like/CIFAR-10 (left), LeNet-like/MNIST (center), MobileNet-like/CIFAR-100 (right). The static baseline over-covers shallow and collapses on the hard depths; global ACI misallocates in a family-dependent direction; per-depth Mondrian adaptation tracks the target wherever its groups have data, exactly flat on the MobileNet-like family, where every depth clears the calibration minimum. Table 5: Mean calibration error |coverage − 0.90 | by depth region, no-prune audits (eight seeds). Mondrian ties the global arms where a depth group is well-sampled and wins where every group is fed (LeNet-, MobileNet-like); on ResNet-like it cannot help the data-starved deep depths, where all arms suffer.                       
+
+> family depth region adaptive mondrian split-recal ResNet-like 1–13 (fed) 0.034 0.032 0.075 14–20 (starved) 0.175 0.160 0.287 all 0.083 0.077 0.149 LeNet-like all (2–4, fed) 0.152 0.075 0.169 MobileNet-like all (4–12, fed) 0.039 0.003 0.028
+
+three arms, global ACI, per-depth Mondrian ACI, and the recalibrating split-conformal baseline, auditing all three families at target 1 − δ = 0 .90 over eight seeds (more than the marginal sweeps of Sec. 4.2, since slicing each stream by depth leaves the per-depth estimates far noisier). Figure 3 plots the per-depth coverage curves for the three families, and Table 5 summarizes the conditional error by depth region. The target depth range is family-specific (ResNet-like [8 , 20], LeNet-like [2 , 4], MobileNet-like [4 , 12]), and coverage is audited at every construction depth up to the terminal. On ResNet-like/CIFAR-10, the static baseline exhibits the textbook conditional failure: over-coverage on shallow partials (1.00, its mixed-distribution quantile is too wide for low-variance stubs), then monotone collapse with depth, to 0.57 at depth 20; its periodic recalibration cannot chase a shift that unfolds within single episodes. Global ACI roughly halves the conditional error and holds the target through depth ∼13, but (being a marginal 
+
+23 Brandimarte, Aranjuelo, Nieto and Otaegui 
+
+method) it, too, under-covers the deepest layers, subsidizing them with shallow over-coverage. Per-depth Mondrian adaptation smooths the curve and removes the shallow over-coverage, but at these depths its deep groups are data-starved (few episodes reach depth 16+; per-depth estimates carry seed std up to ±0.4) and fall back to the global offset. 
+
+The starvation diagnosis is confirmed on a space where every depth is well-sampled. On LeNet-like/MNIST ( ∼455 partial networks per seed, ≥ 54 at the rarest depth), Mondrian is closest to target at every depth, halving global ACI’s conditional error (0.075 vs 0.152; split-recal 0.169): per-group adaptation delivers group-conditional coverage wherever the search visits the group often enough to calibrate it. The conditional failure of a global offset is not a deep-network artifact, global ACI collapses already at depth 3 of a 4-layer space, because the stream is dominated by shallow steps. The terminal depth under-covers for every method even when well-sampled (0.61–0.72 at ∼54 samples/seed), though the third family shows this is not universal. 
+
+On a fully-sampled family, Mondrian is near-exact at every depth, and the hard depths are shallow, not deep. On MobileNet-like/CIFAR-100 (every group above the calibration minimum, from 150 nets/seed at depths 1–4 down to ∼17 at depth 12), with no group data-starved, Mondrian is near-exactly calibrated at every depth, coverage 0.893–0.902 across all twelve (a range of 0.009, ∼15 × flatter than either global arm), mean conditional error 0.003 against 0.039 (adaptive) and 0.028 (split-recal), with the two global arms roughly tied. Equally instructive is where the global arms fail: here the under-coverage sits at shallow-mid depths (0.833–0.870 at depths 3–4) while deep partials over -cover, the inverse of the other two families’ profile, with no deep collapse and an exactly-calibrated terminal depth. The conditional failure of a marginal method is therefore not “deep layers are hard”: whichever depths are hard (and the hard region is family-dependent, unknowable in advance) a single offset under-covers them and subsidizes the rest, while per-group adaptation finds the right offset per depth without being told where the hardness lies. Marginal coverage (the guarantee ACI formally carries) is held throughout; what this experiment adds is that the practically-relevant conditional version is delivered by Mondrian adaptation exactly to the extent the data allows (a flat at-target line when every group is fed) and that the split-recal baseline never attains it in any of the three regimes. Returning to the ResNet-like deep gap, a coarser depth-binned Mondrian isolates its cause: pooling the starved deep depths onto a shared offset roughly halves their error (0.160 to 0.079), so the gap is a sample-size limit, not a fundamental one. The pooling is itself a bias–variance trade, though, since a single offset per bin cannot track the hardness gradient it spans. 
+
+The same holds on the search substrate. The audits above use the weak proxy, whereas the directed-search results of Sec. 4.6 use the strong proxy; repeating the ResNet-like audit on that strong-proxy substrate (Figure 4, eight seeds) shows the depth-conditional picture not only survives but sharpens. Both global arms over-cover shallow and collapse deep, adaptive to 0 .60–0 .75 and split-recal to 0 .59–0 .70 at depths 14–20, deep-region error 0.231 and 0 .258, worse than on the weak proxy since the climbable strong-proxy landscape drives the policy harder into deep partial networks. Per-depth Mondrian is again the only calibrated arm, and by the widest margin here: overall error 0 .052 against 0 .113 (adaptive) and 0 .140 (split-recal), roughly halving both. It also confirms the sample-size diagnosis without any pooling: the deeper-reaching policy feeds the deep groups more, so Mondrian’s 
+
+> 24
+
+Coverage You Can Steer 5 10 15 20 
+
+> layer depth
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> achieved coverage
+
+ResNet-like (CIFAR-10, strong proxy) 
+
+> target 0.90 adaptive mondrian split-recal
+
+Figure 4: Coverage by construction depth on the strong-proxy ResNet-like/CIFAR-10 sub-strate (target 0.90, no-prune, eight seeds), the substrate of the directed-search results (Sec. 4.6). The global arms over-cover shallow and collapse deep; per-depth Mondrian tracks the target across depth at roughly half their overall error. Table 6: Best reward vs evaluation budget on the standard landscape (512 kB budget, no filtering; mean over seeds). This is a different, less-constrained testbed than the 256 kB one of Table 7, so absolute rewards are not comparable across the two.                            
+
+> evaluations 100 200 500 1000 final ( ±std) random 0.699 0.719 0.725 0.725 0.7252 ±0.0035
+> evolution 0.707 0.713 0.715 0.715 0.7148 ±0.0117 ppo 0.704 0.704 0.704 0.704 0.7040 ±0.0058
+
+own deep-region error falls from 0 .160 on the weak proxy to 0 .100 here, the same effect binning engineered, now arising naturally. The coverage story and the solution-quality story therefore rest on one substrate, not two. 
+
+4.5 Does the controller matter? RL vs uninformed search 
+
+The filter is controller-agnostic; this experiment asks what the controller itself contributes. On the strong-proxy ResNet-like landscape (15 epochs / 30%, required because the weak-proxy landscape is a needle any method finds only by warm-up luck, which cannot separate methods), PPO, random search and regularized evolution each receive an identical budget of 1,000 real evaluations (filtering disabled), three seeds (Table 6). The controller adds no search efficiency: no early-budget advantage, a running best frozen from evaluation ∼100, overtaken by both baselines by evaluation 200, and a final gap of 3–6 × the seed deviation. The diagnosis matters more than the ranking: PPO is 
+
+25 Brandimarte, Aranjuelo, Nieto and Otaegui 
+
+Table 7: Directed search on the constrained testbed (ResNet-like family, strong proxy, 256 kB budget): best reward reached at each evaluation budget, and best complete-architecture accuracy at 1,000 (mean over three seeds). The acquisition, MCTS and random arms commit only feasible candidates, so their running best is directly comparable across budgets; the terminal-only PPO controller logs a soft budget penalty and explores infeasible candidates, so only its final best-feasible reward is comparable and its intermediate budgets are omitted ( −).                                         
+
+> arm 100 200 500 1000 acc. @1000 acq. [calibrated] 0.622 0.661 0.689 0.695 0.734
+> acq. [uncalibrated] 0.629 0.654 0.676 0.691 0.727 acq. [mean] 0.629 0.657 0.682 0.682 0.723 mcts [calibrated] 0.604 0.627 0.633 0.637 0.661 mcts [uncalibrated] 0.631 0.634 0.642 0.653 0.669 ppo (terminal) ———0.659 0.686 random 0.520 0.604 0.620 0.656 0.673
+
+learning, its mean proposal reward climbs 0 .25 → 0.40 (+58%) over the run while random’s stays flat, but it is learning the wrong objective. The policy maximizes the expected reward and therefore concentrates; the search prize is the argmax , which lives in the tail that concentration abandons (PPO locks onto a good-mean macro region and never revisits the corner containing the true optimum, which random finds precisely because it never stops sampling everywhere). This reproduces the random-search finding of (Li and Talwalkar, 2020) on MARCO’s own controller, and confirms that the method’s value lies where E1–E3 place it: in calibrated control of the evaluation budget, which transfers to any proposer, while motivating the argmax-aligned proposal mechanisms tested next. 
+
+4.6 Directed search with the calibrated acquisition 
+
+The acquisition experiments run on a single constrained sequential testbed, the ResNet-like per-layer space: strong proxy, memory budget tightened to 256 kB so that most architectures are infeasible and search is non-trivial. They compare greedy conformal acquisition (a myopic one-step argmax of the bound, no lookahead), Eq. (13), and conformal-optimistic MCTS, Eq. (15), against random search (and a terminal-only PPO arm) at matched real-evaluation budgets of up to 1,000 evaluations, three seeds. The attribution ablation runs each directed method in three settings of the multiplier q in the normalized bound U (x) = g(x) + q u (x)(Eq. (9)): calibrated (q updated online), uncalibrated (fixed optimism, q held constant), and mean (the surrogate mean alone, q = 0), isolating the contribution of optimism and of its calibration. This 256 kB testbed is a harder, different landscape from the standard-budget one of Sec. 4.5, so its absolute rewards are lower and not comparable across the two tables; here the terminal PPO arm ties random (0.659 vs 0.656, within noise) rather than trailing it as on the standard landscape, either way the controller does not beat random. Greedy conformal acquisition leads random across the budget (Table 7): it finishes +0 .040 reward / +0 .061 accuracy above random and +0 .036 / +0 .048 above the PPO controller at 1,000 evaluations, and it is the most reproducible searcher in the study (seed deviation 0.001, 
+
+> 26 Coverage You Can Steer
+
+against 0.021 for random and 0.032 for PPO). The attribution separates optimism from its calibration: the ranking is calibrated > uncalibrated > mean (0 .695 > 0.691 > 0.682). The mean-only arm ( q = 0) improves by exactly zero over its last 500 evaluations (pure exploitation stalls once the surrogate’s argmax region is mined out) while both optimistic arms keep improving to the end; fixed optimism alone already beats random by 0 .036, and the online updates add a further 0 .004 ( ∼2.6× the arms’ seed deviation) plus a ∼6× variance reduction over the mean arm. Every MCTS variant beats random at 100–200 evaluations but plateaus by 500 and finishes at or below random: valuing deep simulated completions with the bound concentrates planning where the surrogate is optimistic, and too few real evaluations reach those leaves to correct it. This budget profile is robust to the exploration constant: sweeping cpuct ∈{0.5, 1.4, 3.0} leaves MCTS best reward within ∼0.01 at every budget (below the across-seed spread), so the early-only advantage is a property of tree search on this landscape, not an artifact of an untuned cpuct . The cheap pool-argmax acquisition, not planning depth, carries the advantage that lasts. 
+
+Shaping the controller’s own reward does not help. A separate question is whether the same optimism can be injected into the RL controller itself rather than used as an external proposer: the optimism-shaped controller (Eq. (14)) shapes the per-step reward toward improvement-over-incumbent plus an optimism bonus. Comparing the shaped controller against its unshaped counterpart at matched episodes (eight seeds, per-step currency, so the comparison is within this pair, not against the arms above), shaping does not reliably win: on the outlier-robust median the unshaped controller is marginally ahead on reward (0 .67 vs 0 .63) and the shaped one marginally ahead on discovered accuracy (0 .72 vs 0 .70), both within seed noise. Worse, shaping destabilizes training: two of the shaped seeds diverge to strongly negative reward as the optimism bonus drives the controller into the infeasible region, where the unshaped controller stays tight across all seeds. This is a deliberate negative: it echoes the controller result of Sec. 4.5 at one level deeper (optimism helps as an external, calibrated acquisition signal, but not as an internal reward that reshapes the policy), which is why the value sits in the bound, used to gate and to steer, rather than in the RL controller. 
+
+## 5 Conclusion 
+
+Conformally-filtered architecture search rests on a promise: candidates are pruned without training only under a controlled probability of discarding a good one. We showed that in the setting where this idea is deployed (a reinforcement-learning search loop) the static split-conformal construction that makes the promise cannot keep it, because the loop’s own policy improvement destroys the exchangeability the guarantee is built on. Moreover, we observed that the failure is not merely a bias but a loss of control : realized coverage carries a systematic tilt (unresponsive to the requested risk level, under-covering at tight targets, over-covering at loose ones) and lands unpredictably across seeds, so no fixed correction recovers it. Periodic recalibration (a faithful version of the prior work taken as baseline) reduces the variance of this failure without restoring control, and on the one benchmark landscape whose optimum is isolated it falsely discards the best architecture on every seed. 
+
+> 27 Brandimarte, Aranjuelo, Nieto and Otaegui
+
+Replacing quantile estimation with online feedback control repairs this at negligible cost. Adaptive conformal inference tracks every requested coverage level to within ∼10 −3,monotonically and reproducibly (seed deviation ∼0.002, one to two orders of magnitude below the baselines), across three architecture families and datasets, in both the single-step and the sequential per-layer formulations of the search, while pruning 25–50% of candidate evaluations at no measured cost in solution quality. On these streams the result did not depend on the step-size choice: aggregating ACI experts over a fixed grid matches the fixed-γ
+
+filter to within 0.004 with nothing chosen by hand. The comparison with a Gaussian-process upper confidence bound at the same nominal level sharpens the point of principle: model-based uncertainty on this non-exchangeable stream is confidently miscalibrated (pinned near 0.99 coverage whatever level is requested), whereas distribution-free feedback control delivers the level asked for. Inside learning loops, uncertainty that is verified against outcomes is better than uncertainty that is assumed from a model. Two further results delimit what calibration can and cannot buy. In the sequential search, marginal coverage (the guarantee ACI formally carries) conceals a systematic imbalance across construction depth whose direction is family-dependent (deep layers under-cover on two families, shallow-mid layers on the third); per-depth Mondrian adaptation restores group-conditional coverage exactly where the search visits a depth often enough to calibrate it (a flat, at-target line across every depth when all groups have data) without knowing in advance where the hardness lies. And the reinforcement-learning controller itself, reproduced faithfully from prior work, does not outperform random search at matched budget: it demonstrably learns, but it optimizes the expected reward while search rewards the argmax. We report this negative result deliberately: it locates the practical value of this line of work not in the learned controller but in the calibrated bound itself (controller-agnostic management of the evaluation budget that transfers to any proposer) and it motivates our final direction, in which that same bound becomes the proposal mechanism. On one constrained testbed, our proposed greedy optimistic acquisition beats random search at every budget up to 1,000 evaluations and is the most reproducible searcher we test. An attribution ablation traces most of the gain to the optimism itself (fixed optimism already beats random) with online calibration adding a final edge and a marked reduction in seed variance. 
+
+5.1 Limitations Hardware cost model. Our oracle is analytical and monotone but not calibrated to a physical device. The calibration and steerability results are unaffected (the filter’s coverage tracks whatever reward the oracle produces) so the cost model bears only on the absolute hardware interpretation: hardware-aware conclusions concern orderings and budget-binding regimes, not absolute latencies or memory footprints, and the framework’s claimed hardware generality is demonstrated only across parameterizations of one MCU-style model, with validation against measured cost models (GPU, NPU, and a physical edge target) left to future work. 
+
+Proxy fidelity. All rewards derive from partial-training proxies. Calibration claims are unaffected (the bound provably tracks whatever the proxy outputs) but solution-quality claims inherit the proxy’s ranking fidelity, and whether proxy rankings survive full training 
+
+> 28 Coverage You Can Steer
+
+is not tested here. Relatedly, the proxy’s strength shapes what experiments can measure at all: on the weak proxy the ResNet-like family’s landscape degenerates to a needle found by warm-up luck, which is why search-quality comparisons use the stronger proxy and why per-family recalibration of the acceptance threshold τ is a prerequisite, not a tuning nicety. 
+
+Conditional coverage under data-starved or structurally harder groups. Mon-drian adaptation closes the depth-conditional gap only where a depth group has enough data to calibrate it; where a group is starved (the deepest depths on the ResNet-like family whose search rarely reaches them) the guarantee falls back toward the marginal one. More data narrows the gap, whether pooled into coarser depth bins or supplied by a substrate that visits those depths more often (the strong proxy), but does not fully close it. And on the LeNet-like family the terminal construction depth under-covers for every method even when well-sampled (episode-final networks there carry the full cost penalties and concentrate the policy’s drift) while on the MobileNet-like family it calibrates exactly, so structurally harder groups exist but are family-specific rather than a law of depth. Group-conditional validity under such groups, where they occur, remains open. 
+
+Coverage measurement under pruning. In filtered runs, coverage is observable only on accepted candidates, a τ -dependent population. For the adaptive filter this is benign in practice: the τ -sweep (Sec. 4.2) shows its coverage τ -invariant across the operating range (0 .899–0 .901, loosening only at the reward ceiling), and uncensored no-prune audits sidestep the conditioning entirely for both the bandit and sequential experiments: on the full, unpruned bandit stream the calibrated arms still track every requested level to ∼10 −3
+
+(0 .949 /0.899 /0.800 /0.700 on the ResNet-like/CIFAR-10 and LeNet-like/MNIST families). Closing it fully is a censoring problem, not a compute one: pruned candidates are never trained, so their rewards are unobserved by construction, and the accepted-only estimate is censored by the very selection it would measure. Recovering coverage on the full proposed population would require either training the pruned candidates (the no-prune audit, which is not the live filtered condition) or a statistical selection-bias correction, a methodological gap shared with prior work (Fayyazi et al., 2026). 
+
+Scope of the search problem. The empirical base is CNN classification on MCU-scale spaces, chosen for faithful comparison with prior work. Our empirical base is from-scratch architecture search over CNN families: candidates are proposed by varying trainable archi-tecture parameters and scored by partial training. The filter itself assumes only an expensive, reward-producing evaluation, so it should wrap other regimes unchanged—structurally differ-ent spaces (transformer families), different evaluation modalities (e.g. warm-start fine-tuning of pretrained models rather than from-scratch training), detection/segmentation tasks, and real deployment toolchains—but that transfer is asserted by design, not yet by experiment. 
+
+Directed search. The conformal-acquisition results (Sec. 4.6) are the paper’s narrowest evidence base (one family, one constrained testbed, three seeds), so whether the calibration edge and the greedy-over-tree-search advantage generalize across families remains open. The filter contribution is independent of this track. 
+
+Statistical power. Three seeds for the calibration sweeps and eight for the depth audits suffice for the headline effects (10–100 × calibration-error ratios) but leave wide intervals on the sparse deep-depth estimates and the small-budget search comparisons; both are flagged where reported. 
+
+> 29 Brandimarte, Aranjuelo, Nieto and Otaegui
+
+5.2 Outlook 
+
+The broader suggestion of this work is that the statistical machinery inside learning-driven search loops should carry guarantees matched to the non-stationarity those loops create. Distribution-free online calibration proved to be a drop-in upgrade for evaluation filtering; the same quantity (a bound whose meaning is continuously verified) is a natural currency for exploration, resource rationing, and stopping rules. Extending calibrated search from pruning to full acquisition, from marginal to conditional validity on structured state spaces, and from proxy rewards to deployed, device-measured objectives are, in our view, the three most consequential next steps. 
+
+## References 
+
+Mohamed S. Abdelfattah, Abhinav Mehrotra, Lukasz Dudziak, and Nicholas D. Lane. Zero-Cost Proxies for Lightweight NAS. In Proceedings of the International Conference on Learning Representations (ICLR) 2021 . arXiv, 2021. doi: 10.48550/ARXIV.2101.08134. Anastasios Angelopoulos, Emmanuel Cand` es, and Ryan J. Tibshirani. Conformal PID Control for Time Series Prediction. In A. Oh, T. Naumann, A. Glober-son, K. Saenko, M. Hardt, and S. Levine, editors, Advances in Neural Infor-mation Processing Systems , volume 36, pages 23047–23074. Curran Associates, Inc., 2023. URL https://proceedings.neurips.cc/paper_files/paper/2023/file/ 47f2fad8c1111d07f83c91be7870f8db-Paper-Conference.pdf .Anastasios Nikolas Angelopoulos, Rina Barber, and Stephen Bates. Online conformal prediction with decaying step sizes. In Ruslan Salakhutdinov, Zico Kolter, Katherine Heller, Adrian Weller, Nuria Oliver, Jonathan Scarlett, and Felix Berkenkamp, editors, 
+
+Proceedings of the 41st International Conference on Machine Learning , volume 235 of 
+
+Proceedings of Machine Learning Research , pages 1616–1630. PMLR, 2024. URL https: //proceedings.mlr.press/v235/angelopoulos24a.html .Bowen Baker, Otkrist Gupta, Nikhil Naik, and Ramesh Raskar. Designing Neural Network Architectures using Reinforcement Learning. In International Conference on Learning Representations . arXiv, 2017. doi: 10.48550/ARXIV.1611.02167. URL 
+
+https://openreview.net/forum?id=S1c2cvqee .Rina Foygel Barber, Emmanuel J. Cand` es, Aaditya Ramdas, and Ryan J. Tibshirani. Conformal prediction beyond exchangeability. The Annals of Statistics , 51(2), 2023. ISSN 0090-5364. doi: 10.1214/23-aos2276. Hadjer Benmeziane, Kaoutar El Maghraoui, Hamza Ouarnoughi, Smail Niar, Martin Wistuba, and Naigang Wang. Hardware-Aware Neural Architecture Search: Survey and Taxonomy. In Proceedings of the Thirtieth International Joint Conference on Artificial Intelligence ,IJCAI-2021, pages 4322–4329. International Joint Conferences on Artificial Intelligence Organization, 2021. doi: 10.24963/ijcai.2021/592. Aadyot Bhatnagar, Huan Wang, Caiming Xiong, and Yu Bai. Improved Online Conformal Prediction via Strongly Adaptive Online Learning. In Andreas Krause, Emma Brunskill, 
+
+> 30 Coverage You Can Steer
+
+Kyunghyun Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett, editors, 
+
+Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research , pages 2337–2363. PMLR, 2023. URL 
+
+https://proceedings.mlr.press/v202/bhatnagar23a.html .Henrik Bostr¨ om and Ulf Johansson. Mondrian conformal regressors. In Alexander Gammer-man, Vladimir Vovk, Zhiyuan Luo, Evgueni Smirnov, and Giovanni Cherubin, editors, 
+
+Proceedings of the Ninth Symposium on Conformal and Probabilistic Prediction and Appli-cations , volume 128 of Proceedings of Machine Learning Research , pages 114–133. PMLR, 2020. URL https://proceedings.mlr.press/v128/bostrom20a.html .Han Cai, Ligeng Zhu, and Song Han. ProxylessNAS: Direct Neural Architecture Search on Target Task and Hardware. In Proceedings of the International Conference on Learning Representations (ICLR) 2019 . arXiv, 2019. doi: 10.48550/ARXIV.1812.00332. Han Cai, Chuang Gan, Tianzhe Wang, Zhekai Zhang, and Song Han. Once-for-All: Train One Network and Specialize it for Efficient Deployment. In Eight International Conference on Learning Representations - ICLR 2020 , 2020. doi: 10.48550/ARXIV.1908.09791. Nicolo Cesa-Bianchi and Gabor Lugosi. Prediction, Learning, and Games . Cambridge University Press, 2006. ISBN 9780511546921. doi: 10.1017/cbo9780511546921. Clara Fannjiang, Stephen Bates, Anastasios N. Angelopoulos, Jennifer Listgarten, and Michael I. Jordan. Conformal prediction under feedback covariate shift for biomolecular design. Proceedings of the National Academy of Sciences , 119(43), 2022. ISSN 1091-6490. doi: 10.1073/pnas.2204569119. Arya Fayyazi, Mehdi Kamal, and Massoud Pedram. MARCO: Hardware-Aware Neural Architecture Search for Edge Devices with Multi-Agent Reinforcement Learning and Conformal Prediction Filtering. In 2026 31st Asia and South Pacific Design Automation Conference (ASP-DAC) , pages 880–886. IEEE, 2026. doi: 10.1109/ASP-DAC66049.2026. 11420542. Yoav Freund and Robert E. Schapire. A Decision-Theoretic Generalization of On-Line Learning and an Application to Boosting. Journal of Computer and System Sciences , 55 (1):119–139, 1997. ISSN 0022-0000. doi: 10.1006/jcss.1997.1504. Haosen Ge, Hamsa Bastani, and Osbert Bastani. Stochastic online conformal prediction with semi-bandit feedback. In Proceedings of the 42nd International Conference on Machine Learning , ICML’25. JMLR.org, 2025. Isaac Gibbs and Emmanuel Cand` es. Adaptive Conformal Inference Under Distribution Shift. In M. Ranzato, A. Beygelzimer, Y. Dauphin, P.S. Liang, and J. Wortman Vaughan, editors, Advances in Neural Information Processing Systems , volume 34, pages 1660–1672. Curran Associates, Inc., 2021. URL https://proceedings.neurips.cc/paper_files/ paper/2021/file/0d441de75945e5acbc865406fc9a2559-Paper.pdf .Isaac Gibbs and Emmanuel Cand` es. Conformal inference for online prediction with arbitrary distribution shifts. Journal of Machine Learning Research , 25(1), 2024. ISSN 1532-4435. URL https://dl.acm.org/doi/10.5555/3722577.3722739 .
+
+> 31 Brandimarte, Aranjuelo, Nieto and Otaegui
+
+Isaac Gibbs, John J. Cherian, and Emmanuel J. Cand` es. Conformal prediction with conditional guarantees. Journal of the Royal Statistical Society Series B: Statistical Methodology , 87(4):1100–1126, 2025. ISSN 1467-9868. doi: 10.1093/jrsssb/qkaf008. Benoit Jacob, Skirmantas Kligys, Bo Chen, Menglong Zhu, Matthew Tang, Andrew Howard, Hartwig Adam, and Dmitry Kalenichenko. Quantization and Training of Neural Networks for Efficient Integer-Arithmetic-Only Inference. In 2018 IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 2704–2713. IEEE, 2018. doi: 10.1109/ cvpr.2018.00286. Kirthevasan Kandasamy, Willie Neiswanger, Jeff Schneider, Barnab´ as P´ oczos, and Eric P. Xing. Neural architecture search with Bayesian optimisation and optimal transport. In Proceedings of the 32nd International Conference on Neural Information Processing Systems , NIPS’18, pages 2020–2029, Red Hook, NY, USA, 2018. Curran Associates Inc. Jing Lei, Max G’Sell, Alessandro Rinaldo, Ryan J. Tibshirani, and Larry Wasserman. Distribution-Free Predictive Inference for Regression. Journal of the American Statistical Association , 113(523):1094–1111, 2018. ISSN 1537-274X. doi: 10.1080/01621459.2017. 1307116. Jordan Lekeufack, Anastasios N. Angelopoulos, Andrea Bajcsy, Michael I. Jordan, and Jitendra Malik. Conformal Decision Theory: Safe Autonomous Decisions from Imperfect Predictions. In 2024 IEEE International Conference on Robotics and Automation (ICRA) ,pages 11668–11675. IEEE, 2024. doi: 10.1109/icra57147.2024.10610041. Liam Li and Ameet Talwalkar. Random Search and Reproducibility for Neural Architecture Search. In Ryan P. Adams and Vibhav Gogate, editors, Proceedings of The 35th Uncertainty in Artificial Intelligence Conference , volume 115 of Proceedings of Machine Learning Research , pages 367–377. PMLR, 2020. URL https://proceedings.mlr.press/v115/ li20c.html .Lisha Li, Kevin Jamieson, Giulia DeSalvo, Afshin Rostamizadeh, and Ameet Talwalkar. Hyperband: a novel bandit-based approach to hyperparameter optimization. Journal of Machine Learning Research , 18(1):6765–6816, 2017. ISSN 1532-4435. Ji Lin, Wei-Ming Chen, Yujun Lin, John Cohn, Chuang Gan, and Song Han. MCUNet: Tiny Deep Learning on IoT Devices. In Proceedings of the 34th International Conference on Neural Information Processing Systems , NIPS ’20, Red Hook, NY, USA, 2020. Curran Associates Inc. ISBN 9781713829546. doi: 10.48550/ARXIV.2007.10319. Hanxiao Liu, Karen Simonyan, and Yiming Yang. DARTS: Differentiable Architecture Search. 
+
+arXiv: Computer Science - Machine Learning , 2018. doi: 10.48550/ARXIV.1806.09055. Ryan Lowe, Yi Wu, Aviv Tamar, Jean Harb, Pieter Abbeel, and Igor Mordatch. Multi-agent actor-critic for mixed cooperative-competitive environments. In Proceedings of the 31st International Conference on Neural Information Processing Systems , NIPS’17, pages 6382–6393, Red Hook, NY, USA, 2017. Curran Associates Inc. ISBN 9781510860964. 
+
+> 32 Coverage You Can Steer
+
+Joe Mellor, Jack Turner, Amos Storkey, and Elliot J. Crowley. Neural Architecture Search without Training. In Marina Meila and Tong Zhang, editors, Proceedings of the 38th International Conference on Machine Learning , volume 139 of Proceedings of Machine Learning Research , pages 7588–7598. PMLR, 2021. URL https://proceedings.mlr. press/v139/mellor21a.html .Harris Papadopoulos, Kostas Proedrou, Volodya Vovk, and Alex Gammerman. Inductive Confidence Machines for Regression , pages 345–356. Springer Berlin Heidelberg, 2002. ISBN 9783540367550. doi: 10.1007/3-540-36755-1 29. Harris Papadopoulos, Alex Gammerman, and Volodya Vovk. Normalized nonconformity measures for regression Conformal Prediction. In Proceedings of the 26th IASTED International Conference on Artificial Intelligence and Applications , AIA ’08, pages 64–69, USA, 2008. ACTA Press. ISBN 9780889867109. Hieu Pham, Melody Guan, Barret Zoph, Quoc Le, and Jeff Dean. Efficient Neural Ar-chitecture Search via Parameters Sharing. In Jennifer Dy and Andreas Krause, edi-tors, Proceedings of the 35th International Conference on Machine Learning , volume 80 of Proceedings of Machine Learning Research , pages 4095–4104. PMLR, 2018. URL 
+
+https://proceedings.mlr.press/v80/pham18a.html .Esteban Real, Alok Aggarwal, Yanping Huang, and Quoc V. Le. Regularized Evolution for Image Classifier Architecture Search. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 33, pages 4780–4789. Association for the Advancement of Artificial Intelligence (AAAI), 2019. doi: 10.1609/aaai.v33i01.33014780. John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal Policy Optimization Algorithms. arXiv: Computer Science - Machine Learning , 2017. doi: 10.48550/ARXIV.1707.06347. Glenn Shafer and Vladimir Vovk. A Tutorial on Conformal Prediction. Journal of Machine Learning Research , 9:371–421, 2008. ISSN 1532-4435. David Silver, Thomas Hubert, Julian Schrittwieser, Ioannis Antonoglou, Matthew Lai, Arthur Guez, Marc Lanctot, Laurent Sifre, Dharshan Kumaran, Thore Graepel, Timothy Lillicrap, Karen Simonyan, and Demis Hassabis. A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play. Science , 362(6419):1140–1144, 2018. ISSN 1095-9203. doi: 10.1126/science.aar6404. Niranjan Srinivas, Andreas Krause, Sham Kakade, and Matthias Seeger. Gaussian process optimization in the bandit setting: no regret and experimental design. In Proceedings of the 27th International Conference on International Conference on Machine Learning ,ICML’10, pages 1015–1022, Madison, WI, USA, 2010. Omnipress. ISBN 9781605589077. doi: 10.48550/arXiv.0912.3995. Samuel Stanton, Wesley Maddox, and Andrew Gordon Wilson. Bayesian Optimization with Conformal Prediction Sets. In Francisco Ruiz, Jennifer Dy, and Jan-Willem van de Meent, editors, Proceedings of The 26th International Conference on Artificial Intelligence 
+
+> 33 Brandimarte, Aranjuelo, Nieto and Otaegui
+
+and Statistics , volume 206 of Proceedings of Machine Learning Research , pages 959–986. PMLR, 2023. URL https://proceedings.mlr.press/v206/stanton23a.html .Mingxing Tan, Bo Chen, Ruoming Pang, Vijay Vasudevan, Mark Sandler, Andrew Howard, and Quoc V. Le. MnasNet: Platform-Aware Neural Architecture Search for Mobile. In 
+
+2019 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 2815–2823. IEEE, 2019. doi: 10.1109/cvpr.2019.00293. Ryan J. Tibshirani, Rina Foygel Barber, Emmanuel Cand` es, and Aaditya Ramdas. Conformal Prediction Under Covariate Shift. In H. Wallach, H. Larochelle, A. Beygelzimer, F. d 'Alch´ e-Buc, E. Fox, and R. Garnett, editors, Advances in Neural Information Processing Systems ,volume 32. Curran Associates, Inc., 2019. URL https://proceedings.neurips.cc/ paper_files/paper/2019/file/8fb21ee7a2207526da55a679f0332de2-Paper.pdf .Vladimir Vovk, Alexander Gammerman, and Glenn Shafer. Algorithmic Learning in a Random World . Springer International Publishing, 2022. ISBN 9783031066498. doi: 10.1007/978-3-031-06649-8. Linnan Wang, Yiyang Zhao, Yuu Jinnai, Yuandong Tian, and Rodrigo Fonseca. Neural Architecture Search Using Deep Neural Networks and Monte Carlo Tree Search. In 
+
+Proceedings of the AAAI Conference on Artificial Intelligence , volume 34, pages 9983– 9991. Association for the Advancement of Artificial Intelligence (AAAI), 2020. doi: 10.1609/aaai.v34i06.6554. Linnan Wang, Saining Xie, Teng Li, Rodrigo Fonseca, and Yuandong Tian. Sample-Efficient Neural Architecture Search by Learning Actions for Monte Carlo Tree Search. IEEE Transactions on Pattern Analysis and Machine Intelligence , pages 5503–5515, 2021. ISSN 1939-3539. doi: 10.1109/tpami.2021.3071343. Wei Wen, Hanxiao Liu, Yiran Chen, Hai Li, Gabriel Bender, and Pieter-Jan Kindermans. 
+
+Neural Predictor for Neural Architecture Search , pages 660–676. Springer International Publishing, 2020. ISBN 9783030585266. doi: 10.1007/978-3-030-58526-6 39. Colin White, Willie Neiswanger, and Yash Savani. BANANAS: Bayesian Optimization with Neural Architectures for Neural Architecture Search. Proceedings of the AAAI Conference on Artificial Intelligence , 35(12):10293–10301, 2021. ISSN 2159-5399. doi: 10.1609/aaai.v35i12.17233. Bichen Wu, Kurt Keutzer, Xiaoliang Dai, Peizhao Zhang, Yanghan Wang, Fei Sun, Yiming Wu, Yuandong Tian, Peter Vajda, and Yangqing Jia. FBNet: Hardware-Aware Efficient ConvNet Design via Differentiable Neural Architecture Search. In 2019 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 10726–10734. IEEE, 2019. doi: 10.1109/cvpr.2019.01099. Juan Xie, Shimao Jiang, Ke Xu, Xinping Xie, Chao Lu, and Jianfeng Qiu. A progressive constraint and adaptive filter pruning framework for lightweight evolutionary neural architecture search. Memetic Computing , 18(3), 2026. ISSN 1865-9292. doi: 10.1007/ s12293-026-00524-3. 
+
+> 34 Coverage You Can Steer
+
+Antoine Yang, Pedro M. Esperan¸ ca, and Fabio M. Carlucci. NAS evaluation is frustratingly hard. In Proceedings of the International Conference on Learning Representations (ICLR) 2020 . arXiv, 2020. doi: 10.48550/ARXIV.1912.12522. Chao Yu, Akash Velu, Eugene Vinitsky, Jiaxuan Gao, Yu Wang, Alexandre Bayen, and Yi Wu. The surprising effectiveness of PPO in cooperative multi-agent games. In Proceedings of the 36th International Conference on Neural Information Processing Systems , NIPS ’22, Red Hook, NY, USA, 2022. Curran Associates Inc. ISBN 9781713871088. Margaux Zaffran, Aymeric Dieuleveut, Olivier F´ eron, Yannig Goude, and Julie Josse. Adaptive Conformal Predictions for Time Series. In International Conference on Machine Learning , 2022. doi: 10.48550/arXiv.2202.07282. Barret Zoph and Quoc V. Le. Neural Architecture Search with Reinforcement Learning. In 
+
+International Conference on Learning Representations - ICLR 2016 . arXiv, 2017. doi: 10.48550/ARXIV.1611.01578.
