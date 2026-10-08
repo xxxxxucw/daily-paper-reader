@@ -1,0 +1,4230 @@
+Preprint.
+SYMMETRY-INFORMED
+CAUSAL PARTIAL IDENTIFICATION
+Uzair Akbar
+Georgia Tech
+Zulfiqar Zaidi
+Georgia Tech
+Niki Kilbertus
+TU Munich
+Helmholtz Munich
+Krikamol Muandet
+Rational Intelligence
+CISPA
+Bo Dai
+Georgia Tech
+ABSTRACT
+Partial identification (PI) entails estimating bounds on causal effects by encoding
+different assumptions on data generation as a constrained optimization problem.
+Such bounds can suffice to inform policy decisions even if the causal effect itself
+is not identifiable. Often vacuous in practice, practitioners seek to exhaustively
+encode domain knowledge as additional constraints to make the PI bounds more
+informative. We introduce known data symmetries—invariance of the causal effect
+under certain data transformations—as a new source of constraints to inform PI.
+We operationalize this as a shape constraint on the causal function, and via a
+change of measure against which PI is posed using simple data pre-processing.
+Both approaches are shown to sharpen bounds under two canonical PI models.
+This is shown both theoretically for the population case, and via experiments in the
+finite-sample case. More broadly, our framework establishes data symmetries as a
+natural, underutilized source of background knowledge for robust causal inference.
+1
+INTRODUCTION
+Interventions are the gold standard for answering causal queries (Pearl, 2009; Peters et al., 2017).
+Absent interventions, observed associations may be due to hidden confounders rather than causal
+effects, so researchers resort to adjusting via auxiliary variables, which rest on strong, untestable
+assumptions that may simply fail (Zhang et al., 2023). Partial identification (PI) offers a principled
+relaxation to this problem. Rather than insisting on assumptions sufficient for point identification,
+PI returns bounds on the causal effect under a milder set of assumptions (Padh et al., 2023). These
+bounds are constructed by considering all possible data-generating processes (DGPs) compatible
+with both the observed data and the chosen assumptions. Consequently, they are only as informative
+as the strength of said assumptions, and can often be near-vacuous. To make PI actionable for
+decision-making, practitioners must exhaustively incorporate credible domain knowledge into the PI
+solver to restrict the set of compatible DGPs, thereby sharpening the bounds.
+While existing PI families encode domain knowledge by bounding the strength of hidden confound-
+ing (Tan, 2006; Rosenbaum, 2002), positing a causal graph (Meresht et al., 2022), or imposing shape
+restrictions on the class of causal functions (Chetverikov et al., 2018), a natural and accessible source
+of prior knowledge remains underutilized: known data symmetries. Symmetries describe properties
+of a system that remain invariant under certain data transformations; for example, image content may
+not change under rotation/reflection/translation (Bronstein et al., 2021). Readily used in statistical
+regularization (Chen et al., 2020; Lyle et al., 2020), we propose re-purposing known symmetries as a
+natural shape restriction on the set of candidate causal functions to sharpen PI bounds.
+Contributions.
+We give two operationalizations: an invariance shape constraint on the causal
+functions added to white-box PI solvers (§3), and a change-of-measure approach where off-the-shelf
+or black-box solvers are simply fed pre-processed data via symmetry transformations (§4). We license
+the latter by showing it realizes a soft intervention: preserving the causal mechanism and graph up to
+relabeling, while diluting confounding. Thus, validity is preserved on aforementioned PI families. We
+then develop observable conditions for bound sharpening, and a simple pad-and-intersect protocol to
+guard against misspecified symmetry under two canonical PI models: bounded confounding (Cinelli
+& Hazlett, 2020; Chernozhukov et al., 2026) and leaky instruments (Deaner, 2022; Cinelli & Hazlett,
+2025). Finally, we validate both approaches on simulated and real data.
+1
+arXiv:2610.09230v1  [cs.LG]  6 Oct 2026
+
+
+Preprint.
+U
+Y
+X
+Z
+h⋆
+(a) Hidden confounding model
+U
+Y
+x
+Z
+h⋆
+(b) Intervention do(x)
+Figure 1: (a) Graph of Eq. (1) with IV Z and
+hidden noise U that confounds (X, Y ). (b) An in-
+tervention do(X = x) removes this confounding.
+γ3
+γ3
+γ2
+γ2
+γ1
+γ1
+estimation error
+worst-case
+excess risk
+approx.
+error
+width
+x
+h(x)
+h⋆(x)
+herm(x)
+Hpı(x)
+γ1
+γ1
+γ2
+γ2
+γ3
+γ3
+γ4
+γ4
+γ5
+γ5
+γ6
+γ6
+herm
+h⋆
+Hpı
+H
+estimation
+error
+approx.
+error
+worst-case excess risk
+v
+o
+l
+u
+m
+e
+Figure 2: PI sets Hpı(x) (Left) and Hpı (Right)
+for various sensitivity parameters γ and different
+metrics of interest; estimation errors Ex, E, ap-
+prox. errors E−
+x , E−, worst-case errors E+
+x , E+.
+2
+PRELIMINARIES
+2.1
+STATISTICAL VS. CAUSAL INFERENCE
+Given n samples D := {(xi, yi, zi)}i∈[n] from the observational distribution pXY Z of treatment
+X ∈X ⊆Rdx, outcome Y ∈Y ⊆R and pre-treatment co-variates Z ∈Z ⊆Rdz, we aim to find
+the function h⋆∈H := {h : X →R} defining the causal effect of X on Y under the following DGP:
+Y = h⋆(X) + U + ξ,
+E[U ] = E[ξ ] = 0,
+ξ ⊥⊥(U, X, Z).
+(1)
+The unobserved noise (ξ, U) is assumed mean-centered w.l.o.g., with the intercept absorbed into h⋆.
+Independence of noise U ⊥⊥X implies E[Y |x] = h⋆(x). Statistical inference entails identifying
+precisely the Bayes optimal predictor E[Y |x] from D via empirical risk minimization (ERM): for a
+proper, convex loss ℓ: R×R →R+, minimize over h ∈H an empirical version of the statistical risk,
+Rerm(h) := E[ℓ(Y, h(X))].
+(2)
+Then, for a sufficiently rich hypothesis class, the minimizer herm provides an unbiased estimate of h⋆.
+However, independence of X and the unobserved noise U may not hold in general, in which case
+E[U |x]̸ = 0 and the conditional E[Y |x] now gives a biased estimate of h⋆(x) (Pearl, 2009; Peters
+et al., 2017). This dependence arises due to unobserved common causes U of X and Y , known as
+confounders. We say that X and Y are confounded and refer to the resulting bias as confounding
+bias (Pearl, 2009). The observed pre-treatment co-variates Z may contain auxiliary information, e.g.
+proxies for such confounders, that can help to mitigate this bias. This encompasses causal inference
+which seeks to identify h⋆under hidden confounding, or at the very least account for it by finding
+bounds on h⋆should point-identification not be possible. Both approaches are outlined below.
+2.2
+POINT IDENTIFICATION VIA INTERVENTION AND ADJUSTMENT
+We can make treatment X and the confounder U independent via an intervention do(X = x) that
+sets X to a fixed value x in Eq. (1) during data generation. Under such a treatment intervention,
+henceforth denoted as do(x) for brevity, outcome Y follows the interventional distribution pY |do(x).
+The loss from Eq. (2) evaluated under pY |do(x) now defines the causal risk R (Kania & Wit, 2023),
+Rx(y) := E[ℓ(Y, y)|do(x)],
+R(h) := EX∼pX[RX(h(X))].
+(3)
+The target estimand of Eq. (3) is the average treatment effect (ATE) E[Y |do(x)] which equals
+h⋆(x) for the data generation in Eq. (1) (Xu & Gretton, 2022). Minimizers of Eq. (3) hence yield
+unbiased estimates of h⋆(x). To capture the estimation error for a candidate hypothesis h ∈H, we
+use causal excess risk (Akbar et al., 2025; Chennuru Vankadara et al., 2022)
+E(h) := R(h) −R(h⋆),
+which removes the irreducible noise from Eq. (3) and measures how far h is from h⋆, with E(h⋆) = 0.
+As interventions are often inaccessible for computing the risk in Eq. (3), estimating h⋆usually relies
+on access to the full joint distribution p of (U, X, Y, Z) via back-door adjustment hp
+⋆(Pearl, 2009),
+hp
+⋆(x) := E[E[Y |x, Z, U ]],
+(U, X, Y, Z) ∼p.
+2
+
+
+Preprint.
+Alternatively, h⋆is recovered via instrumental variables (IVs) Z satisfying (i) un-confoundedness:
+Z ⊥⊥U, (ii) exclusion: Y ⊥⊥Z | X, U (Newey & Powell, 2003). Conditioning Eq. (1) on Z:
+E[Y −h⋆(X)|z ] = E[U |z ] = 0.
+(4)
+An IV estimate hıv solves Eq. (4) for h⋆, which now requires only observed pXY Z (Sun et al., 2025).
+2.3
+PARTIAL IDENTIFICATION AND SENSITIVITY ANALYSIS
+Uniqueness of the IV solution in Eq. (4) needs a complete Z, i.e. E[h(X)|Z ] = 0 iff h(X) = 0
+(Deaner, 2022). Without completeness, h⋆is unidentifiable (Ailer et al., 2024). Furthermore, the IV
+properties themselves may be violated (Watson et al., 2024; Penn et al., 2025; Conley et al., 2012;
+Cinelli & Hazlett, 2025). And since U is unobserved, h⋆is generally not recoverable from pXY Z
+alone. Nevertheless, milder assumptions on the model in Eq. (1) still allows partial identification (PI)
+of h⋆by considering all the joint distributions q consistent with said assumptions (Padh et al., 2023),
+Qpı(pXY Z) :=
+n
+q ∈Ppı : DF(pV , qV ) = 0
+o
+,
+DF(pV , qV ):= sup
+f∈F
+ E
+p[f(V )] −E
+q [f(V )]
+,
+where some discrepancy metric DF, chosen here to be an integral probability metric (IPM) (Chau
+et al., 2025), matches q, p on observed variables V ⊆{X, Y, Z} over a set of witness functions
+F = {f : V →R} and the constraint set Ppı encodes our assumptions on the DGP Eq. (1). If
+correctly specified, p ∈Ppı, and the following set Hpı of candidate hypotheses contains the true h⋆,
+Hpı :=
+
+hq
+⋆: q ∈Qpı
+	
+,
+Hpı(x) :=
+
+hq
+⋆(x) : q ∈Qpı
+	
+,
+where Qpı abbreviates Qpı(pXY Z). Computing interval Hpı(x) at x is often more practical than
+characterizing set Hpı, as for convex Qpı it amounts to solving two constrained optimization problems
+Hpı(x) =
+
+minq∈Qpı hq
+⋆(x),
+maxq∈Qpı hq
+⋆(x)
+
+.
+In either case, we want the identified sets to (i) contain the true solution, and (ii) be sharp, i.e. as small
+as possible. Of course these respectively depend on the validity and strength of assumptions that one
+is willing to make within Ppı, with point-estimation now being a special case where Qpı is singleton.
+Hence, one may parameterize the constraints as Pγ
+pı to conduct sensitivity analysis by varying param-
+eters γ to see how Hγ
+pı(x), Hγ
+pı evolve as assumptions are relaxed/tightened (Frauen et al., 2024).
+Lastly, since we are now discussing hypothesis sets, we define the three appropriate evaluation metrics
+E−(Hpı) := min
+h∈HpıE(h),
+E(Hpı) := Eh∼Unif(Hpı)[E(h)],
+E+(Hpı) := max
+h∈HpıE(h).
+The approximation error E−measures how far the target h⋆is from Hpı (Brown & Ali, 2024),
+enabling a notion of approximate validity: Hpı is ϵ-approximately valid, or just ϵ-valid, whenever
+E−(Hpı) ≤ϵ (Li et al., 2026). The worst-case error E+ gives our primary notion of bound
+informativeness for decision making, upper bounding the excess risk of candidates within Hpı relative
+to h⋆. We additionally introduce the average error E (Gustafson, 2010) as an analytic surrogate for
+informativeness, approximating worst-case error up to a universal constant factor (see Lem. 4).
+Similarly, the intervals Hpı(x) are evaluated using E−
+x (Hpı(x)), Ex(Hpı(x)) and E+
+x (Hpı(x)). We
+define these analogously to E−, E and E+ respectively, but with Rx as the primitive instead of R.
+Choice of constraints.
+The construction of Ppı depends on domain knowledge. At the agnostic
+extreme, Manski’s (1990) “no-assumption” bounds use only a bounded support of Y to constrain
+Hpı(x) for binary x. Other approaches bound the strength of unmeasured confounding through odds
+ratios (Rosenbaum, 2002), propensity scores in the Marginal Sensitivity Model (MSM) (Tan, 2006), or
+the share of variance explained by hidden confounders in the partial r2 model (Cinelli & Hazlett, 2020;
+Chernozhukov et al., 2026). Robust optimization (RO) formulations instead take Qpı to be a total-
+variation (Bertsimas et al., 2023; Guo et al., 2022) or Wasserstein (Meresht et al., 2022) ball around
+pXY Z. Alternatively, one may directly model the response function H⋆(·) := h⋆(·) + U + ξ (Padh
+et al., 2023), e.g., with GANs matched to pXY Z (Hu et al., 2021). Many methods further sharpen
+bounds via conditional independences on auxiliary variables (Ailer et al., 2024; Zheng et al., 2025). A
+notable example is IV-based PI (Balke & Pearl, 1997), where U may affect Y non-additively, unlike
+3
+
+
+Preprint.
+Eq. (1). Neural variants extend this to continuous, high-dimensional treatments and IVs (Kilbertus
+et al., 2020; Hu et al., 2021; Padh et al., 2023; Meresht et al., 2022; Gunsilius, 2020).
+Perhaps the closest to our work are shape constraints (Chetverikov et al., 2018), which sharpen PI by
+restricting the class of structural or response functions h⋆or H⋆. Examples include positivity (Leamer,
+1981), monotonicity (Manski, 1997; Manski & Pepper, 2000), convexity (Freyberger & Horowitz,
+2015), curvature (Melnychuk et al., 2023), smoothness (Kim et al., 2018), sparsity (Pfister & Peters,
+2022), and other regularities (Meresht et al., 2022), each narrowing the set of compatible DGPs. In
+the same vein, we propose known invariances of h⋆as a natural shape constraint.
+2.4
+KNOWN DATA SYMMETRIES AND INVARIANCE
+e
+X
+U
+X
+Y
+Z
+h⋆
+(a) Data augmentation
+T
+U
+e
+X
+Y
+Z
+h⋆
+(b) Soft-intervention
+Figure 3: For T -inv. h⋆, (a) DA on observed
+data induces an identical distribution to (b) a
+soft intervention do(X = e
+X) on Eq. (1).
+Symmetries are ubiquitous in scientific modeling, de-
+scribing structural properties that do not change under
+certain data transformations (Bronstein et al., 2021).
+Formalized as a map α : X × T →X parameterized
+by τ ∈T with τx := α(x, τ) as shorthand, we say
+that h⋆is invariant under T , or T -invariant, if
+h⋆(τx) = h⋆(x),
+∀(x, τ) ∈X × T .
+This captures the notion that certain transformations
+preserve the causal relationship X →Y . E.g., spa-
+tial translations in physics (Brandstetter et al., 2022),
+permutations of exchangeable units (Zaheer et al., 2017), semantics-preserving text transforma-
+tions (Ribeiro et al., 2020), and reverse-complements in genomics (Weinstein & Blei, 2026). In image
+classification, for instance, a rotated image τx of a cat x remains a cat (Cohen & Welling, 2016).
+In practice, symmetries may hold only approximately, and h⋆is (ε, T )-inv. if (Huang et al., 2023)
+supx,τ |h⋆(x) −h⋆(τx)| ≤ε.
+Symmetry assumptions are well-established across many applications and routinely used to improve
+statistical estimation. For example, given some probability measure pT on T , data augmentation (DA)
+reduces estimation variance by generating multiple m augmentations {(τi,jxi, yi)}j∈[m], τi,j ∼pT
+for each sample (xi, yi, ·) ∈D, increasing data variability for statistical risk evaluation (Lyle et al.,
+2020; Chen et al., 2020; Savkin et al., 2020),
+R e
+erm(h) := E
+
+ℓ
+ Y, h( e
+X)
+
+,
+(5)
+where we denote e
+X := TX as random perturbation of X under T ∼pT , such as depicted in Fig. 3a.
+While DA is canonically used to mitigate finite-sample estimation variance, our focus is primarily on
+the infinite-sample setting, and we present Eq. (5) and subsequent theoretical results in that context.
+Nonetheless, increasing sample size via DA also bears on our work, a point we shall briefly discuss.
+Despite their success in statistical inference, symmetry priors remain understudied in causal infer-
+ence (Akbar et al., 2025). This gap is particularly consequential for PI, where bounds are often
+vacuous and practitioners seek to exhaustively impose constraints encoding domain knowledge to
+sharpen them. In the language of §2.3, T -inv. is precisely a shape constraint on h⋆. Symmetry assump-
+tions hence provide a natural and powerful addition to this toolkit, especially in domains where they
+are already established. In what follows, we provide a first analysis of their application to sharpen PI.
+3
+A SYMMETRY SHAPE CONSTRAINT
+Following the shape constraint tradition in PI, the most direct way is to incorporate T -inv. as a solver
+feasibility requirement. E.g., impose an invariance error constraint with ε as a sensitivity parameter:
+Eınv(h) := Ep
+
+|h(X) −h( e
+X)|2
+,
+Ppı+ınv :=
+
+q ∈Ppı : Eınv(hq
+⋆) ≤ε2 	
+.
+yielding the sharp set Hpı+ınv = Hpı ∩Hε
+ınv, with Hε
+ınv :=
+
+h ∈H : Eınv(h) ≤ε2	
+(Cor. 1, cf. §C).
+Other Eınv functionals may serve equally (Yang et al., 2019), as does restricting H to be invariant by
+design (Cohen & Welling, 2016), though the latter can sit awkwardly with standard PI solvers and
+may not admit sensitivity parameters.
+4
+
+
+Preprint.
+While most of our experiments focus on settings where Hpı+ınv(x) is computable via convex pro-
+gramming, this constraint formulation is compatible with modern deep learning-based PI. Since
+Eınv(·) is differentiable and amenable to Monte Carlo evaluation, it can be incorporated as a regu-
+larizer in augmented Lagrangian or gradient-based solvers (Padh et al., 2023; Meresht et al., 2022;
+Hu et al., 2021). Nevertheless, there are operational limitations: it requires white-box access to the
+solver’s objective, which precludes the specialized or black-box software where the optimization is
+fixed. Furthermore, optimizing non-convex invariance constraints for complex, high-dimensional
+data can be expensive and notoriously unstable (Schweisthal et al., 2025; Padh et al., 2023). This
+motivates our second approach; an operationalization that touches only the data, not the solver.
+4
+A CHANGE OF MEASURE UNDER SYMMETRY TRANSFORMATIONS
+DA as a change of measure.
+Where §3 constrains the feasible set, we instead change the measure
+pXY Z →p e
+XY Z under which PI is posed while leaving the solver untouched, composing with it as
+Qepı(pXY Z) := Qpı(p e
+XY Z).
+This change of measure reweights candidate evaluations, pruning previously feasible functions while,
+crucially, preserving validity across broad families of standard solvers. We now isolate the two mech-
+anisms driving these effects: variance inflation (sharpening) and simulated intervention (validity).
+Variance inflation.
+In IV methods, “strong” IVs that induce more exogenous variation in X yield
+sharper PI bounds than weak ones (Kilbertus et al., 2020; Padh et al., 2023). So we pose the question:
+Can the synthetic exogenous variation introduced by DA likewise sharpen PI?
+We answer yes. Fundamentally, PI uncertainty is an attribution problem; the solver must split
+observed (X, Y ) covariation between h⋆and U. Only variation in (X, Y ) whose relation to U
+is known, e.g. an IV Z, can break the tie. DA adds exactly such variation since T is exogenous
+by construction and cannot be attributed to U. This reduces ambiguity in PI, giving sharper, more
+informative bounds. This effect is formalized in §4.1, here we give a notion of variance inflation itself.
+Fit vs. evaluation geometries. Center Y w.l.o.g., then E[h⋆(X)] = 0. So estimation of h⋆lives only
+in the centered shape space HX := {h ∈H: E[h(X)] = 0}, which we equip with covariance forms
+⟨f, g⟩X := Cov(f(X), g(X)),
+∥h∥2
+X := Var(h(X)),
+and (H e
+X, ⟨·, ·⟩e
+X) likewise under p e
+X. Of course, evaluation is still reported in the ambient L2(X)-
+norm; in particular, the causal excess risk under a sq.-loss ℓ(a, b):=(a−b)2 decomposes orthogonally,
+E(h) =
+h −h⋆
+2
+L2(X) = ∥h −h⋆∥2
+X
+|
+{z
+}
+shape; lives on HX
++
+ E[h(X)] −E[h⋆(X)]
+2
+|
+{z
+}
+level; lives off HX
+.
+Fitting in (H e
+X, ⟨·, ·⟩e
+X) can change the shape. But e
+X-centered candidates are not X-centered, so a
+level penalty appears. This forces a separate treatment of covariance and mean, which we do under:
+Assumption 1. Let H ⊆L2(X)∩L2( e
+X) be closed under constant shifts H+R1 = H. Optionally:1
+(a) Realizability: Suppose H contains both h⋆(X), E[Y |X], and post-DA E[h⋆(X)| e
+X], E[Y | e
+X].
+(b) Absolute continuity: pX ≪p e
+X , i.e. the post-DA distribution covers the baseline distribution.
+(c) Finite dim. Hilbert: H is linear with dim(HX) = k < ∞, and ⟨·, ·⟩X positive-definite over HX.
+Variance vs. mean-shifts. We ask how much a solver-unit direction actually weighs under evaluation,
+on average. Sum the L2(X)-norms over any e
+X-orthonormal basis {ei} ⊂H e
+X (basis indep., cf. §F),
+X
+i∥ei∥2
+L2(X)
+=
+X
+i∥ei∥2
+X +
+X
+i
+ E[ei(X)] −E[ei( e
+X)]
+2
+=
+tr(K) + D2
+B(pX, p e
+X).
+1Any class with a free intercept satisfies the base clause. Clause (a) removes statistical approx. bias to isolate
+confounding bias, our focus. Clause (b) is essentially free under DA; sample Id ∈T , or mix-in pXY Z. It lets the
+HX Hilbert structure carry over to H e
+X. Clause (c) gives bounded evaluation h(x), without which PI intervals
+Hpı(x) for continuous X are known to be vacuous (Kilbertus et al., 2020; Pearl, 1995; Bonet, 2001; Gunsilius,
+2020). Crucially, finite dimension is only needed to compute set volume/avg.-error in closed form.
+5
+
+
+Preprint.
+Here, tr(K) := P
+i∥ei∥2
+X is the X-variance carried by k directions that are unit-sized under
+e
+X.
+And D2
+B is the squared maximum mean discrepancy (MMD) over a unit e
+X-ball B :=
+{h ∈H e
+X : ∥h∥e
+X ≤1} (Gretton et al., 2012), collecting the ei mean-shifts by Pythagoras. Read
+them as a lever and its price. Whenever tr(K)/k ≤1, a typical unit e
+X-direction carries less than
+unit X-variance; this is our notion of variance inflation, quantifying the added exogenous variation
+invoked above. We later connect it directly to bound sharpening in Prop. 2 with a price; the familiar
+DB from out-of-distribution (OOD) generalization literature (Long et al., 2015), since we fit under
+p e
+X yet evaluate OOD on pX. However, DA must first be licensed for PI at all, which we discuss next.
+Simulated-intervention.
+We now give an observation that licenses DA for PI: for T -inv. h⋆, DA
+realizes a soft intervention do(X = e
+X) on Eq. (1) (Akbar et al., 2025; Ilse et al., 2021; Massidda
+et al., 2023; Jaber et al., 2020; Besserve & Schölkopf, 2022); the structural equation and causal graph
+are preserved up to relabeling X →e
+X, as in Fig. 3. Meanwhile, confounding is diluted by the data
+processing inequality (DPI) Var(E[U|X]) ≥Var(E[U| e
+X]) on the chain U ↔X →e
+X. Crucially,
+this dilution is observable through the ratio ρ := ˜σ2/σ2 of MMSE σ2 := minh∈H Rerm(h) and
+˜σ2 := minh∈H R e
+erm(h), with ρ ≥1 since a noisy e
+X cannot predict Y better than X. Concretely:
+Lemma 1 (soft intervention with DA). For T -inv. h⋆, DA acts on Eq. (1) as a soft-intervention:
+(A) Structural equation: Trivially, post-DA variables (ξ, U, e
+X, Y, eZ) with eZ ∈{Z, (Z, T)} follow:
+Y = h⋆( e
+X) + U + ξ,
+E[U ] = E[ξ ] = 0,
+ξ ⊥⊥(U, e
+X, eZ).
+(B) Markov transfer: Let p be Markov w.r.t. a DAG G over V := {U, X, Y, Z1, Z2, . . .} where
+NonDescG(X) = V \{X, Y }. Then, peV is Markov w.r.t. eG, where eV , eG relabel X to e
+X in V, G.
+(C) Attenuated confounding: Under Asm. 1a, let biases b := herm −h⋆and ˜b := h e
+erm −h⋆. Then,
+∥b∥2
+X −∥˜b∥2
+e
+X = σ2(ρ −1) ≥0.
+Hence, broad families of shape constraints (Chetverikov et al., 2018), graphical restrictions (Balke
+& Pearl, 1997; Zhang & Bareinboim, 2021) or confounding bounds (Frauen et al., 2024) that are
+valid under pXY Z continue to remain valid under p e
+XY Z. Subsequent sections instantiate two such
+canonical PI models to study the specific identified set evaluation metrics we introduced in §2.3.
+Fragility of point-estimation.
+To motivate the PI application of DA, we first understand its
+limitations in point-estimation. After all, Lem. 1 does beg the question why this should not work.
+Proposition 1 (estimation with DA). Under Asm. 1a, T -inv. h⋆and bias direction e˜b := ˜b
+.
+∥˜b∥e
+X,
+E(herm) −E(h e
+erm)
+=
+σ2(ρ −1) · ∥e˜b∥2
+L2(X)
+|
+{z
+}
+gain
++ (1 −∥e˜b∥2
+L2(X)) · E(herm)
+|
+{z
+}
+wild-card
+.
+Proposition 1 reveals three fragilities: (i) bias-direction dependence: attenuation ρ ≥1 alone does
+not guarantee improvement, which hinges on whether ∥e˜b∥2
+L2(X) ≤1 for an unobserved bias direction,
+(ii) misspecification: if symmetry is misspecified, the gain term may itself become a loss, and
+(iii) identifiability: h⋆remains unidentifiable regardless. All three defects are manageable under PI.
+4.1
+PARTIAL IDENTIFICATION WITH DATA AUGMENTATION
+We show that DA yields three PI guarantees, each resolving one fragility above, as summarized
+in Table 1. Validity (Thm. 1) : Crucially, PI validity follows from T -invariance alone, addressing (iii).
+Sharpness / informativeness (Prop. 2 and Thm. 2) : We show that PI sharpening is governed by
+global quantities like ρ, tr(K), DB, making sufficient conditions observable, unlike (i). Robust-
+ness (Thm. 3 and Rem. 1) : To make these guarantees robust to ε-misspecified symmetry, we deploy
+a simple ε-pad-and-intersect post-processing, resolving (ii).
+Beyond these population effects, DA has the familiar statistical-efficiency benefit of growing effective
+sample size, mitigating sampling variation and finite-sample error, key sources of PI uncertainty (Im-
+bens & Manski, 2004). To make these claims explicit, we instantiate the following PI model:
+6
+
+
+Preprint.
+Hpı
+h⋆
+H/R1
+Eınv(h) ≤ε2
+Hpı+ınv
+Hpı+ınv
+(a) Hpı+ınv.
+Hpı
+herm
+h e
+erm
+Hepı
+h⋆
+H/R1
+lower estimation error
+sharper bounds
+sharper bounds
+(b) H e
+pı.
+H/R1
+h⋆
+Hpı
+Hepı
+Hepı+eıv
+Hpı+ınv
+Eınv(h) = 0
+(c) H e
+pı+eıv.
+x
+h(x)
+h⋆(x)
+Hpı(x)
+Hepı(x) ± ε
+Hpı(x) ∩(Hepı(x) ± ε)
+(d) Hpı(x)∩(H e
+pı(x) ± ε)
+Figure 4: Illustration of identified sets: (a) Invariance shape constraint prunes the baseline set (§3).
+(b) DA pre-processing yields a sharper (Prop. 2), better-centered (Prop. 1) set (§4). (c) T-as-IV
+enforces symmetry (§4.2, cf. §C). (d) ε-pad-and-intersect dominates under arbitrary DA (Rem. 1).
+Assumption 2 (a bounded confounding sensitivity model). For confounding budgets γx, γy, let
+Ppı :=
+(
+q :
+r2
+U∼X ≤γx,
+r2
+U∼Y |X ≤γy
+)
+,
+r2
+A∼B|C := 1 −E[Var(A|B, C)]
+E[Var(A|C)]
+≤1,
+where r2
+A∼B|C is the partial-r2, i.e. fraction of variation in A explained by B after controlling for C.
+Further, make the IPM DF test all quadratic functions F :=
+
+f 2 : f ∈span(H) + RY
+	
+of (X, Y ).
+Assumption 2 adopts the widely used partial-r2 model by Cinelli & Hazlett (2020); Chernozhukov
+et al. (2026). While we employ this model in our analysis, we do not necessarily restrict ourselves to
+it: several PI families in §2.3 impose equivalent constraints, reducing to ellipsoidal sets of the form
+Lemma 2 (characterizing the identified set). Under Asm. 2 and 1a or 1c, Hpı is the covariance ball
+Hpı =
+n
+h ∈HX :
+h −herm
+2
+X ≤σ2γ
+o
+,
+within HX, centered at herm with radius σ√γ, and an effective confounding budget of γ := γxγy
+1−γx .
+The post-DA analysis now reduces to three questions about this ellipsoid: whether it covers h⋆, does
+its size contract, and if its center/radius tradeoff lowers avg./worst-case errors. We treat these in turn.
+Table 1: Point vs. partial identification under DA.
+Condition
+Identification metric
+Safeguard
+T-inv. h⋆=⇒
+=⇒
+validity (Thm. 1) ✓} ε-pad (Thm. 3)
+∥e˜b∥≤1=⇒estimation error ↓
+(Prop. 1)
+o
+✗
+⇓
+informativeness ↑
+(Thm. 2)
+
+
+
+
+
+
+
+intersect with
+baseline set
+(Rem. 1)
+⇑
+Ω≤1 =⇒
+sharpness ↑
+(Prop. 2)
+Validity.
+First and foremost, we establish post-
+DA validity. In terms of approximation error:
+Theorem 1 (valid bounds with DA). Let h⋆be T -
+inv. under Asm. 1a and 2. Then, the post-DA set
+Hepı is exactly valid whenever the baseline set Hpı
+is ϵ-valid with ϵ ≤σ2 √ρ −1 + γρ −√γ
+2.
+Consequently, Hepı repairs the ϵ-validity of Hpı
+since the previously insufficient budget γ can now
+accommodate the diluted bias. Crucially, this fol-
+lows from the simulated intervention in Lem. 1
+alone, and does not rely on conditions over un-
+observed bias like Prop. 1. The only untestable
+requirement of T -invariance is later relaxed to
+(ε, T )-invariance to allow for sensitivity analysis over the assumed ε-misspecification of symmetry.
+Having established validity, we now show DA can make bounds better, even under relaxed conditions.
+Sharpness.
+While the centroid drift in Prop. 1 hinges on the bias direction, the identified set’s size
+depends on global distribution shifts. This yields a milder, data-observable improvement condition:
+Proposition 2 (sharper bounds with DA). Denoting L2(X)-volume by |·|, under Asms. 1b–1c and 2,
+|Hepı|
+|Hpı|
+2/k
+≤
+E
+
+|Hepı(X)|2
+E
+
+|Hpı(X)|2
+=
+ρ
+|{z}
+over-budget
+·
+h
+tr(K)
+| {z }
+lever
++ D2
+B(pX, p e
+X)
+|
+{z
+}
+penalty
+i .
+k
+=:
+Ω.
+7
+
+
+Preprint.
+Proposition 2 ties sharpening to competing factors. Noise inflation ρ ≥1 and mean-shift D2
+B ≥0
+strictly expand the set. Thus, bounds tighten when inflated variance tr(K)/k ≤1 drives Ωsmall
+enough to satisfy Ω≤1. Intuitively, Lem. 2 enforces a variance cap on allowable bias. DA can
+stretch admissible candidates beyond this fixed γ-budget, pruning them from the set. Notably, the soft
+intervention Lem. 1 keeps the true bias ˜b within budget even as other candidates are pruned. Finally,
+as the inherited γ over-budgets the now diluted confounding by ρ, one may re-calibrate to ˜γ := γ/ρ
+if the solver exposes γ, keeping validity while reducing Prop. 2’s term to Ω= (tr(K) + D2
+B)/k.
+Informativeness.
+While smaller sets are desirable, we also gauge the “quality” of set candidates:
+Theorem 2 (informative bounds with DA). Under Asms. 1b–1c and 2, the following holds for d = k,
+E(Hpı) −E(Hepı)
+=
+E(herm) −E(h e
+erm)
+|
+{z
+}
+centroid drift (Prop. 1)
++ σ2γk
+d + 2 ·
+(1 −Ω)
+| {z }
+set size (Prop. 2)
+=:
+f(d),
+And interval improvement averaged over queries: EX∼pX
+
+EX(Hpı(X)) −EX(Hepı(X))
+
+= f(1).
+The decomposition isolates two mechanisms: the centroid drifts toward h⋆and the set shrinks, as
+illustrated in Fig. 4b. Crucially, thresholds ∥e˜b∥2
+L2(X) ≤1 and Ω≤1 are sufficient, and not necessary
+for improvement. In general, DA “wobbles” the ellipsoid of Lem. 2, inflating some directions while
+deflating others. The intersection Hpı(x) ∩Hepı(x) nonetheless guarantees no regression.
+Robustness.
+DA encoding misspecified T -inv. induces endogenous noise η := h⋆(X) −h⋆( e
+X),
+Y = h⋆(X) + U + ξ,
+⇐⇒
+Y = h⋆( e
+X) + U + η + ξ,
+The post-DA intervals Hepı(x) may not account for this additional confounding. Therefore, to recover
+validity we apply ε-padding [a, b] ± ε := [a −ε, b + ε].2 Baseline intersection then absorbs any slack.
+Theorem 3.A (robust bounds with DA). Under Asms. 1a–1b and 2, let valid baseline set Hpı cover
+an (ε, T )-invariant h⋆. Then, ε-padded post-DA intervals Hepı(x)±ε also remain valid on pX-a.e. x.
+Remark 1 (dominant bounds with DA). Under Asms. 1a–1b and 2, let Hpı cover (ε, T )-invariant h⋆.
+Then, Hpı(x) ∩(Hepı(x) ± ε) dominates Hpı(x) on sharpness and worst-case error for pX-a.e. x.
+Theorem 3.A now enables DA-based sensitivity analysis via the parameter ε; validity is preserved by ε-
+padding bounds, while baseline intersection maintains sharpness and informativeness. This is depicted
+in Fig. 4d where post-DA bounds may arbitrarily change, yet intersection guarantees dominance. It is
+worth contrasting this with §3; unlike Hpı+ınv(x), Hepı(x)±ε solves the entire ε-grid simultaneously.
+4.2
+SYMMETRY CONSTRAINT WITH T -AS-IV
+The IV problem in Eq. (4) may be incomplete (Ailer et al., 2024), or even misspecified (Watson et al.,
+2024; Penn et al., 2025; Conley et al., 2012; Deaner, 2022; 2025; Cinelli & Hazlett, 2025). Conse-
+quently, h⋆is unidentifiable. Nevertheless, even invalid instruments retain value for sharpening PI:
+Assumption 3 (a leaky IV sensitivity model (Deaner, 2022)). For instrument violation budget γz, let
+Ppı+ıv :=
+n
+q ∈Ppı :
+Ep[Y −hq
+⋆(X)|Z ]
+2
+Z ≤σ2γz
+o
+.
+Here, γz represents a bounded violation in un-confoundedness and/or exclusion of Z, while the
+baseline constraints Ppı may allow Ppı+ıv to be sufficiently well-posed to yield non-vacuous bounds.
+Can §4.1 be pushed further, to impose symmetry explicitly within an IV solver? Apparently so!
+Post-DA, the random transformation T satisfies the IV properties of un-confoundedness T ⊥⊥U and
+exclusion Y ⊥⊥T | e
+X, U by construction. But T -invariance renders it incomplete, since T ⊥⊥X gives
+E[h⋆( e
+X)|T ] = E[h⋆(X)|T ] = E[h⋆(X)] = 0. Because incomplete instruments still constrain PI,
+we plug T in as an IV eZ := (Z, T) to enforce symmetry within off-the-shelf or black-box IV solvers,
+Qepı+eıv(pXY Z) := Qpı+ıv(p e
+XY e
+Z).
+We defer readers to §B and §C for additional analysis under Asm. 3, including comparison with §3.
+2For non-interval H e
+pı(x), read ±ε as the Minkowski sum H e
+pı(x) ± ε := H e
+pı(x) + [−ε, ε]. Also, note that
+re-calibrating to any bigger budget ˜γ ≥γ may not suffice for validity since E[η]̸ = 0 is not represented by H e
+X.
+8
+
+
+Preprint.
+0
+10−1
+100
+101
+102
+E+
+x
+principal direction 1
+x := t · ν1
+radial sweep
+x := sd1 cos(ϑ)ν1 + sd2 sin(ϑ)ν2
+principal direction 2
+x := t · ν2
+0
+10−1
+100
+101
+width
+0.000
+0.005
+0.010
+density
+ate
+erm
+e
+erm
+e
+erm + eıv
+pı + ınv
+pı
+epı
+epı + eıv
+−300
+−200
+−100
+0
+100
+200
+300
+t
+−2
+−1
+0
+1
+2
+3
+h(x)
+0
+1
+2
+3
+4
+5
+6
+ϑ
+−150
+−100
+−50
+0
+50
+100
+150
+t
+Figure 5: Optical device. Across queries x along principal
+components ν1, ν2 of Var(X) and a radial sweep, symmetries
+reduce interval width and worst-case error (Top) over baseline
+while maintaining validity (Bottom).
+−2.5
+−2.0
+−1.5
+−1.0
+−0.5
+0.0
+θstate price
+pı + ınv +ıv
+pı + ıv
+epı + ıv
+epı + eıv
+0.2
+0.3
+0.4
+γ
+−0.5
+0.0
+0.5
+1.0
+1.5
+2.0
+θneighbor price
+10−4
+10−3
+10−2
+10−1
+γz
+Figure 6: US cigarette demand.
+State (Top) and neighbor (Bottom)
+price elasticity across confounding
+γ (Left) and IV γz (Right) budgets.
+5
+EXPERIMENTS
+We test three claims in finite samples: symmetry-informed PI (i) stays valid, (ii) is sharper and
+more informative than baseline PI, and (iii) via DA remains usable where the shape constraint is
+not. We compare baseline pı with the shape constraint pı + ınv (§3), DA pre-processing epı (§4.1)
+and T-as-IV epı + eıv (§4.2), each an instance of one common PI program (Table 3). To isolate
+symmetry-driven sharpening from mere statistical efficiency, the augmented dataset is the same
+size as the original. Setup details are in §E.1, and our implementation is publicly available at
+https://github.com/uzairakbar/symmetry4CausalBounds.
+Optical device.
+In Janzing & Schölkopf (2018)’s benchmark, 3 × 3-pixel images X shown on a
+screen drive voltage readings Y across a photodiode, while a physical latent U drives two LEDs, one
+lighting the webcam that records X, the other the photodiode. Since image orientation should not
+affect the irradiance, we augment X by flips, 90◦rotations, and sum-zero translations. We obtain h⋆
+by back-door adjustment on U, withheld from all methods. Figure 5 shows that symmetry-informed
+bounds stay valid while reducing width and worst-case error, sometimes by an order of magnitude.
+US cigarette demand. We give an illustrative example of a textbook symmetry in a canonically
+causal setting; scaling all prices and income by a common factor (e.g., inflation) should leave demand
+unchanged. Following Baltagi & Levin (1986), we take a panel of 48 US states and DC (1970–2019)
+with Y the log cigarette sales per capita and X the state’s own price, cheapest neighbor’s price,
+income and the consumer price index (CPI). We assume the latter two are exogenous, whereas the
+former two are confounded, with the state’s cigarette tax as a (possibly leaky) instrument Z. With
+h⋆(·) := θ⊤
+⋆log(·), the symmetry implies 1⊤θ⋆≈0 and DA multiplies X by a random scalar T
+with log T Gaussian. Figure 6 shows that imposing the symmetry makes the neighbor-price effect
+clearly positive unless the IV is heavily leaky, suggestive evidence of cross-border shopping.
+0.0
+0.5
+1.0
+h(x)
+ate
+erm
+e
+erm
+pı
+epı
+epı + eıv
+pı + ınv
+Figure 7: do-MNIST data. Bounds on 10 ex-
+emplar images with alternating colors. ERM
+follows color; symmetries sharpen PI. Invariance
+shape constraint pı + ınv is infeasible here (§E).
+do-MNIST. We build a colored-MNIST vari-
+ant (Arjovsky et al., 2019; LeCun et al., 1998),
+dubbed do-MNIST, where a hidden U both tints
+the digit image X red or blue and corrupts its
+binary label Y , so color spuriously predicts Y ,
+while h⋆(x) depends only on whether the digit
+is ≥5.
+We bound h⋆using an off-the-shelf
+CopSens model (Zheng et al., 2025) with a con-
+volutional network backend and a latent factor
+qU|X. Small translations, rotations and jitter to
+contrast/saturation/hue defines our DA, none of
+which alter the digit. In Fig. 7, ERM tracks color
+rather than digit, and symmetries sharpen PI around h⋆. Table 2 aggregates metrics over 2, 000 test
+queries, showing that DA reduces average width by 19.08% and worst-case error by 34.81%, while
+imposing T-as-IV reduces them by 29.05% and 47.10% respectively. The shape constraint pı + ınv,
+9
+
+
+Preprint.
+coverage
+width
+worst-case error
+pı
+0.993 ± 0.001
+0.692 ± 0.001
+0.293 ± 0.001
+epı
+0.989 ± 0.001
+0.560 ± 0.001
+0.191 ± 0.001
+epı + eıv
+0.980 ± 0.004
+0.491 ± 0.019
+0.155 ± 0.010
+Table 2: Metrics aggregate over 2, 000 do-MNIST test queries ± one standard error across 10 seeds.
+by contrast, is infeasible for any reasonably small ε as CopSens adapts only the last layer of a frozen,
+non-invariant feature extractor (§E.1). This is precisely the operational limitation that motivates §4.
+Finally, readers may notice that coverage dips by 0.40% and 1.31% for epı and epı + eıv respectively.
+We blame finite samples and realizability, as with all sins in PI (Kilbertus et al., 2020, Reviewer 4).
+Ablations. Under known h⋆, §E.2 sweeps each quantity from our theory in turn, aggregating PI
+metrics over 10 seeds. Post-DA sets attain coverage at smaller confounding budgets than baseline, as
+predicted by Thm. 1 (Fig. 10). Width and worst-case error shrink with observable Ω(Prop. 2, Fig. 11).
+Under deliberately misspecified symmetry, ε-padding restores coverage once ε ≥ε⋆, and intersecting
+with the baseline set prevents regression; surprisingly, improvements hold under symmetry violations
+as large as confounding itself, even with up to 16× over-padding (Thm. 3, Rem. 1, Fig. 12). Finally,
+gains persist even without budget re-calibration and across sample sizes m, n (Figs. 13 to 15).
+6
+DISCUSSION
+Limitations. Our proposed framework provides a practical hierarchy of symmetry constraints for PI:
+should an invariance shape constraint pose implementation challenges, practitioners can resort to the
+DA operationalization. If they suspect misspecification by some ε, they need only to ε-pad bounds.
+Which leads us to the main limitation of our work: while the soft intervention framing in Lem. 1
+makes composability of DA with a broad class of disparate PI solvers plausible under well-specified
+symmetries, it is yet unclear whether this should also be the case under ε-misspecification. Having
+addressed this question under two canonical, arguably the most popular PI classes (Asm. 2 bounded
+confounding and Asm. 3 leaky IVs), further investigation of additional models is left as future work.
+Broader applicability. In principle, symmetry as a shape constraint is compatible with all PI models.
+Furthermore, since DA dilutes confounding, it also extends to other bounded-confounding models,
+e.g. MSM (Tan, 2006), Wasserstein (Meresht et al., 2022), total-variation (Bertsimas et al., 2023; Guo
+et al., 2022) and f-divergence (Jin et al., 2022) balls. All of these, like Asm. 2, admit conditioning on
+pre-treatment Z (Cinelli & Hazlett, 2020), omitted here only for clarity of exposition. Under well-
+specified symmetry, DA leaves h⋆unchanged, so other shape constraints remain valid. And as DA
+preserves the causal graph up to relabeling, Balke & Pearl (1997) style graphical constraints carry over
+too; with response-function invariance H⋆(x) =d H⋆(τx), this covers IVs with latent, non-additive
+U (Kilbertus et al., 2020), response-function models (Padh et al., 2023), proxy variables (Ghassami
+et al., 2026; Mastouri et al., 2021; Sun et al., 2025) and others (Zhang & Bareinboim, 2021).
+Related work. Dance & Bloem-Reddy (2025) use symmetry to improve estimation of an identifiable
+target, and concurrent work uses symmetry as a point-identification assumption (Weinstein & Blei,
+2026; Rabel & Runge, 2026). Counterfactual DA likewise imposes causal priors via augmentation
+for point-estimation (Ilse et al., 2021; Mohebbi et al., 2026), or uses causal structure to inform
+DA design (Gajewski et al., 2026). All of these are target-identifiable settings; we consider the
+weaker setting where point-identification itself fails. Closer to our work is Akbar et al. (2025),
+where additive Gaussian DA under a stylized, linear-Gaussian DGP improves non-identifiable point-
+estimation. Proposition 1 shows that this is generally fragile, which motivates the PI lens taken here.
+Future work. We aim to generalize our change-of-measure framework to (i) general causal queries on
+pY | do(x) (Ailer et al., 2024), (ii) equi-variance in the response function H⋆(τx) =d β(x, τ)H⋆(x)
+under cocycle β (Dance & Bloem-Reddy, 2025), and (iii) latent U under a ℘-Wasserstein notion of
+equi-variance misspecification supx,τ W℘(pH⋆(τx), β(x, τ)#pH⋆(x)) ≤ε (Chen et al., 2020). Also,
+it may be interesting to demonstrate application across causal settings like genomics (Weinstein &
+Blei, 2026) and medicine (Müller et al., 2021; Elaldi et al., 2023; Slote et al., 2025; Cheema, 2026).
+Conclusion. Researchers are advised to incorporate established domain symmetries as a standard
+component of their partial-identification toolkit. Integration is effortless with DA pre-processing.
+10
+
+
+Preprint.
+REFERENCES
+Elisabeth Ailer, Niclas Dern, Jason Hartford, and Niki Kilbertus. Targeted sequential indirect experiment design.
+In Advances in Neural Information Processing Systems, volume 37, 2024. doi: 10.52202/079017-3877.
+Uzair Akbar, Niki Kilbertus, Hao Shen, Krikamol Muandet, and Bo Dai. An analysis of causal effect estima-
+tion using outcome invariant data augmentation. In Advances in Neural Information Processing Systems,
+volume 38, 2025. doi: 10.52202/085713-3290.
+T. W. Anderson and Herman Rubin. Estimation of the parameters of a single equation in a complete system of
+stochastic equations. The Annals of Mathematical Statistics, 20(1), 1949.
+Martin Arjovsky, Léon Bottou, Ishaan Gulrajani, and David Lopez-Paz. Invariant risk minimization, 2019.
+arXiv:1907.02893.
+Alexander Balke and Judea Pearl. Bounds on treatment effects from studies with imperfect compliance. Journal
+of the American Statistical Association, 92(439):1171–1176, 1997.
+Badi H Baltagi and Dan Levin. Estimating dynamic demand for cigarettes using panel data: The effects of
+bootlegging, taxation and advertising reconsidered. The Review of Economics and Statistics, 68(1), 1986.
+Gary S Becker, Michael Grossman, and Kevin M Murphy. An empirical analysis of cigarette addiction. American
+Economic Review, 84(3), 1994.
+Andrew Bennett, Nathan Kallus, and Tobias Schnabel. Deep generalized method of moments for instrumental
+variable analysis. In Advances in Neural Information Processing Systems 32. Curran Associates Inc., 2019.
+Dimitris Bertsimas, Kosuke Imai, and Michael Lingzhi Li. Distributionally robust causal inference with
+observational data, 2023. URL https://arxiv.org/abs/2210.08326.
+Michel Besserve and Bernhard Schölkopf. Learning soft interventions in complex equilibrium systems. In Pro-
+ceedings of the Thirty-Eighth Conference on Uncertainty in Artificial Intelligence, volume 180 of Proceedings
+of Machine Learning Research, pp. 170–180. PMLR, 2022.
+Blai Bonet. Instrumentality tests revisited. In Proceedings of the Seventeenth Conference on Uncertainty in
+Artificial Intelligence, 2001. ISBN 1558608001.
+Johannes Brandstetter, Max Welling, and Daniel E Worrall. Lie point symmetry data augmentation for neural
+PDE solvers. In Proceedings of the 39th International Conference on Machine Learning, volume 162, 2022.
+Michael M. Bronstein, Joan Bruna, Taco Cohen, and Petar Veliˇckovi´c. Geometric deep learning: Grids, groups,
+graphs, geodesics, and gauges, 2021. URL https://arxiv.org/abs/2104.13478.
+Gavin Brown and Riccardo Ali. Bias/variance is not the same as approximation/estimation. Transactions on
+Machine Learning Research, 2024. ISSN 2835-8856. URL https://openreview.net/forum?id=
+4TnFbv16hK.
+A. Colin Cameron and Douglas L. Miller. A practitioner’s guide to cluster-robust inference. Journal of Human
+Resources, 50(2), 2015.
+Siu Lun Chau, Michele Caprio, and Krikamol Muandet. Integral imprecise probability metrics. In The
+Thirty-ninth Annual Conference on Neural Information Processing Systems, 2025.
+Ahsan Jamal Cheema. Neck-Learn: Attention-based multiple instance learning and ensemble framework for
+ecological momentary assessment. arXiv preprint arXiv:2605.02700, 2026. doi: 10.48550/arXiv.2605.02700.
+URL https://arxiv.org/abs/2605.02700.
+Shuxiao Chen, Edgar Dobriban, and Jane H. Lee. A group-theoretic framework for data augmentation. Journal
+of Machine Learning Research, 21(245):1–71, 2020.
+Leena Chennuru Vankadara, Luca Rendsburg, Ulrike von Luxburg, and Debarghya Ghoshdastidar. Interpolation
+and regularization for causal learning. In Advances in Neural Information Processing Systems, volume 35,
+2022. doi: 10.52202/068431-2654.
+Victor Chernozhukov, Carlos Cinelli, Whitney K. Newey, Amit Sharma, and Vasilis Syrgkanis. Long story
+short: Omitted variable bias in causal machine learning. The Review of Economics and Statistics, 2026. ISSN
+0034-6535. doi: 10.1162/REST.a.1705.
+Denis Chetverikov, Andres Santos, and Azeem M. Shaikh. The econometrics of shape restrictions. Annual
+Review of Economics, 10:pp. 31–63, 2018. ISSN 19411383, 19411391.
+11
+
+
+Preprint.
+Carlos Cinelli and Chad Hazlett. Making sense of sensitivity: Extending omitted variable bias. Journal of the
+Royal Statistical Society Series B: Statistical Methodology, 82, 2020. ISSN 1369-7412. doi: 10.1111/rssb.
+12348.
+Carlos Cinelli and Chad Hazlett. An omitted variable bias framework for sensitivity analysis of instrumental
+variables. Biometrika, 112(2), 2025. ISSN 1464-3510. doi: 10.1093/biomet/asaf004.
+Taco Cohen and Max Welling.
+Group equivariant convolutional networks.
+In Proceedings of The 33rd
+International Conference on Machine Learning, volume 48, 2016.
+Timothy G. Conley, Christian B. Hansen, and Peter E. Rossi. Plausibly exogenous. The Review of Economics
+and Statistics, 94(1), 2012. ISSN 00346535, 15309142.
+Hugh Dance and Benjamin Bloem-Reddy. Counterfactual cocycles: A framework for robust and coherent
+counterfactual transports, 2025. URL https://arxiv.org/abs/2405.13844.
+Ben Deaner. Nonparametric instrumental variables estimation under misspecification, 2022. URL https:
+//arxiv.org/abs/1901.01241.
+Ben Deaner. The trade-off between flexibility and robustness in instrumental variables analysis. American
+Economic Review, 115(11):3975–98, November 2025. doi: 10.1257/aer.20231765. URL https://www.
+aeaweb.org/articles?id=10.1257/aer.20231765.
+Axel Elaldi, Guido Gerig, and Neel Dey. E(3) × SO(3)-equivariant networks for spherical deconvolution in
+diffusion MRI. In Medical Imaging with Deep Learning (MIDL), volume 227 of Proceedings of Machine
+Learning Research, pp. 301–319, 2023.
+Dennis Frauen, Fergus Imrie, Alicia Curth, Valentyn Melnychuk, Stefan Feuerriegel, and Mihaela van der Schaar.
+A neural framework for generalized causal sensitivity analysis. In The Twelfth International Conference on
+Learning Representations, 2024. URL https://openreview.net/forum?id=ikX6D1oM1c.
+Joachim Freyberger and Joel L. Horowitz. Identification and shape restrictions in nonparametric instrumental
+variables estimation. Journal of Econometrics, 189(1), 2015. ISSN 0304-4076. doi: https://doi.org/10.1016/j.
+jeconom.2015.06.020.
+Mateusz Gajewski, Sophia Xiao, and Bijan Mazaheri. Data augmentation via causal-residual bootstrapping,
+2026. URL https://arxiv.org/abs/2603.15335.
+AmirEmad Ghassami, Yunshu Zhang, Ilya Shpitser, and Eric Tchetgen Tchetgen. Partial identification of causal
+effects using proxy variables, 2026. URL https://arxiv.org/abs/2304.04374.
+Arthur Gretton, Karsten M. Borgwardt, Malte J. Rasch, Bernhard Schölkopf, and Alexander Smola. A kernel
+two-sample test. Journal of Machine Learning Research, 13(25):723–773, 2012. URL http://jmlr.
+org/papers/v13/gretton12a.html.
+Florian Gunsilius. A path-sampling method to partially identify causal effects in instrumental variable models,
+2020. URL https://arxiv.org/abs/1910.09502.
+Wenshuo Guo, Mingzhang Yin, Yixin Wang, and Michael Jordan. Partial identification with noisy covariates:
+A robust optimization approach. In First Conference on Causal Learning and Reasoning, 2022. URL
+https://openreview.net/forum?id=-NVBxy0TdU.
+Paul Gustafson. Bayesian inference for partially identified models. International Journal of Biostatistics, 6(2),
+2010. doi: 10.2202/1557-4679.1206.
+Yaowei Hu, Yongkai Wu, Lu Zhang, and Xintao Wu. A generative adversarial framework for bounding
+confounded causal effects. Proceedings of the AAAI Conference on Artificial Intelligence, 35(13):12104–
+12112, May 2021. doi: 10.1609/aaai.v35i13.17437. URL https://ojs.aaai.org/index.php/
+AAAI/article/view/17437.
+Ningyuan Huang, Ron Levie, and Soledad Villar. Approximately equivariant graph networks. In A. Oh,
+T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine (eds.), Advances in Neural Information
+Processing Systems, volume 36, 2023.
+Maximilian Ilse, Jakub M. Tomczak, and Patrick Forré. Selecting data augmentation for simulating interventions.
+In International Conference on Machine Learning, pp. 4555–4562. PMLR, 2021.
+Guido W. Imbens and Charles F. Manski. Confidence intervals for partially identified parameters. Economet-
+rica, 72(6):1845–1857, 2004. ISSN 00129682, 14680262. URL http://www.jstor.org/stable/
+3598769.
+12
+
+
+Preprint.
+Amin Jaber, Murat Kocaoglu, Karthikeyan Shanmugam, and Elias Bareinboim. Causal discovery from soft
+interventions with unknown targets: Characterization and learning. In Advances in Neural Information
+Processing Systems, volume 33. Curran Associates, Inc., 2020.
+Dominik Janzing and Bernhard Schölkopf. Detecting confounding in multivariate linear models via spectral
+analysis. Journal of Causal Inference, 6(1), 2018.
+Ying Jin, Zhimei Ren, and Zhengyuan Zhou. Sensitivity analysis under the f-sensitivity models: a distributional
+robustness perspective, 2022. URL https://arxiv.org/abs/2203.04373.
+Lucas Kania and Ernst Wit. Causal regularization: On the trade-off between in-sample risk and out-of-sample
+risk guarantees, 2023. arXiv:2205.01593.
+Niki Kilbertus, Matt J. Kusner, and Ricardo Silva. A class of algorithms for general instrumental variable models.
+In Advances in Neural Information Processing Systems, volume 33, pp. 20108–20119, 2020.
+Wooyoung Kim, Koohyun Kwon, Soonwoo Kwon, and Sokbae Lee. The identification power of smoothness
+assumptions in models with counterfactual outcomes. Quantitative Economics, 9(2), 2018. doi: https:
+//doi.org/10.3982/QE545.
+Edward E. Leamer. Is it a demand curve, or is it a supply curve? partial identification through inequality
+constraints. The Review of Economics and Statistics, 63(3), 1981. ISSN 00346535, 15309142.
+Y. LeCun, L. Bottou, Y. Bengio, and P. Haffner. Gradient-based learning applied to document recognition.
+Proceedings of the IEEE, 86, 1998. doi: 10.1109/5.726791.
+Ang Li, Scott Mueller, Xin Shu, and Judea Pearl. ϵ-identifiability of causal quantities. In The 29th International
+Conference on Artificial Intelligence and Statistics, 2026.
+Mingsheng Long, Yue Cao, Jianmin Wang, and Michael Jordan. Learning transferable features with deep
+adaptation networks. In Proceedings of the 32nd International Conference on Machine Learning, volume 37
+of Proceedings of Machine Learning Research. PMLR, 2015.
+Clare Lyle, Mark van der Wilk, Marta Kwiatkowska, Yarin Gal, and Benjamin Bloem-Reddy. On the benefits of
+invariance in neural networks, 2020. arXiv:2005.00178.
+Charles F. Manski. Nonparametric bounds on treatment effects. The American Economic Review, 80(2):319–323,
+1990. ISSN 00028282.
+Charles F. Manski. Monotone treatment response. Econometrica, 65(6):1311–1334, 1997. ISSN 00129682,
+14680262.
+Charles F. Manski and John V. Pepper. Monotone instrumental variables: With an application to the returns to
+schooling. Econometrica, 68(4):997–1010, 2000. doi: https://doi.org/10.1111/1468-0262.t01-1-00144a. URL
+https://onlinelibrary.wiley.com/doi/abs/10.1111/1468-0262.t01-1-00144a.
+Riccardo Massidda, Atticus Geiger, Thomas Icard, and Davide Bacciu. Causal abstraction with soft interventions.
+In Mihaela van der Schaar, Cheng Zhang, and Dominik Janzing (eds.), Proceedings of the Second Conference
+on Causal Learning and Reasoning, volume 213 of Proceedings of Machine Learning Research. PMLR,
+2023.
+Afsaneh Mastouri, Yuchen Zhu, Limor Gultchin, Anna Korba, Ricardo Silva, Matt Kusner, Arthur Gretton, and
+Krikamol Muandet. Proximal causal learning with kernels: Two-stage estimation and moment restriction. In
+Proceedings of 38th International Conference on Machine Learning (ICML), volume 139, pp. 7512–7523.
+PMLR, 2021.
+Valentyn Melnychuk, Dennis Frauen, and Stefan Feuerriegel. Partial counterfactual identification of continuous
+outcomes with a curvature sensitivity model. In Thirty-seventh Conference on Neural Information Processing
+Systems, 2023.
+Vahid Balazadeh Meresht, Vasilis Syrgkanis, and Rahul G Krishnan. Partial identification of treatment effects
+with implicit generative models. In Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho
+(eds.), Advances in Neural Information Processing Systems, 2022. URL https://openreview.net/
+forum?id=8cUGfg-zUnh.
+Hossein Mohebbi, Oliver Schulte, Ke Li, and Pascal Poupart. Counterfactual residual data augmentation for
+regression. In Proceedings of the 43rd International Conference on Machine Learning (ICML), 2026. URL
+https://openreview.net/forum?id=mqd3zyHQj9.
+13
+
+
+Preprint.
+Philip Müller, Vladimir Golkov, Valentina Tomassini, and Daniel Cremers. Rotation-equivariant deep learning
+for diffusion MRI, 2021.
+Aviv Nevo and Adam M. Rosen. Identification with imperfect instruments. The Review of Economics and
+Statistics, 94(3), 2012.
+Whitney K. Newey and James L. Powell. Instrumental variable estimation of nonparametric models. Economet-
+rica, 71(5), 2003. ISSN 00129682, 14680262.
+Orzechowski and Walker.
+The tax burden on tobacco, 1970–2019.
+Centers for Disease Con-
+trol and Prevention, Office on Smoking and Health.
+URL https://data.cdc.gov/Policy/
+The-Tax-Burden-on-Tobacco-1970-2019/7nwe-3aj9. Dataset 7nwe-3aj9. Accessed 2026-
+10-05.
+Kirtan Padh, Jakob Zeitler, David Watson, Matt Kusner, Ricardo Silva, and Niki Kilbertus. Stochastic causal
+programming for bounding treatment effects. In Proceedings of the Second Conference on Causal Learning
+and Reasoning, volume 213 of Proceedings of Machine Learning Research. PMLR, 11–14 Apr 2023.
+Judea Pearl. On the testability of causal models with latent and instrumental variables. In Proceedings of the
+Eleventh Conference on Uncertainty in Artificial Intelligence, 1995. ISBN 1558603859.
+Judea Pearl. Causality. Cambridge University Press, 2009.
+Jordan Penn, Lee M. Gunderson, Gecia Bravo-Hermsdorff, Ricardo Silva, and David Watson. BudgetIV:
+Optimal partial identification of causal effects with mostly invalid instruments. In Proceedings of The 28th
+International Conference on Artificial Intelligence and Statistics, volume 258 of Proceedings of Machine
+Learning Research, pp. 2485–2493. PMLR, 03–05 May 2025.
+Jonas Peters, Dominik Janzing, and Bernhard Schölkopf. Elements of causal inference: foundations and learning
+algorithms. The MIT Press, 2017.
+Niklas Pfister and Jonas Peters. Identifiability of sparse causal effects using instrumental variables. In Proceedings
+of the Thirty-Eighth Conference on Uncertainty in Artificial Intelligence, volume 180 of Proceedings of
+Machine Learning Research. PMLR, 2022.
+Martin Rabel and Jakob Runge. Symmetries and causality: Causal effect identification beyond iid data, 2026.
+URL https://arxiv.org/abs/2609.03697.
+R. Ranga Rao. Relations between weak and uniform convergence of measures with applications. The Annals of
+Mathematical Statistics, 33(2), 1962.
+Marco Tulio Ribeiro, Tongshuang Wu, Carlos Guestrin, and Sameer Singh. Beyond accuracy: Behavioral testing
+of NLP models with CheckList. In Association for Computational Linguistics (ACL), 2020.
+Paul R Rosenbaum. Observational studies. Springer, 2002.
+Gian-Carlo Rota. Reynolds operators. In Richard Bellman (ed.), Stochastic Processes in Mathematical Physics
+and Engineering, pp. 70–83. American Mathematical Society, 1964. doi: 10.1090/psapm/016/0161140.
+Dominik Rothenhäusler, Nicolai Meinshausen, Peter Bühlmann, and Jonas Peters. Anchor regression: Heteroge-
+neous data meet causality. Journal of the Royal Statistical Society Series B: Statistical Methodology, 83(2):
+215–246, 2021.
+Artem Savkin, Thomas Lapotre, Kevin Strauss, Uzair Akbar, and Federico Tombari. Adversarial appearance
+learning in augmented Cityscapes for pedestrian recognition in autonomous driving. In IEEE International
+Conference on Robotics and Automation, pp. 3305–3311, 2020. doi: 10.1109/ICRA40945.2020.9197024.
+Jonas Schweisthal, Dennis Frauen, Maresa Schröder, Konstantin Hess, Niki Kilbertus, and Stefan Feuerriegel.
+Learning representations of instruments for partial identification of treatment effects. In Forty-second
+International Conference on Machine Learning, 2025. URL https://openreview.net/forum?id=
+pgrJPhsk2w.
+George A. F. Seber and Alan J. Lee. Linear Regression Analysis. Wiley, 2nd edition, 2003.
+Kevin J. Slote, Kelley M. Smith, Marrium Shamshad, Aditi Trivedi, Charles M. Epstein, Mukesh Dhamala, and
+Igor Belykh. Node degree volatility for seizure onset zone localization. Research Square preprint (Version 1),
+2025.
+14
+
+
+Preprint.
+Haotian Sun, Antoine Moulin, Tongzheng Ren, Arthur Gretton, and Bo Dai. Spectral representation for causal
+estimation with hidden confounders. In Proceedings of The 28th International Conference on Artificial
+Intelligence and Statistics, volume 258 of Proceedings of Machine Learning Research, 2025.
+Zhiqiang Tan. A distributional approach for causal inference using propensity scores. Journal of the American
+Statistical Association, 101(476):1619–1637, 2006. doi: 10.1198/016214506000000023. URL https:
+//doi.org/10.1198/016214506000000023.
+U.S. Bureau of Economic Analysis. SAINC1 state annual personal income summary: Personal income,
+population, per capita personal income. Regional Economic Accounts. URL https://apps.bea.gov/
+regional/zip/SAINC.zip. File SAINC1__ALL_AREAS_1929_2025.csv. Accessed 2026-10-05.
+U.S. Bureau of Labor Statistics.
+Consumer price index for all urban consumers: All items in U.S. city
+average [CPIAUCSL]. Retrieved from FRED, Federal Reserve Bank of St. Louis. URL https://fred.
+stlouisfed.org/series/CPIAUCSL. Accessed 2026-10-05.
+David Watson, Jordan Penn, Lee Gunderson, Gecia Bravo-Hermsdorff, Afsaneh Mastouri, and Ricardo Silva.
+Bounding causal effects with leaky instruments. In Proceedings of the Fortieth Conference on Uncertainty in
+Artificial Intelligence, volume 244 of Proceedings of Machine Learning Research. PMLR, 2024.
+Eli N. Weinstein and David M. Blei. Geometric causal models, 2026. URL https://arxiv.org/abs/
+2607.05153.
+Liyuan Xu and Arthur Gretton. A neural mean embedding approach for back-door and front-door adjustment,
+2022. arXiv:2210.06610.
+Fanny Yang, Zuowen Wang, and Christina Heinze-Deml. Invariance-inducing regularization using worst-
+case transformations suffices to boost accuracy and spatial robustness. In Advances in Neural Information
+Processing Systems, volume 32, 2019.
+Manzil Zaheer, Satwik Kottur, Siamak Ravanbakhsh, Barnabas Poczos, Ruslan Salakhutdinov, and Alexander
+Smola. Deep sets. In Advances in Neural Information Processing Systems, volume 30, 2017.
+J. Zhang and E. Bareinboim. Non-parametric methods for partial identification of causal effects. Technical
+Report R-72, Causal Artificial Intelligence Lab, Columbia University, Feb 2021.
+Rui Zhang, Masaaki Imaizumi, Bernhard Schölkopf, and Krikamol Muandet. Instrumental variable regression
+via kernel maximum moment loss. Journal of Causal Inference, 11(1), 2023.
+Jiajing Zheng, Alexander D’Amour, and Alexander Franks. Copula-based sensitivity analysis for multi-treatment
+causal inference with unobserved confounding. Journal of Machine Learning Research, 26(36):1–60, 2025.
+URL http://jmlr.org/papers/v26/22-0372.html.
+15
+
+
+Preprint.
+APPENDIX—SYMMETRY-INFORMED CAUSAL PARTIAL IDENTIFICATION
+CONTENTS
+A
+List of Symbols. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+B
+Misspecified DA under IV Constraints. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18
+C
+Shape Constraint vs. Change of Measure. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+D
+Implementation Details. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+E
+Experiment Supplement . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+E.1
+Experiment Setup . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+22
+E.2
+Ablations
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+23
+F
+Proofs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27
+F.1
+Proof of Thm. 1—Valid bounds with DA . . . . . . . . . . . . . . . . . . . . . . .
+28
+F.2
+Proof of Thm. 2—Informative bounds with DA . . . . . . . . . . . . . . . . . . .
+29
+F.3
+Proof of Thms. 3.A and 3.B—Robust bounds with DA
+. . . . . . . . . . . . . . .
+30
+F.4
+Proof of Prop. 1—Estimation with DA . . . . . . . . . . . . . . . . . . . . . . . .
+31
+F.5
+Proof of Prop. 2—Sharper bounds with DA
+. . . . . . . . . . . . . . . . . . . . .
+32
+F.6
+Proof of Prop. 3—Shape constraint vs. change-of-measure . . . . . . . . . . . . .
+33
+F.7
+Proof of Prop. 4—Finite-sample budgets . . . . . . . . . . . . . . . . . . . . . . .
+34
+F.8
+Proof of Prop. 5—Sharp bounds with structural-function constraints . . . . . . . .
+35
+F.9
+Proof of Lem. 1—Soft intervention with DA . . . . . . . . . . . . . . . . . . . . .
+36
+F.10 Proof of Lem. 2—Characterizing the identified set . . . . . . . . . . . . . . . . . .
+37
+F.11 Proof of Lem. 3—Shift decomposition . . . . . . . . . . . . . . . . . . . . . . . .
+40
+F.12 Proof of Lem. 4—Average error as a worst-case surrogate . . . . . . . . . . . . . .
+41
+F.13 Proof of Lem. 5—Reynolds projection with DA . . . . . . . . . . . . . . . . . . .
+42
+F.14 Proof of Lem. 6—Average Representer Norms . . . . . . . . . . . . . . . . . . . .
+43
+16
+
+
+Preprint.
+A
+LIST OF SYMBOLS
+Symbol
+Description
+Variables and Spaces
+X, X, x
+Treatment, its support, and a realization
+Y, Y, y
+Outcome, its support, and a realization
+Z, Z, z
+Pre-treatment co-variates / instruments (IVs), their support, and realization
+U, ξ
+Unobserved confounder, exogenous noise (mean-zero, ξ ⊥⊥(U, X, Z))
+e
+X, eZ
+Post-DA treatment e
+X := TX and instrument eZ := (Z, T)
+Hypotheses and Estimators
+h, h⋆, H
+Candidate hypothesis, causal target, hypothesis class
+HX, H e
+X, k
+X-, e
+X-centered H with covariance forms ⟨·, ·⟩X, ⟨·, ·⟩e
+X and k := dim(HX)
+herm, h e
+erm, b,˜b
+ERM estimators h• := argminh∈H R•(h), their respective biases h• −h⋆
+hıv, hp
+⋆
+IV estimator, and back-door adjustment over joint p
+gx, ˜gx
+Riesz representers for point-evaluation h 7→h(x) in HX and H e
+X
+Hınv, I, Π
+Π orthogonally projects onto ambient invariant space I, and Hınv := H ∩I
+Symmetries, Interventions and Change of Measure
+T, T , τ, α
+Random transformation, support, realization, and defining map τx=α(x,τ)
+do(x), do(X = e
+X)
+Hard intervention do(X = x), and DA-simulated soft intervention
+ε, η
+Invariance residual η := h⋆(X) −h⋆( e
+X) uniformly bounded |η| ≤ε a.s.
+S, K, δ∗δ
+Shift operator on H e
+X, splits into shape/variance + rank-1 level/mean shifts
+B, DB
+MMD DB(pX, p e
+X) over a unit e
+X-ball in H e
+X, with D2
+B = tr(δ∗δ) (Lem. 3)
+σ2, ˜σ2, ρ
+Baseline / post-DA MMSE, and the noise-inflation factor ρ := ˜σ2/σ2 ≥1
+Ω
+Ω:= ρ ·
+ tr(K) + D2
+B
+
+k; post-DA bounds sharpen if Ω≤1 (Prop. 2)
+Constraints and Partial Identification
+p, q
+True observational joint, and a candidate joint distribution in Qpı
+DF, F
+IPM and its witness-function class defining Qpı
+γx, γy, γz
+Assumed budgets for confounding in X, Y , and leaky IV Z violation
+γ, γ⋆
+•, ˜γ•
+Effective confounding budget γ := γxγy
+1−γx , true and re-calibrated budgets
+Ppı, Ppı+ınv, Ppı+ıv
+PI constraint sets: baseline, augmented with invariance / IV constraints
+Qpı, Qepı, Qepı+eıv
+Candidate joints: baseline, post-DA, and DA-as-IV
+Hpı, Hepı, Hpı(x), Hepı(x)
+Baseline and post-DA identified sets, their respective intervals at query x
+Risks and Evaluation Metrics
+Rerm(h), R e
+erm(h)
+Observational risks, pre- and post-DA
+Rx(y), R(h)
+Causal / interventional risks, point-wise and averaged
+Ex(y), E(h)
+Causal excess risk/ estimation error E(h)=R(h)−R(h⋆), pointwise via Rx
+E−(H), E(H), E+(H)
+Approximation (min), averaged, and worst-case (max) errors E over set H
+E−
+x (Y), Ex(Y), E+
+x (Y)
+Point-wise versions of the above metrics via Ex over interval Y
+Eınv(h)
+Invariance error Ep
+
+|h(X) −h( e
+X)|2
+17
+
+
+Preprint.
+B
+MISSPECIFIED DA UNDER IV CONSTRAINTS
+For completeness, we explore the limits of the ε-padding approach from Thm. 3.A under the IV
+constraint in Asm. 3. Notice that T -invariance violation manifests as violated IV exclusion / un-
+confoundedness. This violation may be accommodated by either DA reducing confounding via the
+DPI σ2 ≤˜σ2, or a sufficient slack in the baseline IV budget γz.
+Theorem 3.B (robust bounds with DA). Let a valid model following Asm. 3 yield intervals Hpı+ıv(x)
+under the setting of Thm. 3.A. Then, Hepı+eıv(x) ± ε is also valid for eZ ∈{Z, (Z, T)} on pX-a.e. x if
+ε ≤˜σ√γz −σ
+p
+γ⋆z,
+where γ⋆
+z ≤γz is the true IV budget.
+The above inequality allows for some tolerance to ε-misspecified symmetry under DA so long as γz
+is positive. In practice this is often true even for perfect instruments to make the optimization problem
+more tractable. Importantly, practitioners can use the following observable diagnostic for Thm. 3.B:
+ε ≤(˜σ −σ)√γz.
+Alternatively, if the sensitivity parameter γz is exposed, one can simply re-calibrate it to ˜γz satisfying
+˜γz(ε) =
+
+ε/˜σ +
+p
+γz/ρ
+2
+.
+Meaning the new budget ˜γz should accommodate the IV leak as well as the misspecified symmetry. If
+one plausibly assumes symmetry violation is “orthogonal” to confounding (Rem. 2), this tightens to
+˜γz(ε) = ε2/˜σ2 + γz/ρ.
+18
+
+
+Preprint.
+C
+SHAPE CONSTRAINT VS. CHANGE OF MEASURE
+In this section we aim to compare the two operationalizations of symmetry informed PI; via an
+invariance shape constraint in §3, and via change-of-measure through DA pre-processing in §4.
+Throughout, we assume no observable co-variates Z = ∅for simplicity, and a mean-centered Y
+w.l.o.g. with the mean absorbed into the intercept of h⋆. Define the ambient T -inv. subspace I as
+I :=
+n
+h ∈L0
+2(X) ∩L0
+2( e
+X) : h(X) = h( e
+X) a.s.
+o
+,
+Hınv := H ∩I.
+Notice that, by construction, all forms ⟨·, ·⟩X, ⟨·, ·⟩e
+X ⟨·, ·⟩L2(X) and ⟨·, ·⟩L2( e
+X) coincide on I, Hınv.
+Next, define the operator EA|B : L0
+2(A) →L0
+2(B) as conditional expectation on centered subspaces
+(EA|B h)(·) = E[h(A)|B = ·].
+Well defined because E[E[h(A)|B ]] = E[h(A)] = 0 by the tower property, and EA|Bh = 0 iff
+E[h(A)|B ] = 0 a.s.. Of particular interest are EX| e
+X and E e
+X|T , both of which we discuss below.
+Now, under a T -inv. h⋆, ε = 0 and the invariance shape constraint in §3 yields Hpı+ınv = Hpı ∩Hınv
+(see Cor. 1). By contrast, DA pre-processing yields Hepı and/or Hepı+eıv. To make their comparison
+tractable in observables, we make two standard assumptions. First, we take T to be a compact group:
+Assumption 4 (compact group action DA). Let T be a compact group with action α : X × T →X.
+Furthermore, T is endowed with a (unique) normalized Haar measure pT , i.e. pT is uniform over T .
+Assumption 4 encompasses several standard DA transformations, including some used in our experi-
+ments such as rotations, translations, etc. Under Asm. 4, p e
+X itself becomes T -invariant. Importantly,
+EX| e
+X is now the Reynolds operator; an L2(X)-orthogonal projector onto I (Rota, 1964). Un-
+der Asms. 1a–1b, the post-DA bias ˜b is then a projection of b onto I (Lem. 5). This now allows us to
+compare identification metrics entirely in observables, e.g. in Prop. 1,
+e˜b
+2
+L2(X) =
+∥˜b∥2
+L2(X)
+∥˜b∥2
+e
+X
+= ∥˜b∥2
+e
+X
+∥˜b∥2
+e
+X
+= 1.
+Second, since T-as-IV imposes Eq. (4) as a constraint, it filters functions with E[h( e
+X)|T] a.s. constant.
+This holds for all h ∈Hınv, since E[h( e
+X)|T] = E[h(X)|T] = E[h(X)] = 0 a.s. following T ⊥⊥X.
+Hence Hınv ⊆null
+ E e
+X|T
+
+. We say that DA is relevant, or complete, when this holds with equality:
+Assumption 5 (relevant / complete DA). Let T be relevant / complete: null
+ E e
+X|T
+ Hf
+X
+
+= Hınv.
+Assumption 5 is akin to the standard injective EX|Z assumption for relevant/complete IVs Z (Ailer
+et al., 2024; Sun et al., 2025). Similarly, Asm. 5 assumes E e
+X|T injective on e
+X-orthogonal complement
+of Hınv within H e
+X. Meaning, the only directions whose data-averaged response is zero across
+augmentations are the invariant ones.
+The inv. shape constraint and change-of-measure routes are now comparable under Asms. 4 and 5:
+Proposition 3 (shape constraint vs. change-of-measure). Under Asms. 1a–1b, and Asms. 2 to 5 with
+T -invariant h⋆and Z = ∅. Set ε = γz = 0, and suppose the baseline PI set is valid h⋆∈Hpı.
+Then, h e
+erm = Πherm ∈Hınv, where Π is the L2(X)-orthogonal projection onto I (cf. §F). Further,
+Hepı =
+n
+h ∈H e
+X :
+h −h e
+erm
+2
+e
+X ≤˜σ2γ
+o
+,
+Hepı+eıv =
+n
+h ∈Hınv :
+h −h e
+erm
+2
+e
+X ≤˜σ2γ
+o
+,
+Hpı+ınv =
+n
+h ∈Hınv :
+h −h e
+erm
+2
+X ≤σ2(1 + γ −ρ)
+o
+.
+All identified sets are balls centered about h e
+erm. Both Hepı+eıv and Hpı+ınv live on the slice Hınv, the
+latter with a smaller radius σ√1 + γ −ρ ≤˜σ√γ with equality iff ρ = 1. It trivially follows that,
+h⋆∈Hpı+ınv ⊆Hepı+eıv ⊆Hepı,
+and the same dominance hierarchy holds for sharpness and worst-case errors over H• and H•(x).
+Under Asm. 1c, closed form volume, width and avg. errors for the balls in Prop. 3 can now be derived
+in observables similar to Prop. 2 and Thm. 2. We leave it as an exercise for interested readers.
+19
+
+
+Preprint.
+Table 3: Every object in the paper as one setting of the same program (P2); labels are those used
+in the legends of Figs. 5 to 8 and 10 to 15. The label may drop · · · + ıv whenever Z = ∅in
+the respective experiment. γmin represents the minimum feasible budget, whereas ˜γ• represents a
+post-DA, re-calibrated budget. And erm + ıv is the anchor regression (Rothenhäusler et al., 2021).
+Sensitivity params.
+Sensitivity params.
+Dataset
+Instruments
+Point estimate
+γ
+γz
+ε
+PI interval
+γ
+γz
+ε
+Post-proc.
+D
+Z
+ıv
+∞
+0
+∞
+pı + ınv + ıv γ
+γz
+ε
+D
+Z
+erm + ıv
+γmin
+0
+∞
+pı + ıv
+γ
+γz
+∞
+eD
+Z
+e
+erm + ıv
+γmin
+0
+∞
+epı + ıv
+˜γ
+˜γz
+∞
+±ε
+eD
+eZ := (Z, T)
+e
+erm + eıv
+γmin
+0
+∞
+epı + eıv
+˜γ
+˜γz
+∞
+±ε
+D
+IMPLEMENTATION DETAILS
+Identification program.
+Write the finite-n sample version of the abstract PI program from §2.3 as:
+min
+q
+/ max
+q
+hq
+⋆(x)
+// interval lower / upper bounds
+s.t.
+DF(qXY Z, bpXY Z) ≤γn,
+// observational consistency
+q ∈Ppı,
+hq
+⋆∈H,
+bEınv(hq
+⋆) ≤ε2.
+// structural constraints
+(P1)
+Here, bpXY Z is the empirical distribution of n observations. The IPM DF matches qXY Z to bpXY Z
+within tolerance γn ≥0 to account for sampling error. Further, bEınv is a Monte Carlo approx. of Eınv:
+bEınv(h) :=
+1
+mn
+n
+X
+i=1
+m
+X
+j=1
+h(xi) −h(τi,j xi)
+2,
+(xi, ·) ∈D,
+τi,j ∼pT .
+In practice, the partial-r2 model (Asm. 2) directly imposes Lem. 2 via bRerm(h)−bRerm(bherm) ≤bσ2γ,
+bRerm(h) −bRerm(bherm) = 1
+n
+n
+X
+i=1
+ h(xi) −bherm(xi)
+2
+|
+{z
+}
+≤bσ2γ by Lem. 2
+,
+bσ2 :=
+1
+n −k
+n
+X
+i=1
+ yi −bherm(xi)
+2.
+For leaky-IV, we implement a generalized method of moments (GMM) relaxation of the conditional
+moment in Asm. 3 (Akbar et al., 2025; Ailer et al., 2024). For IV test functions ϕz : Z →Rdϕz , define
+bRıv(h) :=
+
+1
+n
+n
+X
+i=1
+ yi −h(xi)
+
+· ϕz(zi)
+
+2
+W
+,
+∥v∥2
+W := v⊤W v.
+We use ϕz(z) = z and W = bΣ†
+z (Bennett et al., 2019), where † denotes the Moore–Penrose
+pseudoinverse. For point-estimation bhıv := argmin
+h∈H
+bRıv(h), whereas for PI, impose bRıv(h) ≤bσ2γz.
+We instantiate the hypothesis class by a parameterized family H := {Φ ◦θ⊤ϕx : θ ∈Θ} with some
+basis features ϕx : X →Rk, e.g. polynomial features for optical device, log transform in cigarette
+demand, and penultimate layer of a convolutional neural network in do-MNIST (Kilbertus et al.,
+2020; Padh et al., 2023; Zheng et al., 2025). Program (P1) under Asms. 2 and 3 now reduces to:
+min
+θ∈Θ / max
+θ∈Θ hθ(x)
+s.t.
+bRerm(hθ) −bRerm(bherm) ≤bσ2bγ,
+// bounded confounding (Lem. 2)
+bRıv(hθ) ≤bσ2bγz,
+// leaky IV constraints (Asm. 3)
+bEınv(hθ) ≤ε2,
+// invariance constraint (§3)
+ 
+1
+n
+X
+i
+hθ(xi) −yi
+!2
+≤bσ2bγµ,
+// center / mean-match
+(P2)
+where we relax population budgets γ• into the finite-sample tolerances bγ• elaborated below. Fi-
+nally, Table 3 lists how programs (P1) or (P2) are invoked under different approaches of symmetry-
+informed PI.
+20
+
+
+Preprint.
+Finite-sample tolerances bγ•.
+Evaluated at h⋆, every empirical constraint in (P2) has the form
+∥bvn∥2 ≤σ2γ•, where bvn ∈Rd is a sample statistic (table below). The population counterpart
+v := plimn→∞bvn satisfies ∥v∥2 ≤σ2γ•. At finite n, bvn fluctuates about v at rate n−1/2, so h⋆
+may violate the empirical constraint. We therefore relax each budget γ• just enough that h⋆satisfies
+the corresponding empirical constraint with asymptotic probability ≥1 −α/3.
+Assumption 6 (asymptotic normality). At h = h⋆, let √n(bvn −v) ⇝N(0, s2
+0Id) and 0 < s2
+0 ≤s2.
+Proposition 4 (finite-sample budgets). Under Asm. 6 and the population budget ∥v∥2 ≤σ2γ•, set
+bγ• := s2
+σ2 Γn
+
+d; σ2
+s2 γ•
+
+,
+Γn(d; λ) := 1
+n F −1
+χ2
+d(nλ)
+
+1 −α
+3
+
+,
+where χ2
+d(κ) is the noncentral χ2 distribution with d degrees of freedom and noncentrality value κ.
+Then lim infn→∞Pr
+ ∥bvn∥2 ≤σ2bγ•
+
+≥1 −α/3, such that 0 < bγ• −γ• = O
+ d/n +
+p
+γ•/n
+
+.
+Now, simply plug the respective (s, d, γ•) values to get finite-sample budgets for each (P2) constraint:
+constraint
+bvn
+d
+s2
+0
+s2/σ2
+γ•
+ERM (Seber & Lee, 2003)
+bΣ1/2
+ϕx
+ bθerm −θ⋆
+
+k
+σ2
+1 + γ
+γ
+IV (Anderson & Rubin, 1949)
+c
+W 1/2 1
+n
+P
+i(yi −h⋆(xi))zi
+dz
+Var(U + ξ)
+1 + γ
+γz
+mean-match
+1
+n
+P
+i(yi −h⋆(xi))
+1
+Var(U + ξ)
+1 + γ
+0
+where s2/σ2 column follows from Lem. 2: Var(U + ξ) = σ2 + ∥herm −h⋆∥2
+X ≤σ2(1 + γ). Note
+that the invariance budget ε does not require finite-sample adjustment since it is assumed to hold a.s.
+Therefore, the final budgets adjusted for finite-samples that (P2) uses in our experiments are
+bγ := (1 + γ) Γn
+
+k;
+γ
+1 + γ
+
+,
+bγz := (1 + γ) Γn
+
+dz;
+γz
+1 + γ
+
+,
+bγµ := (1 + γ) Γn(1; 0),
+Consequently, (P2) is asymptotically valid with probability ≥1 −α by a union bound over the three
+constraints; we use α = 0.05. Post-DA, ˜γ, ˜γz, ˜σ replace γ, γz, σ, and we keep n = |D| throughout
+since augmented copies are dependent (Cameron & Miller, 2015).
+Solvers and link Φ.
+The simulation, optical device and cigarette demand experiments
+solve (P2) via QCQP under an identity link Φ = Id, while do-MNIST uses SLSQP with 5 multi-
+restarts across seeds to account for a non-linear probit link Φ. The PI interval then reports the max
+over restarts for the upper-bound, and the min over restarts for the lower-bound.
+Change of measure.
+Take m samples τi,j ∼pT for each i ∈[n] with n = |D|. Construct dataset
+eD := {(˜xi,j, yi, ˜zi,j)}i∈[n],j∈[m] with ˜xi,j := τi,jxi and ˜zi,j := (zi, τi,j).
+Budget re-calibration.
+The post-DA budgets ˜γ• are set as below per the attenuated confound-
+ing (Lem. 1) and symmetry misspecification (Thm. 3.B), and swept across [˜γ•, γ•] in §E.2 ablations,
+˜γ = γ/ bρ,
+˜γz(ε) =
+
+ε/˜σ +
+p
+γz/ρ
+2
+.
+21
+
+
+Preprint.
+0
+10−1
+100
+101
+E+
+x
+principal direction 1
+x := t · ν1
+radial sweep
+x := sd1 cos(ϑ)ν1 + sd2 sin(ϑ)ν2
+principal direction 2
+x := t · ν2
+10−1
+100
+width
+0.00
+0.25
+0.50
+density
+ate
+erm +ıv
+e
+erm + ıv
+e
+erm + eıv
+pı + ınv +ıv
+pı + ıv
+epı + ıv
+epı + eıv
+−3
+−2
+−1
+0
+1
+2
+3
+t
+−3
+−2
+−1
+0
+1
+2
+3
+h(x)
+0
+1
+2
+3
+4
+5
+6
+ϑ
+−3
+−2
+−1
+0
+1
+2
+3
+t
+Figure 8: Simulation data. Across queries x along principal components ν1, ν2 of Var(X), interval
+width and worst-case error (Top) decrease over baseline while maintaining validity (Bottom).
+E
+EXPERIMENT SUPPLEMENT
+E.1
+EXPERIMENT SETUP
+Simulation.
+Fix θ⋆∼N(0, I) and sample Σux uniformly over a sphere of radius √γ⋆. Generate
+h⋆(X) := θ⊤
+⋆X,
+(U, X, Z) ∼N
+
+0,
+
+
+1 + γ⋆
+Σux
+0
+Σ⊤
+ux
+I
+Σxz
+0
+Σ⊤
+xz
+1
+
+
+
+,
+where Σxz is sampled on a unit sphere orthogonal to Σux, and Y follows Eq. (1) with ξ = 0. Hence
+Z is a valid but an incomplete instrument, so h⋆is not point-identified. Following Akbar et al. (2025),
+we keep each basis of null(θ⋆) with probability 0.8, stack the dτ basis into A ∈Rdτ ×dx, and set
+e
+X = α(X, T) = X + A⊤T,
+T ∼N(0dτ , Idτ ).
+e
+X varies only in null(θ⋆), so h⋆is exactly T -invariant. Although this construction uses θ⋆, A stands
+in for domain knowledge of plausible symmetries; alone, it does not identify θ⋆without observing U.
+We take dx = k = 32 and n = 2048. PI uses the program (P2) with an oracle budget γ = γ⋆= 1,
+and ε = γz = 2−8 as numerical tolerances. Figure 8 shows the resulting intervals, where erm + ıv is
+the anchor regression (Rothenhäusler et al., 2021), i.e. least squares within an IV solution set.
+Optical device. The benchmark of Janzing & Schölkopf (2018) comprises 12 datasets, each with
+n = 1000 samples of 3 × 3 pixel images X displayed on a laptop screen and the resulting photodiode
+voltages Y . A physical latent U drives two LEDs, one affecting the webcam that captures X and
+the other the photodiode that measures Y . U is recorded but withheld from all methods; we use it
+only to estimate the target h⋆(x) = θ⊤
+⋆ϕx(x) by back-door adjustment on (ϕx(X), U), where ϕx
+are polynomial features of the degree deg(h⋆) ∈{1, · · · , 5} that best explains the data.3 Post-DA
+features are ϕx( e
+X), with DA composing random vertical/horizontal flips, 90◦rotations, each with
+probability 0.25, and zero-sum translations that preserve the pixel sum 1⊤˜x = 1⊤x via
+˜x = x + τ0,
+τ0 ∼N
+ 0, 0.25 Var(xpixels)
+ I −1
+91 · 1⊤
+.
+The DA parameters τ = [τvflip, τhflip, τrot, τ ⊤
+0 ]⊤with τvflip, τhflip, τrot ∈{0, 1} record the composi-
+tion. As Z = ∅, the IV constraint enters only through T-as-IV with eZ = T. Figure 5 uses dataset #8,
+whereas §E.2 ablations aggregate all metrics across 10 datasets, each using oracle budgets γ, ε for (P2)
+unless stated otherwise. We exclude dataset #6 (no confounding) and #11 (pure confounding).
+3Lowest 5-fold cross-validation error of back-door adjustment, e.g. deg(h⋆) = 2 on dataset #8.
+22
+
+
+Preprint.
+C
+color
+U
+X
+image
+Y
+label
+h⋆
+(a) do-MNIST
+C
+camera
+U
+LED
+X
+image
+Y
+photodiode
+h⋆
+(b) Optical device
+X1
+prices
+Z
+tax
+U
+Y
+sales
+X2
+income
+X3
+CPI
+h⋆
+(c) US cigarette demand
+Figure 9: Causal graphs of the three real / semi-synthetic datasets used in our experiments.
+US cigarette demand. We use annual data for the 48 contiguous states and DC, 1970–2019
+(n = 2450), from the CDC, BEA and FRED Orzechowski and Walker; U.S. Bureau of Economic
+Analysis; U.S. Bureau of Labor Statistics. Y is log cigarette packs sold per capita; X is the state’s
+cigarette price, the cheapest neighboring state’s price, income, and the consumer price index (CPI),
+with ϕx = log elementwise, so h⋆(x) = θ⊤
+⋆ϕx(x). State and neighbor price are confounded; income
+and CPI are assumed exogenous and, with the state cigarette tax, form the instrument set Z. We
+partial out state fixed effects and a cubic time trend. Symmetry assumes demand is unchanged
+when all prices and income scale by a common factor, i.e. h⋆(τx) = h⋆(x) for τ > 0, which
+holds iff 1⊤θ⋆= 0 (imposed with ε = 2−8); DA draws e
+X = TX with log T Gaussian. Figure 6
+pins γ = 0.31 per Cinelli & Hazlett (2020), benchmarking against last year’s sales, an omitted
+confounder capturing addiction (Becker et al., 1994), and sweeps γ ∈[0.15, 0.45] at γz = 0.01. It
+then sweeps γz ∈[10−4, γ], as a plausible IV should leak less than the confounder (Nevo & Rosen,
+2012). Ablations (§E.2) keep the real (X, Z) and simulate Y from a known h⋆(the 2SLS fit projected
+onto 1⊤θ = 0) plus a synthetic confounder orthogonal to Z with γ⋆= 0.25.
+do-MNIST. For a MNIST image D, we generate color C, colored image X and label Y ∈{0, 1} as
+C := U ⊕Bern(µC),
+U ∼Bern(µU),
+ξ ∼Bern(µξ),
+X := color(D, C),
+Y := (1 −ξ) · 1[digit(X) ≥5] + ξ · U,
+with µC = 0.25, µξ = 0.4, µU = 0.5, and color(·, c) tints the 28 × 28 digit red (c = 1) or blue
+(c = 0). Then, the ERM E[Y |X ] ∈{0.1, 0.3, 0.7, 0.9} tracking the color whereas the target ATE is
+h⋆(x) = 0.6 · 1[digit(x) ≥5] + 0.2 ∈{0.2, 0.8}.
+ERM uses the network architecture of Arjovsky et al. (2019), trained on 40k images, and serves as the
+centroid of the CopSens PI model (Zheng et al., 2025). CopSens sets the radius from a latent factor
+model qU|X (dimension 32), fit on a further 10k images. All methods share a single γ = 0.062: the
+smallest budget at which baseline pı covers h⋆on 99.5% of 10k samples, i.e. the baseline’s tightest
+valid budget. DA composes ±10% translations, ±10◦rotations, and contrast, saturation and hue jitter.
+The symmetry is exact, so ε = 0.0475 serves only as finite-sample slack. 5% of augmented rows are
+left untransformed so that Asm. 1b holds. Table 2 reports mean ± one standard error over 10 seeds.
+Infeasibility of the shape constraint. pı + ınv is infeasible on do-MNIST for any reasonably small
+ε. This is because CopSens fixes all but the last layer of the ERM network (Zheng et al., 2025), a
+standard device in neural PI for keeping bounds non-vacuous (Padh et al., 2023; Kilbertus et al., 2020).
+The frozen features are not invariant, so no last-layer weights can satisfy the invariance constraint.
+Unfreezing earlier layers would restore feasibility, but at the cost of vacuity and compute. DA, in
+contrast, needs no access to the solver, which is precisely the operational case made for it in §4.
+E.2
+ABLATIONS
+The following sweeps are repeated over 10 independent runs, each sampling from a different DGP.
+We report coverage of h⋆(x), interval width, and worst-case error E+
+x , averaged over test queries
+x ∼pX; width and worst-case error are normalized by the baseline pı+ıv. Lines are aggregated over
+runs (arithmetic mean for coverage, geometric mean for width / worst-case error); bands span the 95%
+CI across 1,000 bootstrapped replicates over runs. When one quantity is swept, all others are held at
+their oracle values γ = γ⋆, γz = γ⋆
+z, ε = ε⋆. Here ε⋆is the 95th percentile of |h⋆(X) −h⋆( e
+X)| on a
+fixed calibration sample, a heuristic since the sup is unbounded for linear h⋆. Unless stated otherwise,
+m = 1, n is the full dataset, and post-DA budgets are re-calibrated to ˜γ = γ/bρ and ˜γz(ε) per §D.
+23
+
+
+Preprint.
+0.0
+0.5
+1.0
+coverage
+simulation
+optical device (Z = ∅)
+pı + ıv
+epı + ıv
+epı + eıv
+pı + ınv +ıv
+(pı + ıv) ∩(epı + ıv)
+(pı + ıv) ∩(epı + eıv)
+cigarette demand
+0.0
+0.5
+1.0
+width
+10−1
+100
+0.0
+0.5
+1.0
+worst error
+10−1
+100
+10−1
+100
+γ/γ⋆
+Figure 10: Validity (Thm. 1). Coverage, width, and worst-case error as the confounding budget γ
+varies relative to its oracle γ⋆(dotted). Post-DA sets attain coverage at smaller budgets than baseline.
+0.0
+0.5
+1.0
+coverage
+simulation
+optical device (Z = ∅)
+pı + ıv
+epı + ıv
+epı + eıv
+pı + ınv +ıv
+(pı + ıv) ∩(epı + ıv)
+(pı + ıv) ∩(epı + eıv)
+cigarette demand
+0.0
+0.5
+1.0
+width
+0.25
+0.50
+0.75
+1.00
+0.0
+0.5
+1.0
+worst error
+1.0
+1.2
+1.4
+0.7
+0.8
+0.9
+Ω
+Figure 11: Sharpness / informativeness (Prop. 2 and Thm. 2). Ωis varied by applying augmenta-
+tions of increasing strength, then computing bΩpost hoc and sorting along the horizontal axis. For
+basis features ϕx, let bΣV = d
+Cov(ϕx(V )) and bδ = bE[ϕx(X)] −bE[ϕx( e
+X)]. Then, we compute bΩby
+summing tr( bK)/k = tr(bΣ−1
+e
+X bΣX)/k and bD2
+B/k = bδ⊤bΣ−1
+e
+X bδ/k. Dotted: the threshold Ω= 1.
+24
+
+
+Preprint.
+0.0
+0.5
+1.0
+coverage
+simulation
+optical device (Z = ∅)
+pı + ıv
+epı + ıv
+epı + eıv
+pı + ınv +ıv
+(pı + ıv) ∩(epı + ıv)
+(pı + ıv) ∩(epı + eıv)
+cigarette demand
+0.0
+0.5
+1.0
+width
+2−4
+2−2
+20
+22
+24
+0.0
+0.5
+1.0
+worst error
+2−4
+2−2
+20
+22
+24
+2−4
+2−2
+20
+22
+24
+ε/ε⋆
+Figure 12: Robustness (Thm. 3). We deliberately set ε⋆to σ√γ⋆to make symmetry misspecification
+as large as confounding itself. To this end, we add a symmetry-breaking corruption of strength s to the
+DA (Gaussian noise for simulation and optical device, an extra translation off 1 for cigarette demand),
+and bisect s until the 95th percentile of |h⋆(X) −h⋆( e
+X)| matches σ√γ⋆. The assumed ε is swept
+relative to ε⋆(dotted); ε-padding restores coverage for ε ≥ε⋆, and intersecting with the baseline set
+prevents regression (Rem. 1). Surprisingly, all symmetry-informed bounds maintain improvement on
+both simulation and optical device up to ε = 16ε⋆. For cigarette demand, pı + ınv + ıv still improves
+at ε = ε⋆, but note that this is an abnormally large violation for a demand system.
+0.0
+0.5
+1.0
+coverage
+simulation
+optical device (Z = ∅)
+pı + ıv
+epı + ıv
+epı + eıv
+pı + ınv +ıv
+(pı + ıv) ∩(epı + ıv)
+(pı + ıv) ∩(epı + eıv)
+cigarette demand
+0.0
+0.5
+1.0
+width
+0.7
+0.8
+0.9
+1.0
+0.0
+0.5
+1.0
+worst error
+0.8
+0.9
+1.0
+0.998
+0.999
+1.000
+˜γ/γ
+Figure 13: Re-calibration. The post-DA budget is swept over ˜γ ∈[γ/bρ, γ]. Gains persist without re-
+calibration, particularly for intersected bounds. For cigarette demand bρ ≈1, hence the narrow range.
+25
+
+
+Preprint.
+0.0
+0.5
+1.0
+coverage
+simulation
+optical device (Z = ∅)
+pı + ıv
+epı + ıv
+epı + eıv
+pı + ınv +ıv
+(pı + ıv) ∩(epı + ıv)
+(pı + ıv) ∩(epı + eıv)
+cigarette demand
+0.0
+0.5
+1.0
+width
+10
+100
+0.0
+0.5
+1.0
+worst error
+10
+100
+10
+100
+n (%)
+Figure 14: Statistical efficiency in n. The dataset is subsampled to n% of its full size; the augmented
+size matches n since m = 1. Symmetry-informed PI gives sharper bounds across sample sizes.
+0.0
+0.5
+1.0
+coverage
+simulation
+optical device (Z = ∅)
+pı + ıv
+epı + ıv
+epı + eıv
+pı + ınv +ıv
+(pı + ıv) ∩(epı + ıv)
+(pı + ıv) ∩(epı + eıv)
+cigarette demand
+0.0
+0.5
+1.0
+width
+100
+101
+0.0
+0.5
+1.0
+worst error
+100
+101
+100
+101
+m
+Figure 15: Statistical efficiency in m. Augmentation folds m at n = 10% of the data. Unlike
+elsewhere, the augmented dataset grows to mn, isolating the finite-sample benefit of DA. This effect
+is noticeable, albeit insignificant for optical device. Significant, but modest for simulation. And
+invisible in cigarette demand; we conjecture it scales with the number of directions excited by the
+symmetry.
+26
+
+
+Preprint.
+F
+PROOFS
+TECHNICAL PRELIMINARIES
+Finite dimension.
+For V ∈{X, e
+X}, define the centering operator CV := h −E[h(V )]. Now, since
+H + R1 = H (Asm. 1), therefore CV h ∈HV . These maps define a bijection between HX and H e
+X,
+HX
+C ˜
+X
+⇄
+CX
+H e
+X
+therefore, dim(H e
+X) = dim(HX) = k (Asm. 1c).
+Non-degeneracy.
+pX ≪p e
+X (Asm. 1b) transfers Hilbert structure (Asm. 1c) to H e
+X. For h ∈H e
+X,
+∥h∥e
+X = 0
+=⇒
+h( e
+X) = 0 a.s.
+(0 is the only a.s. constant h ∈H e
+X.)
+1b
+=⇒
+h(X) = 0 a.s.
+=⇒
+∥h∥X = 0
+1c
+=⇒
+h ∈R1
+h∈Hf
+X
+=⇒
+h = 0.
+Hence both ⟨·, ·⟩X and ⟨·, ·⟩e
+X are positive-definite Hilbert norms on H e
+X, but so is ⟨·, ·⟩L2(X) because
+∥h∥2
+L2(X) = ∥h∥2
+X + E[h(X)]2 ≥∥h∥2
+X.
+Shift operator + decomposition.
+We give a basis-free form of the var.-/mean-shift identity in §4.
+Under Asms. 1b–1c, Riesz gives a unique, positive-definite, self-adjoint shift operator S : H e
+X →H e
+X
+that pulls the evaluation L2(X)-inner product back into the solver’s native (H e
+X, ⟨·, ·⟩e
+X)-geometry,
+⟨f, Sg⟩e
+X = ⟨f, g⟩L2(X),
+∀f, g ∈H e
+X.
+S captures the fit vs. evaluation gap. And like L2(X)-norm, its pull-back S also admits a shape /
+level split into operator K: H e
+X →H e
+X and linear functional δ: H e
+X →R defined respectively as
+⟨f, Kg⟩e
+X = ⟨f, g⟩X,
+δh = E[h(X)] −E[h( e
+X)],
+∀f, g, h ∈H e
+X.
+Lemma 3 (shift decomposition). Under Asms. 1b–1c, S = K + δ∗δ, with K ≻0, δ∗δ ≽0 s.t.
+rank(δ∗δ)≤1, and tr(δ∗δ)=D2
+B(pX, p e
+X) is MMD2 over the unit ball B:={h ∈H e
+X : ∥h∥e
+X ≤1}.
+The variance-shift operator K governs how the estimation geometry changes between (HX, ⟨·, ·⟩X)
+and (H e
+X, ⟨·, ·⟩e
+X). It differs from S precisely by the rank-1 mean-shift operator δ∗δ with trace D2
+B.
+Invariant slice.
+Recall from §C,
+I :=
+n
+f ∈L0
+2(X) ∩L0
+2( e
+X) :
+f(X) = f( e
+X) a.s.
+o
+.
+Here I is a closed linear subspace, irrespective of any linearity assumed of H. Now define
+Hınv := H ∩I.
+By construction, all four forms coincide on I and Hınv,
+⟨f, g⟩L2(X)
+=
+⟨f, g⟩L2( e
+X)
+=
+⟨f, g⟩X
+=
+⟨f, g⟩e
+X,
+∀f, g ∈I.
+(6)
+Covariance forms agree with L2 as I is both X- and e
+X-centered. And X-, e
+X-forms agree by T -inv.
+Throughout, we denote Π as the L2(X)-orthogonal (equivalently, X-orthogonal) projection onto I.
+27
+
+
+Preprint.
+F.1
+PROOF OF THM. 1—VALID BOUNDS WITH DA
+Theorem 1 (valid bounds with DA). Let h⋆be T -inv. under Asm. 1a and 2. Then, the post-DA set
+Hepı is exactly valid whenever the baseline set Hpı is ϵ-valid with ϵ ≤σ2 √ρ −1 + γρ −√γ
+2.
+Proof. We proceed as: (i) express baseline approx. error as point-to-ball distance (∗), (ii) certify
+post-DA membership (†) by comparing bias magnitudes (‡) using Lem. 1.
+First, write the Lem. 2 pre- and post-DA partially identified sets in their respective L2 geometries as:
+Hpı =
+n
+h ∈HX : ∥h −herm∥2
+L2(X) ≤γσ2o
+,
+Hepı =
+n
+h ∈H e
+X : ∥h −h e
+erm∥2
+L2( e
+X) ≤γ˜σ2o
+.
+Note that target h⋆lies in both centered classes: E[h⋆(X)] = E[Y ] = 0 =⇒h⋆∈HX, and by
+T -inv., E[h⋆( e
+X)] = E[h⋆(X)] = 0 =⇒h⋆∈H e
+X. Define the pre- and post-DA bias magnitudes:
+A := ∥herm −h⋆∥L2(X),
+B := ∥h e
+erm −h⋆∥L2( e
+X).
+For an L2(X)-round ball, approx. error E−(•) = min
+h∈•
+h −h⋆
+
+2
+L2(X)
+reduces to point-to-ball distance.
+Since Hpı is essentially HX ∩L2(X)-ball, approx. error is lower-bounded by point-to-ball distance,
+E−(Hpı) ≥
+ A −σ√γ
+2
++,
+h⋆∈Hpı ⇐⇒A ≤σ√γ.
+(∗)
+As for Hepı, the following validity criterion gives E−(Hepı) = 0 exactly,
+h⋆∈Hepı ⇐⇒B ≤˜σ√γ.
+(†)
+For C2 := ˜σ2 −σ2, Lem. 1 (Asm. 1a, T -inv. h⋆) supplies the following two identities with C2 ≥0,
+A2 = B2 + C2,
+˜σ2 = σ2 + C2.
+(‡)
+Now suppose Hpı is ϵ-valid with
+ϵ ≤ϵ+ :=
+p
+C2 + γ˜σ2 −σ√γ
+2
+= σ2p
+ρ −1 + γρ −√γ
+2
+,
+the second equality substituting C2 +γ˜σ2 = σ2(ρ−1+γρ) from Eq. (‡). Note ϵ+ > 0 iff ρ > 1, and
+√
+ϵ+ =
+p
+C2 + γ˜σ2 −σ√γ ≥0,
+since the difference defining ϵ+ is non-negative C2 + γ˜σ2 −γσ2 = (1 + γ)C2 ≥0. From Eq. (∗),
+(A −σ√γ)+ ≤√ϵ,
+(ϵ-validity.)
+=⇒
+A −σ√γ ≤
+√
+ϵ+,
+(x ≤(x)+ and √ϵ ≤
+√
+ϵ+.)
+=⇒
+A −σ√γ ≤
+p
+C2 + γ˜σ2 −σ√γ,
+(Def. of ϵ+, and
+√
+ϵ+ ≥0.)
+=⇒
+A2 ≤C2 + γ˜σ2.
+(Add σ√γ, then square.)
+=⇒
+B2 = A2 −C2 ≤γ˜σ2.
+(From Eq. (‡).)
+Because B ≤˜σ√γ, thus by Eq. (†) h⋆∈Hepı, and therefore
+E−(Hepı) = 0 ≤E−(Hpı).
+Finally, equality holds precisely when E−(Hpı) = 0, which by Eq. (∗) is equivalent to h⋆∈Hpı.
+28
+
+
+Preprint.
+F.2
+PROOF OF THM. 2—INFORMATIVE BOUNDS WITH DA
+Theorem 2 (informative bounds with DA). Under Asms. 1b–1c and 2, the following holds for d = k,
+E(Hpı) −E(Hepı)
+=
+E(herm) −E(h e
+erm)
+|
+{z
+}
+centroid drift (Prop. 1)
++ σ2γk
+d + 2 ·
+(1 −Ω)
+| {z }
+set size (Prop. 2)
+=:
+f(d),
+And interval improvement averaged over queries: EX∼pX
+
+EX(Hpı(X)) −EX(Hepı(X))
+
+= f(1).
+Proof. Gist of the proof: (i) reduce avg. error to second moment of a uniform law over a centered-ball,
+(ii) connect it to post-DA ball via operator S, and (iii) repeat for intervals via representers and Lem. 6.
+Setup.
+Write the Lem. 2 and Cor. 3 pre- and post-DA PI sets in their respective L2 geometries:
+Hpı =
+n
+h ∈HX : ∥h −herm∥2
+L2(X) ≤σ2γ
+o
+,
+Hpı(x) = {herm(x)} ± σ√γ∥gx∥L2(X),
+Hepı =
+n
+h ∈H e
+X : ∥h −h e
+erm∥2
+L2( e
+X) ≤˜σ2γ
+o
+,
+Hepı(x) = {h e
+erm(x)} ± ˜σ√γ∥˜gx∥L2( e
+X),
+with L2(X)-representers gx, ˜gx well defined on Hilbert HX (Asm. 1c) and H e
+X (Asm. 1b, cf. §F).
+Now, suppose u is uniform on a centered d-dim. ball of radius r w.r.t. any inner product ⟨·, ·⟩, then
+E[u] = 0,
+E[⟨u, Au⟩] =
+r2
+d + 2 tr(A),
+for any self-adjoint operator A in ⟨·, ·⟩. We show that avg. errors reduce to these identities up to offset.
+Set version (d = k).
+Recall E(·) = Eh∼Unif(·)
+h
+∥h −h⋆∥2
+L2(X)
+i
+. Take the re-parameterizations
+h = herm + u,
+u ∼Unif
+
+u ∈HX : ∥u∥L2(X) ≤σ√γ
+	
+,
+h = h e
+erm + ˜u,
+˜u ∼Unif
+
+u ∈H e
+X : ∥u∥L2( e
+X) ≤˜σ√γ
+	
+,
+for h ∼Unif(Hpı) and h ∼Unif(Hepı) respectively. Substituting back into avg. error E(Hpı) def.:
+E(Hpı) = Eu
+h
+∥herm −h⋆+ u∥2
+L2(X)
+i
+,
+= ∥herm −h⋆∥2
+L2(X) + Eu
+h
+∥u∥2
+L2(X)
+i
+= E(herm) + σ2γk
+k + 2,
+(tr(Id) = k.)
+where E[u] = 0 kills the cross-term. Likewise, for post-DA avg. error it follows from the def. of S:
+E(Hepı) = E˜u
+h
+∥h e
+erm −h⋆+ ˜u∥2
+L2(X)
+i
+,
+= ∥h e
+erm −h⋆∥2
+L2(X) + E˜u
+
+⟨˜u, S˜u⟩L2( e
+X)
+
+,
+( ∥h∥2
+L2(X) = ⟨h, Sh⟩L2( e
+X) for h ∈H e
+X.)
+= E(h e
+erm) + ˜σ2γ
+k + 2 tr(S).
+Again, cross-terms vanish because E[ ˜u] = 0. Subtracting, and with ρ = ˜σ2
+σ2 gives the result f(k).
+Interval version (d = 1).
+A uniform draw from [−w, w] has mean zero and variance w2
+3. Thus,
+Ex(Hpı(x)) = Ex(herm(x)) + 1
+3σ2γ∥gx∥2
+L2(X),
+Ex(Hepı(x)) = Ex(h e
+erm(x)) + 1
+3 ˜σ2γ∥˜gx∥2
+L2( e
+X).
+Averaging over X ∼pX via Lem. 6 gives EX
+h
+∥gX∥2
+L2(X)
+i
+= k and EX
+h
+∥˜gX∥2
+L2( e
+X)
+i
+= tr(S).
+Substituting into pointwise approx. errors and subtracting gives the desired result f(1).
+29
+
+
+Preprint.
+F.3
+PROOF OF THMS. 3.A AND 3.B—ROBUST BOUNDS WITH DA
+Theorem 3 (robust bounds with DA). Under Asms. 1a–1b, suppose valid PI models following Asms. 2
+and 3 yield respective intervals Hpı(x) and Hpı+ıv(x) covering an (ε, T )-invariant h⋆. Then,
+(A) ε-padded post-DA intervals Hepı(x) ± ε continue to remain valid for all ε ≥0 on pX-a.e. x.
+(B) ε-padded T-as-IV intervals Hepı+eıv(x) ± ε are also valid for eZ ∈{Z, (Z, T)} on pX-a.e. x if
+ε ≤˜σ√γz −σ
+p
+γ⋆z,
+where γ⋆
+z ≤γz is the true IV budget.
+Proof. Sketch: (i) build a surrogate target h† within ε of h⋆, (ii) certify h† ∈Hepı by DPI (Part A),
+and (iii) verify the IV moment via Minkowski (Part B); ε-pad to convert h† membership into validity
+Surrogate.
+Define the surrogate as the smoothed target h† := E[h⋆(X)| e
+X = ·] ∈H (Asm. 1a).
+Define η := h⋆(X) −h⋆( e
+X), with |η| ≤ε a.s. by (ε, T )-invariance. Now, h† obeys two identities:
+h†( e
+X) = h e
+erm( e
+X) −E[U | e
+X ],
+(Take E[ · | e
+X] in Eq. (1).)
+= h⋆( e
+X) + E[η| e
+X ],
+(Take E[ · | e
+X] in def. of η.)
+=⇒
+h† −h⋆
+
+L∞(X)
+Asm. 1b
+≤
+h† −h⋆
+
+L∞( e
+X)
+Jensen
+≤
+ε.
+(¶)
+Furthermore, by tower property E[h†( e
+X)] = E[h⋆(X)] = 0, so surrogate is e
+X-centered h† ∈H e
+X.
+Part (A): h† ∈Hepı.
+The surrogate’s offset from the post-DA center is h e
+erm −h† = E[U | e
+X ], so
+∥h e
+erm −h†∥2
+L2( e
+X) = Var
+ E[U | e
+X ]
+
+,
+( e
+X-centered h†, h e
+erm, ⇒∥·∥2
+L2 = Var(·).)
+≤Var
+ E[U |X ]
+
+,
+(Contraction over Markov U −X−e
+X.)
+≤γσ2,
+(Baseline valid h⋆∈Hpı (Asm. 1a, 2).)
+≤γ˜σ2.
+(DPI ρ ≥1.)
+Post-DA, Lem. 2 gives Hepı as the H e
+X ∩L2( e
+X)-ball of sq.-radius ˜σ2γ about h e
+erm. So h† ∈H
+(Asm. 1a) gives h† ∈Hepı ⇒h†(x) ∈Hepı(x). Hence h⋆(x) ∈Hepı(x) ± ε for pX-a.e. x by Eq. (¶).
+Part (B): h† ∈Hepı+eıv.
+To verify membership, we need to test the surrogate’s residual Y −h†( e
+X)
+against the IV moment constraint in Asm. 3. Note that this residual is mean-zero and reads as
+Y −h†( e
+X) = ζ + U + ξ,
+ζ := η −E[η| e
+X ],
+∥ζ∥2
+L2 = E[Var(η| e
+X)] ≤ε2.
+For any choice of IV eZ ∈{Z, (Z, T)}, the conditional E[U + ξ |Z ] = E[U + ξ | eZ ] is conserved
+since T ⊥⊥(ξ, U, Z). Writing the true budget γ⋆
+z := ∥E[U + ξ |Z ]∥2
+L2
+.
+σ2 ≤γz (Asm. 3), we have
+E[Y −h†( e
+X) | eZ]
+
+L2 ≤
+E[ζ | eZ]
+
+L2 +
+E[U + ξ | eZ]
+
+L2,
+(Minkowski.)
+≤ε + σ
+p
+γ⋆z,
+(Contraction; T ⊥⊥(ξ, U, Z).)
+≤˜σ√γz.
+(ε ≤˜σ√γz −σ√γ⋆z.)
+This is exactly the leaky-IV constraint of Asm. 3 under the augmented law, so together with Part (A),
+h† ∈Hepı+eıv, and h⋆(x) ∈Hepı+eıv(x) ± ε for pX-a.e. x uniformly over eZ ∈{Z, (Z, T)}.
+Remark 2 (conservativeness of Thm. 3.B.). Minkowski assumes the worst-case where the two
+residual components are perfectly aligned. Instead, one can define
+κ :=
+D
+E[ζ| eZ], E[U+ξ| eZ]
+E
+L2
+. E[ζ| eZ]
+ ·
+E[U+ξ| eZ]
+
+
+∈[−1, 1],
+as an alignment sensitivity parameter. The sufficient condition for post-DA leaky-IV validity is now
+ε2 + 2κ ε σ
+p
+γ⋆z + σ2γ⋆
+z ≤˜σ2γz.
+A conservative κ = 1 then recovers Thm. 3.B, while a plausible κ = 0 (misspecification uncorrelated
+to confounding) gives the Pythagorean budget ε ≤
+p
+˜σ2γz −σ2γ⋆z, strictly dominating the smaller
+˜σ√γz −σ√γ⋆z. The observable diagnostic ε ≤(˜σ −σ)√γz of §B remains assumption-free.
+30
+
+
+Preprint.
+F.4
+PROOF OF PROP. 1—ESTIMATION WITH DA
+Proposition 1 (estimation with DA). Under Asm. 1a, T -inv. h⋆and bias direction e˜b := ˜b
+.
+∥˜b∥e
+X,
+E(herm) −E(h e
+erm)
+=
+σ2(ρ −1) · ∥e˜b∥2
+L2(X)
+|
+{z
+}
+gain
++ (1 −∥e˜b∥2
+L2(X)) · E(herm)
+|
+{z
+}
+wild-card
+.
+Proof. Under Asm. 1a, herm = E[Y |X ] and h e
+erm = E[Y | e
+X ]. Taking conditional means in Eq. (1),
+b = E[Y |X ] −h⋆= E[U|X ],
+˜b = E[Y | e
+X ] −h⋆= E[U| e
+X ],
+where the latter follows from T -inv. of h⋆. Note that b,˜b ∈H since herm, h e
+erm, h⋆∈H (Asm. 1a).
+Further, E[U ] = 0 implies b ∈HX and ˜b ∈H e
+X. Now, re-write the error terms in respective biases:
+E(herm) = ∥b∥2
+L2(X),
+E(h e
+erm) = ∥˜b∥2
+L2(X).
+On e
+X-centered functions h ∈L0
+2( e
+X), define the shift ratio s(h) := ∥h∥2
+L2(X)
+.
+∥h∥2
+e
+X (s(0) := 0).
+Substitute into E(h e
+erm):
+E(h e
+erm) = ∥˜b∥2
+L2(X),
+= s(˜b) · ∥˜b∥2
+e
+X,
+(Multiply and divide by ∥˜b∥2
+e
+X.)
+= s(˜b) · ∥˜b∥2
+L2( e
+X),
+(˜b ∈H e
+X =⇒∥˜b∥2
+L2( e
+X) = ∥˜b∥2
+e
+X.)
+= s(˜b) ·
+
+∥b∥2
+L2(X) −(˜σ2 −σ2)
+
+,
+(Lem. 1.)
+= s(˜b) ·
+ E(herm) −σ2 · (ρ −1)
+
+,
+(Substitute E(herm) = ∥b∥2
+L2(X) and ρ = ˜σ2/σ2.)
+Finally, subtract this from E(herm) and re-arrange to get a general form of the proposition statement:
+E(herm) −E(h e
+erm) = σ2s(˜b) · (ρ −1) + E(herm) · (1 −s(˜b)).
+Operator version under Asms. 1b–1c.
+Recall from §F that Asms. 1b–1c gives ∥h∥2
+L2(X) =
+⟨h, Sh⟩e
+X where operator S has a Rayleigh quotient S[h] := ⟨h, Sh⟩e
+X
+
+∥h∥2
+e
+X (S[0] := 0) and
+decomposition S = K + δ∗δ by Lem. 3.
+Trivially, substituting s(˜b) = S[˜b] into the claimed identity now gives an operator version where
+S[˜b] = K[˜b] + (δ∗δ)[˜b] (Lem. 3 and Rayleigh quotient is linear in the operator).
+31
+
+
+Preprint.
+F.5
+PROOF OF PROP. 2—SHARPER BOUNDS WITH DA
+Proposition 2 (sharper bounds with DA). Denoting L2(X)-volume by |·|, under Asms. 1b–1c and 2,
+|Hepı|
+|Hpı|
+2/k
+≤
+E
+
+|Hepı(X)|2
+E
+
+|Hpı(X)|2
+=
+ρ
+|{z}
+over-budget
+·
+h
+tr(K)
+| {z }
+lever
++ D2
+B(pX, p e
+X)
+|
+{z
+}
+penalty
+i .
+k
+=:
+Ω.
+Proof. Sketching our steps: (i) volume: write the post-DA ball in an L2(X)-orthonormal basis of
+H e
+X and compare via AM-GM; (ii) width: write widths as representer norms and average via Lem. 6.
+Setup.
+Write Lem. 2 and Cor. 3 pre- and post-DA identified sets in their respective L2 geometries,
+Hpı =
+n
+h ∈HX : ∥h −herm∥2
+L2(X) ≤σ2γ
+o
+,
+Hpı(x) = {herm(x)} ± σ√γ∥gx∥L2(X),
+Hepı =
+n
+h ∈H e
+X : ∥h −h e
+erm∥2
+L2( e
+X) ≤˜σ2γ
+o
+,
+Hepı(x) = {h e
+erm(x)} ± ˜σ√γ∥˜gx∥L2( e
+X).
+We measure both sets in ambient L2(X)-volume and -width by bridging with L2( e
+X) using operator S.
+Volume.
+Define the L2(X)-volume of a set inside a k-dim. subspace as the Lebesgue volume of its
+coordinates in any L2(X)-orthonormal basis of that subspace; in particular Vk := πk/2
+Γ(k/2 + 1),
+the Euclidean unit-ball volume, is the L2(X)-volume of a k-dim. unit ball in any L2(X)-orthonormal
+basis. The baseline set is an L2(X)-round ball of radius σ√γ within HX, so directly
+|Hpı| = Vk(σ√γ)k.
+For the post-DA set, take an L2( e
+X)-orthonormal eigenbasis {ψi}k
+i=1 of S on H e
+X with eigenvalues
+λi > 0 (Asms. 1b–1c), and rescale ei := ψi/√λi. First, notice {ei} ⊂H e
+X is L2(X)-orthonormal:
+⟨ei, ej⟩L2(X) = ⟨ei, Sej⟩L2( e
+X),
+(Def. of S.)
+=
+λj
+p
+λiλj
+⟨ψi, ψj⟩L2( e
+X) = Idij.
+(Def. of ei, and Sψj = λjψj.)
+Therefore we can measure L2(X)-volume in the coordinates h −h e
+erm = P
+i viei. Second, we have:
+⟨ei, ej⟩L2( e
+X) =
+1
+p
+λiλj
+⟨ψi, ψj⟩L2( e
+X) = 1
+λi
+Idij.
+(L2( e
+X)-orthonormality of ψi.)
+Using this identity and linearity of inner-product, substitute h −h e
+erm = P
+i viei into the def. of Hepı:
+∥h −h e
+erm∥2
+L2( e
+X) =
+*X
+i
+viei,
+X
+j
+vjej
++
+L2( e
+X)
+=
+X
+i
+X
+j
+vivj⟨ei, ej⟩L2( e
+X) =
+k
+X
+i=1
+v2
+i
+λi
+≤˜σ2γ.
+Out pops an ellipsoid with semi-axes ˜σ√γ · √λi. Now, taking its volume and subsequently the ratio:
+|Hepı| = Vk(˜σ√γ)k Y
+i
+p
+λi = Vk(˜σ√γ)k(det S)1/2,
+=⇒
+|Hepı|
+|Hpı| = ρ
+k
+2 (det S)
+1
+2 = ρ
+k
+2
+Y
+i
+λi
+ 1
+2 AM–GM
+≤
+ρ
+k
+2
+1
+k
+X
+i
+λi
+ k
+2 =
+
+ρ · tr(S)
+k
+ k
+2 ,
+with equality iff eigenvalues λi coincide, i.e. iff S = λ · Id for some λ > 0.
+Width.
+Cor. 3 gives half-widths at a query x as σ√γ∥gx∥L2(X) and ˜σ√γ∥˜gx∥L2( e
+X). Averaging
+their squares over X ∼pX using Lem. 6,
+EX
+h
+|Hpı(X)|2 i
+= 4σ2γ EX
+h
+∥gX∥2
+L2(X)
+i
+= 4σ2γ k,
+EX
+h
+|Hepı(X)|2 i
+= 4˜σ2γ EX
+h
+∥˜gX∥2
+L2( e
+X)
+i
+= 4˜σ2γ tr(S).
+Splitting tr(S) = tr(K) + tr(δ∗δ) (Lem. 3), their ratio gives the claimed identity.
+32
+
+
+Preprint.
+F.6
+PROOF OF PROP. 3—SHAPE CONSTRAINT VS. CHANGE-OF-MEASURE
+Proposition 3 (shape constraint vs. change-of-measure). Under Asms. 1a–1b, and Asms. 2 to 5 with
+T -invariant h⋆and Z = ∅. Set ε = γz = 0, and suppose the baseline PI set is valid h⋆∈Hpı.
+Then, h e
+erm = Πherm ∈Hınv, where Π is the L2(X)-orthogonal projection onto I (cf. §F). Further,
+Hepı =
+n
+h ∈H e
+X :
+h −h e
+erm
+2
+e
+X ≤˜σ2γ
+o
+,
+Hepı+eıv =
+n
+h ∈Hınv :
+h −h e
+erm
+2
+e
+X ≤˜σ2γ
+o
+,
+Hpı+ınv =
+n
+h ∈Hınv :
+h −h e
+erm
+2
+X ≤σ2(1 + γ −ρ)
+o
+.
+All identified sets are balls centered about h e
+erm. Both Hepı+eıv and Hpı+ınv live on the slice Hınv, the
+latter with a smaller radius σ√1 + γ −ρ ≤˜σ√γ with equality iff ρ = 1. It trivially follows that,
+h⋆∈Hpı+ınv ⊆Hepı+eıv ⊆Hepı,
+and the same dominance hierarchy holds for sharpness and worst-case errors over H• and H•(x).
+Proof. Fix the common center and geometry, characterize the three sets as balls, then compare radii:
+Shared center.
+Under Asms. 1a–1b and 4, Lem. 5 gives:
+h e
+erm = Πherm ∈Hınv.
+The post-DA set.
+Hepı =
+n
+h ∈H e
+X : ∥h −h e
+erm∥2
+e
+X ≤˜σ2γ
+o
+immediate from Lem. 2 under p e
+XY .
+The T-as-IV set.
+For eZ = T, γz = 0, the IV constraint of Cor. 2 under p e
+XY e
+Z filters h ∈H e
+X via
+Var(E[Y −h( e
+X)|T ]) = 0
+⇐⇒Var(E[Y ] −E[h( e
+X)|T ]) = 0
+(T⊥⊥Y by construction.)
+⇐⇒
+Var(E[h( e
+X)|T ]) = 0
+⇐⇒E e
+X|T h = 0
+(Def. of E e
+X|T .)
+⇐⇒h ∈null
+ E e
+X|T
+ Hf
+X
+
+= Hınv,
+(Asm. 5.)
+=⇒Hepı+eıv = Hepı ∩Hınv.
+(Cor. 2 under p e
+XY e
+Z.)
+The inv. constraint set.
+By Cor. 1, Hpı+ınv = Hpı ∩Hınv, with Hpı the X-ball of radius σ√γ
+about herm (Lem. 2). For invariant h ∈Hınv, using Pythagoras along Π followed by h = Πh,
+∥h −herm∥2
+X = ∥Π(h −herm)∥2
+X + ∥(Id −Π)(h −herm)∥2
+X,
+= ∥h −Πherm∥2
+X + ∥(Id −Π)herm∥2
+X.
+(△)
+Writing pre- and post-DA biases b := herm −h⋆and ˜b := h e
+erm −h⋆, the second term reduces to:
+∥(Id −Π)herm∥2
+X = ∥(Id −Π)(h⋆+ b)∥2
+X = ∥(Id −Π)b∥2
+X,
+(Def. of bias b, T -inv. h⋆.)
+= ∥b −˜b∥2
+X = ∥b∥2
+X −∥˜b∥2
+X,
+(Lem. 5 ˜b = Πb, Pythagoras.)
+= ∥b∥2
+X −∥˜b∥2
+e
+X = ˜σ2 −σ2.
+(˜b ∈I ⇒Eq. (6), Lem. 1.)
+Substituting into (△), together with Πherm = h e
+erm and baseline ball constraint ∥h −herm∥2
+X ≤σ2γ,
+=⇒∥h −h e
+erm∥2
+X ≤σ2γ −(˜σ2 −σ2) = σ2(1 + γ −ρ).
+Inclusion and dominance hierarchy.
+Both T-as-IV and inv.-constrained sets Hepı+eıv, Hpı+ınv are
+balls in Hınv about the common center h e
+erm. Since h −h e
+erm ∈I for invariant h, their norms are
+measured in the common geometry of Eq. (6), with squared radii obeying
+˜σ2γ −σ2(1 + γ −ρ) = σ2(1 + γ)(ρ −1) ≥0,
+where ρ ≥1 by the DPI (Lem. 1). Hence Hpı+ınv ⊆Hepı+eıv, while Hepı+eıv ⊆Hepı is immediate.
+Finally, set inclusion directly implies a dominance hierarchy in sharpness and worst-case errors.
+33
+
+
+Preprint.
+F.7
+PROOF OF PROP. 4—FINITE-SAMPLE BUDGETS
+Proposition 4 (finite-sample budgets). Under Asm. 6 and the population budget ∥v∥2 ≤σ2γ•, set
+bγ• := s2
+σ2 Γn
+
+d; σ2
+s2 γ•
+
+,
+Γn(d; λ) := 1
+n F −1
+χ2
+d(nλ)
+
+1 −α
+3
+
+,
+where χ2
+d(κ) is the noncentral χ2 distribution with d degrees of freedom and noncentrality value κ.
+Then lim infn→∞Pr
+ ∥bvn∥2 ≤σ2bγ•
+
+≥1 −α/3, such that 0 < bγ• −γ• = O
+ d/n +
+p
+γ•/n
+
+.
+Proof. Sketch: (i) rewrite the constraint as a Gaussian ball probability (Part A), (ii) sandwich the
+noncentral χ2 quantile between its median and Cantelli’s bound (Part B).
+Setup. Standardize by the sampling scale and write the empirical constraint as a ball,
+λ := σ2γ•
+s2 ,
+t := s0
+s ∈(0, 1],
+un :=
+√n v
+s
+,
+Wn :=
+√n (bvn −v)
+s
+⇝tζ,
+qn := n Γn(d; λ),
+Bn :=
+
+w ∈Rd : ∥w + un∥2 ≤qn
+	
+,
+ζ ∼N(0, Id),
+with the limit given by Asm. 6. The ball Bn is convex and contains the origin, since
+∥un∥2 ≤nλ,
+(Population budget.)
+< qn.
+(∥ζ +
+√
+nλ e1∥2 > nλ whenever ζ1 > 0, i.e. w.p. ≥1
+2 > α
+3 .)
+Part (A): coverage.
+Pr
+ ∥bvn∥2 ≤σ2bγ•
+
+= Pr(Wn ∈Bn),
+(Scale by n/s2; def. of bγ•.)
+= Pr(tζ ∈Bn) + o(1),
+(Uniform over convex sets; tζ abs. cont. (Ranga Rao, 1962).)
+≥Pr(ζ ∈Bn) + o(1),
+(Bn convex, 0 ∈Bn, t ≤1 ⇒Bn ⊆Bn/t.)
+≥Pr
+ χ2
+d(nλ) ≤qn
+
++ o(1),
+(χ2
+d(·) stoch. increasing; ∥un∥2 ≤nλ.)
+= 1 −α
+3 + o(1).
+(Def. of qn.)
+Taking the lim inf gives the coverage claim.
+Part (B): vanishing slack. The law χ2
+d(nλ) has mean d + nλ and variance 2(d + 2nλ), so Cantelli
+caps its quantile qn from above, while the Setup bounds it from below,
+0 < bγ• −γ• =
+s2
+σ2n (qn −nλ),
+(Def. of bγ•, λ; Setup.)
+≤
+s2
+σ2n
+ d + cα
+p
+2(d + 2nλ)
+
+,
+(One-sided Cantelli, cα :=
+p
+3/α −1.)
+= O
+  d
+n +
+p
+γ•/n
+
+.
+(
+√
+a + b ≤√a +
+√
+b; λ ∝γ•.)
+34
+
+
+Preprint.
+Qpı
+Qpı ∩PΨ
+Hpı
+Hpı ∩HΨ.
+Ψ(Φ(q);p0)
+Φ
+Φ
+Ψ(h;p0)
+Figure 16: A picture of Prop. 5: Filtering baseline models q ∈Qpı by the predicate Ψ(Φ(q); p0) and
+then mapping through Φ yields the same hypothesis set as mapping Hpı = Φ(Qpı) first and then
+filtering by the corresponding function-level predicate Ψ(h; p0). Dashed arrows denote set restriction.
+F.8
+PROOF OF PROP. 5—SHARP BOUNDS WITH STRUCTURAL-FUNCTION CONSTRAINTS
+Proposition 5 (sharp bounds with structural-function constraints). Fix some distribution p0. Define
+Φ: Ppı →H, q 7→hq
+⋆.
+For a set of baseline PI candidate distributions Qpı ⊆Ppı, their candidate hypotheses are given by
+Hpı := Φ(Qpı).
+Let Ψ(h; p0) be a predicate depending only on functions h ∈H and the fixed law p0. Define the sets
+HΨ := {h ∈H: Ψ(h; p0)},
+PΨ := {q ∈Ppı : Ψ(Φ(q); p0)}.
+Then PΨ = Φ−1(HΨ) is the pre-image of HΨ under Φ, and the constrained identified set is sharp:
+Φ(Qpı ∩PΨ) = Hpı ∩HΨ.
+The same identity holds for any finite collection of such predicates. Fig. 16 states the prop. in a picture.
+Proof. Re-write the claimed identity by substituting Hpı = Φ(·), PΨ = Φ−1(·), Q = Qpı, H = HΨ,
+Φ
+ Q ∩Φ−1(H)
+
+= Φ(Q) ∩H.
+=⇒direction.
+Trivially, for any h ∈Φ
+ Q ∩Φ−1(H)
+
+, we have h = Φ(q) for some candidate
+q ∈Q ∩Φ−1(H). This directly implies h ∈Φ(Q) and h ∈H. Therefore, it holds that LHS ⊆RHS.
+⇐= direction.
+Let h ∈Φ(Q) ∩H. Then there exists q ∈Q such that Φ(q) = h, which is in H.
+Since Φ(q) ∈H, then q ∈Φ−1(H). Thus, q ∈Q ∩Φ−1(H), giving h = Φ(q) ∈Φ
+ Q ∩Φ−1(H)
+
+.
+Corollary 1 (sharp bounds with inv. constraints). Define hypotheses via the inv.-error functional Eınv
+Hε
+ınv :=
+
+h ∈H : Eınv(h) ≤ε2	
+.
+Then, the invariance shape constraint PI model from §3 is sharp, meaning Hpı+ınv = Hpı ∩Hε
+ınv.
+Proof. Immediate from Prop. 5 using p0 = pX e
+X and Ψ(h; p0) = 1
+
+Eınv(h) ≤ε2	
+.
+Corollary 2 (sharp bounds with IV constraints). Let σ2
+p be the ERM noise floor under true p. Define
+Hıv :=
+n
+h ∈H : Varp
+
+Ep[Y −h(X)|Z ]
+
+≤σ2
+pγz
+o
+,
+as the leaky-IV hypotheses. Then, the PI model of Asm. 3 is sharp, meaning Hpı+ıv = Hpı ∩Hıv.
+Proof. Immediate from Prop. 5 using p0 = pXY Z and the predicate
+Ψ(h; p0) = 1
+n
+Varp0
+
+Ep0[Y −h(X)|Z ]
+
+≤σ2
+p0γz
+o
+.
+35
+
+
+Preprint.
+F.9
+PROOF OF LEM. 1—SOFT INTERVENTION WITH DA
+Lemma 1 (soft intervention with DA). For T -inv. h⋆, DA acts on Eq. (1) as a soft-intervention:
+(A) Structural equation: Trivially, post-DA variables (ξ, U, e
+X, Y, eZ) with eZ ∈{Z, (Z, T)} follow:
+Y = h⋆( e
+X) + U + ξ,
+E[U ] = E[ξ ] = 0,
+ξ ⊥⊥(U, e
+X, eZ).
+(B) Markov transfer: Let p be Markov w.r.t. a DAG G over V := {U, X, Y, Z1, Z2, . . .} where
+NonDescG(X) = V \{X, Y }. Then, peV is Markov w.r.t. eG, where eV , eG relabel X to e
+X in V, G.
+(C) Attenuated confounding: Under Asm. 1a, let biases b := herm −h⋆and ˜b := h e
+erm −h⋆. Then,
+∥b∥2
+X −∥˜b∥2
+e
+X = σ2(ρ −1) ≥0.
+Proof. Part (a) is immediate from def. of T -inv. and T ⊥⊥(ξ, U, X, Y, Z). We prove parts (b)–(c).
+Part (b): Markov transfer.
+Write W := V \{X, Y }, so eV = W ∪{ e
+X, Y }. Now, disintegrate peV ,
+pW e
+XY = pW ⊗p e
+X|W ⊗pY | e
+XW ,
+and reduce each kernel to its eG-kernel,
+pW =
+O
+V ∈W pV |PaG(V ),
+(W ancestral in G, so its G-marginal factorizes.)
+p e
+X|W ( · |w)
+(Integrate out τ.)
+=
+Z
+α(·, τ)# pX|W ( · |w) pT (dτ),
+(Use T ⊥⊥(W, X) and e
+X = α(X, τ) on {T = τ}.)
+=
+Z
+α(·, τ)# pX|PaG(X)
+ ·
+paG(x)
+
+pT (dτ),
+(W non-desc., so X ⊥⊥W\PaG(X)
+ PaG(X).)
+=: p e
+X|PaG(X)
+ ·
+paG(x)
+
+,
+pY | e
+XW ( · |x, w)
+(Part (a): Y = h⋆( e
+X) + U + ξ with exogenous ξ ⊥⊥(W, e
+X).)
+= pξ( · −h⋆(x) −u) =: pY | e
+XU( · |x, u).
+Substitute back to get the desired factorization along eG, i.e. all parent sets of G with X relabeled e
+X:
+pW e
+XY =
+O
+V ∈W pV |PaG(V ) ⊗p e
+X|PaG(X) ⊗pY | e
+XU.
+Part (c): attenuated confounding.
+Under Asm. 1a, herm = E[Y |X ] and h e
+erm = E[Y | e
+X ].
+Taking conditional means in Eq. (1),
+b = E[Y |X ] −h⋆= E[U|X ],
+˜b = E[Y | e
+X ] −h⋆= E[U| e
+X ],
+where the latter follows from T -inv. of h⋆.
+The identity: Since ξ ⊥⊥(U, X), the noise floor σ2 decomposes as
+σ2 = E[Var(Y |X)],
+(Asm. 1a.)
+= Var(ξ) + E[Var(U|X)],
+(ξ ⊥⊥(U, X).)
+= Var(ξ) + Var(U) −∥b∥2
+L2(X),
+(Law of total variance.)
+and identical steps under e
+X (T -inv. at the first step) gives ˜σ2 = Var(ξ) + Var(U) −∥˜b∥2
+L2( e
+X).
+Subtracting the two noise floors gives ∥b∥2
+L2(X) −∥˜b∥2
+L2( e
+X) = ˜σ2 −σ2.
+Non-negativity: As e
+X = α(X, T) with T ⊥⊥(U, X), the chain U −X −e
+X is Markov, hence:
+˜b = E[U | e
+X ] = E
+h
+E[U|X ]
+ e
+X
+i
+= E[b(X)| e
+X ]
+(Tower rule.)
+Because conditional expectation is an L2-contraction, we have:
+∥˜b∥2
+L2( e
+X) = Var(E[U | e
+X ]) ≤Var(E[U |X ]) = ∥b∥2
+L2(X),
+i.e. ˜σ2 −σ2 = ∥b∥2
+L2(X) −∥˜b∥2
+L2( e
+X) ≥0.
+36
+
+
+Preprint.
+F.10
+PROOF OF LEM. 2—CHARACTERIZING THE IDENTIFIED SET4
+Lemma 2 (characterizing the identified set). Under Asm. 2 and 1a or 1c, Hpı is the covariance ball
+Hpı =
+n
+h ∈HX :
+h −herm
+2
+X ≤σ2γ
+o
+,
+within HX, centered at herm with radius σ√γ, and an effective confounding budget of γ := γxγy
+1−γx .
+Proof. With B the ball in the statement, the proof has three parts. (i) Anchor: all q ∈Qpı share the
+center herm and radius σ. (ii) Necessity (Hpı ⊆B): hq
+⋆∈B for every q by bounding on budgets
+γx, γy; (iii) Sufficiency (Hpı ⊇B): Any h ∈B is achieved by some Gaussian certificate qh ∈Qpı.
+Anchor.
+Denote V := span(H). The IPM test class F =
+
+f 2 : f ∈V + RY
+	
+in Asm. 2 matches
+pXY and qXY up to second moments of (v(X), Y ) for all v ∈V. Hence, all q induce a common risk
+Rerm(h) = E[Y 2] −2 E[h(X)Y ] + E[h(X)2],
+h ∈H,
+with common minimizer herm and minimum σ2. Moreover,
+Ep[v(X) · (Y −herm(X))] = 0
+∀v ∈V.
+(♣)
+Under Asm. 1a, this holds because herm = Ep[Y |X ]; under Asm. 1c, V = H and herm = ΠHY .
+For v = 1 ∈V, Eq. (♣) gives E[herm(X)] = E[Y ], confirming that herm ∈HX under mean-zero Y .
+Necessity (Hpı ⊆B).
+Write Eq. (1) under some fixed q ∈Qpı
+Y = hq
+⋆(X) + Uq + ξq,
+ξq ⊥⊥(Uq, X, Z),
+omitting the sub-/superscript q where unambiguous. Define
+bq := herm −hq
+⋆∈H −H ⊆V,
+rq := Eq[Y |X ] −herm ⊥L2(X) V,
+where rq ⊥L2(X) V holds because for every v ∈V, tower rule, moment matching, and Eq. (♣) give
+Eq[v(X)rq(X)] = Eq[v(X)Y ] −Eq[v(X)herm(X)]
+= Ep[v(X)Y ] −Ep[v(X)herm(X)] = 0.
+Conditioning the structural on X now yields,
+Eq[U |X ] = Eq[Y |X ] −hq
+⋆= rq
+|{z}
+⊥V
++ bq
+|{z}
+∈V
+.
+(♠)
+with rq, bq both X-centered. Now define:
+a := Eq[Varq(U |X)],
+c := Varq
+ Eq[U |X ]
+
+.
+To show that hq
+⋆∈B, we need to show ∥bq∥2
+X ≤σ2γ. This constitutes a chain of three inequalities,
+∥b∥2
+X
+(∗∗)
+≤
+c
+(††)
+≤
+γx
+1 −γx
+a
+(‡‡)
+≤
+γxγy
+1 −γx
+σ2 ≤σ2γ.
+Here, (∗∗) holds by Pythagoras on Eq. (♠). And (††) follows from the X-budget
+r2
+U∼X := 1 −a
+σ2
+U
+≤γx
+=⇒
+σ2
+U ≤
+a
+1 −γx
+=⇒
+c
+total-var.
+=
+σ2
+U −a ≤
+γx
+1 −γx
+a.
+To establish (‡‡), we need to upper-bound a. The Y -budget gives,
+r2
+U∼Y |X := 1 −E[Var(U |X, Y )]/ a ≤γy,
+=⇒
+(1 −γy) a ≤E[Var(U |X, Y )].
+(♢)
+4By convention, set γ := +∞when γx = 1 in Asm. 2, and r2 := 0 whenever its denominator vanishes.
+37
+
+
+Preprint.
+Now, condition on X = x and write s(x) := Var(U |X = x), so that E[s(X)] = a. Note that
+E[Var(U |Y, X)|X = x] is the MMSE of predicting U from Y , so a linear MMSE upper-bounds it:
+E[Var(U |Y, X)|X = x] ≤
+s(x) σ2
+ξ
+s(x) + σ2
+ξ
+.
+The RHS is concave in s(x). For a > 0, Jensen and Eq. (♢) give (conclusion immediate for a = 0),
+(1 −γy) a ≤
+a σ2
+ξ
+a + σ2
+ξ
+,
+=⇒
+a ≤γy (a + σ2
+ξ).
+This, combined with the below inequality gives a ≤γy σ2, finally establishing ∥b∥2
+X ≤σ2γ via (‡‡).
+a + σ2
+ξ
+total-var.
+=
+E[Var(Y |X)]
+E[Y |X] optimality
+≤
+min
+h∈H E
+h
+(Y −h(X))2 i
+=:
+σ2.
+Sufficiency (Hpı ⊇B).
+Fix h ∈B, then define
+bh := herm −h,
+e2 :=
+bh2
+X ≤σ2γ.
+Suppose first that γx > 0 and e > 0. Define,
+σ2
+W := 1 −γx
+γx
+e2,
+σ2
+ξ := σ2 −σ2
+W ,
+Since e2 ≤σ2γ,
+=⇒σ2
+W ≤1 −γx
+γx
+σ2γ = γyσ2 ≤σ2,
+(♡)
+so σ2
+ξ ≥0. Sample independently
+(X, Z) ∼pXZ,
+Wh ∼N(0, σ2
+W ),
+ξh ∼N(0, σ2
+ξ),
+and define
+Uh := bh(X) + Wh,
+Y = h(X) + Uh + ξh = herm(X) + Wh + ξh.
+This satisfies the structural equation with hqh
+⋆= h; Uh and ξh are centered, and ξh ⊥⊥(Uh, X, Z).
+It remains to verify qh ∈Qpı.
+(a) Moment matching. For every v ∈V, qh
+X = pX and Y −herm(X) = Wh + ξh is centered,
+independent of X, and has variance σ2. Thus
+Eqh[v(X)Y ] = Ep[v(X)herm(X)] = Ep[v(X)Y ],
+by Eq. (♣), while
+Eqh[v(X)2] = Ep[v(X)2],
+Eqh[Y 2] = Ep[herm(X)2] + σ2 = Ep[Y 2],
+the latter by Pythagoras under p. First moments match similarly. Hence DF(pXY , qh
+XY ) = 0.
+(b) The γx budget: Since Wh ⊥⊥X,
+a = σ2
+W ,
+σ2
+U = e2 + σ2
+W = e2
+γx,
+and therefore
+r2
+U∼X = 1 −
+σ2
+W
+e2/ γx
+= 1 −(1 −γx) = γx ≤γx.
+(c) The γy budget: Conditional on X, observing Y is equivalent to observing Wh + ξh. Therefore
+Varq(U | X = x, Y ) = Var(W | W + ξ) =
+σ2
+W · σ2
+ξ
+σ2
+W + σ2
+ξ
+= σ2
+W (σ2 −σ2
+W )
+σ2
+,
+whence
+r2
+U∼Y |X = 1 −σ2
+W (σ2 −σ2
+W )/σ2
+σ2
+W
+= σ2
+W
+σ2 ≤γy,
+using σ2
+W ≤γyσ2 from Eq. (♡). Hence qh ∈Qpı.
+38
+
+
+Preprint.
+Edge cases.
+If e = 0 (equivalently h = herm in HX; this covers γx = 0 or γy = 0, where γ = 0
+and the ball degenerates to {herm}), take Uh := 0 and ξh ∼N(0, σ2). Moment matching (a) holds
+as before, and both budgets (b)–(c) hold with r2 = 0.
+Hence, every h ∈B is attained by a Gaussian certificate (note, p itself is not assumed Gaussian).
+Corollary 3 (characterizing the identified interval). Under Asm. 1c and Asm. 2, for x ∈supp(pX),
+Hpı(x) =
+
+herm(x)
+	
+± σ√γ ∥gx∥L2(X),
+where gx ∈HX is the L2(X)-representer of h 7→h(x), well defined by the non-degenerate ⟨·, ·⟩X.
+Proof. For any h ∈Hpı as given by Lem. 2, evaluation at query point x ∈supp(pX) follows
+|h(x) −herm(x)| =
+⟨h −herm, gx⟩L2(X)
+,
+(Reproducing identity.)
+≤∥h −herm∥L2(X) · ∥gx∥L2(X),
+(Cauchy–Schwarz.)
+≤σ√γ ∥gx∥L2(X),
+(From Lem. 2.)
+with equality at h −herm = ±σ√γ gx/∥gx∥L2(X) ∈H, membership by linearity of H (Asm. 1c).
+These two extremal functions are attained since they lie in the ball of Lem. 2 by construction.
+Finally, since Hpı is convex (a ball within linear H under Asm. 1c) and evaluation h 7→h(x) is linear,
+the image Hpı(x) is an interval, and therefore coincides with the full interval above.
+39
+
+
+Preprint.
+F.11
+PROOF OF LEM. 3—SHIFT DECOMPOSITION
+Lemma 3 (shift decomposition). Under Asms. 1b–1c, S = K + δ∗δ, with K ≻0, δ∗δ ≽0 s.t.
+rank(δ∗δ)≤1, and tr(δ∗δ)=D2
+B(pX, p e
+X) is MMD2 over the unit ball B:={h ∈H e
+X : ∥h∥e
+X ≤1}.
+Proof. We make three moves: (i) decompose the evaluation form as covariance-plus-mean, (ii) read
+off the two operators it splits into via Riesz, and (iii) identify the rank and trace of the mean part.
+Evaluation form identity.
+Take f, g ∈H e
+X. Scoring them in L2(X) gives
+⟨f, g⟩L2(X) = E
+
+f(X) g(X)
+
+,
+= Cov(f(X), g(X)) + E[f(X)] E[g(X)],
+= ⟨f, g⟩X + (δf) (δg).
+Operator decomposition via Riesz.
+By Asm. 1c, (HX, ⟨·, ·⟩X) is Hilbert. By Asm. 1b (cf. §F),
+(H e
+X, ⟨·, ·⟩e
+X)
+is also Hilbert, so every symmetric bilinear form on it is represented by a unique self-adjoint operator.
+Additionally, the forms ⟨·, ·⟩L2(X) and ⟨·, ·⟩X are also both positive-definite on H e
+X (§F).
+Riesz gives unique self-adjoint, positive-definite S, K : H e
+X →H e
+X satisfying
+⟨f, Sg⟩e
+X = ⟨f, g⟩L2(X),
+⟨f, Kg⟩e
+X = ⟨f, g⟩X.
+Likewise, δ : H e
+X →R being a bounded linear functional has a unique representer δ♯∈H e
+X s.t.
+δh = ⟨h, δ♯⟩e
+X,
+∀h ∈H e
+X.
+Therefore the adjoint δ∗c = cδ♯, and
+δ∗δ = δ♯⊗e
+X δ♯,
+⟨f, (δ∗δ)g⟩e
+X = (δf)(δg).
+Combining these identities, for every f, g ∈H e
+X,
+⟨f, Sg⟩e
+X = ⟨f,
+ K + δ∗δ
+
+g⟩e
+X.
+Non-degeneracy of ⟨·, ·⟩e
+X on H e
+X therefore gives
+S = K + δ∗δ.
+Rank and trace.
+Finally, the cross-product δ∗δ = δ♯⊗e
+X δ♯≽0 has image contained in span(δ♯),
+and its only possible nonzero eigenvalue is ∥δ♯∥2
+e
+X. Hence,
+rank(δ∗δ) ≤1,
+tr(δ∗δ) = ∥δ♯∥2
+e
+X.
+Moreover,
+DB(pX, p e
+X) = sup
+h∈B
+|δh| =
+sup
+∥h∥f
+X≤1
+|⟨h, δ♯⟩e
+X| = ∥δ♯∥e
+X.
+by Cauchy–Schwarz, attained at h = δ♯
+
+∥δ♯∥e
+X. Therefore,
+tr(δ∗δ) = D2
+B(pX, p e
+X).
+40
+
+
+Preprint.
+F.12
+PROOF OF LEM. 4—AVERAGE ERROR AS A WORST-CASE SURROGATE
+Lemma 4 (avg. error as worst-case surrogate). Let H(x) ⊂R be a bounded interval at query x.
+Under a squared-loss ℓ(a, b) := (a −b)2, the following sandwich is tight in multiplicative constant 4:
+Ex(H(x)) ≤E+
+x (H(x)) ≤4 · Ex(H(x)).
+Furthermore, under Asm. 1c and 2 the following inequality holds for the k-dim. ball H from Lem. 2:
+E(H) ≤E+(H) ≤(k + 3) · E(H).
+Proof. The lower bound is trivial (max. dominates mean). For upper bounds: (i) write closed forms
+of both interval metrics in center offset and half-width, (ii) compute a maximizer for their ratio, and
+(iii) derive a common bound for k-dim. ellipsoids.
+Closed forms.
+Write H(x) = [c −w, c + w] with interval center c and half-width w ≥0. Let
+d := |c −h⋆(x)| be the center’s offset from the truth. Under sq.-loss, the pointwise excess risk of a
+candidate y is Ex(y) = (y −h⋆(x))2, so worst-case is attained at the endpoint farther from h⋆(x),
+E+
+x (H(x)) = max|u|≤w(d + u)2 = (d + w)2,
+while a uniform draw decomposes into offset plus uniform second moment,
+Ex(H(x)) = Eu∼Unif[−w,w][(d + u)2] = d2 + 1
+3w2.
+(E[u] = 0 kills cross term.)
+Upper bound.
+Take w > 0, as otherwise the metrics are equal. Write their ratio in t := d/w ≥0,
+E+
+x (H(x))
+Ex(H(x)) = (t + 1)2
+t2 + 1/3 =: f(t),
+=⇒
+f ′(t) = 2(t + 1)(1/3 −t)
+(t2 + 1/3)2
+,
+so f increases on t ∈[0, 1/3] and decreases thereafter, with maximum
+f(1/3) =
+(4/3)2
+(1/3)2 + 1/3 = 16/9
+4/9 = 4.
+Hence, E+
+x (H(x)) ≤4 · Ex(H(x)), with equality exactly at the offset d = w/3.
+k-dim. ellipsoids.
+Write an L2(X)-ellipsoid H = c + ABk
+2, with center c and k-dim. ball Bk
+2. Let
+d := ∥c −h⋆∥L2(X),
+v := tr(A∗A)
+k + 2 ,
+R :=
+sup
+∥u∥2≤1
+∥Au∥L2(X).
+with v the average sq.-radius of a centered L2(X)-ellipsoid. Hence, for U ∼Unif(Bk
+2),
+E(H) = E
+h
+∥c + AU −h⋆∥2
+L2(X)
+i
+= d2 + v.
+Therefore,
+E+(H) ≤(d + R)2,
+= d2 + R2 + 2dR,
+≤d2 + R2 + d2R2
+v
++ v,
+(Cauchy-Schwarz 2ab ≤a2 + b2 on a = dR
+√v, b = √v.)
+=
+
+1 + R2
+v
+
+(d2 + v),
+≤(1 + (k + 2))(d2 + v),
+(Pythagoras R2 ≤tr(A∗A) = (k + 2)v.)
+= (k + 3) · E(H).
+The bound is sharp: let one semi-axis be 1, and remaining k −1 semi-axes tend to 0. Place h⋆on the
+longest-axis line at distance v/R from the center. The ratio E+(H)
+.
+E(H) then tends to k + 3.
+41
+
+
+Preprint.
+F.13
+PROOF OF LEM. 5—REYNOLDS PROJECTION WITH DA
+Lemma 5 (Reynolds projection with DA). Under Asms. 1a–1b, and 4, post-DA ERM h e
+erm satisfies
+h e
+erm = Πherm ∈Hınv,
+where Π is the L2(X)-orthogonal proj. onto the ambient inv. subspace I with Hınv = H∩I (cf. §C).
+Furthermore, when the target h⋆is T -invariant, the post-DA bias ˜b := h e
+erm −h⋆similarly follows
+˜b = Πb.
+Proof. We structure the proof in two parts: (i) the conditional expectation over augmentation acts as
+a proj. onto I; (ii) both the post-DA ERM and bias naturally follow this conditional expectation.
+Reynolds projection with DA.
+Take the operator (Rh)(·) := E[h(X) | e
+X = ·] on h ∈L0
+2(X),
+defined p e
+X-a.e., hence pX-a.e. (Asm. 1b). R coincides with projection Π under Asm. 4, Rh = Πh.
+To prove this, we need to show that it is invariant Rh ∈I, and its residual h −Rh is orthogonal to I.
+(a) Invariance: Since group T is compact, the Haar measure pT is left-invariant, i.e. for any τ ∈T ,
+τT
+d= T,
+(Def. of left-inv. pT , follows from Asm. 4.)
+⇒
+(τT, X)
+d= (T, X),
+(Follows from T ⊥⊥X.)
+⇒
+(τ e
+X, h(X))
+d= ( e
+X, h(X)),
+(Apply (τ, x) 7→(α(x, τ), h(x)) on both sides.)
+⇒
+E[h(X) | τ e
+X] = E[h(X) | e
+X],
+(Conditional expectation on both sides.)
+⇒
+(Rh)(τ −1 e
+X) = (Rh)( e
+X).
+(Re-parameterize to Rh. T group ⇒τ −1 exists.)
+Because τ is arbitrary, it follows that (Rh)(X) = (Rh)( e
+X), where the left-hand evaluation under pX
+is again licensed by Asm. 1b. Also, E[(Rh)( e
+X)] = E[h(X)] = 0, hence Rh ∈I. Immediately, if
+Rh ∈H
+=⇒
+Rh ∈Hınv.
+(b) Orthogonality: The residual h −Rh is L2(X)-orthogonal to every invariant test function g ∈I:
+⟨Rh, g⟩L2(X) := E[(Rh)(X) · g(X)] = E[(Rh)( e
+X) · g( e
+X)],
+(Both Rh and g are T -inv.)
+= E[E[h(X)| e
+X ] · g( e
+X)],
+(Def. of R.)
+= E[E[h(X) · g( e
+X)| e
+X ]],
+(g( e
+X) is e
+X-measurable.)
+= E[h(X) · g( e
+X)],
+(Tower property.)
+= E[h(X) · g(X)] = ⟨h, g⟩L2(X).
+(T -inv. of g.)
+Subtracting the two sides gives ⟨h −Rh, g⟩L2(X) = 0 for all g ∈I. Together with part (a), Rh ∈I
+and h −Rh ⊥L2(X) I, therefore for all h ∈L0
+2(X),
+Rh = Πh.
+Application to ERM and Bias.
+Under Asm. 1a, herm(X) = E[Y |X ] and h e
+erm( e
+X) = E[Y | e
+X ].
+Since Y is centered, all of h⋆, herm, h e
+erm (hence b,˜b) are centered. Further, T ⊥⊥(X, Y, U, ξ) by
+construction, so Y −X −e
+X is a Markov chain. Via the tower rule,
+h e
+erm( e
+X) = E[Y | e
+X ] = E
+h
+E[Y |X, e
+X ]
+ e
+X
+i
+,
+= E
+h
+E[Y |X ]
+ e
+X
+i
+= E[herm(X)| e
+X ] = (Rherm)( e
+X).
+Note that h e
+erm and Rherm are T -inv., hence they must also be identically equal in L2(X) (Asm. 1b),
+giving h e
+erm = Rherm = Πherm by part (b). And since h e
+erm ∈H e
+X by Asm. 1a, part (a) places it in
+the class: h e
+erm ∈Hınv. Finally, for a T -inv h⋆∈I, using Πh⋆= h⋆and linearity of Π on L0
+2(X),
+Πb
+=
+Πherm −Πh⋆
+=
+h e
+erm −h⋆
+=
+˜b.
+42
+
+
+Preprint.
+F.14
+PROOF OF LEM. 6—AVERAGE REPRESENTER NORMS
+Lemma 6 (avg. representer norms). Under Asms. 1b–1c, evaluation h 7→h(x) admits the L2(X)-
+representer gx ∈HX and the L2( e
+X)-representer ˜gx ∈H e
+X. Averaged over queries X ∼pX gives
+EX
+h
+∥gX∥2
+L2(X)
+i
+= k,
+EX
+h
+∥˜gX∥2
+L2( e
+X)
+i
+= tr(S).
+Proof. Two steps give the result: (i) expand each representer in an orthonormal basis of its own cen-
+tered class; (ii) average over X ∼pX, reading each summand as a quadratic form of the shift operator.
+Expansion.
+Fix an L2( e
+X)-orthonormal basis {ψi}k
+i=1 of the class H e
+X (Asms. 1b–1c, cf. §F). Then,
+˜gx =
+k
+X
+i=1
+⟨˜gx, ψi⟩L2( e
+X) · ψi,
+(Parseval in ⟨·, ·⟩L2( e
+X).)
+=
+k
+X
+i=1
+ψi(x) · ψi,
+(Reproducing identity ⟨ψi, ˜gx⟩L2( e
+X) = ψi(x).)
+=⇒
+∥˜gx∥2
+L2( e
+X) =
+k
+X
+i=1
+ψi(x)2.
+(Orthonormality of ψi.)
+Averaging.
+Take expectations over X ∼pX in each summand,
+EX
+h
+ψi(X)2 i
+= ∥ψi∥2
+L2(X) = ⟨ψi, Sψi⟩L2( e
+X),
+(Def. of S.)
+and sum over the basis to obtain a trace,
+EX
+h
+∥˜gX∥2
+L2( e
+X)
+i
+=
+k
+X
+i=1
+⟨ψi, Sψi⟩L2( e
+X) = tr(S).
+(Trace in any orthonormal basis.)
+Repeating the two steps in an L2(X)-orthonormal basis {ψi}k
+i=1 of HX replaces S by Id throughout.
+The averaged summand is then ∥ψi∥2
+L2(X) = 1, now resulting in EX
+h
+∥gX∥2
+L2(X)
+i
+= tr(Id) = k.
+43

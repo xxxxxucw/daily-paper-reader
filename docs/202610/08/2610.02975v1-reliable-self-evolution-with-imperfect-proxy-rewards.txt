@@ -1,0 +1,1189 @@
+Preprint.
+RELIABLE SELF-EVOLUTION WITH
+IMPERFECT PROXY REWARDS.
+Kangjun Noh1, Soyu Kim1, Kyungwoo Song1†
+1Yonsei University
+ABSTRACT
+Large language model (LLM)-based self-evolving search is a promising approach
+to scientific discovery. However, high-fidelity evaluation of every candidate is
+prohibitively expensive in some domains. Self-evolving systems in such settings
+therefore rely on low-cost but imperfect proxy rewards, which may assign high
+scores to infeasible candidates. These false positives may contaminate both the
+final output and the feedback used to guide subsequent generations. This moti-
+vates statistically calibrated reward intervals for more reliable self-evolving search.
+We propose Conformal Interval-Driven Self-Evolution (CISE), which constructs
+candidate-specific reward intervals using conditional conformal inference and
+iteration-wise online density-ratio estimation. CISE uses conservative interval-
+based rewards for evolutionary feedback and returns candidates only when all
+required property intervals lie entirely within their respective feasible regions. We
+derive fixed-iteration coverage results under explicit assumptions of independence
+and covariate shift. We evaluate CISE on three self-evolving search tasks in materi-
+als science. In our experiments, all candidates returned by CISE are true positives
+under high-fidelity evaluation, whereas the baselines return more candidates but
+include false positives. These results highlight the value of a smaller, more pre-
+cise shortlist when downstream validation budgets are limited. Our repository is
+available at https://github.com/MLAI-Yonsei/CISE.git.
+1
+INTRODUCTION
+Self-evolving search uses large language models (LLMs) to generate candidates and improve subse-
+quent candidates using feedback from previous evaluations. This paradigm has recently emerged as an
+approach to scientific discovery (Romera-Paredes et al., 2024; Novikov et al., 2025; Liu et al., 2026).
+These methods retain previously evaluated candidates together with their rewards and reuse them to
+guide subsequent search. The effectiveness of self-evolution therefore depends on the reliability of
+the rewards that determine which candidates are treated as successful and reused in later iterations.
+However, obtaining the true reward for every generated candidate is often slow or expensive in
+iterative search. In such settings, self-evolving systems often rely on computationally inexpensive
+proxy rewards that approximate the true reward. For example, in materials discovery, evaluating every
+candidate with high-fidelity density functional theory (DFT) calculations or experimental validation
+is prohibitively expensive. Property prediction models are therefore often used as proxy rewards
+during search (Abhyankar et al., 2026). Although proxy rewards make iterative search practical,
+prediction errors may produce false positives: candidates that satisfy the target constraints under the
+proxy reward but fail under the true reward. In self-evolving search, such errors affect more than the
+returned candidates. Once a false positive is assigned a favorable reward and stored as a successful
+example, it is reused to guide subsequent generations. This false-positive propagation may steer the
+search toward regions where the proxy reward is overly optimistic rather than toward candidates with
+genuinely high true rewards.
+This motivates uncertainty-aware reward estimates rather than relying solely on point-valued proxy
+rewards. Conformal inference (Vovk et al., 2005; Angelopoulos & Bates, 2022) provides a principled
+way to construct such estimates by converting model predictions into calibrated intervals with
+†Corresponding author.
+1
+arXiv:2610.02975v1  [cs.AI]  2 Oct 2026
+
+
+Preprint.
+statistical coverage guarantees. In particular, conditional conformal inference (Gibbs et al., 2025)
+incorporates candidate characteristics into calibration, which is useful when proxy-reward reliability
+varies across candidates. These calibrated intervals support conservative decisions about which
+candidates guide subsequent evolution and which candidates are returned as outputs.
+We propose Conformal Interval-Driven Self-Evolution (CISE), a self-evolving framework that re-
+places point-valued proxy rewards with candidate-specific calibrated reward intervals. CISE uses
+conditional conformal inference to construct candidate-specific reward intervals with adaptive widths.
+The resulting reward interval is stored in the archive and used to guide subsequent generations, while
+only candidates whose entire reward intervals satisfy the task-specific constraints are returned as
+outputs. Because the candidate distribution can change as the archive, selected parents, and generation
+context evolve, CISE additionally performs iteration-wise online density-ratio estimation (Kanamori
+et al., 2009) to characterize the difference between the source distribution and the current candidate
+distribution and incorporates the estimated ratio into conditional conformal inference. As a result,
+calibrated reward intervals are used for both evolutionary feedback and final candidate selection.
+Theoretically, we analyze fixed-iteration marginal coverage under explicit independence and covariate-
+shift assumptions and characterize how density-ratio estimation error affects the resulting guarantee.
+Empirically, we evaluate CISE on three self-evolving material-property search tasks and validate
+the returned candidates using high-fidelity DFT calculations. Across the reported experiments,
+CISE trades output yield for higher observed DFT-validated output precision: all CISE outputs with
+resolved DFT evaluations are true positives, whereas the baseline methods return false positives. We
+further show under a matched downstream validation budget that the reliability improvement cannot
+be explained solely by CISE returning fewer candidates. These results demonstrate the potential of
+calibrated reward intervals to make self-evolving search more reliable when accurate true rewards are
+too expensive to use throughout evolution. To the best of our knowledge, CISE is the first framework
+to use conformal proxy-reward intervals for both evolutionary feedback and final candidate selection
+in LLM-based self-evolving candidate search.
+2
+RELATED WORK
+Self-evolving search reuses previously generated candidates and their rewards to guide subsequent
+generations across domains, including program discovery (Romera-Paredes et al., 2024; Novikov
+et al., 2025), video-prompt optimization (Ji et al., 2024), scientific hypothesis generation (Gottweis
+et al., 2026), and materials discovery (Abhyankar et al., 2026). While some settings provide directly
+verifiable rewards, others rely on learned or LLM-generated proxy rewards to enable efficient iterative
+search. In such cases, proxy-favored candidates may not correspond to true improvements, and
+reusing them as successful examples can propagate reward errors across subsequent generations. This
+motivates accounting for proxy-reward uncertainty in both evolutionary feedback and final selection.
+Recent work has sought to improve the reliability of proxy evaluations and rewards through cali-
+bration and uncertainty-aware optimization. For LLM-as-a-judge, post-hoc score calibration learns
+regression models from limited human feedback to adjust judge scores using their original scores
+and rationales (Sahoo et al., 2026), while linear probes on judge hidden states provide calibrated
+confidence estimates for the correctness of their judgments (Radharapu et al., 2025). Related work on
+learned reward models addresses uncertainty and overoptimization directly: ensemble-based conser-
+vative objectives use disagreement among reward models to reduce optimization against errors in an
+imperfect reward model (Coste et al., 2024). Process reward models have also been calibrated using
+quantile regression to better align their predictions with empirical success probabilities and support
+uncertainty-aware allocation of inference-time computation (Park et al., 2025). These approaches
+improve the calibration, interpretation, or robustness of model-derived rewards. However, they do
+not statistically control false-positive rewards under task-specific true-reward constraints in iterative
+self-evolving search.
+Conformal inference provides a complementary framework for uncertainty quantification by con-
+verting model predictions into calibrated prediction sets or intervals with finite-sample coverage
+guarantees under explicit assumptions (Vovk et al., 2005; Angelopoulos & Bates, 2022). Condi-
+tional conformal inference formulates conditional validity through classes of covariate shifts and
+provides finite-sample guarantees for shifts represented by a finite-dimensional calibration function
+space (Gibbs et al., 2025). More recently, conformal inference has been applied to LLM-as-a-judge
+2
+
+
+Preprint.
+evaluation, replacing point-valued judge scores with calibrated intervals that explicitly represent
+evaluation uncertainty (Sheng et al., 2025; Noh et al., 2026). Building on this line of work, we use
+conformal inference to construct calibrated intervals for proxy rewards and use these reward intervals
+in both evolutionary feedback and final candidate selection in self-evolving search.
+3
+PRELIMINARIES: SELF-EVOLVING AGENT FOR MATERIAL SEARCH WITH
+PROXY REWARD
+We consider a self-evolving agent that searches a candidate space X for solutions satisfying task-
+specific constraints. For each candidate x ∈X, r(x) ∈R denotes a scalar true reward, and
+ˆr(x) ∈R denotes an inexpensive and imperfect proxy reward. During search, generated candidates
+are evaluated using the proxy reward. The task-specific constraints are specified before evolution. Let
+Fr and Fˆr denote the sets of candidates satisfying these constraints according to the true and proxy
+rewards, respectively. Membership in Fˆr is determined by computing ˆr(x) and checking it against
+the specified constraints. A candidate x ∈Fˆr \ Fr is a false positive: it satisfies the constraints under
+the proxy reward but violates them under the true reward.
+The archive Ht stores candidates generated through iteration t together with their proxy rewards.
+The parent-selection policy πt(· | Ht) selects K candidates from the archive to form the parent set
+St, which guides candidate generation at the next iteration. We treat {πt}T
+t=0 as a given sequence
+of selection rules; we do not consider a separate policy-learning step. As the archive and its
+stored rewards change, the selected parents and the resulting candidate generation can nevertheless
+change across iterations. Algorithm 2 summarizes the proxy-reward-driven search process. At
+iteration t, the agent uses the previous parents St−1 and their stored rewards to generate a batch
+Ct = {xt,1, . . . , xt,M} of M new candidates. The proxy reward is computed for each candidate, and
+the resulting candidate-reward pairs are added to the archive. Candidates whose proxy rewards satisfy
+the task-specific constraints are also added to the cumulative output set, giving Ot = Ot−1∪(Ct∩Fˆr).
+The updated archive is then used to select the next parent set. The archive and output set serve
+different purposes: the archive retains generated candidates as search experience, whereas the output
+set contains only candidates that satisfy the proxy-reward constraints.
+4
+METHODOLOGY
+4.1
+PROBLEM SETUP
+We are given a labeled source dataset D = {(Xi, r(Xi))}n
+i=1 of independent candidate-reward pairs
+drawn from a joint distribution P0, with candidate marginal PX
+0 . We partition D into three mutually
+disjoint subsets: Dfit, Dcal, and Dsrc. The fitting set Dfit is used to train a model ˆq(x) that predicts an
+upper conditional quantile of the absolute proxy error |r(x) −ˆr(x)|. The calibration set Dcal is used
+to construct conformal reward intervals, while Dsrc provides the source reference for density-ratio
+estimation. Only the candidate information in Dsrc is used for density-ratio estimation. The proxy
+reward model, fitted quantile model, and candidate representation are fixed before evolution.
+For a fixed iteration t, let Pt denote the joint distribution of a candidate and its true reward under the
+current archive, selected parents, and generation configuration. For a fresh candidate–reward pair
+(X′, r(X′)) ∼Pt, CISE uses conditional conformal inference (Gibbs et al., 2025) to construct an
+iteration-specific prediction interval It(X′) for the true reward. This interval represents uncertainty
+in the proxy reward and is used for both evolutionary feedback and output selection.
+For evolutionary feedback, a candidate with a nonempty, bounded interval is evaluated conservatively
+over that interval using a task-specific rule. The resulting interval reward is stored with the candidate
+in Ht. The parent-selection policy πt(· | Ht) uses these stored rewards to select the next parents, and
+subsequent generation uses the selected parents and their rewards as feedback. For output selection, a
+candidate is added to Ot only when its interval is nonempty and bounded and every reward value
+in the interval satisfies the task-specific constraints. A lower-bound constraint is checked using the
+lower endpoint, an upper-bound constraint using the upper endpoint, and a bounded-range constraint
+requires the entire interval to lie within the prescribed range. Thus, a candidate with a valid interval
+may be retained in the archive even when it does not satisfy the output criterion.
+3
+
+
+Preprint.
+Figure 1: Overview of CISE. Offline, we fit the conditional proxy-error quantile using Dfit, Dcal
+provides calibration scores, and Dsrc provides the source reference for density-ratio estimation.
+During evolution, unlabeled probes are used to estimate the current distribution shift, which is
+incorporated into conditional conformal inference to construct candidate-specific reward intervals.
+These intervals guide subsequent evolution and candidates are returned only when the entire interval
+satisfies the task constraint.
+Our target is iteration-wise marginal coverage: for a fresh candidate–reward pair at a fixed iteration t,
+the true reward should lie in its prediction interval with probability at least 1 −α,
+P(r(X′) ∈It(X′)) ≥1 −α,
+t = 1, . . . , T.
+(1)
+The probability is marginal over the source data and the fresh candidate–reward pair under the
+assumptions stated below. The guarantee is evaluated separately at each iteration and does not
+assert simultaneous coverage over the full search trajectory. We first analyze this target under
+exchangeability and then characterize the effect of covariate shift and density-ratio estimation error.
+Let At denote acceptance at iteration t. Since acceptance requires the entire interval to satisfy the
+task constraint,
+At ∩{X′ /∈Fr} ⊆{r(X′) /∈It(X′)},
+and hence P(At, X′ /∈Fr) ≤α whenever equation 1 holds. This controls the joint acceptance-and-
+false-positive event, not the false-positive probability conditional on acceptance.
+4.2
+CONFORMAL INTERVAL-DRIVEN SELF-EVOLUTION UNDER EXCHANGEABILITY
+We first consider an exchangeable reference setting with Pt = P0 for a fixed iteration t before con-
+sidering covariate shift. Write the calibration pairs as {(Xi, r(Xi))}ncal
+i=1, and let (X′, r(X′)) ∼Pt
+denote an independent fresh candidate-reward pair. The equality Pt = P0 means that the calibration
+candidates and the newly generated candidate follow the same joint distribution over material struc-
+tures and true rewards. We hold the archive, selected parents, and generation configuration fixed, and
+assume that the resulting candidate distribution is independent of Dcal.
+Let S(x, u; ˆr) denote a fixed nonconformity score measuring the discrepancy between a hypothetical
+reward value u and the proxy prediction ˆr(x). Let ˆq(x) denote a fitted conditional quantile of the
+absolute proxy error. We define the score as S(x, u; ˆr) = |u −ˆr(x)| −ˆq(x), so that larger values
+indicate discrepancies that are unusually large relative to the prediction error expected at x. For each
+calibration pair (Xi, r(Xi)), we write Si = S(Xi, r(Xi); ˆr). Let G be a finite-dimensional linear
+function space spanned by the constant function and fixed functions of the candidate representation
+4
+
+
+Preprint.
+ϕ(x). For example, G may be chosen as G = span{1, ϕ1(x), . . . , ϕd(x)}. This space allows the
+calibration adjustment to vary with candidate characteristics.
+Following Gibbs et al. (2025), we calibrate the scores through an augmented quantile regression that
+includes the fresh candidate. For a fixed X′ and an imputed test score s ∈R, define
+bqs ∈arg min
+q∈G
+(ncal
+X
+i=1
+ℓα(q(Xi), Si) + ℓα(q(X′), s)
+)
+,
+(2)
+where ℓα(a, b) = (1 −α)(b −a)+ + α(a −b)+ is the pinball loss for the (1 −α)-quantile, with
+(v)+ = max{v, 0}. The additional term incorporates the fresh candidate into calibration using a
+hypothetical score, allowing the adjustment to account for X′ before its true reward is observed.
+Let ηs(X′) ∈[−α, 1 −α] denote the dual variable associated with the fresh candidate in equation 2.
+This variable is nondecreasing in s. The nonrandomized score cutoff and the resulting reward interval
+are
+bτt(X′) = sup {s ∈R : ηs(X′) < 1 −α} ,
+It(X′) = {u ∈R : S(X′, u) ≤bτt(X′)} .
+(3)
+The cutoff is computed from the dual boundary of the unpenalized augmented problem. Inverting the
+chosen absolute-error score yields an interval centered at ˆr(X′), with its width determined by the
+fixed normalization, fitted base quantile, and calibrated cutoff. An empty interval leads to abstention
+under the output rule in Section 4.1.
+Theorem 1 (Iteration-wise marginal coverage under exchangeability). For a fixed iteration t, assume
+that the calibration pairs are i.i.d. draws from P0, and that the fresh pair (X′, r(X′)) is an inde-
+pendent draw from Pt = P0. Suppose that the score S and finite-dimensional linear space G are
+fixed independently of these pairs, and that G contains the constant function. If equation 2 is solved
+exactly with a dual-solution rule symmetric under permutations of the augmented observations, then
+the interval in equation 3 satisfies
+P (r(X′) ∈It(X′)) ≥1 −α.
+At the true test score, the augmented observations are exchangeable. The constant function in G
+imposes a zero-sum constraint on the optimal dual variables. Together with their bounds, this limits
+the fraction reaching the upper boundary 1 −α to at most α. The result establishes equation 1 in the
+reference setting. The next subsection adapts the calibration function space to the current candidate
+distribution when Pt̸ = P0.
+4.3
+CONFORMAL INTERVAL-DRIVEN SELF-EVOLUTION UNDER EVOLUTIONARY COVARIATE
+SHIFT
+As evolution proceeds, changes in the archive, selected parents, and generation strategy alter the
+distribution of materials proposed by the agent. For a fixed iteration t, let Pt denote the joint
+distribution of a candidate and its true reward under the current archive, parent set, and generation
+configuration. We consider evolutionary covariate shift satisfying
+Pt(r(X) | X) = P0(r(X) | X),
+PX
+t ≪PX
+0 ,
+wt(x) = dPX
+t
+dPX
+0
+(x) ≤W,
+(4)
+where W < ∞is a bounded-overlap constant. Thus, evolution may change how frequently different
+material structures are generated while preserving the conditional relationship between a structure
+and its true reward. The density ratio wt describes this change relative to the source distribution.
+At iteration t, we generate an unlabeled probe batch Bt from PX
+t using the current parents and
+their stored rewards. The probe batch is used only for density-ratio estimation, and fresh candidates
+are subsequently generated for interval evaluation and archive updates. The archive, parents, and
+generation configuration remain fixed throughout both stages. We assume that the probe candidates
+and the subsequent candidates are independent draws from the same current distribution, with Dcal
+independent of both stages.
+Let ϕ(X) be the fixed candidate representation, and let W = {wθ : wθ(x) = hθ(ϕ(x)) ∈[0, W], θ ∈
+Θ} be a bounded density-ratio model class. We estimate the current ratio through least-squares
+5
+
+
+Preprint.
+importance fitting (Kanamori et al., 2009):
+bθt ∈arg min
+θ∈Θ
+
+
+
+1
+2|Dsrc|
+X
+(Xi,r(Xi))∈Dsrc
+wθ(Xi)2 −
+1
+|Bt|
+X
+X′∈Bt
+wθ(X′) + λΩ(θ)
+
+
+,
+bwt = wbθt.
+(5)
+Here, λ ≥0 controls regularization of the ratio estimator through a fixed penalty Ω. The population
+counterpart of the first two terms equals 1
+2EPX
+0 [(wθ(X) −wt(X))2] up to a constant independent of
+θ. Equation 5 therefore approximates the current ratio using source candidates and unlabeled target
+candidates. Repeating this update with Bt at each iteration gives an online density-ratio estimation
+procedure for the sequence {PX
+t }T
+t=1.
+We incorporate the estimated ratio into CCI by extending the calibration function space from Sec-
+tion 4.2:
+Gt = G + span{ bwt}.
+The ratio enters as an additional basis function, while the augmented quantile regression retains
+its unweighted pinball loss and unpenalized calibration objective. For each fresh candidate x, we
+solve equation 2 over Gt and construct It(x) through equation 3. Finite-dimensional CCI provides
+coverage under covariate shifts represented by nonnegative functions in its calibration space (Gibbs
+et al., 2025). Adding bwt therefore connects the calibration adjustment to the current generation
+distribution.
+For the coverage analysis, suppose that EPX
+0 [ bwt(X)] > 0 and define
+ϵt = 1
+2EPX
+0
+"wt(X) −
+bwt(X)
+EPX
+0 [ bwt(X)]
+
+#
+.
+(6)
+The normalized ratio defines a candidate distribution relative to PX
+0 , and ϵt is its total variation
+distance from PX
+t . This term captures density-ratio estimation error and misspecification of the
+representation or ratio model. Normalization preserves membership in Gt, since multiplying a basis
+function by a positive constant leaves its linear span unchanged.
+Algorithm 1 summarizes the resulting search process. The current probe batch determines bwt and Gt,
+while each fresh candidate receives its own test-point calibration. The archive stores the resulting
+interval rewards, and the cumulative output contains candidates whose entire intervals satisfy the
+task-specific constraints.
+The following result combines the finite-dimensional CCI guarantee with the distribution discrepancy
+in Equation 6.
+Theorem 2 (Iteration-wise marginal coverage under evolutionary covariate shift). For a fixed iteration
+t, condition on the current generation state, Dfit, Dsrc, and Bt. Assume that, conditionally on these
+quantities, the calibration pairs remain i.i.d. draws from P0, and the fresh pair (X′, r(X′)) is an
+independent draw from Pt satisfying equation 4. Suppose that bwt is nonnegative with positive source
+expectation, and that the score S and finite-dimensional space Gt are fixed under this conditioning.
+If the augmented calibration over Gt is solved exactly with the symmetric dual-solution rule in
+Theorem 1, then
+P (r(X′) ∈It(X′)) ≥1 −α −ϵt,
+where ϵt is defined in equation 6. The probability is conditional on the quantities held fixed and
+marginal over the calibration data and the fresh candidate–reward pair.
+The normalized estimated ratio belongs to Gt, so the finite-dimensional CCI result gives coverage of
+at least 1 −α under its induced candidate distribution. The calibration distribution remains P0 in
+both settings, and the conditional reward law is shared. Replacing the induced candidate distribution
+by PX
+t therefore changes the coverage probability by at most ϵt, establishing Theorem 2. Averaging
+over the estimation data gives the corresponding marginal bound with E[ϵt]. The same 1−α coverage
+follows directly whenever wt ∈Gt. By the output rule in Section 4.1, the probability of returning a
+false positive is bounded by α + ϵt under the same fixed-iteration setting.
+6
+
+
+Preprint.
+Algorithm 1 CISE
+Require: Initial archive H0; evolving agent; proxy reward ˆr; data splits Dfit, Dcal, and Dsrc; base
+calibration space G; density-ratio model class W; parent-selection policies {πt}T
+t=0; task-specific
+reward constraints; miscoverage level α; probe budget; candidate budget M; parent budget K;
+number of iterations T
+Ensure: Interval-qualified candidate set OT
+1: Fit the base quantile model on Dfit and fix the score S
+2: Compute S(Xi, r(Xi)) for every (Xi, r(Xi)) ∈Dcal
+3: Initialize the stored rewards in H0 using the intervals from Section 4.2, and set O0 ←∅
+4: Select K initial parents according to π0(· | H0) and denote them by S0
+5: for t = 1, . . . , T do
+6:
+Fix the current generation configuration using St−1 and their stored rewards
+7:
+Generate an unlabeled probe batch Bt under this configuration without updating the archive
+8:
+Estimate bwt from Dsrc and Bt using equation 5
+9:
+Set Gt ←G + span{ bwt}
+10:
+Propose fresh candidates Ct = {xt,1, . . . , xt,M} independently of Bt under the same genera-
+tion configuration
+11:
+Initialize Ht ←Ht−1 and Ot ←Ot−1
+12:
+for all x ∈Ct do
+13:
+Evaluate ˆr(x) and construct It(x) using equation 2 and equation 3 with Gt
+14:
+if It(x) is nonempty and bounded then
+15:
+Evaluate the candidate conservatively over It(x) and store it in Ht
+16:
+if every reward value in It(x) satisfies the task-specific constraints then
+17:
+Update Ot ←Ot ∪{x}
+18:
+end if
+19:
+end if
+20:
+end for
+21:
+Select K parents according to πt(· | Ht) and denote them by St
+22: end for
+23: return OT
+5
+EXPERIMENTS
+5.1
+EXPERIMENTAL SETUP
+We evaluate CISE on three multi-constraint material-discovery tasks from the LLEMA bench-
+mark (Abhyankar et al., 2026): wide-bandgap semiconductors (WBG), which require Eg ≥2.5 eV
+and Eform ≤−1.0 eV/atom; solid-state electrolytes (SSE), which require Eform ≤−1.0 eV/atom,
+Eg ≥2.0 eV, and at least one mobile species from {Li, Na, K, Mg, Ca, Al}; and photovoltaic ab-
+sorbers (PV), which require 0.7 ≤Eg ≤2.0 eV, Eform ≤0.0 eV/atom, and compositions restricted
+to earth-abundant, non-toxic elements. A candidate is counted as a task hit only when all correspond-
+ing constraints are satisfied. We provide detailed descriptions of each task in Appendix A.2. We set
+α = 0.1/#constraint for each property. For example, we set α = 0.05 for both Eg and Eform in the
+WBG task.
+We compare CISE against MatterGen (Zeni et al., 2025), LLMatDesign (Jia et al., 2024), and
+LLEMA (Abhyankar et al., 2026). CISE modifies only the archive-admission and output-selection
+steps of LLEMA; its generator and evolutionary operators remain unchanged. For proxy evaluation,
+we use MGT in place of CGCNN for band-gap prediction, while otherwise following the LLEMA
+experimental protocol, including the task definitions, hierarchical proxy-property pipeline, proxy-
+reward construction, candidate budgets, and method-specific generation settings. For tasks involving
+multiple predicted properties, we apply CISE separately to each property and return only candidates
+that satisfy all property-specific CISE criteria. During search, surrogate predictions provide the proxy
+properties used to score and qualify candidates. We then re-evaluate the candidates returned by each
+method using DFT implemented in Quantum ESPRESSO (Giannozzi et al., 2009). A proxy hit is
+a candidate satisfying the task constraints under surrogate predictions, whereas a DFT hit satisfies
+the same physical-property constraints under Quantum ESPRESSO calculations, together with any
+deterministic compositional restrictions. A proxy hit that fails this final evaluation is recorded as a
+7
+
+
+Preprint.
+Table 1:
+Comparison of output reliability across three material-discovery tasks. Each method
+generates 200 candidate structures. Output denotes candidates satisfying the method-specific output
+criterion. TP and FP denote output candidates that satisfy or violate the target constraints under DFT
+evaluation, respectively. Values in parentheses denote the fraction among output candidates.
+Wide-bandgap (WBG)
+Solid-state electrolytes (SSE)
+Photovoltaic absorbers (PV)
+Method
+Output
+TP
+FP
+Output
+TP
+FP
+Output
+TP
+FP
+MatterGen
+3/200
+2 (0.67)
+1 (0.33)
+2/200
+1 (0.50)
+1 (0.50)
+0/200
+–
+–
+LLMatDesign 37/200
+0 (0.00)
+37 (1.00)
+2/200
+0 (0.00)
+2 (1.00)
+18/200
+0 (0.00)
+18 (1.00)
+LLEMA
+102/200 94 (0.92)
+8 (0.08)
+104/200 71 (0.68)
+33 (0.32)
+60/200 39 (0.65)
+21 (0.35)
+CISE
+41/200
+41 (1.00)
+0 (0.00)
+51/200
+51 (1.00)
+0 (0.00)
+6/200
+6 (1.00)
+0 (0.00)
+Figure 2: Evolution of formation energy on the solid-state electrolyte (SSE) task, where success
+requires Eform ≤−1.0 eV/atom. (a) Proxy rewards for LLEMA and reward intervals for CISE;
+vertical blue bars denote CISE intervals and the dashed blue curve shows their mean upper bound. (b)
+Corresponding DFT evaluations. Circles and crosses denote selected and non-selected candidates,
+respectively, and solid curves show the 20-iteration output mean. In later iterations, LLEMA produces
+a pronounced concentration of candidates above the DFT success threshold, visible in the upper-right
+of (b), including selected false positives. In contrast, CISE shows no comparable accumulation and
+its output mean remains within the feasible region throughout evolution.
+false positive. We use gpt-5-mini (OpenAI, 2026) as a solver LLM to generate candidates. More
+detailed experimental settings are provided in Appendix A.
+5.2
+EMPIRICAL RESULTS
+Main results. Table 1 shows a trade-off between the number of returned structures and their DFT
+results. This contrast is particularly clear between LLEMA and CISE on WBG and SSE. LLEMA
+returns 102 and 104 candidates, respectively, but 7.84% and 31.73% fail DFT validation. In contrast,
+CISE returns 41 WBG candidates and 51 SSE candidates, with no observed false positives among
+candidates with resolved DFT evaluations: all 41 WBG candidates and 51 SSE candidates are
+confirmed true positives. A smaller but more reliable shortlist can be valuable when downstream
+experimental validation is the bottleneck. The objective is not simply to maximize the number of
+structures satisfying proxy constraints, but to prioritize candidates worth further investigation. Under
+a limited validation budget, higher output precision can reduce the fraction of resources allocated to
+candidates that do not satisfy the intended properties. We therefore view the WBG and SSE results as
+a reliability-yield trade-off. This trade-off is consistent with CISE’s joint interval-based selection
+rule. Whereas proxy-based selection checks whether each point prediction satisfies its constraint,
+CISE requires the entire prediction interval of every required property to lie within the corresponding
+8
+
+
+Preprint.
+Table 2:
+Equal post-evaluation budget comparison on the photovoltaic absorber (PV) task. To
+match the six candidates returned by CISE, we select six candidates from the LLEMA output whose
+proxy-predicted band gaps are closest to the target value of 1.2 eV. Importantly, this ranking is
+performed before DFT evaluation and therefore does not use the TP/FP labels. Under the same
+validation budget, three of the six LLEMA candidates are false positives under DFT, whereas all six
+candidates returned by CISE are true positives.
+LLEMA: top-6 closest to 1.2 eV
+CISE: six returned candidates
+Rank
+Material
+Proxy Eg
+DFT Eg
+Result
+Material
+CISE interval
+DFT Eg
+Result
+1
+SrO
+1.24
+2.99
+FP
+RbLiO
+[0.73, 1.98]
+1.24
+TP
+2
+ZnF2
+1.25
+2.32
+FP
+RbNa2OF
+[1.34, 1.51]
+1.32
+TP
+3
+MgTiO3
+1.37
+1.65
+TP
+KNa2OF
+[1.19, 1.62]
+1.50
+TP
+4
+MgO
+1.54
+1.39
+TP
+Na3Li3P2
+[0.92, 1.72]
+1.08
+TP
+5
+MgZrO3
+1.57
+1.07
+TP
+NaLi(MgP)2
+[0.83, 1.86]
+1.66
+TP
+6
+CaO
+1.75
+3.06
+FP
+KLi5P2
+[0.89, 1.73]
+1.00
+TP
+DFT outcome
+3 TP / 3 FP
+6 TP / 0 FP
+feasible region. A candidate can therefore satisfy all point constraints yet be excluded because at
+least one interval extends beyond an admissible boundary.
+Calibrated interval rewards facilitate reliable LLM evolution. Figure 2 shows a clear difference in
+the search trajectories of LLEMA and CISE on the SSE task. Although LLEMA continues to assign
+favorable proxy rewards, its DFT-evaluated candidates increasingly populate the failure region in
+later iterations. This is particularly visible in the upper-right of Figure 2(b), where many late-iteration
+LLEMA candidates lie above the Eform = −1.0 threshold, including selected false positives. In
+contrast, CISE shows no comparable accumulation, and its output mean remains within the feasible
+region throughout evolution. This pattern suggests that calibrated interval rewards help prevent overly
+optimistic proxy evaluations from being repeatedly reinforced during LLM evolution.
+Comparison of fixed-budget shortlists of LLEMA and CISE. To examine whether the higher
+reliability of CISE is simply a consequence of returning fewer candidates, we perform an equal-budget
+comparison on the PV task. CISE returns six candidates in this experiment, so we restrict LLEMA to
+the same downstream validation budget of six structures. Among the proxy-qualified LLEMA outputs,
+we select the six candidates whose proxy-predicted band gaps are closest to 1.2 eV, representing a
+natural point-estimate-based prioritization strategy for PV screening. Importantly, this selection is
+performed before DFT evaluation, so the true-positive and false-positive labels are unavailable when
+the candidates are ranked. As shown in Table 2, only three of the six selected LLEMA candidates
+satisfy the PV band-gap constraint after DFT evaluation, while the remaining three are false positives.
+In contrast, all six candidates returned by CISE are confirmed as true positives. This result indicates
+that the reliability gain of CISE cannot be explained solely by its smaller output set: even under the
+same validation budget and a stricter post-hoc truncation of the LLEMA output, point-estimate-based
+prioritization can still select candidates whose apparent quality is caused by proxy error, whereas
+interval-based selection excludes such uncertain candidates before expensive validation.
+6
+CONCLUSION
+In this work, we study reliable self-evolution when accurate true rewards are too expensive to obtain
+throughout iterative search. We propose CISE, which replaces point-valued proxy rewards with
+calibrated reward intervals constructed using conditional conformal inference and iteration-wise
+online density-ratio estimation. These intervals are used for both evolutionary feedback and final
+candidate selection, allowing proxy-reward uncertainty to directly influence the search process. Under
+explicit independence and covariate-shift assumptions, we provide fixed-iteration coverage guarantees
+and characterize the effect of density-ratio estimation error. Across three material-discovery tasks,
+CISE consistently returns a smaller but more reliable set of candidates, with no observed false
+positives among its DFT-validated outputs and improved reliability under a matched validation
+budget. Our results suggest that calibrated interval rewards provide a practical route toward more
+reliable self-evolving agents when true rewards are costly to obtain.
+9
+
+
+Preprint.
+REFERENCES
+Nikhil Abhyankar, Sanchit Kabra, Saaketh Desai, and Chandan K. Reddy. Llema: Evolutionary
+search with llms for multi-objective materials discovery, 2026. URL https://arxiv.org/
+abs/2510.22503.
+Anastasios N. Angelopoulos and Stephen Bates. A Gentle Introduction to Conformal Prediction and
+Distribution-Free Uncertainty Quantification, 2022. arXiv preprint arXiv:2107.07511.
+Kamal Choudhary. The jarvis infrastructure is all you need for materials design. Computational
+Materials Science, 259:114063, 2025. ISSN 0927-0256. doi: 10.1016/j.commatsci.2025.114063.
+URL http://dx.doi.org/10.1016/j.commatsci.2025.114063.
+Thomas Coste, Usman Anwar, Robert Kirk, and David Krueger. Reward model ensembles help
+mitigate overoptimization, 2024. URL https://arxiv.org/abs/2310.02743.
+Paolo Giannozzi, Stefano Baroni, Nicola Bonini, Matteo Calandra, Roberto Car, Carlo Cavazzoni,
+Davide Ceresoli, Guido L Chiarotti, Matteo Cococcioni, Ismaila Dabo, Andrea Dal Corso, Stefano
+de Gironcoli, Stefano Fabris, Guido Fratesi, Ralph Gebauer, Uwe Gerstmann, Christos Gougoussis,
+Anton Kokalj, Michele Lazzeri, Layla Martin-Samos, Nicola Marzari, Francesco Mauri, Riccardo
+Mazzarello, Stefano Paolini, Alfredo Pasquarello, Lorenzo Paulatto, Carlo Sbraccia, Sandro
+Scandolo, Gabriele Sclauzero, Ari P Seitsonen, Alexander Smogunov, Paolo Umari, and Renata M
+Wentzcovitch. Quantum espresso: a modular and open-source software project for quantum
+simulations of materials. Journal of Physics: Condensed Matter, 21(39):395502, 2009. ISSN
+1361-648X. doi: 10.1088/0953-8984/21/39/395502. URL http://dx.doi.org/10.1088/
+0953-8984/21/39/395502.
+Isaac Gibbs, John J Cherian, and Emmanuel J Candès. Conformal prediction with conditional
+guarantees. Journal of the Royal Statistical Society Series B: Statistical Methodology, 87(4):
+1100–1126, 2025. ISSN 1369-7412. doi: 10.1093/jrsssb/qkaf008.
+Juraj Gottweis, Wei-Hung Weng, Alexander Daryin, Tao Tu, Petar Sirkovic, Artiom Myaskovsky,
+Grzegorz Glowaty, Felix Weissenberger, Alessio Orlandi, Dan Popovici, Anil Palepu, Keran
+Rong, Ryutaro Tanno, Khaled Saab, Fan Zhang, Jacob Blum, Andrew Carroll, Kavita Kulkarni,
+Nenad Tomašev, Dina Zverinski, Ivor Rendulic, Elahe Vedadi, Florian Hasler, Luka Rimanic,
+Marina Boia, Ivan Budiselic, Ben Feinstein, Mathias Bellaiche, Tom Sheffer, Jan Freyberg, Jeremy
+Ratcliff, Ottavia Bertolli, Katherine Chou, Avinatan Hassidim, Burak Gokturk, Amin Vahdat,
+Yuan Guan, Vikram Dhillon, Eeshit Dhaval Vaishnav, Byron Lee, Tiago R. D. Costa, José R.
+Penadés, Gary Peltz, Yossi Matias, James Manyika, Demis Hassabis, Yunhan Xu, Pushmeet Kohli,
+Annalisa Pawlosky, Alan Karthikesalingam, and Vivek Natarajan. Accelerating scientific discovery
+with co-scientist. Nature, 655(8122):487–496, May 2026. ISSN 1476-4687. doi: 10.1038/
+s41586-026-10644-y. URL http://dx.doi.org/10.1038/s41586-026-10644-y.
+Yatai Ji, Jiacheng Zhang, Jie Wu, Shilong Zhang, Shoufa Chen, Chongjian GE, Peize Sun, Weifeng
+Chen, Wenqi Shao, Xuefeng Xiao, Weilin Huang, and Ping Luo. Prompt-a-video: Prompt your
+video diffusion model via preference-aligned llm, 2024. URL https://arxiv.org/abs/
+2412.15156.
+Shuyi Jia, Chao Zhang, and Victor Fung. Llmatdesign: Autonomous materials discovery with large
+language models, 2024. URL https://arxiv.org/abs/2406.13163.
+Takafumi Kanamori, Shohei Hido, and Masashi Sugiyama. A least-squares approach to direct
+importance estimation. Journal of Machine Learning Research, 10(48):1391–1445, 2009. URL
+http://jmlr.org/papers/v10/kanamori09a.html.
+Shu Liu, Shubham Agarwal, Monishwaran Maheswaran, Mert Cemri, Zhifei Li, Qiuyang Mang,
+Ashwin Naren, Ethan Boneh, Audrey Cheng, Melissa Z. Pan, Alexander Du, Kurt Keutzer, Alvin
+Cheung, Alexandros G. Dimakis, Koushik Sen, Matei Zaharia, and Ion Stoica. Evox: Meta-
+evolution for automated discovery, 2026. URL https://arxiv.org/abs/2602.23413.
+Kangjun Noh, Ryunyi LEE, Heejin Jung, Young Jin Kim, and Kyungwoo Song. Reliable LLM-as-a-
+judge evaluation via transferable calibration. In ICML 2026 Statistical Frameworks for Uncertainty
+in Agentic Systems, 2026. URL https://openreview.net/forum?id=AIBoVLkc31.
+10
+
+
+Preprint.
+Alexander Novikov, Ngân V˜u, Marvin Eisenberger, Emilien Dupont, Po-Sen Huang, Adam Zsolt Wag-
+ner, Sergey Shirobokov, Borislav Kozlovskii, Francisco J. R. Ruiz, Abbas Mehrabian, M. Pawan
+Kumar, Abigail See, Swarat Chaudhuri, George Holland, Alex Davies, Sebastian Nowozin, Push-
+meet Kohli, and Matej Balog. Alphaevolve: A coding agent for scientific and algorithmic discovery,
+2025. URL https://arxiv.org/abs/2506.13131.
+OpenAI. Openai gpt-5 system card, 2026. URL https://arxiv.org/abs/2601.03267.
+Young-Jin Park, Kristjan Greenewald, Kaveh Alim, Hao Wang, and Navid Azizan. Know what you
+don’t know: Uncertainty calibration of process reward models, 2025. URL https://arxiv.
+org/abs/2506.09338.
+Bhaktipriya Radharapu, Eshika Saxena, Kenneth Li, Chenxi Whitehouse, Adina Williams, and Nicola
+Cancedda. Calibrating llm judges: Linear probes for fast and reliable uncertainty estimation, 2025.
+URL https://arxiv.org/abs/2512.22245.
+Bernardino Romera-Paredes, Mohammadamin Barekatain, Alexander Novikov, Matej Balog,
+M Pawan Kumar, Emilien Dupont, Francisco JR Ruiz, Jordan S Ellenberg, Pengming Wang,
+Omar Fawzi, et al. Mathematical discoveries from program search with large language models.
+Nature, 625(7995):468–475, 2024.
+Aishwarya Sahoo, Jeevana Kruthi Karnuthala, Tushar Parmanand Budhwani, Pranchal Agarwal,
+Sankaran Vaidyanathan, Alexa Siu, Franck Dernoncourt, Jennifer Healey, Nedim Lipka, Ryan A.
+Rossi, Uttaran Bhattacharya, and Branislav Kveton. Quantitative LLM judges using post-hoc
+score calibration. Transactions on Machine Learning Research, 2026. ISSN 2835-8856. URL
+https://openreview.net/forum?id=isUKzVxmOB.
+Huanxin Sheng, Xinyi Liu, Hangfeng He, Jieyu Zhao, and Jian Kang. Analyzing uncertainty of
+LLM-as-a-judge: Interval evaluations with conformal prediction. In Christos Christodoulopoulos,
+Tanmoy Chakraborty, Carolyn Rose, and Violet Peng (eds.), Proceedings of the 2025 Conference on
+Empirical Methods in Natural Language Processing, pp. 11286–11328, Suzhou, China, November
+2025. Association for Computational Linguistics. ISBN 979-8-89176-332-6. doi: 10.18653/v1/
+2025.emnlp-main.569. URL https://aclanthology.org/2025.emnlp-main.569/.
+Vladimir Vovk, Alexander Gammerman, and Glenn Shafer. Algorithmic learning in a random world.
+Springer, 2005.
+Claudio Zeni, Robert Pinsler, Daniel Zügner, Andrew Fowler, Matthew Horton, Xiang Fu, Zilong
+Wang, Aliaksandra Shysheya, Jonathan Crabbé, Shoko Ueda, et al. A generative model for
+inorganic materials design. Nature, 639(8055):624–632, 2025.
+11
+
+
+Preprint.
+Algorithm 2 PROXY-REWARD-DRIVEN SELF-EVOLVING SEARCH
+Require: Initial archive H0; evolving agent; proxy reward ˆr; parent-selection policies {πt}T
+t=0;
+proxy-reward constraints; candidate budget M; parent budget K; number of iterations T
+Ensure: Proxy-qualified candidate set OT
+1: Initialize O0 ←∅
+2: Select K initial parents according to π0(· | H0) and denote them by S0
+3: for t = 1, . . . , T do
+4:
+Propose Ct = {xt,1, . . . , xt,M} using St−1 and their stored proxy rewards
+5:
+Evaluate ˆr(x) for every x ∈Ct
+6:
+Update Ht ←Ht−1 ∪{(x, ˆr(x)) : x ∈Ct}
+7:
+Update Ot ←Ot−1 ∪(Ct ∩Fˆr)
+8:
+Select K parents according to πt(· | Ht) and denote them by St
+9: end for
+10: return OT
+A
+DETAILED EXPERIMENTAL SETTINGS
+A.1
+IMPLEMENTATIONS
+Calibration set. We construct the calibration set Dcal using 10,000 material structures from JARVIS-
+QE-TB (QETB) (Choudhary, 2025). The calibration samples are separated from the model-fitting
+data at the composition-group level to avoid overlap between the two sets.
+Model-fitting set. We use Dfit consisting of 423,205 structures from QETB to train the conditional
+quantile regression model. The proxy models remain fixed throughout the evolution process.
+Probe generation. At each generation context, we generate eight valid probe structures using the
+same parent structures and prompt context as the main candidate generation. These probes are used
+to characterize the current candidate distribution for online density-ratio estimation.
+Conditional quantile regression. We implement the conditional quantile regression model using a
+gradient-boosted regression model (HistGradientBoostingRegressor) with quantile loss. The model
+is trained to predict the conditional 0.95 quantile of absolute proxy error. Its input consists of 27
+structural features together with the corresponding proxy prediction.
+CCI features. For conditional conformal inference, the structural features are used to capture
+heterogeneous proxy uncertainty across materials. The online density ratio estimated from the
+probe structures and a fixed source set is additionally incorporated into the finite-dimensional Gibbs
+calibration basis, allowing the calibration procedure to adapt to the candidate distribution at the
+current generation step.
+DFT evaluation. Selected material structures are evaluated using Quantum ESPRESSO under a
+PBEsol fixed-structure protocol consistent with the QETB calculations. We use the Modified GBRV
+PBEsol pseudopotentials and evaluate the target material properties independently from the proxy
+models.
+A.2
+DETAILED TASK DESCRIPTIONS
+• Wide-bandgap semiconductors (WBG): the target constraints are Eg ≥2.5 eV and
+Eform ≤−1.0 eV/atom. Here, ˆr(X) = ( bEg, bEform) and r(X) = (Eg, Eform), where the
+latter quantities are obtained by DFT. Since a larger predicted Eg and a smaller predicted
+Eform can make a candidate appear more favorable,
+Y (X) = I
+n
+bEg −Eg ≤δEg, Eform −bEform ≤δEform
+o
+.
+• Solid-state electrolytes (SSE): the constraints are Eform ≤−1.0 eV/atom, Eg ≥2.0 eV,
+and the presence of at least one mobile species from {Li, Na, K, Mg, Ca, Al}. We use
+ˆr(X) = ( bEg, bEform) and r(X) = (Eg, Eform), with
+Y (X) = I
+n
+bEg −Eg ≤δEg, Eform −bEform ≤δEform
+o
+.
+12
+
+
+Preprint.
+Figure 3: Qualitative comparison of proxy-driven evolution and CISE on the photovoltaic absorber
+task, with target band gap 0.7 ≤Eg ≤2.0 eV. (a) LLEMA reuses proxy-qualified candidates along
+the parent–child lineage Na2O →Li2O →Na2O. All three candidates satisfy the point-estimate
+constraint but fail DFT validation (FP). The recorded LLM design justifications illustrate how previous
+surrogate evaluations inform subsequent proposals, allowing false positives to become reusable search
+feedback. The displayed CISE intervals extend beyond the target range, so these candidates would be
+excluded by the interval-based output rule. (b) A RbLiO candidate from a separate CISE run has its
+entire band-gap interval within the target range and also satisfies the constraint under DFT evaluation.
+Arrows indicate parent–child relations; checkmarks and crosses indicate acceptance and rejection,
+respectively.
+The mobile-species requirement is determined directly from the composition and therefore
+does not require proxy calibration.
+• Photovoltaic absorbers (PV): the constraints are 0.7 ≤Eg ≤2.0 eV, Eform ≤
+0.0 eV/atom, and compositions restricted to earth-abundant, non-toxic elements. We again
+use ˆr(X) = ( bEg, bEform) and r(X) = (Eg, Eform). Because Eg is constrained on both
+sides, its proxy error is controlled in both directions:
+Y (X) = I
+n
+| bEg −Eg| ≤δEg, Eform −bEform ≤δEform
+o
+.
+The elemental restriction is evaluated directly from the composition.
+B
+ADDITIONAL EMPIRICAL RESULTS
+Interval rewards mitigate false-positive propagation. Figure 3 qualitatively illustrates how proxy
+errors can propagate through self-evolving search and how CISE changes this feedback process. In
+the LLEMA trajectory in Figure 3(a), the agent repeatedly reuses proxy-qualified candidates along the
+parent-child lineage Na2O →Li2O →Na2O. Although all three candidates satisfy the photovoltaic
+band-gap constraint according to their proxy predictions, DFT evaluation shows that each is a false
+positive. Importantly, the recorded LLM rationales explicitly refer to previous surrogate evaluations
+when proposing subsequent candidates, showing that an erroneous proxy reward can become reusable
+13
+
+
+Preprint.
+feedback rather than remaining an isolated output error. In contrast, the corresponding CISE intervals
+extend beyond the feasible band-gap range, preventing these candidates from being treated as reliable
+successes under the interval-based criterion. Figure 3(b) shows the complementary case: the full
+CISE interval for RbLiO lies within the target range, and the candidate is subsequently confirmed
+as a true positive by DFT. Together, these examples illustrate how interval rewards can suppress
+the propagation of uncertain proxy successes while retaining candidates whose uncertainty-aware
+rewards remain feasible.
+C
+PROOFS
+Throughout this section, we fix an iteration t and write N = ncal + 1. All scores, basis functions, and
+solution rules are taken to be measurable. Symmetry of the dual-solution rule means that permuting
+the augmented observations permutes the selected dual coordinates in the same way. We interpret the
+supremum in Equation 3 in the extended real line, with sup ∅= −∞.
+C.1
+PROOF OF THEOREM 1
+Proof. Condition on the independently fixed score S and calibration space G. Set XN = X′ and
+write Si = S(Xi, r(Xi)) for i = 1, . . . , N. At the true test score SN, the augmented calibration
+problem in equation 2 becomes
+min
+q∈G
+N
+X
+i=1
+ℓα(q(Xi), Si).
+The pinball loss admits the representation
+ℓα(a, b) =
+max
+−α≤η≤1−α η(b −a).
+Since G is a finite-dimensional linear space, the augmented problem is a finite-dimensional linear
+program. It is feasible and has a finite optimal value: its objective is nonnegative, and the choice
+q = 0 gives a finite value. Linear-programming duality therefore yields the dual problem
+max
+η∈RN
+N
+X
+i=1
+ηiSi
+subject to
+−α ≤ηi ≤1 −α,
+i = 1, . . . , N,
+N
+X
+i=1
+ηig(Xi) = 0,
+for every g ∈G.
+(7)
+The last constraint follows because the coefficients of q ∈G are unrestricted. The dual feasible set is
+nonempty and compact, so an optimal dual solution exists.
+Let η = (η1, . . . , ηN) be the optimal dual solution selected by the symmetric rule. Since the constant
+function belongs to G, equation 7 implies
+N
+X
+i=1
+ηi = 0.
+The box constraints also give, for every i,
+1{ηi = 1 −α} ≤ηi + α.
+Consequently,
+N
+X
+i=1
+1{ηi = 1 −α} ≤
+N
+X
+i=1
+(ηi + α) = Nα.
+Under the assumptions of the theorem, the N augmented pairs are independent draws from P0.
+The fixed score and symmetric dual-solution rule therefore make the selected dual coordinates
+14
+
+
+Preprint.
+exchangeable. It follows that
+P(ηN = 1 −α) = 1
+N E
+" N
+X
+i=1
+1{ηi = 1 −α}
+#
+≤α.
+At the true test score, ηN = ηSN (XN). If ηN < 1 −α, then SN belongs to the set whose supremum
+defines bτt(XN). Thus, SN ≤bτt(XN), which implies r(XN) ∈It(XN) by equation 3. We therefore
+have the pointwise inequalities
+1{r(XN) /∈It(XN)} ≤1{ηN = 1 −α} ≤ηN + α.
+(8)
+Combining the first inequality with the boundary-probability bound gives
+P
+ r(X′) /∈It(X′)
+
+≤α.
+Averaging over any independently fitted quantities conditioned on above proves the stated guarantee.
+Only an inclusion between the miscoverage event and the dual boundary event is needed. In particular,
+the argument remains valid when the true score equals the cutoff or when optimal solutions are not
+unique, provided that the selected dual solution follows the stated symmetric rule.
+We also verify the monotonicity of ηs(X′) used in Section 4.2. Fix the calibration observations, the
+fresh candidate X′, and the calibration space. For s1 < s2, let η(1) and η(2) be optimal dual solutions
+with imputed test scores s1 and s2, respectively. The dual feasible set in equation 7 does not depend
+on the imputed score. Optimality therefore gives
+N−1
+X
+i=1
+Siη(1)
+i
++ s1η(1)
+N ≥
+N−1
+X
+i=1
+Siη(2)
+i
++ s1η(2)
+N ,
+N−1
+X
+i=1
+Siη(2)
+i
++ s2η(2)
+N ≥
+N−1
+X
+i=1
+Siη(1)
+i
++ s2η(1)
+N .
+Adding these inequalities yields
+(s2 −s1)
+ η(2)
+N −η(1)
+N
+
+≥0.
+Hence ηs2(X′) ≥ηs1(X′). This argument applies to any choices of optimal dual solutions and
+remains valid when G is replaced by a fixed Gt.
+C.2
+PROOF OF THEOREM 2
+Proof. Condition on the current generation state, Dfit, Dsrc, and Bt, as specified in the theorem. All
+probabilities and expectations below are conditional on these quantities unless stated otherwise. In
+particular, the score S, estimated ratio bwt, and calibration space Gt are fixed. By assumption, the
+calibration pairs retain their independent P0 laws under this conditioning.
+Define
+µt = EPX
+0 [ bwt(X)],
+ewt(x) = bwt(x)
+µt
+.
+The bounded ratio model and the positive-source-expectation assumption give 0 < µt < ∞. There-
+fore, ewt is nonnegative and satisfies
+EPX
+0 [ ewt(X)] = 1,
+ewt ∈Gt.
+The latter inclusion follows from bwt ∈Gt and linearity of Gt.
+Let ePt be the joint distribution defined by
+dePt
+dP0
+(x, u) = ewt(x).
+15
+
+
+Preprint.
+This is a probability distribution because ewt is nonnegative and has source expectation one. It changes
+only the candidate marginal while preserving the conditional reward law of P0.
+First consider an auxiliary experiment in which all N augmented pairs are independent draws from
+P0. Let E0 denote expectation in this experiment, with the conditioned quantities above still held
+fixed. For each realization of the augmented sample, solve the same calibration problem over Gt at
+the true test score. Let η denote the selected optimal dual solution.
+The dual formulation in equation 7 applies with Gt in place of G. Since ewt ∈Gt, dual feasibility gives
+N
+X
+i=1
+ewt(Xi)ηi = 0.
+Under the auxiliary source experiment, the augmented pairs are exchangeable. Since ewt is fixed and
+the dual-solution rule is symmetric, the pairs ( ewt(Xi), ηi) are also exchangeable. Consequently,
+E0[ ewt(XN)ηN] = 1
+N E0
+" N
+X
+i=1
+ewt(Xi)ηi
+#
+= 0.
+These expectations are well-defined because the dual variables are bounded and E0[ ewt(XN)] = 1.
+The pointwise bound in equation 8 also applies to the calibration problem over Gt. Multiplying it by
+ewt(XN) ≥0 and taking expectations gives
+E0 [ ewt(XN)1{r(XN) /∈It(XN)}]
+≤E0 [ ewt(XN)(ηN + α)] = α.
+(9)
+Changing measure for the last observation only, the left-hand side of equation 9 is exactly the mis-
+coverage probability when the calibration pairs are independent draws from P0 and the independent
+fresh pair has law ePt. Thus, the prediction interval has miscoverage at most α under this auxiliary
+target law. The fitted score, estimated ratio, calibration space, and interval-construction rule remain
+unchanged in this comparison.
+It remains to replace ePt by the actual target distribution Pt. The covariate-shift assumption in equa-
+tion 4 implies
+dPt
+dP0
+(x, u) = wt(x).
+Since both target laws preserve the conditional reward law of P0, their total variation distance is
+dTV
+ Pt, ePt
+
+= 1
+2EPX
+0 [|wt(X) −ewt(X)|]
+= ϵt,
+where the last equality follows from equation 6.
+The calibration sample has the same independent law under both target distributions. Therefore,
+dTV
+
+P⊗ncal
+0
+⊗Pt, P⊗ncal
+0
+⊗ePt
+
+= dTV
+ Pt, ePt
+
+= ϵt.
+Applying the defining total-variation bound to the miscoverage event shows that replacing the
+auxiliary target law by Pt increases its probability by at most ϵt. Combining this with equation 9
+yields
+P
+ r(X′) /∈It(X′)
+
+≤α + ϵt,
+or equivalently,
+P
+ r(X′) ∈It(X′)
+
+≥1 −α −ϵt.
+This is the conditional guarantee stated in the theorem.
+16
+
+
+Preprint.
+When the stated conditional assumptions hold almost surely, averaging over all quantities conditioned
+on above gives the unconditional bound
+P
+ r(X′) ∈It(X′)
+
+≥1 −α −E[ϵt].
+Finally, if wt ∈Gt, the weighted argument can be applied directly with wt in place of ewt. Indeed, wt
+is nonnegative and EPX
+0 [wt(X)] = 1, while dual feasibility gives PN
+i=1 wt(Xi)ηi = 0. Changing
+measure then leads directly to the actual target law Pt, so no total-variation comparison is needed.
+The resulting coverage is at least 1 −α. In particular, this applies when bwt = wt, in which case
+ϵt = 0.
+For completeness, the false-positive implication follows directly from the output rule. Let At be
+the acceptance event defined in Section 4.1. On At, every reward value in It(X′) satisfies the
+task-specific constraints. If r(X′) also belongs to this interval, then X′ ∈Fr. Hence
+At ∩{X′ /∈Fr} ⊆{r(X′) /∈It(X′)}.
+Under the assumptions of Theorem 1, this gives P(At, X′ /∈Fr) ≤α. Under the conditioning and
+assumptions of Theorem 2, it gives
+P(At, X′ /∈Fr) ≤α + ϵt.
+These bounds concern the joint event that a fresh proposal is accepted and is a false positive. They do
+not assert the same bounds conditional on acceptance or simultaneously over the full search trajectory.
+17
+
+
+Preprint.
+Table 3: Notation used for proxy-reward-driven material evolution and conditional conformal infer-
+ence.
+Notation
+Description
+Material search and rewards
+X; X, x; X′
+Space of material candidates; a random candidate and its realization; a fresh
+candidate at the current iteration.
+ˆr(x); r(x)
+Computationally inexpensive proxy reward and expensive true reward of candidate
+x.
+Ht
+Archive after iteration t, containing candidates and their stored rewards. Algo-
+rithm 2 stores proxy rewards, while Algorithm 1 stores rewards evaluated conserva-
+tively over prediction intervals.
+πt(· | Ht); St
+Parent-selection policy applied to Ht and the resulting set of K parents used to
+guide the following iteration.
+Ct; Ot
+Candidate batch proposed at iteration t and cumulative output set through that
+iteration.
+Fˆr; Fr
+Sets of candidates satisfying the task-specific constraints according to the proxy
+reward and the true reward, respectively.
+M; K; T
+Number of fresh candidates evaluated per iteration, number of selected parents, and
+number of iterations.
+Conditional conformal inference
+D; n; ncal
+Labeled source dataset D = {(Xi, r(Xi))}n
+i=1, its size, and the number of calibra-
+tion pairs.
+Dfit; Dcal; Dsrc
+Mutually disjoint subsets used to fit the base quantile model, calibrate prediction
+intervals, and provide the source reference for density-ratio estimation.
+It(x)
+Prediction interval for r(x) constructed at iteration t. A candidate is returned only
+when its interval is nonempty, bounded, and satisfies the task-specific constraints
+throughout.
+α
+Nominal marginal miscoverage level for a fresh candidate, evaluated separately at
+each iteration.
+S(x, u); Si
+Fixed nonconformity score for a hypothetical reward u and calibration score Si =
+S(Xi, r(Xi)).
+G; Gt
+Base finite-dimensional calibration space containing the constant function and its
+iteration-specific extension Gt = G + span{ bwt}.
+s; bqs
+Imputed test score and fitted calibration function obtained from augmented quantile
+regression with that score.
+ℓα(a, b)
+Pinball loss for the (1 −α)-quantile, ℓα(a, b) = (1 −α)(b −a)+ + α(a −b)+.
+ηs(X′)
+Dual variable associated with the fresh candidate in the augmented calibration
+problem, taking values in [−α, 1 −α].
+bτt(x)
+Candidate-specific score cutoff obtained from the augmented dual boundary and
+inverted to construct It(x).
+Evolutionary covariate-shift correction
+P0; Pt
+Joint distributions of a candidate and its true reward in the source data and under
+the fixed generation configuration at iteration t, respectively.
+PX
+0 ; PX
+t
+Marginal distributions over material candidates under P0 and Pt.
+ϕ(x)
+Fixed material representation used in the calibration basis and density-ratio estima-
+tion.
+Bt
+Unlabeled probe batch generated under the current fixed configuration and used
+only for density-ratio estimation.
+wt(x); bwt(x)
+Oracle density ratio wt(x) =
+dPX
+t
+dPX
+0 (x) and its online estimate from Dsrc and Bt.
+W; W
+Density-ratio model class with values in [0, W] and the bounded-overlap constant
+satisfying wt(x) ≤W.
+ϵt
+Total variation distance between PX
+t and the candidate distribution induced by the
+normalized estimated ratio, as defined in equation 6.
+18

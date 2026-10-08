@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-07</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-08</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 14 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 9 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>5</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>5</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>4</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-07 11:48:39 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-08 12:15:47 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日14篇论文聚焦表格基础模型，重点深挖任务自适应与主动特征获取策略。</p>
-<p>最值得看的两项9分工作：TAFFY利用上下文多样性实现任务自适应，以及面向主动特征获取策略的系统评估。</p>
-<p>建议普通读者优先阅读这两篇高分论文，快速把握表格基础模型的调适与效率优化前沿方向。</p>
+<p>2026-10-08日报：9篇入榜、5篇精读4篇速读，两篇9分论文领跑“可靠自进化”与“免重训练不确定性估计”。</p>
+<p>最值得看：用不完美代理奖励做可靠自进化，以及机器学习多群截面无需重训练的不确定性估计；速读可顺带关注LLM忠实因子解释、交互感知电路发现与表格基础模型的隐私分类。</p>
+<p>普通读者建议先读两篇9分精读，抓住“可靠性/不确定性”主线，再按兴趣扫速读。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">9 篇</strong>
+    <strong class="dpr-home-dashboard-count">5 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Evaluation of Active Feature Acquisition Policies with Tabular Foundation Models">Evaluation of Active Feature Acquisition Policies with Tabular Foundation Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="TAFFY: A Task-Adaptive Tabular Foundation Model with In-Context Diversity">TAFFY: A Task-Adaptive Tabular Foundation Model with In-Context Diversity</span></li><li><span class="dpr-home-dashboard-paper-title" title="Valid for Free: Homophily-Gated Conformal Prediction for Training-Free Node Classification with Tabular Foundation Models">Valid for Free: Homophily-Gated Conformal Prediction for Training-Free Node Classification with Tabular Foundation Models</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Reliable Self-Evolution with Imperfect Proxy Rewards">Reliable Self-Evolution with Imperfect Proxy Rewards</span></li><li><span class="dpr-home-dashboard-paper-title" title="Reliable Uncertainty Estimation for Machine-Learned Multigroup Cross Sections Without Retraining">Reliable Uncertainty Estimation for Machine-Learned Multigroup Cross Sections Without Retraining</span></li><li><span class="dpr-home-dashboard-paper-title" title="Symmetry-Informed Causal Partial Identification">Symmetry-Informed Causal Partial Identification</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>5</strong></span><span class="dpr-home-dashboard-tag">cp <strong>3</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">5 篇</strong>
+    <strong class="dpr-home-dashboard-count">4 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Reliable Self-Evolution with Imperfect Proxy Rewards">Reliable Self-Evolution with Imperfect Proxy Rewards</span></li><li><span class="dpr-home-dashboard-paper-title" title="What Should We Measure Next? Finding Identification Strategies by Refining Mechanisms">What Should We Measure Next? Finding Identification Strategies by Refining Mechanisms</span></li><li><span class="dpr-home-dashboard-paper-title" title="The Standardization Trap: Certifying Joint Label Processing in Tabular Foundation Models">The Standardization Trap: Certifying Joint Label Processing in Tabular Foundation Models</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="How the Audit Rule Shapes Faithful Factor Explanations in LLMs">How the Audit Rule Shapes Faithful Factor Explanations in LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Slaying the Hydra: Interaction-Aware Circuit Discovery in Language Models">Slaying the Hydra: Interaction-Aware Circuit Discovery in Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Efficient Provably Private Classification with a Tabular Foundation Model">Efficient Provably Private Classification with a Tabular Foundation Model</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 </div>
 
