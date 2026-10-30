@@ -1,0 +1,2476 @@
+Recall or Relearn? A Mixture of In-Context Experts for Recurring
+Concept Drift
+Zhangkai Wu
+University of Sydney
+Sydney, Australia
+zhangkai.wu@sydney.edu.au
+Xu Zhang
+Macquarie University
+Sydney, Australia
+xu.zhang12@hdr.mq.edu.au
+Zhihong Cui
+Department of Informatics
+University of Oslo
+Oslo, Norway
+zhihongc@ifi.uio.no
+Yiqi Wang
+University of Southern Queensland
+Toowoomba, Australia
+Yiqi.Wang@unisq.edu.au
+Yi Zhang
+University of Technology Sydney
+Sydney, Australia
+Yi.Zhang@uts.edu.au
+ABSTRACT
+Tabular foundation models (TFMs) are being applied to Web data
+streams such as network intrusion detection, where they adapt
+by updating the labelled rows of their context without retraining.
+When a past concept returns after leaving the context, a TFM faces
+a recall-or-relearn decision between restoring stored rows of the con-
+cept and relearning it from new labels. We propose MICE (Mixture
+of In-Context Experts), a training-free learner that cuts the stream
+into segments at detected changes. It merges a closed segment into
+a stored context when the TFM’s estimated additional error on the
+segment is within a tolerance, under a capacity limit on stored con-
+texts. A fast level weights the stored contexts and first-in-first-out
+(FIFO) windows by the log-loss of their predictions on the last la-
+belled batch. We show that, with pure stored contexts and a margin
+condition, this fast level gains over relearning, in expected accuracy,
+the normalised positive area between the stored context’s accuracy
+and the TFM’s learning curve, up to a first-batch term. A slow level
+mixes the fast level’s prediction with that of the FIFO window of
+the last labelled rows and bounds the discounted half-Brier regret
+of MICE against this window at every time. Learning curves mea-
+sured beforehand predict the ordering of the observed recall gains.
+MICE outperforms reset, which empties the context at detected
+drifts, on grid streams with random boundary phases. Merging
+keeps fewer experts than pools that store every segment, and with
+fixed segmentation a time-matched snapshot pool matches MICE
+on the shifted grid. On real streams, MICE has the highest mean
+accuracy of all policies we compare.
+KEYWORDS
+web mining, concept drift, recurring concepts, tabular foundation
+models, in-context learning, data streams, online learning, mixture
+of experts
+1
+INTRODUCTION
+Web classification tasks such as fake news detection [42], time-
+series anomaly detection [40] and network intrusion detection
+receive their data as streams. Tabular foundation models (TFMs)
+have been applied to intrusion detection [13] and are being ex-
+tended to data streams [27]. On a stream, a TFM such as TabPFN
+[19] adapts by updating the labelled rows of its context, without
+mail
+mail
+A
+A
+A
+B
+B
+B
+A
+C
+returns
+returns
+new
+new
+weeks
+weeks
+FIFO window
+FIFO window
+MICE
+MICE
+e-mail
+e-mail
+A
+Your parcel is held
+Your parcel is held
+ordinary week
+ordinary week
+A
+A
+spam
+spam
+spam
+spam
+A
+Your parcel is held
+Your parcel is held
+A returns (hard)
+A returns (hard)
+B
+B
+B
+ham
+ham
+A
+A
+A
+spam
+spam
+forgotten
+forgotten
+recalled
+recalled
+C
+Verify your login
+Verify your login
+C is new (easy)
+C is new (easy)
+B
+C
+C
+spam
+spam
+spam
+spam
+both learn fast
+both learn fast
+Figure 1: A frozen TFM filters spam from recent labelled mail,
+its context. Red flags mark detected changes. When campaign
+A returns, the FIFO window holds only B and predicts ham.
+MICE recalls A’s stored context and classifies A’s mail as spam.
+Here, recall avoids relearning the hard campaign A. Both
+methods learn the new, easy campaign C quickly. Schematic.
+retraining. A model may need new labels to rebuild a useful context
+when a returning pattern’s rows have been discarded. Recurring
+concepts therefore pose a recall-or-relearn decision: whether
+to restore stored rows or rebuild the context from arriving labels.
+Fig. 1 illustrates the decision with a returning spam campaign. Each
+batch is predicted before its labels arrive one batch later, and neither
+concept identities nor change points are observed.
+The first-in-first-out (FIFO) window follows recent data but dis-
+cards the rows of past concepts, the contextual knowledge loss of
+Fig. 2a. Keeping old rows alone does not repair this loss, because
+a context that straddles an unknown boundary mixes conflicting
+rules and causes the conceptual interference of Fig. 2b. A pure
+stored context can recover the predictions of a returning concept at
+once, and its benefit depends on how quickly the TFM could learn
+the concept again. In our controlled tests, some concepts need 50
+rows and others more than 1000. For the former, one new batch
+can make the stored context redundant. For the latter, recall can
+avoid a long recovery, as the learning curves in Fig. 2c illustrate.
+This difference makes the right answer to the recall-or-relearn
+decision differ from concept to concept.
+1
+arXiv:2610.36585v1  [cs.LG]  27 Oct 2026
+
+
+Wu et al.
+(a) contextual knowledge loss
+(a) contextual knowledge loss
+A
+A
+A
+B
+B
+B
+A
+time
+time
+t₁
+t₁
+t₂
+t₂
+t₃
+t₃
+xL
+xL
+frozen TFM
+frozen TFM
+labels
+A as B
+labels
+A as B
+A
+batch
+batch
+row of A
+row of A
+row of B
+row of B
+dropped
+dropped
+(b) conceptual interference
+(b) conceptual interference
+A
+A
+A
+B
+B
+B
+?
+same x:  A → 
+same x:  A → 
+B → 
+B → 
+pure
+pure
+xL
+xL
+mixed: conflict
+mixed: conflict
+xL
+xL
+(c) what recall is worth
+(c) what recall is worth
+easy
+easy
+hard
+hard
+recalled
+recalled
+area =
+gain of
+recall
+area =
+gain of
+recall
+rows
+rows
+Figure 2: Three aspects of the recall-or-relearn decision. A and B are two concepts of one stream. (a) When A returns, the FIFO
+window has discarded A’s rows and the TFM predicts A’s batch with B’s rule. (b) A context that straddles an unknown boundary
+mixes conflicting rules. (c) What recall is worth: the TFM relearns the easy concept from a few rows but the hard one only from
+many, and the red rows mark the relearning that recall avoids. Schematic. Sec. 3 measures each aspect. Under the purity and
+margin conditions of Thm. 4.1, the fast level’s expected accuracy gain over relearning equals the normalised positive area in (c),
+up to a first-batch term.
+Existing stream policies either keep rows without grouping them
+by concept or reuse trained models. FIFO windows already make
+TFMs competitive with adaptive tree ensembles [27], and a prior
+trained on drifting causal models improves temporal extrapolation
+[18]. Reset, which empties the context when the drift detection
+method (DDM) fires [11], discards outdated rows but rebuilds the
+context even when a concept has appeared before. The large tabular
+model (LTM) baseline of Lourenço et al. [27] pairs a short-term FIFO
+buffer with a class-balanced long-term memory, without grouping
+rows by concept. Recurring-concept learners instead reuse trained
+models [9, 10, 16, 24]. For a frozen TFM, a stored context can serve
+as an expert directly. The challenge is to construct useful contexts
+from an unsegmented stream and decide when their predictions
+deserve more weight than those of recent data.
+Consider a fast level that weights stored contexts and recent
+windows by their loss on the last labelled batch. Under pure-context
+and margin conditions, its expected accuracy gain over a learner
+that resets at concept boundaries equals the area between stored-
+context accuracy and the relearning curve, up to a first-batch term.
+The area is large when relearning is slow and vanishes when one
+batch already reaches stored-context accuracy. Learning curves
+measured beforehand therefore predict which concepts offer the
+most benefit from recall. The online method needs no learning curve
+at run time, because it selects contexts from their observed losses.
+MICE (Mixture of In-Context Experts) maintains stored con-
+texts alongside FIFO windows and combines their predictions using
+exponential weights [25]. Memory construction closes segments at
+detected changes and merges them when their recall regret, the
+extra 0-1 error that the TFM makes on a segment when conditioned
+on a stored context instead of on the segment itself, is small. This
+preserves reusable concepts while limiting the pool. Fast selection
+weights the experts by the log-loss of their predictions on the last
+labelled batch. When one expert leads every labelled batch of a
+single-concept block by a log-loss margin, the regret of the fast
+level over the block is at most one batch of clipped loss plus a term
+exponentially small in the margin. Slow aggregation mixes the fast
+level’s prediction with the prediction of FIFO, weighted by their
+discounted half-Brier losses. It keeps discounted half-Brier regret
+against FIFO within 2 ln 2 at every time, for any sequence of la-
+bels and expert predictions, which provides a loss guarantee when
+following the pool does not yield a clear advantage.
+We summarise our contributions as follows.
+• We formulate the recall-or-relearn decision for TFMs on streams
+with recurring concepts and measure its three aspects with a
+context stress test.
+• We prove that, under pure-context and margin conditions, the
+expected accuracy gain of the fast level over relearning is a
+normalised learning-curve area up to a first-batch term, which
+lets learning curves measured before deployment predict where
+recall pays.
+• We propose MICE, a training-free mixture of in-context experts
+whose fast level selects stored contexts from recent losses and
+whose slow level keeps discounted half-Brier regret against FIFO
+at most 2 ln 2 at every time.
+• We show that, with detected segmentation, MICE is above reset
+on 70 of 72 grid streams with random boundary phases. On 29 real
+streams, where concepts are unobserved and experts often have
+similar losses, it has the highest mean accuracy of all policies
+and is above FIFO on 24.
+2
+RELATED WORK
+Recurring-concept methods reuse trained models, whose knowl-
+edge of past concepts lives in weights that cost training to obtain.
+Drift detection and adaptation are surveyed by Gama et al. [12]
+and Lu et al. [28], and Cabrera Martin et al. [7] treat drift, forget-
+ting and adaptation together. Gonçalves and de Barros [16] select a
+stored model by statistical tests. Gama and Kosina [10] learn a meta-
+model of each model’s domain. Weighted ensembles reweight their
+members as the stream changes [9, 24], and density-harmonized
+gradient descent learns imbalanced streams online from actively
+queried labels [20]. Dynamic TMoE adds and prunes trained ex-
+perts at detected regime shifts [46], and drift-aware collaborative
+assistance combines trained experts across heterogeneous streams
+[41]. Online learning with experts tracks the best expert through
+tracking and adaptive regret [17], whatever the experts are, and
+MICE uses this view for contexts.
+2
+
+
+Recall or Relearn?
+Prior-data fitted networks (PFNs) approximate posterior predic-
+tion from a labelled context [31, 32], and TabPFN [19], TabICL [35]
+and TabICLv2 [34] are TFMs of this kind with fixed weights. On
+streams, Drift-Resilient TabPFN [18] retrains the prior to extrapo-
+late temporal trends. The LTM baseline of Lourenço et al. [27], a
+TFM with a short-term FIFO buffer and a class-balanced long-term
+memory, outperforms incremental ensembles. LTM does not re-
+call a returning concept as a whole, because its two buffers do
+not group rows by concept.
+Recalling a stored context for a new interval needs a criterion for
+whether one context can serve another concept. The H-divergence
+[3] and the discrepancy distance [29] measure how well a source
+serves a target through the hypotheses it induces. Decision-based
+divergences [44] define a distance between distributions by the
+decisions that their difference affects. These divergences do not
+say when recalling a stored context beats relearning from the rows
+of the current concept, because they compare distributions for a
+fixed hypothesis class. Our analysis uses learning curves to pre-
+dict when recall pays, and MICE estimates the cost of reuse from
+the TFM’s prediction errors.
+3
+SETTING AND THE VALUE OF CONTEXT
+MEMORY
+Our setting keeps the TFM frozen and lets a context policy choose
+its rows, on a stream whose batches of 𝐵rows are labelled one
+batch late. The TFM 𝑓Θ(· | x; C) predicts every batch from a con-
+text C of at most 𝑀labelled rows. The stream is a sequence of
+intervals 𝐼1, 𝐼2, . . . with distributions 𝑃1, 𝑃2, . . . over (x,𝑦). Concept
+drift occurs between intervals in the sense of Lu et al. [28].
+Definition 3.1 (Recurring in-context concept drift). Let C𝑘be a con-
+text of rows of interval 𝐼𝑘and 𝑓Θ(· ; C𝑘) the 𝑘-th in-context expert.
+The drift into interval 𝐼𝐾+1 is recurring if min𝑘≤𝐾D𝑇(𝑃𝐾+1 | 𝑃𝑘) ≤
+𝛿, where D𝑇(𝑄| 𝑃) is the population risk on 𝑄of the TFM condi-
+tioned on a context of 𝑃minus that conditioned on a context of 𝑄,
+the recall regret of Definition A.1, and new otherwise.
+The definition is model-oriented: a drift is recurring when
+some stored context serves the new interval with additional risk
+at most 𝛿relative to a context from that interval. Three poli-
+cies are the reference points of this paper. FIFO conditions the
+TFM on the first-in-first-out window of the last 𝑀labelled rows.
+Reset empties this window when DDM [11] fires. The window
+ensemble mixes FIFO windows of several lengths. None of them
+keeps a library of past concepts.
+The context stress test runs three tests with frozen TabPFN v2,
+which Fig. 3 shows and App. D specifies. The revisit test shows that
+FIFO forgets a returning concept. In the five batches after the return,
+FIFO reaches 0.17 to 0.51 accuracy on the Sine [11], STAGGER
+[36] and Agrawal [1] streams, whereas an oracle context of the
+concept’s past rows reaches at least 0.99. The splice test shows that
+mixing concepts in a stored context can remove its gain. Moving
+the boundaries of eight grid streams 200 rows into fixed 500-row
+segments lowers the gain of stored contexts over reset from +3.09 to
+−3.67 points, and realigning the segments on the same rows returns
+it to +3.01. The curve test shows that relearning speed differs across
+concepts. Concepts with 5 centroids are learned from 50 rows,
+concepts with 100 centroids need more than 1000, and concepts
+of the standard generators about 200. Because 200 rows are two
+batches, resetting the context at a detected drift already recovers in
+the revisit test. FIFO’s failure on recurrence therefore establishes
+forgetting, whereas the learning curve determines whether stored
+memory adds value beyond reset.
+4
+METHOD: A MIXTURE OF IN-CONTEXT
+EXPERTS
+MICE uses contexts as experts of one frozen TFM. A fast level
+weights stored contexts and FIFO windows by the log-loss of their
+predictions on the last labelled batch. A slow level mixes the fast
+level’s prediction with that of FIFO and bounds the cost of follow-
+ing the fast level. Sec. 4.1 quantifies the gain of a stored context.
+Segmentation and merging construct reusable contexts that hold
+mostly one concept. Fig. 4 gives the overview, Alg. 1 in App. B the
+per-batch procedure, and Tab. 2 the notation. Formal statements
+are in App. A and proofs in App. F.
+4.1
+Learning Curves Predict When Recall Pays
+Let concepts recur in blocks of 𝐿rows, 𝐽= 𝐿/𝐵batches, and let
+𝑎𝑘(𝑛) be the accuracy learning curve of concept 𝑘, non-decreasing
+in 𝑛. On the 𝑐-th visit of concept 𝑘its stored expert holds 𝑛𝑐=
+min(𝑀, (𝑐−1)𝐿) rows. The relearning learner resets its context
+at the block boundary. The fast level weights the stored experts
+and FIFO windows by the log-loss of their predictions on the last
+labelled batch, as specified in Sec. 4.3. Here 𝐾is the number of
+candidate experts, 𝜂is the exponential-weight parameter, and 𝑔
+is the log-loss margin of the leading expert over every other ex-
+pert, as defined in Asm. 3.
+Theorem 4.1 (Recall versus relearn). Let the stored context
+of concept 𝑘hold rows of 𝑘only, and on every labelled batch of the
+block let the expert with the larger learning-curve value, the stored
+expert if 𝑎𝑘(𝑛𝑐) ≥𝑎𝑘(min(𝑗𝐵, 𝑀)) and the window otherwise, lead
+by a margin 𝑔with (𝐾−1)𝑒−𝜂𝑔below the gap between its two largest
+predicted class probabilities on every evaluated row. On the 𝑐-th visit
+of concept 𝑘, the expected accuracy of the fast level minus that of
+relearning, averaged over the block, is
+Δ𝑘,𝑐(𝐿) = 1
+𝐽
+𝐽−1
+∑︁
+𝑗=1
+h
+𝑎𝑘(𝑛𝑐) −𝑎𝑘
+ min(𝑗𝐵, 𝑀)i
++ + 𝜁𝑘,𝑐,
+(1)
+where 𝜁𝑘,𝑐, the difference on the first batch of the block divided by 𝐽,
+satisfies |𝜁𝑘,𝑐| ≤1/𝐽. We call the sum the area term.
+The area term is the area by which the learning curve lies be-
+low the accuracy of the stored expert. It is zero on the first visit
+and whenever the curve is flat, and at most 𝑀
+𝐿
+ 𝑎𝑘(𝑀) −𝑎𝑘(𝐵) in
+general, as Cor. A.7 states. Thus slow relearning creates more room
+for recall, while long blocks dilute its average gain. The identity
+covers the fast level with pure contexts under the stated margins.
+For the full method, whose detected segments can contain mixed
+concepts and whose predictions include the slow level, the area
+term supplies an empirical prediction tested in Sec. 5.2.
+4.2
+Constructing Reusable Contexts
+To recover the gain in Eq. (1), a stored expert must retain rows
+that predict the returning concept well.
+3
+
+
+Wu et al.
+0
+50
+100
+Accuracy (%)
+Sine
+STAGGER
+Agrawal
+reset
+5 batches after recurrence
+FIFO
+oracle ≥99
+aligned
+shifted
+realigned
+−10
+0
+10
+Gain over reset (points)
+all batches
+first 5
+50
+200
+500
+2000
+Context rows
+40
+70
+100
+Accuracy (%)
+5
+30
+100 centroids
+Figure 3: Context stress test. (1) Accuracy in the first five batches after a recurrence: FIFO (gray bars) and the oracle-context
+lower bound of 99% (blue bars), with the reset range of 81–88% shaded. (2) Gain of stored contexts over reset with aligned,
+shifted and realigned segments, over all batches (blue) and the first five batches after a recurrence (dashed orange), with single
+streams as pale traces. (3) Learning curves of concepts with 5, 30 and 100 centroids.
+MICE
+MICE
+1 memory
+memory
+aim: one concept
+aim: one concept
+e.g. A recurs:
+e.g. A recurs: A segment joins card A
+segment joins card A
+2 fast level
+fast level
+gain = area + ζ
+gain = area + ζ
+e.g. A recurs:
+e.g. A recurs: A card A takes weight
+card A takes weight
+3 slow level
+slow level
+any-time safeguard
+any-time safeguard
+e.g. A recurs:
+e.g. A recurs: A mix shifts to fast
+mix shifts to fast
+stream
+stream
+A
+A
+B
+B
+A
+segment
+segment
+A
+A
+A
+B
+B
+lowest recall regret
+lowest recall regret
+cut at flag
+cut at flag
+A
+A
+A
+A
+pure card
+pure card
+A
+A
+B
+B
+mixed card
+mixed card
+merge only within tolerance
+merge only within tolerance
+A
+A
+A
+B
+B
+B
+A
+B
+B
+A
+one frozen TFM
+one frozen TFM
+log-loss weights
+log-loss weights
+batch j
+batch j
+stored
+stored
+relearning
+relearning
+area
+area
+ζ: first batch
+ζ: first batch
+B
+B
+A
+FIFO
+FIFO
+Σ
+fast level
+fast level
+half-Brier mix
+half-Brier mix
+prediction
+prediction
+discounted half-Brier mix
+discounted half-Brier mix
+≤ 2 ln 2
+≤ 2 ln 2
+2 ln 2
+2 ln 2
+every time T
+every time T
+discounted regret
+discounted regret
+vs FIFO
+vs FIFO
+Figure 4: Overview of MICE (schematic, bottom row illustrative). (1) Segments cut at detected changes join the stored context of
+lowest estimated recall regret within a tolerance. (2) The fast level weights stored-context and FIFO predictions from one frozen
+TFM by their log-loss on the last labelled batch. Under pure contexts and the margins of Thm. 4.1, its expected accuracy gain
+over relearning equals the area term plus the first-batch term 𝜁. (3) The slow level mixes the fast-level and FIFO predictions. Its
+discounted half-Brier regret against FIFO is at most 2 ln 2 at every time.
+MICE segments the stream at detected changes to keep stored
+contexts pure, because purity governs recall under the assump-
+tions of Prop. A.2. Under the posterior-predictive limit of Asm. 1,
+Prop. A.2 shows that a stored context of two deterministic con-
+cepts with a shared input distribution recalls the concept that
+holds the majority of its rows. MICE locates candidate changes
+using a two-sample test on the 300-row window’s error rate. Let
+𝑧𝑡be the number of errors that the window of the last 300 rows
+makes on batch 𝑡, scored when its labels arrive. For every candi-
+date change 𝑏∈{𝑡−𝐻cp, . . . ,𝑡−1}, the test compares the error
+rate on the batches 𝑏, . . . ,𝑡−1 (𝑛2 rows) with that on up to 𝑅cp
+batches before 𝑏(𝑛1 rows, at least two batches, none before the
+previous declared change), and declares a change at the candi-
+date with the largest excess
+1
+𝑛2
+𝑡−1
+∑︁
+𝑠=𝑏
+𝑧𝑠−1
+𝑛1
+𝑏−1
+∑︁
+𝑠=𝑏−𝑅cp
+𝑧𝑠−𝜏(𝑛1,𝑛2),
+𝜏=
+√︃
+1
+2
+  1
+𝑛1 + 1
+𝑛2
+ ln 1
+𝛿cp ,
+(2)
+if that excess is positive, with 𝐻cp = 3, 𝑅cp = 5 and 𝛿cp = 10−3.
+When the test declares a change at 𝑏, the open segment ends be-
+fore batch 𝑏and closes if it holds at least 300 rows. A shorter
+segment stays in the windows only. The batches from 𝑏on start
+the next segment. Without a declared change, a segment closes
+after 500 rows once three further batches are labelled, and these
+three batches start the next segment. A change can be declared
+before this closure, which gives segments of 300 to 700 rows. Fixed
+segmentation, a variant used in several experiments, closes a seg-
+ment every 500 rows instead.
+MICE merges a segment into a stored context when the TFM’s es-
+timated additional error on the segment is within a tolerance, which
+compares contexts through the TFM’s own predictions. A closed
+segment 𝑆joins the stored expert C𝑘that minimises the recall regret
+bD𝑇(𝑆| C𝑘) = ˆ𝜖𝑆(C𝑘) −ˆ𝜖𝑆(𝑆),
+(3)
+the 0-1 risk on 𝑆of the TFM conditioned on C𝑘minus that condi-
+tioned on 𝑆itself, if this is at most 𝛿= 0.02. Otherwise 𝑆founds
+4
+
+
+Recall or Relearn?
+a new stored expert. ˆ𝜖𝑆(𝑆) is cross-fitted in two folds because an
+in-context learner memorises its context. Eq. (3) is the finite-context
+estimate of the recall regret of Definition A.1. In the population limit
+of Asm. 1, for two deterministic concepts with a shared input distri-
+bution, this cost is their disagreement mass under the 0-1 loss, which
+is Prop. A.2 with 𝜋= 0. Concepts that conflict on more than a share
+𝛿of the inputs are therefore not merged. A stored expert keeps its
+last 𝑀rows, and the pool holds at most 12 (least recently used out).
+4.3
+Selecting Contexts from Recent Feedback
+Because a cumulative loss still carries the previous concept after
+a recurrence, the fast level weights the experts by their log-loss
+on the last labelled batch only. The experts are the FIFO windows
+of the last 100, 300 and 𝑀labelled rows and the stored experts of
+the pool, and the fast level weights the 𝐾experts by
+𝑤𝑘∝exp(−𝜂ℓ𝑘),
+𝜂= 10,
+(4)
+where ℓ𝑘is the mean log-loss of the predictions of expert 𝑘on the
+last labelled batch. In other words, a stored expert that leads the last
+labelled batch by a clear log-loss margin takes most of the weight
+one batch after its concept returns. If one expert leads the last la-
+belled batch by a margin𝑔in log-loss as in Asm. 3, it holds weight at
+least 1/(1+ (𝐾−1)𝑒−𝜂𝑔), and the mixture predicts its class on every
+row where its top two probabilities differ by more than (𝐾−1)𝑒−𝜂𝑔,
+as Lem. A.5 shows. Over a block of one concept on which the mar-
+gin holds at every batch, with log-losses clipped at 𝑐, the regret of
+the fast level is at most 𝑐for the first batch, because labels arrive one
+batch late, plus a term exponentially small in 𝑔, as Prop. A.6 states.
+4.4
+Bounding the Loss of Following Memory
+When the experts have similar losses, the fast level can change
+its weights in response to small batch-to-batch fluctuations. The
+slow level uses a discounted loss history to control the cost of
+following the fast level. MICE mixes two experts, FIFO (𝑘= 0) and
+the fast level (4) (𝑘= 1), with predictions 𝑝𝑡,0 and 𝑝𝑡,1 on batch
+𝑡. With ℓ𝑡,𝑘∈[0, 1] the mean half Brier score 1
+2 ∥𝑝−𝑒𝑦∥2
+2 of the
+predictions of expert 𝑘on batch 𝑡,
+𝐿𝑡,𝑘= 𝛾𝐿𝑡−1,𝑘+ ℓ𝑡,𝑘,
+𝐿0,𝑘= 0,
+(5)
+𝑣𝑡,𝑘∝exp −𝜂2 𝛾𝐿𝑡−1,𝑘
+,
+(6)
+𝑝𝑡= 𝑣𝑡,0 𝑝𝑡,0 + 𝑣𝑡,1 𝑝𝑡,1,
+(7)
+with𝛾= 0.9 and 𝜂2 = 1
+2. Because the discount spans about 1/(1−𝛾)
+batches, the slow level moderates the influence of the fast predic-
+tions when batch-to-batch losses fluctuate.
+Theorem 4.2 (Any-time safeguard). Let 𝐾experts be combined
+by (5)–(7), with ℓthe half Brier score and a step 𝜂2 ≤1
+2. For every
+sequence of labels and expert predictions, every time 𝑇and every
+expert 𝑘,
+𝑇
+∑︁
+𝑡=1
+𝛾𝑇−𝑡 ℓ𝑡(𝑝𝑡) −ℓ𝑡,𝑘
+ ≤ln𝐾
+𝜂2
+.
+(8)
+With 𝐾= 2, the discounted regret of MICE against FIFO, and
+against the fast level, is at most 2 ln 2 ≈1.39 at every time, over a
+discounted horizon of 1/(1 −𝛾) = 10 batches, with no assumption
+on the stream. The bound covers the method as run, not the variant
+with the log-loss or the variant with 𝜂2 = 10 in Tab. 1.
+4.5
+Timing and Cost
+When the labels of the previous batch arrive, every loss scores a
+prediction issued before they arrived, and the contexts are updated
+only afterwards. No expert is therefore scored on rows it already
+holds, and the slow level is scored on the predictions actually is-
+sued. At most one segment closes per batch, and App. B gives the
+initialisation. The cost is one TFM call per expert and batch, at
+most 15. Closing a segment adds two cross-fitted calls and one call
+per stored expert, at most 14 calls, which brings a closing batch
+to at most 29 calls. The change test reuses the predictions of the
+300-row window and makes no call.
+In summary, stored contexts provide the gain of recall, and the
+slow level bounds what following them can cost.
+5
+EXPERIMENTS
+The evaluation follows the gain predicted by Eq. (1) from ideal
+contexts to online use. RQ1: does the area identity describe re-
+call gains under its assumptions, and predict their ordering for
+the full method? RQ2: can detected segmentation recover gains
+when boundaries are unknown? RQ3: how does slow aggrega-
+tion affect prediction loss and accuracy on real streams? RQ4:
+which gains come from the pool and its organisation, and what
+resources do they require?
+5.1
+Experimental Setup
+Every policy is evaluated prequentially, predicting each batch of
+𝐵= 100 rows before its labels arrive one batch later. Each TFM
+expert conditions on at most 𝑀= 1000 context rows and the
+pool holds at most 12 stored contexts. The backbone is TabPFN v2
+with four ensemble members [19], and FIFO windows exceed 1000
+rows only in the larger-window comparison of Sec. 5.5. GPU ex-
+periments run on eight NVIDIA A800 GPUs, while the trained
+stream learners run on CPUs.
+The streams range from a controlled grid with known concepts
+and measured learning curves to real streams, where both are unob-
+served. The grid mixes Gaussian centroids in ten dimensions with
+four classes, using centroid counts from {5, 30, 100}. Each of the
+three concepts assigns its own class to every centroid, keeping 𝑃𝑋
+fixed while creating conflicts wherever classes differ. Grid streams
+have blocks of 500 or 2000 rows and three cycles, as App. G details.
+Thirty streams come from six standard generators with recurring
+concepts in River [30]1: SEA [39], STAGGER [36], Agrawal [1], Sine
+[11], RBF [6] and Hyperplane [22]. Generator streams have blocks
+of 2000 rows and three cycles over three or four concepts. Twenty-
+nine real streams come from 13 sources, the long ones in segments
+of 100,000 rows. They are Electricity from River, seven INSECTS
+streams [38]2, Forest CoverType3, and PokerHand, Airlines, Rialto
+[26], NOAA Weather [9], Spam [23] and Phishing from a public col-
+lection of drift data sets4, which contributes its remaining streams
+with at least 5000 rows and at most ten classes. Six later segments
+of Airlines, CoverType and PokerHand serve as confirmation seg-
+ments, and the earlier real-stream sets served as development data,
+1https://riverml.xyz
+2https://sites.google.com/view/uspdsrepository
+3https://archive.ics.uci.edu/dataset/31/covertype
+4https://github.com/ogozuacik/concept-drift-datasets-scikit-multiflow
+5
+
+
+Wu et al.
+as App. C details. Nine independent confirmation segments come
+from two further sources, Bitcoin Heist ransomware transactions
+[2]5 and CIC-IDS2017 network intrusions [37]6.
+The baselines cover the two ways of following drift, adapting the
+context of a TFM and training a model on the stream. The in-context
+baselines are FIFO, LTM [27], reset [11] and the window ensemble
+of the three FIFO windows of MICE without the pool. Trained
+stream learners are Adaptive Random Forest (ARF) [14], Streaming
+Random Patches (SRP) [15], Hoeffding Adaptive Tree (HAT) [4],
+Leveraging Bagging [5], ADWIN Bagging [6] and Learn++.NSE
+[9]. The incremental learners use the default settings of river
+[30] with ten base models and the same batch protocol. Online
+forecasters FSNet [33], OneNet [43], ShifTS [45] and ADAPT-Z
+[21] get a softmax head and are tuned on the five development
+streams. Drift-Resilient TabPFN [18] runs without tuning.
+Four metrics complement accuracy by weighting classes equally
+and by scoring the predicted probabilities. F1 is the macro-F1 over
+the classes that occur in a stream. AUC, the area under the receiver
+operating characteristic curve, is computed one-vs-rest from each
+policy’s predicted class probabilities and averaged over these classes.
+The expected calibration error (ECE) bins the predictor’s largest
+class probability into 15 equal bins. Brier is the half Brier score
+1
+2 ∥𝑝−𝑒𝑦∥2
+2 averaged over rows. All four are reported in percent.
+Unless a result names fixed segmentation, MICE segments at
+detected changes, which improves on fixed segmentation by +0.04
+points on the aligned grid and +0.01 on the real streams. The gen-
+erator streams, the confirmation segments, the ablations and the
+timings use fixed segmentation, and each comparison below names
+its variant. App. C records how the development and confirma-
+tion streams were separated and every registered hypothesis with
+its outcome. Tab. 1 reports both the slow step 𝜂2 = 1
+2 covered
+by Thm. 4.2 and the step of 10.
+5.2
+RQ1: Learning Curves Predict Recall Gains
+The oracle-boundary test checks the identity of Thm. 4.1 with
+known boundaries, the relearning learner and the stored expert of
+the theorem, which holds the visit-specific 𝑛𝑐rows. Its observed
+quantity is the measured area term 𝐽−1 Í𝐽
+𝑗=2(acc𝑋,𝑗−acc𝑅,𝑗),
+where acc𝑋,𝑗and acc𝑅,𝑗are the accuracies of the fast level and
+of relearning on batch 𝑗of the block. The first batch enters only
+𝜁𝑘,𝑐= (acc𝑋,1 −acc𝑅,1)/𝐽. Its predicted quantity is the area term
+computed from learning curves with the same 𝑛𝑐. On seeds 40
+and 41 the two lie within 0.7 points of each other in every cell,
+with a mean absolute difference of 0.37 points and Spearman
+correlation 1.0, as Fig. 5b shows. The mixture assigns more than
+half of its weight to the more accurate expert on every batch
+where the two differ by more than 10 points.
+Beyond the ideal setting, learning curves measured before the
+grid streams were run also rank the observed recall gains, as App. G
+describes. These registered predictions insert the curves into the
+area term with the full stored context of 𝑀rows on every recurrence.
+Their observed counterpart is the gain over reset of a complete
+policy with fixed segmentation. On seeds 10 and 11, whose concepts
+supplied the curves, MICE w/o slow level exceeds reset on all eight
+5https://archive.ics.uci.edu/dataset/526
+6https://www.unb.ca/cic/datasets/ids-2017.html
+0
+5
+10
+predicted gain (points)
+0
+2
+4
+6
+8
+10
+observed gain over reset
+(a) deployed
+5/500
+5/2000
+30/500
+30/2000
+100/500
+100/2000
+MICE w/o slow level, s. 10–11, ρ = 0.94
+MICE, s. 20–21, ρ = 0.83
+0
+5
+10
+predicted area term
+0
+2
+4
+6
+8
+10
+measured area term
+(b) oracle boundaries
+5/500
+5/2000
+30/500
+30/2000
+100/500
+100/2000
+measured, s. 40–41
+best expert, s. 40–41
+measured, s. 20–21
+Figure 5: Learning curves predict the gain of recall, per grid
+cell (centroids/block length). Dashed lines mark equality. (a)
+With fixed segments, observed gain over reset of MICE w/o
+slow level (seeds 10, 11) and of MICE (seeds 20, 21) against the
+prediction from learning curves measured beforehand. (b)
+With oracle boundaries, the measured area term of Thm. 4.1
+(seeds 40, 41 and 20, 21) and the best expert per batch against
+the predicted area.
+streams with 30 or 100 centroids, more for shorter blocks and harder
+concepts. Predicted and observed gains have Spearman correlation
+0.94 across the six cells (10.4 against 8.6 points in the hardest cell).
+For the full method on fresh seeds 20 and 21 the correlation is
+0.83, as Fig. 5a shows. With the visit-specific 𝑛𝑐in place of 𝑀, the
+predictions change only for 𝐿= 500 (100 centroids: 9.2 instead of
+10.4), and the rank correlations stay unchanged.
+Stored contexts add more accuracy on slowly learned concepts,
+because they replace a longer period of relearning. With fixed
+segments, MICE exceeds reset and the window ensemble on all
+eight streams with 30 or 100 centroids. Averaged over the twelve
+streams of seeds 20 and 21 it reaches 86.5 against 84.3 for reset, 81.8
+for the window ensemble and 62.4 for FIFO, up to 8.5 points over
+reset in the hardest cell. On seeds 10 and 11 the trained learners
+ARF and SRP reach 68.0 and 69.7, against 83.9 for reset and 86.2
+for MICE with fixed segments. On the six standard generators,
+whose learning curves are flat after about 200 rows, the predicted
+gain is at most 0.4 points and the observed gain over reset is 0.1
+points with fixed segments (computed from unrounded means, 95.0
+against 94.8 after rounding): where relearning is cheap, memory
+has little to add, as Cor. A.7 predicts.
+5.3
+RQ2: Recovering Gains with Unknown
+Boundaries
+Detected segmentation preserves recall gains without knowing the
+boundary phase. On 72 new grid streams with random boundary
+offsets, MICE is above reset on 70, by +2.85 points on average:
++5.17 with 500-row blocks (95% interval [+4.59, +5.72]), +1.48 with
+2 000-row blocks and +1.91 with variable blocks, against +0.66,
++0.74 and +0.65 for fixed segmentation, as Fig. 6b shows. On 72
+grid confirmation streams from seeds 50 to 53, MICE is above reset
+on all 72, by +2.69 points. Detected segmentation recovers what
+fixed segmentation lost, +6.55 points on the shifted grid and +1.74
+6
+
+
+Recall or Relearn?
+Table 1: Main results (%, mean over streams). Worst Δ: lowest accuracy difference to FIFO over the real streams, in points. Indep.
+(9): the nine independent confirmation segments of Bitcoin Heist and CIC-IDS2017. The top three values per column are shaded.
+Real streams (29)
+Controlled grid (24)
+Gen. (30)
+Indep. (9)
+Policy
+Acc. ↑
+F1 ↑
+AUC ↑
+ECE ↓
+Brier ↓
+Worst Δ ↑
+Acc. ↑
+F1 ↑
+AUC ↑
+ECE ↓
+Brier ↓
+Acc. ↑
+Acc. ↑
+Trained stream learners
+ARF [14]
+73.4
+58.4
+85.4
+6.0
+18.7
+−37.5
+67.7
+65.6
+83.8
+11.2
+22.9
+88.0
+98.39
+SRP [15]
+76.6
+62.3
+87.5
+6.0
+16.7
+−19.8
+69.5
+68.1
+84.7
+8.8
+21.6
+86.4
+98.57
+HAT [4]
+64.3
+51.1
+79.1
+16.5
+27.4
+−49.6
+51.4
+49.4
+74.5
+13.3
+32.1
+79.2
+97.93
+Leveraging Bagging [5]
+72.4
+57.3
+85.9
+5.1
+19.1
+−34.6
+62.0
+60.6
+82.4
+7.2
+24.9
+85.9
+98.39
+ADWIN Bagging [6]
+65.1
+51.5
+81.4
+7.8
+24.0
+−50.1
+51.2
+49.2
+76.1
+9.4
+30.8
+77.0
+97.91
+Learn++.NSE [9]
+67.7
+51.2
+82.8
+8.5
+22.3
+−41.0
+61.6
+60.0
+81.2
+30.0
+33.6
+84.1
+94.86
+FSNet [33]
+77.3
+64.9
+88.1
+4.6
+15.6
+−26.7
+62.7
+61.3
+80.4
+8.4
+24.8
+87.5
+98.21
+OneNet [43]
+77.8
+65.1
+88.1
+4.2
+15.2
+−22.1
+62.4
+60.9
+80.1
+7.0
+24.6
+87.6
+97.19
+ShifTS [45]
+73.4
+59.9
+84.6
+3.5
+17.7
+−30.4
+51.1
+47.0
+71.7
+6.0
+29.3
+76.4
+97.72
+ADAPT-Z [21]
+65.6
+50.7
+80.1
+5.6
+22.3
+−52.3
+50.1
+46.2
+70.7
+6.0
+30.0
+78.1
+97.43
+In-context policies, frozen TabPFN
+FIFO
+83.3
+73.5
+89.9
+1.7
+11.6
+–
+61.9
+60.9
+83.7
+16.7
+25.1
+87.6
+98.57
+LTM [27]
+82.6
+72.1
+91.0
+1.5
+11.9
+−2.7
+62.2
+61.4
+84.8
+16.0
+24.5
+87.6
+98.21
+Reset [11]
+81.5
+71.3
+88.5
+2.6
+12.9
+−9.6
+84.1
+83.8
+91.4
+7.3
+13.1
+94.8
+98.49
+Window ensemble
+83.0
+73.0
+89.5
+1.2
+11.7
+−1.4
+81.6
+81.0
+90.8
+8.7
+14.9
+94.6
+98.44
+Drift-Resilient TabPFN [18]
+81.7
+68.7
+88.4
+3.0
+12.9
+−4.2
+76.4
+75.6
+87.4
+9.8
+17.9
+93.7
+98.37
+Ours
+MICE (full, detected seg.)
+83.8
+74.4
+90.7
+1.3
+11.2
+−0.23
+86.4
+86.0
+92.4
+9.9
+12.6
+95.0
+98.59
+MICE, fixed segments
+83.8
+74.3
+90.5
+1.3
+11.2
+−0.25
+86.4
+86.0
+92.3
+10.1
+12.7
+95.0
+98.60
+MICE, fixed segments, 𝜂2 = 10
+83.8
+74.2
+90.5
+1.1
+11.2
+−0.08
+86.6
+86.3
+93.6
+7.0
+11.5
+95.2
+98.61
+MICE w/o slow level (fixed seg.)
+83.3
+73.4
+90.3
+1.5
+11.5
+−2.3
+86.8
+86.5
+93.6
+7.1
+11.4
+95.3
+98.50
+on the misaligned schedules, and leaves the aligned grid and the
+real streams unchanged, as Fig. 6a shows.
+The alignment diagnostic explains this recovery, because bound-
+aries inside fixed segments mix concepts and reduce recall gains.
+When the boundaries of the eight aligned grid streams move 200
+rows into the segments, the gain of fixed segmentation over reset
+falls by 6.8 points on average, and it is below reset on 7 of the 8
+streams. On twelve streams with misaligned block schedules it is
+above reset on 8, by +0.47 points, as test 2 of Fig. 3 shows and Fig. 8
+details per stream. Restarting the segments at the known phase of
+the boundaries restores the gain (+3.01 against +3.09 points), which
+shows that the loss lies in the phase of the segments.
+Segment purity matters because a late detection mixes the rows
+of two concepts in one segment. The detector declared 570 of the
+576 changes of the test streams and 575 of the 576 of the con-
+firmation streams, each in the batch that holds the boundary or
+the next one. Every stored context was majority-pure, and 88%
+of the segment closes held at least 95% rows of one concept (87%
+on the confirmation streams). The impure closes concentrate on
+500-row blocks, as Fig. 6c shows.
+5.4
+RQ3: The Cost of Following Memory on
+Real Streams
+Real-stream concepts and learning curves are unobserved, and the
+experts often have similar prediction losses. On the grid the leading
+expert holds weight 1.000 from the second batch of a recurring
+block. On the real streams the median margin, the gap in mean
+log-loss between the leading and the next-best expert on a labelled
+batch, is about 0.01 nats, the regime the slow level is built for. With
+detected segmentation, MICE is never more than 0.23 points below
+FIFO across the 29 real streams and is above it on 24 (+0.58 on
+average). With fixed segmentation, the slow level limits the largest
+shortfall of MICE to 0.25 points, against 2.3 for MICE w/o slow
+level. In comparison, reset loses up to 9.6 points to FIFO and 1.8 on
+average, and the window ensemble up to 1.4, as Tab. 1 reports and
+App. H gives per stream. The largest gains occur on Rialto (+4.7,
+a daily cycle) and the INSECTS streams (+0.2 to +1.9). In Tab. 1,
+the trained baselines have lower mean accuracy on these streams.
+Beyond accuracy, MICE has the highest F1 and a lower Brier score
+than every baseline on the real streams. LTM has the highest mean
+AUC, with its advantage concentrated on the PokerHand segments,
+where its class-balanced buffer keeps rare classes.
+The confirmation segments of Airlines, CoverType and Poker-
+Hand, run with fixed segmentation, reproduce the real-stream result.
+MICE is never more than 0.01 points below FIFO on any of the six
+segments and is not below reset. It is more accurate than all four
+in-context baselines on five and has the highest mean (85.3 against
+85.1 for FIFO). The slow level turns the −2.0 and −1.9 points of
+MICE w/o slow level on the two PokerHand segments into +0.4 and
++0.5. The one-sided 95% block-bootstrap bound of the difference to
+FIFO is above −0.3 points on 28 of the 29 real streams. On Spam,
+with 61 batches, non-inferiority is undecided.
+On the nine independent confirmation segments of Bitcoin Heist
+and CIC-IDS2017, detected segmentation keeps the accuracy of
+fixed segmentation, from which the mean of MICE differs by less
+than 0.01 points. On every segment the one-sided 95% bootstrap
+lower bound on its accuracy difference to FIFO is at least −0.25
+points, and its observed accuracy is never more than 0.18 points
+below the better of FIFO and reset. It is above its pool-free replay
+on eight of nine segments. Mean accuracies over the nine seg-
+ments differ by less than 0.4 points across the in-context policies,
+at about 98.5%, and MICE is the most accurate of the in-context
+policies on four of the nine segments.
+Replacing the half Brier score with the log-loss can harm the slow
+level, because one confidently wrong batch after a switch outweighs
+the next ten. With the log-loss in place of the half Brier score, the
+7
+
+
+Wu et al.
+aligned shifted
+mis-
+aligned
+fresh
+real
+(FIFO)
+0
+5
+points
+(a) stream groups
+detected − reference
+fixed − reference
+detected − archive
+detected − fixed (95% CI)
+500-row
+blocks
+2000-row
+blocks
+500–2500
+rows
+0
+5
+minus reset (points)
+(b) fresh streams
+fixed
+detected, test, seeds 40–43
+detected, confirmation, 50–53
+500
+30
+500
+100
+2k
+30
+2k
+100
+var
+30
+var
+100
+block length / centroids
+60
+80
+100
+pure closes (%)
+(c) purity, seeds 40–43
+registered 90%
+all closes: 88%
+30 centroids
+100 centroids
+Figure 6: Detected against fixed segmentation. (a) Their difference per stream group. (b) Gain over reset on fresh streams with
+random boundary phases, test and confirmation seeds. (c) Share of segment closes that are at least 95% pure. The dashed line
+marks the target share of 90%.
+1.00
+1.25
+1.50
+1.75
+2.00
+2.25
+2.50
+2.75
+seconds per batch, three real prefixes
+−2
+0
+2
+4
+6
+8
+10
+MICE minus pool (points)
+k=2
+k=2
+k=4
+k=4
+k=12
+k=12
+ MICE
+(a) fixed segments, pool sizes 2, 4, 12
+aligned grid
+shifted grid
+9 real streams
+archive pool
+snapshot pool
+1.00
+1.25
+1.50
+1.75
+2.00
+2.25
+2.50
+2.75
+seconds per batch, three real prefixes
+0
+2
+4
+6
+8
+MICE minus pool (points)
+k=2
+k=4
+k=12
+ MICE
+(b) detected segments, snapshot pool
+72 confirmation
+shifted grid
+misaligned
+snapshot pool
+Figure 7: MICE minus unmerged pools (archive, snapshot) of sizes 2, 4 and 12 against their time per batch. The dashed line is
+the time of MICE. (a) Fixed segmentation. (b) Detected segmentation.
+accuracy of MICE on one grid stream falls from 86.4 to 74.9. On the
+grid with fixed segments, the step 𝜂2 = 1
+2 covered by Thm. 4.2 has
+an ECE 3.1 points above the step of 10. The largest discounted half-
+Brier regret of MICE against FIFO over 33 development streams
+is 0.15, within the bound of 1.39.
+5.5
+RQ4: Memory Organisation and Resource
+Tradeoffs
+Removing stored contexts lowers accuracy on all 24 grid streams
+(by 5.6 points on average) and on 28 of the 29 real streams (by
+0.35) in this fixed-segmentation ablation. Without them, the two
+levels mix only the three FIFO windows.
+Merging keeps fewer experts than two pools that never merge
+and share the windows and two-level rule of MICE with a pool
+size of 12. An archive keeps every closed segment as its own ex-
+pert, and a snapshot pool stores the latest 1000 rows at every close.
+With fixed segments, MICE is above the archive on the aligned
+grid by +0.30 points and within 0.1 points of both pools on the
+real streams, with fewer experts (8.4 against 14.2 per batch) and
+TFM calls (9.7 against 14.0).
+Capped to the time per batch of MICE, both fixed-segmentation
+pools are less accurate than MICE, by 6.7 and 7.5 points on the
+aligned grid and 0.35 and 0.27 on nine real streams. On the shifted
+grid, the time-matched snapshot pool is level with MICE, and the
+uncapped archive is ahead of it, as Fig. 7a shows.
+With detected segments on the fresh grid streams, MICE keeps
+the pool at a third of the archive’s experts and is 0.11 points more ac-
+curate. On the grid confirmation streams it exceeds a snapshot pool
+of equal capacity by 2.14 points and is level with it only on 2 000-row
+blocks, as Fig. 7b shows. On 144 pairs of grid segments the recall
+regret separates same from different concepts with AUROC 1.00.
+Runtime and peak GPU memory grow with the rows that a
+policy conditions on, and MICE is compared with FIFO windows
+of up to 13 400 rows. MICE with fixed segments takes 1.07 s per
+batch on three real prefixes on one GPU, against 0.22 s for FIFO
+with 1000 rows, 0.42 s with 3000 rows and 1.91 s with 13 400, as
+plotted in App. H. Peak GPU memory is 0.8 to 26.4 GB for FIFO and
+1.0 GB for MICE. A 3000-row window, about 2.5 times cheaper, is
+more accurate than fixed-segmentation MICE on 21 of the 29 real
+streams. MICE is ahead by +0.31 points on average because of the
+sharply drifting streams, four INSECTS streams by +3.3 to +5.5 and
+Rialto by +6.9, as Fig. 9 details per stream. These comparisons cover
+complete policies at different context budgets, whereas Thm. 4.2
+compares MICE with FIFO at 𝑀rows.
+8
+
+
+Recall or Relearn?
+6
+CONCLUSION
+A stored context lets a frozen TFM reuse a past concept without re-
+training. Under pure-context and margin conditions, its value is the
+relearning it saves, a normalised learning-curve area up to a first-
+batch term. MICE builds contexts at detected changes and weights
+them by their last-batch log-loss. Its slow level keeps discounted
+half-Brier regret against FIFO at most 2 ln 2 at every time. Learning
+curves predict the ordering of recall gains on the grid. Detected seg-
+mentation recovers these gains under unknown boundary phases.
+On 29 real streams, MICE has the highest mean accuracy of all
+policies and is above FIFO on 24. Learning curves measured before
+deployment can therefore indicate whether stored contexts will pay.
+9
+
+
+Wu et al.
+REFERENCES
+[1] Rakesh Agrawal, Tomasz Imielinski, and Arun Swami. 1993. Database Mining: A
+Performance Perspective. IEEE Transactions on Knowledge and Data Engineering
+5, 6 (1993), 914–925.
+[2] Cuneyt G. Akcora, Yitao Li, Yulia R. Gel, and Murat Kantarcioglu. 2020. Bit-
+coinHeist: Topological Data Analysis for Ransomware Prediction on the Bitcoin
+Blockchain. In Proceedings of the International Joint Conference on Artificial Intel-
+ligence (IJCAI). 4439–4445.
+[3] Shai Ben-David, John Blitzer, Koby Crammer, Alex Kulesza, Fernando Pereira,
+and Jennifer Wortman Vaughan. 2010. A Theory of Learning from Different
+Domains. Machine Learning 79, 1–2 (2010), 151–175.
+[4] Albert Bifet and Ricard Gavaldà. 2009. Adaptive Learning from Evolving Data
+Streams. In Proceedings of the International Symposium on Intelligent Data Analysis
+(IDA). 249–260.
+[5] Albert Bifet, Geoff Holmes, and Bernhard Pfahringer. 2010. Leveraging Bagging
+for Evolving Data Streams. In Proceedings of the European Conference on Machine
+Learning and Principles and Practice of Knowledge Discovery in Databases (ECML
+PKDD). 135–150.
+[6] Albert Bifet, Geoff Holmes, Bernhard Pfahringer, Richard Kirkby, and Ricard
+Gavaldà. 2009. New Ensemble Methods for Evolving Data Streams. In Proceedings
+of the ACM SIGKDD International Conference on Knowledge Discovery and Data
+Mining (KDD). 139–148.
+[7] Ignacio Cabrera Martin, Subhaditya Mukherjee, Almas Baimagambetov, Joaquin
+Vanschoren, and Nikolaos Polatidis. 2025. Evolving Machine Learning in Non-
+Stationary Environments: A Unified Survey of Drift, Forgetting, and Adaptation.
+arXiv preprint arXiv:2505.17902 (2025).
+[8] Nicolò Cesa-Bianchi and Gábor Lugosi. 2006. Prediction, Learning, and Games.
+Cambridge University Press.
+[9] Ryan Elwell and Robi Polikar. 2011. Incremental Learning of Concept Drift in
+Nonstationary Environments. IEEE Transactions on Neural Networks 22, 10 (2011),
+1517–1531.
+[10] João Gama and Petr Kosina. 2014. Recurrent Concepts in Data Streams Classifi-
+cation. Knowledge and Information Systems 40 (2014).
+[11] João Gama, Pedro Medas, Gladys Castillo, and Pedro Rodrigues. 2004. Learning
+with Drift Detection. In Proceedings of the Brazilian Symposium on Artificial
+Intelligence (SBIA) (Lecture Notes in Computer Science, Vol. 3171). Springer, 286–
+295.
+[12] João Gama, Indr˙e Žliobait˙e, Albert Bifet, Mykola Pechenizkiy, and Abdelhamid
+Bouchachia. 2014. A Survey on Concept Drift Adaptation. Comput. Surveys 46, 4
+(2014), 44:1–44:37.
+[13] Pablo García, J. de Curtò, I. de Zarzà, Juan Carlos Cano, and Carlos T. Calafate.
+2025. Foundation Models for Cybersecurity: A Comprehensive Multi-Modal
+Evaluation of TabPFN and TabICL for Tabular Intrusion Detection. Electronics
+14, 19 (2025), 3792. https://doi.org/10.3390/electronics14193792
+[14] Heitor Murilo Gomes, Albert Bifet, Jesse Read, Jean Paul Barddal, Fabrício Enem-
+breck, Bernhard Pfahringer, Geoff Holmes, and Talel Abdessalem. 2017. Adaptive
+Random Forests for Evolving Data Stream Classification. Machine Learning 106,
+9–10 (2017), 1469–1495.
+[15] Heitor Murilo Gomes, Jesse Read, and Albert Bifet. 2019. Streaming Random
+Patches for Evolving Data Stream Classification. In Proceedings of the IEEE Inter-
+national Conference on Data Mining (ICDM). 240–249.
+[16] Paulo Mauricio Gonçalves, Jr. and Roberto Souto Maior de Barros. 2013. RCD:
+A Recurring Concept Drift Framework. Pattern Recognition Letters 34 (2013),
+1018–1025.
+[17] Elad Hazan and C. Seshadhri. 2009. Efficient Learning Algorithms for Changing
+Environments. In Proceedings of the International Conference on Machine Learning
+(ICML). 393–400.
+[18] Kai Helli, David Schnurr, Noah Hollmann, Samuel Müller, and Frank Hutter. 2024.
+Drift-Resilient TabPFN: In-Context Learning Temporal Distribution Shifts on
+Tabular Data. In Advances in Neural Information Processing Systems (NeurIPS).
+98742–98781.
+[19] Noah Hollmann, Samuel Müller, Lennart Purucker, Arjun Krishnakumar, Max
+Körfer, Shi Bin Hoo, Robin Tibor Schirrmeister, and Frank Hutter. 2025. Accurate
+Predictions on Small Data with a Tabular Foundation Model. Nature 637, 8045
+(2025), 319–326.
+[20] Jianhao Huang, Zhihong Zeng, Zhangkai Wu, Hengyu Liu, and Yanfang Liu. 2026.
+Density Harmonized Gradient Descent Online Active Learning for Imbalanced
+Data Streams. In Proceedings of the International Conference on Behavioural and
+Social Computing (BESC) (Lecture Notes in Computer Science). Springer, 148–163.
+https://doi.org/10.1007/978-981-95-7141-3_9
+[21] Xiannan Huang, Shuhan Qiu, Jiayuan Du, and Chao Yang. 2026. Online Time Se-
+ries Prediction Using Feature Adjustment. In International Conference on Learning
+Representations (ICLR).
+[22] Geoff Hulten, Laurie Spencer, and Pedro Domingos. 2001. Mining Time-Changing
+Data Streams. In Proceedings of the ACM SIGKDD International Conference on
+Knowledge Discovery and Data Mining (KDD). 97–106.
+[23] Ioannis Katakis, Grigorios Tsoumakas, and Ioannis Vlahavas. 2010. Tracking
+Recurring Contexts Using Ensemble Classifiers: An Application to Email Filtering.
+Knowledge and Information Systems 22, 3 (2010), 371–391.
+[24] J. Zico Kolter and Marcus A. Maloof. 2007. Dynamic Weighted Majority: An
+Ensemble Method for Drifting Concepts. Journal of Machine Learning Research 8
+(2007), 2755–2790.
+[25] Nick Littlestone and Manfred K. Warmuth. 1994. The Weighted Majority Algo-
+rithm. Information and Computation 108, 2 (1994), 212–261.
+[26] Viktor Losing, Barbara Hammer, and Heiko Wersing. 2016. KNN Classifier with
+Self Adjusting Memory for Heterogeneous Concept Drift. In Proceedings of the
+IEEE International Conference on Data Mining (ICDM). 291–300.
+[27] Afonso Lourenço, João Gama, Eric P. Xing, and Goreti Marreiros. 2026. In-
+Context Learning of Evolving Data Streams with Tabular Foundational Models. In
+Proceedings of the ACM SIGKDD International Conference on Knowledge Discovery
+and Data Mining (KDD).
+[28] Jie Lu, Anjin Liu, Fan Dong, Feng Gu, João Gama, and Guangquan Zhang. 2019.
+Learning under Concept Drift: A Review. IEEE Transactions on Knowledge and
+Data Engineering 31, 12 (2019), 2346–2363.
+[29] Yishay Mansour, Mehryar Mohri, and Afshin Rostamizadeh. 2009. Domain
+Adaptation: Learning Bounds and Algorithms. In Proceedings of the Conference
+on Learning Theory (COLT).
+[30] Jacob Montiel, Max Halford, Saulo Martiello Mastelini, Geoffrey Bolmier, Raphaël
+Sourty, Robin Vaysse, Adil Zouitine, Heitor Murilo Gomes, Jesse Read, Talel
+Abdessalem, and Albert Bifet. 2021. River: Machine Learning for Streaming Data
+in Python. Journal of Machine Learning Research 22, 110 (2021).
+[31] Samuel Müller, Noah Hollmann, Sebastian Pineda-Arango, Josif Grabocka, and
+Frank Hutter. 2022. Transformers Can Do Bayesian Inference. In Proceedings of
+the International Conference on Learning Representations (ICLR).
+[32] Thomas Nagler. 2023. Statistical Foundations of Prior-Data Fitted Networks. In
+Proceedings of the International Conference on Machine Learning (ICML). 25660–
+25676.
+[33] Quang Pham, Chenghao Liu, Doyen Sahoo, and Steven C. H. Hoi. 2023. Learning
+Fast and Slow for Online Time Series Forecasting. In International Conference on
+Learning Representations (ICLR).
+[34] Jingang Qu, David Holzmüller, Gaël Varoquaux, and Marine Le Morvan. 2026.
+TabICLv2: A Better, Faster, Scalable, and Open Tabular Foundation Model. arXiv
+preprint arXiv:2602.11139 (2026).
+[35] Jingang Qu, David Holzmüller, Gaël Varoquaux, and Marine Le Morvan. 2025.
+TabICL: A Tabular Foundation Model for In-Context Learning on Large Data. In
+Proceedings of the International Conference on Machine Learning (ICML). 50817–
+50847.
+[36] Jeffrey C. Schlimmer and Richard H. Granger, Jr. 1986. Incremental Learning
+from Noisy Data. Machine Learning 1, 3 (1986), 317–354.
+[37] Iman Sharafaldin, Arash Habibi Lashkari, and Ali A. Ghorbani. 2018. Toward
+Generating a New Intrusion Detection Dataset and Intrusion Traffic Character-
+ization. In Proceedings of the International Conference on Information Systems
+Security and Privacy (ICISSP). 108–116.
+[38] Vinicius M. A. Souza, Denis M. dos Reis, André G. Maletzke, and Gustavo E. A.
+P. A. Batista. 2020. Challenges in Benchmarking Stream Learning Algorithms
+with Real-World Data. Data Mining and Knowledge Discovery 34, 6 (2020), 1805–
+1858.
+[39] W. Nick Street and YongSeog Kim. 2001. A Streaming Ensemble Algorithm (SEA)
+for Large-Scale Classification. In Proceedings of the ACM SIGKDD International
+Conference on Knowledge Discovery and Data Mining (KDD). 377–382.
+[40] Zhangkai Wu, Qi Zhang, Junxian Zhou, Hui Chen, and Yanfang Liu. 2026. WAVAE:
+A Weakly Augmented Variational Autoencoder for Time Series Anomaly Detec-
+tion. Information Fusion 125 (2026), 103462. https://doi.org/10.1016/j.inffus.2025.
+103462
+[41] En Yu, Jie Lu, Kun Wang, Xiaoyu Yang, and Guangquan Zhang. 2026. Drift-Aware
+Collaborative Assistance Mixture of Experts for Heterogeneous Multistream
+Learning. In Proceedings of the AAAI Conference on Artificial Intelligence (AAAI),
+Vol. 40. 16199–16207.
+[42] Tianlin Zhang, En Yu, Yi Shao, and Jiande Sun. 2025. Multimodal Inverse Atten-
+tion Network with Intrinsic Discriminant Feature Exploitation for Fake News
+Detection. In Proceedings of the International Joint Conference on Artificial Intelli-
+gence (IJCAI).
+[43] YiFan Zhang, Qingsong Wen, Xue Wang, Weiqi Chen, Liang Sun, Zhang Zhang,
+Liang Wang, Rong Jin, and Tieniu Tan. 2023. OneNet: Enhancing Time Series
+Forecasting Models under Concept Drift by Online Ensembling. In Advances in
+Neural Information Processing Systems (NeurIPS).
+[44] Shengjia Zhao, Abhishek Sinha, Yutong He, Aidan Perreault, Jiaming Song, and
+Stefano Ermon. 2022. Comparing Distributions by Measuring Differences that
+Affect Decision Making. In Proceedings of the International Conference on Learning
+Representations (ICLR).
+[45] Zhiyuan Zhao, Haoxin Liu, and B. Aditya Prakash. 2026. Tackling Time-Series
+Forecasting Generalization via Mitigating Concept Drift. In International Confer-
+ence on Learning Representations (ICLR).
+10
+
+
+Recall or Relearn?
+Table 2: Notation.
+Symbol
+Meaning
+(x, 𝑦)
+a row and its label
+𝐵, 𝑀
+batch size (100 rows), context budget (1000 rows)
+C, C𝑘
+a context, the stored context 𝑘
+𝑓Θ(· | x; C)
+the frozen TFM
+𝑃, 𝑄
+concepts
+𝜖𝑃(C)
+risk on 𝑃of the TFM given C
+D𝑇
+recall regret
+𝑆, 𝛿
+a closed segment, merge threshold (0.02)
+𝐻cp, 𝑅cp, 𝛿cp, 𝜏
+constants and margin of the change test
+𝜋, 𝜈
+majority share of a context, distance of a declared change to
+its boundary
+𝐾
+number of experts
+ℓ𝑘, 𝜂, 𝑤𝑘
+last-batch loss, step (10) and weight of the fast level
+𝑔
+margin of the leading expert
+𝐿, 𝐽
+block length in rows and in batches
+𝑎𝑘(𝑛), 𝑛𝑐
+learning curve of concept 𝑘, rows of its stored context on visit
+𝑐
+Δ𝑘,𝑐(𝐿)
+gain of recall over relearning
+𝐿𝑡,𝑘, 𝜂2, 𝛾, 𝑣𝑡,𝑘
+discounted loss, step ( 1
+2 ), discount (0.9) and weight of the slow
+level
+[46] Jiawen Zhu, Shuhan Liu, Di Weng, and Yingcai Wu. 2026. Dynamic TMoE: A
+Drift-Aware Dynamic Mixture of Experts Framework for Non-Stationary Time
+Series Forecasting. In Proceedings of the International Conference on Machine
+Learning (ICML).
+A
+THEORY
+This appendix states formally the results that Sec. 4 uses to justify
+the design of MICE. The change test (2), the fast and slow levels (4),
+(5)–(7) and Thms. 4.1 and 4.2 are stated there. Proofs are in App. F.
+The risk of a context and the learning curve of a concept let stored
+contexts be compared with contexts relearned from new rows. For
+a concept 𝑃over (x,𝑦) and a loss ℓ, the risk of a context C is
+𝜖𝑃(C) = E(x,𝑦)∼𝑃ℓ 𝑓Θ(· | x; C),𝑦,
+and the learning curve of 𝑃is 𝑅𝑃(𝑛) = EC∼𝑃𝑛𝜖𝑃(C). We write 𝑝x =
+𝑃(· | x) for the conditional, 𝑃𝑋for the marginal. For a predictor ℎ,
+𝜖𝑃(ℎ) is its risk on 𝑃, which makes 𝜖𝑃(C) the risk of the predictor
+ℎ= 𝑓Θ(· | · ; C). Definition A.1 uses the population predictors of
+Asm. 1, and (3) estimates it from finite contexts.
+A.1
+Which Contexts Share a Concept
+We compare two concepts through the TFM conditioned on their
+contexts. Its population behaviour follows from the principle be-
+hind prior-fitted networks, which approximate the posterior pre-
+dictive distribution [31, 32].
+Assumption 1 (Posterior-predictive limit). With a context from
+𝑃alone, the TFM predicts the conditional 𝑝x. With contexts of
+equal size from 𝑃and 𝑄, it predicts the conditional of the mixture
+𝑈= 1
+2 (𝑃+ 𝑄),
+𝑢x = 𝛼(x) 𝑝x +  1 −𝛼(x) 𝑞x,
+𝛼=
+𝑃𝑋
+𝑃𝑋+ 𝑄𝑋
+.
+We denote the two predictors by ℎ𝑃and ℎ𝑈.
+Definition A.1 (Recall regret). For two concepts 𝑃and𝑄, the recall
+regret of 𝑃on 𝑄is the risk that the context of 𝑃incurs on 𝑄beyond
+that of the context of 𝑄itself,
+D𝑇(𝑄| 𝑃) = 𝜖𝑄(ℎ𝑃) −𝜖𝑄(ℎ𝑄).
+(9)
+A.2
+Which Rows Form a Concept
+Thm. 4.1 in Sec. 4.1 compares relearning with the stored expert of
+concept 𝑘. A stored context is built from segments of the stream, and
+a segment that straddles a concept boundary holds rows of two con-
+cepts. The next results say how much mixing identification tolerates,
+how reliably a change detector declares changes, and how much
+mixing remains when its declarations lie close to the boundaries.
+Proposition A.2 (Majority purity). Let Asm. 1 extend to un-
+equal shares: a context whose rows come from 𝑃in proportion 𝜋and
+from 𝑄in proportion 1 −𝜋predicts the conditional of 𝜋𝑃+ (1 −𝜋)𝑄.
+Let 𝑃𝑋= 𝑄𝑋, let both concepts be deterministic, 𝑦= 𝑔𝑃(x) and
+𝑦= 𝑔𝑄(x), and let ℓbe the 0-1 loss. Then the recall regret of this
+context on 𝑃is
+D𝑇
+ 𝑃| 𝜋𝑃+ (1 −𝜋)𝑄 =
+(
+0,
+𝜋> 1
+2,
+𝜌,
+𝜋< 1
+2,
+where 𝜌= Prx[𝑔𝑃(x) ≠𝑔𝑄(x)]. At 𝜋= 1
+2 it depends on the tie rule.
+The false-alarm bound of Prop. A.3 concerns the test (2) of Sec. 4.2
+under the following assumption on the window’s errors.
+Assumption 2 (Window error). Given all earlier rows and errors,
+the window errs on the rows of a batch independently, each with
+the conditional error rate of that batch, and almost surely between
+two changes this rate does not increase from batch to batch.
+Proposition A.3 (Detection). Under Asm. 2, if no change occurs
+in the batches 𝑡−𝐻cp −𝑅cp, . . . ,𝑡−1, the probability that (2) declares
+one at 𝑡is at most (𝑅cp −1)𝐻cp𝛿cp.
+Corollary A.4 (Segment purity). If every declared change lies
+within 𝜈rows of a concept boundary and no boundary is missed, then
+a closed segment 𝑆holds at most 2𝜈rows of other concepts, and it is
+majority-pure when 4𝜈< |𝑆|.
+A.3
+The Fast Level and When Recall Pays
+The fast level of MICE restarts every batch with the weights (4).
+Its guarantee comes from a margin.
+Assumption 3 (Margin). One expert 𝑘★leads the last labelled
+batch by a margin 𝑔> 0: ℓ𝑘★≤ℓ𝑘−𝑔for all 𝑘≠𝑘★.
+Lemma A.5 (Margin). Under Asm. 3, let 𝜅= ln 1 + (𝐾−1)𝑒−𝜂𝑔.
+The mixture with the weights (4) satisfies:
+(i) the leader holds almost all weight, 𝑤𝑘★≥𝑒−𝜅.
+(ii) on every row, the log-loss of the mixture is at most that of
+expert 𝑘★plus 𝜅.
+(iii) the mixture predicts the class of expert 𝑘★on every row where
+the top two probabilities of that expert differ by more than
+𝑒𝜅−1.
+Proposition A.6 (One batch of identification). Consider a
+block of 𝐽batches of one concept, with log-losses clipped at 𝑐, and let
+Asm. 3 hold for every labelled batch of the block. Then the regret of
+the fast level per row, summed over the batches of the block, satisfies
+RegretME ≤𝑐+ (𝐽−1)(𝐾−1) 𝑒−𝜂𝑔.
+Corollary A.7 (When memory pays). On the first visit 𝑛1 = 0
+and the area term of (1) is zero. On later visits it is zero whenever the
+11
+
+
+Wu et al.
+Algorithm 1 MICE for one batch 𝑡≥1
+Require: batch 𝑋𝑡, labels 𝑦𝑡−1, windows W, pool P, predictions
+ˆ𝑝𝑡−1,𝑘, ˆ𝑝fast
+𝑡−1, ˆ𝑝def
+𝑡−1 cached for batch 𝑡−1 before 𝑦𝑡−1 arrived
+Ensure: prediction ˆ𝑝𝑡for 𝑋𝑡
+1: // 1. Score the predictions issued for batch 𝑡−1
+2: if 𝑡= 1 then
+3:
+ℓ𝑘←0 for every expert 𝑘, and 𝐿0,def, 𝐿0,fast ←0
+4: else
+5:
+ℓ𝑘←mean log-loss of ˆ𝑝𝑡−1,𝑘on 𝑦𝑡−1, for every expert 𝑘
+6:
+𝐿𝑡−1,𝑗←𝛾𝐿𝑡−2,𝑗+ mean half Brier score of ˆ𝑝𝑗
+𝑡−1, for 𝑗∈
+{def, fast}
+7: end if
+8: // 2. Update the contexts
+9: add batch 𝑡−1 to every window in W
+10: if (2) declares a change on the errors of the 300-row window,
+or the open segment has 500 rows and three more batches are
+labelled then
+11:
+close the open segment 𝑆
+// kept only if |𝑆| ≥300
+12:
+𝑘★←arg min𝑘∈P bD𝑇(𝑆| C𝑘)
+13:
+if bD𝑇(𝑆| C𝑘★) ≤𝛿then
+14:
+merge 𝑆into C𝑘★
+// keeps its identity and losses
+15:
+else
+16:
+add 𝑆to P as a new expert 𝑘′ with ℓ𝑘′ ←median𝑘ℓ𝑘
+17:
+end if
+18: end if
+19: // 3. Predict
+20: ˆ𝑝𝑡,𝑘←𝑓Θ(· | 𝑋𝑡; C𝑘) for every 𝑘∈W ∪P
+21: ˆ𝑝fast
+𝑡
+←Í
+𝑘𝑤𝑘ˆ𝑝𝑡,𝑘, 𝑤𝑘∝𝑒−𝜂ℓ𝑘
+// fast level
+22: ˆ𝑝def
+𝑡
+←ˆ𝑝𝑡,𝑀
+// FIFO
+23: ˆ𝑝𝑡←𝑣def ˆ𝑝def
+𝑡
++ 𝑣fast ˆ𝑝fast
+𝑡
+, 𝑣𝑗∝𝑒−𝜂2𝛾𝐿𝑡−1,𝑗
+// slow level
+24: cache ˆ𝑝𝑡,𝑘, ˆ𝑝fast
+𝑡
+and ˆ𝑝def
+𝑡
+, and return ˆ𝑝𝑡
+learning curve is flat, 𝑎𝑘(𝐵) = 𝑎𝑘(𝑀), and in general
+Δ𝑘,𝑐(𝐿) ≤𝑀
+𝐿
+ 𝑎𝑘(𝑀) −𝑎𝑘(𝐵) + 1
+𝐽.
+A.4
+The Slow Level: A Safeguard at Any Time
+For 𝛾= 1 the slow level is the exponentially weighted average fore-
+caster with an exp-concave loss [8], and 𝛾< 1 forgets losses older
+than about 1/(1 −𝛾) batches. Thm. 4.2 bounds its regret. Synthetic
+expert predictions and labels chosen to hurt the mixture or the cur-
+rent leader (𝐾∈{2, 5}, 𝛾∈{0.5, 0.9, 0.99, 1}, 400 rounds) keep the
+discounted regret below ln𝐾/𝜂2 at 𝜂2 = 1
+2 in every configuration
+(at most 0.67 for 𝐾= 2). The regret exceeds this bound at 𝜂2 = 2
+for 𝛾≥0.9 and reaches 4.4 at 𝜂2 = 10, 𝛾= 0.9.
+B
+ALGORITHM AND IMPLEMENTATION
+Alg. 1 gives one batch of MICE. Before 𝑡= 1, batch 0 is observed
+with its labels and predicted by no one. It only fills the windows
+and counts towards the first segment. At 𝑡= 1 nothing has been
+issued yet, which makes the fast weights uniform, and 𝐿0,𝑘= 0
+makes the slow weights uniform. Scoring of cached predictions
+begins at 𝑡= 2, where 𝐿1,𝑘= 𝛾𝐿0,𝑘+ ℓ1,𝑘. A stored expert created
+at a segment close has issued no prediction for that batch and
+starts with the median of the other experts’ losses. A merged expert
+keeps its identity and its losses.
+C
+REGISTRATION AND DEVELOPMENT
+Hypotheses, data and decision rules were written down before each
+test, every test stream was run once, and all constants were set on
+synthetic development streams. All reported numbers are replays
+of cached expert predictions with weights that use earlier labels
+only, which makes them equal to those of an online run.
+The real streams were opened in five stages, of which the first
+three developed the slow level and the fourth was registered for
+fixed segmentation. The main text calls the third held-out set the
+held-out segments and the fourth held-out set the confirmation
+segments. The second held-out set consisted of all streams of the
+public collection with at least 5000 rows, at most ten classes and
+no earlier use. No method had loaded the nine independent con-
+firmation segments of Bitcoin Heist and CIC-IDS2017 before their
+test. Detected segmentation was registered and tested separately.
+MICE w/o slow level met non-inferiority to reset on the first two
+held-out sets but was the most accurate method on only one of six
+streams of the second, which motivated the slow level. From then
+on these streams count as development data. On the third held-out
+set the registered slow step was 10. The step 𝜂2 = 1
+2 of Thm. 4.2
+was added before any two-level result was computed.
+Each registered test below gives its criterion and then its out-
+come.
+• Grid, seeds 10 and 11 (MICE w/o slow level): gain over reset on
+all eight streams with 30 or 100 centroids, Spearman correlation
+of predicted and observed gain at least 0.8. Held (0.94).
+• Grid, seeds 20 and 21: within 0.5 points of MICE w/o slow level
+and above reset on the same eight streams. Held.
+• Oracle test of Fig. 5b: measured area within 1.0 point of its pre-
+diction on at least five of six cells, Spearman at least 0.8. Held.
+• Confirmation segments, the fourth held-out set (six segments,
+fixed segmentation): never more than 0.5 points below the better
+of FIFO and reset, more accurate than all in-context baselines on
+four of six with the highest mean, never more than 0.3 points
+below FIFO. Held. A second backbone seed held on these six
+segments. On four segments of the third set it gave two of four
+where three were registered. With a second backbone seed, MICE
+is the most accurate policy on two of four held-out segments.
+With TabICL as the backbone and no constant changed, MICE is
+the most accurate policy on all six confirmation segments.
+• Boundary tests (fixed segmentation): above reset on 10 of 12
+misaligned streams and on 7 of 8 shifted streams, each with a
+mean gain of one point. Both failed. The realigned test added
+afterwards held.
+• Detected segmentation (72 test streams, criteria C1–C5): gain over
+reset of at least one point in each length regime with a positive
+bootstrap bound (C1), recovery on the shifted grid (C2), no loss
+on the aligned grid (C3) and on the real streams (C4), and fewer
+calls than an archive (C5). All held. Purity: 88% of the closes held
+at least 95% rows of one concept, short of the registered 90%.
+• Pool controls: MICE above the archive by 0.5 points on the aligned
+grid failed (+0.30). The real-stream criterion held.
+12
+
+
+Recall or Relearn?
+700 / 30 / 30
+700 / 30 / 31
+700 / 100 / 30
+700 / 100 / 31
+1300 / 30 / 30
+1300 / 30 / 31
+1300 / 100 / 30
+1300 / 100 / 31
+var. / 30 / 30
+var. / 30 / 31
+var. / 100 / 30
+var. / 100 / 31
+block length / centroids / seed
+0.0
+2.5
+points
+(a) misaligned schedules
+MICE − reset
+MICE − archive
+aligned
+shifted
+by 200 rows
+shifted,
+segments realigned
+−10
+0
+−reset (points)
+(b) shifted boundaries
+100 centroids
+30 centroids
+500-row blocks
+2000-row blocks
+Figure 8: Boundaries inside fixed segments lower the gain of stored contexts over reset, and realigning the segments restores it.
+(a) Misaligned block schedules. (b) Boundaries shifted by 200 rows, and segments realigned.
+• Confirmation of detected segmentation (nine independent confir-
+mation segments): the one-sided 95% bootstrap lower bound on
+the mean difference to fixed segmentation is above −0.2 points
+(H1), the corresponding per-segment bound against FIFO is above
+−0.3 points (H2), observed accuracy is never more than 0.5 points
+below the better of FIFO and reset (H3), and MICE is above the
+pool-free replay on at least six of nine (H5). All four held. Being
+the most accurate per source and on at least six of nine against
+the four in-context baselines (H4) failed (−0.06 and −0.01 points,
+four of nine).
+A registered reporting rule required the fixed-segmentation ca-
+pacity comparison to name in the abstract any stream group with
+a mean gain of at most +0.1 points over a time-budgeted pool.
+The shifted-grid snapshot comparison meets this condition and is
+reported there. Capacity was chosen from prefix timings. The four-
+expert configuration is supplementary and exceeds the time budget.
+The analogous detected-segmentation reporting rule also required
+naming a qualifying group in the conclusion, and no group met its
+trigger. Pool controls include both segmentation variants, identified
+with each result. With four experts, which take more time per batch,
+both pools are level with MICE on the shifted grid, as Fig. 7a shows.
+The registration deviated in its seed use and in the stored-row
+form of the recall predictions, which Sec. 5.2 reports. Seeds 40 and
+41, registered as unused for the detected-segmentation test, had
+been used by the oracle test. We kept the verdicts and repeated
+the test on unused seeds 50 to 53, where C1 held.
+The rows from ARF to Learn++.NSE in Tab. 1 come from a re-
+run of the trained learners with stored probabilities, whose mean
+accuracy is within 0.2 points of the first run.
+D
+CONTEXT STRESS TEST: PROTOCOLS
+The three parts of the context stress test of Sec. 3 reuse runs of
+Sec. 5, and no run was added for them.
+The revisit test measures how a policy recovers when a concept
+returns after FIFO has discarded its rows. It uses the Sine, STAGGER
+and Agrawal generator streams of Sec. 5 from River [30], with blocks
+of 2000 rows. Each generator supplies five streams from seeds 10
+to 14, with three cycles over three or four concepts. Accuracy is
+averaged over the five batches after a concept recurs, that is, after
+the start of a block whose concept appeared in an earlier block. The
+policies are FIFO, reset and an oracle context of past rows of the
+recurring concept, which knows the concept and its boundaries.
+The splice test measures what mixing concepts costs by mov-
+ing the boundaries inside fixed segments. It uses the eight grid
+−4
+−2
+0
+2
+4
+6
+8
+MICE minus FIFO 3000 (points, 95% CI)
+PokerHand
+PokerHand 3c
+PokerHand 4e
+Airlines 4e
+Phishing
+Airlines 4d
+Airlines 3c
+PokerHand 4d
+Airlines 3b
+Airlines
+Weather
+Spam
+INSECTS inc.
+CoverType 3c
+Electricity
+INSECTS 3b
+CoverType 4d
+CoverType 4e
+INSECTS grad.-imb.
+INSECTS 3c
+CoverType 3b
+PokerHand 3b
+INSECTS abr.-imb.
+CoverType
+INSECTS grad.
+INSECTS abr.
+INSECTS inc.-abr.
+INSECTS inc.-rec.
+Rialto
+mean
+Figure 9: MICE (fixed segments) minus a 3000-row FIFO win-
+dow on the 29 real streams, with 95% bootstrap intervals.
+streams of App. G with 30 or 100 centroids and blocks of 500 or
+2000 rows. These streams use seeds 20 and 21, with shifted and
+aligned copies compared on matched batches. Each shifted copy
+prepends 200 rows of the first concept, drawn from the same cen-
+troids with a separate random generator. Every boundary therefore
+lies 200 rows into a 500-row segment and stays on a batch boundary.
+Stored contexts are formed by the fixed segmentation of Sec. 4. The
+realigned run starts the segments at row 200, the known phase
+of the boundaries. The quantity is MICE with fixed segmentation
+minus reset, over all batches and over the first five batches of each
+recurring block. Fig. 8 gives every stream.
+The curve test estimates relearning speed from learning curves
+measured before the grid test on data seeds 10 and 11. Each centroid
+count and concept supplies one block of 4000 rows, of which rows 1–
+3000 form the context pool and rows 3001–4000 the 1000 test rows.
+For 𝑛∈{50, 100, 200, 500, 1000, 2000}, three contexts are drawn
+without replacement from the pool, and the TFM predicts the test
+rows. The curve is the mean accuracy over 2 seeds, 3 concepts
+and 3 repetitions, as App. G details.
+13
+
+
+Wu et al.
+E
+STREAMS AND BASELINES
+The grid and generator streams are produced by code/grid_
+streams.py and code/streams.py, and long real streams are cut
+into segments as follows. Real streams with more than 100,000 rows
+are cut into segments of 100,000 (CoverType and one INSECTS
+stream: 150,000 for the first segment).
+LTM follows the buffer allocation of Lourenço et al. [27], which
+gives its short-term buffer a share of 0.75.
+F
+PROOFS
+F.1
+Majority Purity, Detection and Segment
+Purity
+Prop. A.2. With 𝑃𝑋= 𝑄𝑋the conditional of 𝜋𝑃+ (1 −𝜋)𝑄is
+𝜋1[𝑦= 𝑔𝑃(x)] + (1 −𝜋) 1[𝑦= 𝑔𝑄(x)]. Where 𝑔𝑃(x) = 𝑔𝑄(x),
+its mode is 𝑔𝑃(x). Where they differ, the mode is 𝑔𝑃(x) if 𝜋> 1
+2
+and 𝑔𝑄(x) if 𝜋< 1
+2. The 0-1 risk on 𝑃is therefore 0 or 𝜌, and
+𝜖𝑃(ℎ𝑃) = 0, which gives the regret.
+Prop. A.3. Fix a candidate 𝑏and a number 𝑚∈{2, . . . , 𝑅cp} of
+compared batches before it, and write the statistic of (2) without
+the margin as 𝑍𝑚= 1
+𝑛2
+Í
+post 1[error] −1
+𝑛1
+Í
+pre 1[error] over the
+rows of the batches 𝑏−𝑚, . . . ,𝑏−1 (pre, 𝑛1 = 𝑚𝐵) and 𝑏, . . . ,𝑡−1
+(post), and ¯𝑍𝑚for the same sum of conditional error rates. For
+fixed 𝑏and 𝑚these rows and the weights 1/𝑛1 and 1/𝑛2 do not
+depend on the data. By Asm. 2 the error indicators minus their
+conditional rates, taken in row order, form a martingale difference
+sequence whose terms lie in intervals of length 1/𝑛2 (post) and
+1/𝑛1 (pre). By the Azuma–Hoeffding inequality, Pr[𝑍𝑚−¯𝑍𝑚≥
+𝜆] ≤exp −2𝜆2/(1/𝑛1 + 1/𝑛2), and at 𝜆= 𝜏(𝑛1,𝑛2) this bound
+equals 𝛿cp. The reference that (2) uses starts after the previous
+declared change. This start depends on earlier errors, possibly on
+those of the compared rows, but it is always one of these 𝑅cp −1
+fixed references, and a union bound over 𝑚covers this selection.
+Without a change in the batches 𝑡−𝐻cp −𝑅cp, . . . ,𝑡−1, Asm. 2
+gives ¯𝑍𝑚≤0 for every 𝑏and 𝑚. Each excess is therefore positive
+with probability at most 𝛿cp, and a union bound over at most 𝐻cp
+candidates and 𝑅cp −1 references gives the claim.
+Cor. A.4. Each end of a closed segment is a declared change, a
+periodic close inside one concept, or the start of the stream. Without
+missed boundaries, the rows of other concepts lie between an end
+and the true boundary nearest to it. These are at most𝜈rows at each
+end and hence at most 2𝜈in all. The majority concept therefore
+holds more than half of the rows when 2𝜈< |𝑆|/2.
+F.2
+Identification under a Margin
+Proof of Lem. A.5. (i) By Asm. 3,
+𝑤𝑘★=
+
+1 +
+∑︁
+𝑘≠𝑘★
+𝑒−𝜂(ℓ𝑘−ℓ𝑘★)−1
+≥ 1 + (𝐾−1)𝑒−𝜂𝑔−1 = 𝑒−𝜅.
+(ii) For a row with label 𝑦and expert predictions 𝑝𝑘,
+−ln
+∑︁
+𝑘
+𝑤𝑘𝑝𝑘(𝑦) ≤−ln 𝑤𝑘★𝑝𝑘★(𝑦) ≤−ln𝑝𝑘★(𝑦) + 𝜅.
+(iii) For two classes 𝑦1,𝑦2,
+∑︁
+𝑘
+𝑤𝑘
+ 𝑝𝑘(𝑦1) −𝑝𝑘(𝑦2) ≥𝑤𝑘★ 𝑝𝑘★(𝑦1) −𝑝𝑘★(𝑦2)
+−(1 −𝑤𝑘★),
+which is positive when the gap of expert 𝑘★exceeds (1−𝑤𝑘★)/𝑤𝑘★,
+a quantity at most 𝑒𝜅−1.
+□
+Proof of Prop. A.6. The first batch of the block is predicted
+with weights from a batch of the previous concept, and its per-row
+regret is at most 𝑐. Every later batch is predicted with weights from
+a labelled batch of the block on which 𝑘★leads by 𝑔. Lem. A.5(ii)
+therefore bounds its per-row regret by ln 1 + (𝐾−1)𝑒−𝜂𝑔 ≤(𝐾−
+1)𝑒−𝜂𝑔. Summing over the 𝐽−1 later batches gives the claim.
+□
+F.3
+Recall versus Relearn
+Proof of Thm. 4.1. The first batch of the block is predicted by
+both learners before any label of the block has arrived. Its accuracy
+difference, divided by 𝐽, is 𝜁𝑘,𝑐and is at most 1/𝐽in absolute value
+because accuracies lie in [0, 1]. Before batch 𝑗+1 (𝑗= 1, . . . , 𝐽−1), the
+relearning context holds min(𝑗𝐵, 𝑀) rows of the block. Its expected
+accuracy is therefore 𝑎𝑘(min(𝑗𝐵, 𝑀)), whereas the stored expert
+has expected accuracy 𝑎𝑘(𝑛𝑐). By Lem. A.5(iii), the mixture predicts
+as the better of the two. Its expected accuracy is thus the larger of
+the two values, and its difference to relearning is the positive part
+in (1). Averaging over the 𝐽batches gives the area term, and adding
+the first batch gives 𝜁𝑘,𝑐.
+□
+Proof of Cor. A.7. On the first visit 𝑛1 = 0, and every positive
+part vanishes because 𝑎𝑘is non-decreasing and hence 𝑎𝑘(0) ≤
+𝑎𝑘(min(𝑗𝐵, 𝑀)). Since 𝑎𝑘is non-decreasing and 𝑛𝑐≤𝑀, every
+term of the area term is at most 𝑎𝑘(𝑀) −𝑎𝑘(𝐵), which is zero for
+a flat curve, and the terms with 𝑗𝐵≥𝑀vanish. At most 𝑀/𝐵of
+the 𝐽−1 terms are non-zero, namely those with 𝑗𝐵< 𝑛𝑐≤𝑀.
+Combining this count with |𝜁𝑘,𝑐| ≤1/𝐽gives the bound.
+□
+F.4
+Any-Time Safeguard
+Proof of Thm. 4.2. Exp-concavity. The half Brier score ℓ(𝑝) =
+1
+2 ∥𝑝−𝑒𝑦∥2 has gradient 𝑝−𝑒𝑦and Hessian 𝐼, and ∥𝑝−𝑒𝑦∥2 ≤2
+on the simplex. Hence ∇2ℓ⪰𝜂2 ∇ℓ∇ℓ⊤for 𝜂2 ≤1
+2, that is, ℓis 𝜂2-
+exp-concave. The mean over the rows of a batch is 𝜂2-exp-concave
+as well: its Hessian is the mean Hessian, and 1
+𝑛
+Í
+𝑖𝑔𝑖𝑔⊤
+𝑖⪰¯𝑔¯𝑔⊤for
+the row gradients 𝑔𝑖with mean ¯𝑔. Consequently,
+𝑒−𝜂2ℓ𝑡(𝑝𝑡) ≥
+∑︁
+𝑘
+𝑣𝑡,𝑘𝑒−𝜂2ℓ𝑡,𝑘.
+(10)
+Potential. Let 𝑊𝑡= Í
+𝑘𝑒−𝜂2𝐿𝑡,𝑘and note that 𝑊0 = 𝐾. By (5) and
+(6),
+𝑊𝑡=
+∑︁
+𝑘
+𝑒−𝜂2𝛾𝐿𝑡−1,𝑘
+ ∑︁
+𝑘
+𝑣𝑡,𝑘𝑒−𝜂2ℓ𝑡,𝑘.
+By the power-mean inequality, Í
+𝑘𝑥𝛾
+𝑘≤𝐾1−𝛾 Í
+𝑘𝑥𝑘
+𝛾for 𝑥𝑘≥0
+and𝛾∈(0, 1]. Applying it with 𝑥𝑘= 𝑒−𝜂2𝐿𝑡−1,𝑘and combining with
+(10) gives
+ln𝑊𝑡≤(1 −𝛾) ln𝐾+ 𝛾ln𝑊𝑡−1 −𝜂2 ℓ𝑡(𝑝𝑡).
+14
+
+
+Recall or Relearn?
+Table 3: Controlled grid: parameters.
+Features, classes, concepts
+𝑑= 10, 4, 3
+Centroids 𝑚
+5, 30, 100 with 𝐶𝑗∼U([0, 1]10)
+Weights
+𝑢𝑗∼U(0, 1), normalised
+Class of centroid 𝑗in concept 𝑘
+𝜆𝑘(𝑗) ∼U{0, . . . , 3}, independent
+Noise
+isotropic Gaussian, s.d. 0.15
+Block length 𝐿, cycles
+500 or 2000 rows, 3
+Batch size, 𝑀
+100, 1000 rows
+Segments
+300–700 rows (detected), 500 rows (fixed)
+Unrolling. Since (1 −𝛾) Í
+𝑡≤𝑇𝛾𝑇−𝑡+ 𝛾𝑇= 1,
+ln𝑊𝑇≤ln𝐾−𝜂2
+𝑇
+∑︁
+𝑡=1
+𝛾𝑇−𝑡ℓ𝑡(𝑝𝑡).
+On the other hand, ln𝑊𝑇≥−𝜂2𝐿𝑇,𝑘= −𝜂2
+Í𝑇
+𝑡=1 𝛾𝑇−𝑡ℓ𝑡,𝑘for every
+𝑘. Combining the two inequalities gives (8).
+□
+G
+CONTROLLED GRID AND LEARNING
+CURVES
+The grid generator fixes the input distribution and lets concepts
+differ only in their classes. A stream has 𝑑= 10 features, four
+nominal classes and three concepts. For 𝑚∈{5, 30, 100} centroids,
+𝐶𝑗∼U([0, 1]10) i.i.d. and mixture weights 𝑤𝑗= 𝑢𝑗/Í
+𝑖𝑢𝑖with
+𝑢𝑗∼U(0, 1). Each concept 𝑘has its own class vector 𝜆𝑘(𝑗) ∼
+U{0, 1, 2, 3}, drawn i.i.d. over centroids and independently across
+concepts. A row of concept 𝑘draws 𝑗∼Categorical(𝑤), x =
+𝐶𝑗+ N (0, 0.152𝐼10) and 𝑦= 𝜆𝑘(𝑗). Concepts appear in the order
+1, 2, 3 in blocks of 𝐿∈{500, 2000} rows for three cycles. The input
+distribution 𝑃𝑋is the same for all concepts because all of them
+share 𝐶, 𝑤and the noise. One NumPy generator per data seed
+draws 𝐶, 𝑤and 𝜆first and then the rows.
+Because the class vectors are drawn independently, 𝜆𝑘is not a
+permutation and two concepts may agree on a centroid. On our
+seeds the weight of such centroids is 18% to 48% averaged over the
+three pairs of concepts and 3% to 76% for single pairs. With five
+centroids a concept can also lack some classes, with two to four
+present. The generator applies no rejection or coverage constraint,
+and class priors follow from 𝑤and 𝜆𝑘.
+The data seeds are allocated as follows. Seeds 0 and 1 serve
+development, including that of the change detector, and seeds 10
+and 11 the registered test. Seeds 20 and 21 serve confirmation, 30
+and 31 the misaligned schedules, and 40 and 41 the oracle test. Seeds
+40 to 43 serve the test of detected segmentation and share seeds 40
+and 41 with the oracle test. Seeds 50 to 53 serve its confirmation.
+The shifted streams reuse seeds 20 and 21 and draw their prefix
+from a separate generator. The streams of Fig. 6 prepend rows of
+the first concept from a separate generator and also use blocks of
+lengths drawn uniformly from 500 to 2 500 rows.
+The learning curves that supply the recall predictions were
+measured before the grid test, for data seeds 10 and 11. For
+each 𝑚and concept, one block of 4000 rows of that concept
+comes from the generator above. Rows 1–3000 form the con-
+text pool and rows 3001–4000 the 1000 test rows, disjoint. For
+𝑛∈{50, 100, 200, 500, 1000, 2000}, three contexts are drawn without
+replacement from the pool (generator seeds 0, 1, 2). Contexts of
+different sizes and repetitions therefore overlap, while the same
+1000 test rows are used throughout. The frozen TabPFN v2 with
+four estimators and random state equal to the data seed predicts the
+test rows, whereas stream evaluation uses backbone random state 0.
+The curve 𝑎(𝑛) is the mean accuracy over 2 seeds, 3 concepts
+and 3 repetitions (18 measurements per 𝑛, not 18 independent
+concept draws), interpolated linearly in log𝑛.
+Predicted recall gains come from inserting the averaged curve
+into the area term of Eq. (1), which measures the accuracy that
+a stored expert saves over relearning. Visits 2 and 3 of a concept
+recur and enter with weight 1
+3 each. The first visit has no stored
+expert and contributes zero. The registered predictions used 𝑀
+stored rows on every recurrence, and Sec. 5.2 reports the form with
+𝑛𝑐= min(𝑀, (𝑐−1)𝐿). The observed gain of a cell is the mean over
+its two streams, and the Spearman correlations are over the six cells.
+The curves of seeds 10 and 11 share randomness with the evalu-
+ated streams of these seeds, because their data were generated by
+re-initialising the generator of the same seed with one 4000-row
+block per concept. The shared part is the concept definitions of
+the evaluated seed-10/11 streams, the centroid draws of their first
+block, and some bit-identical feature vectors (0 to 1887 per stream).
+These identical rows arise in runs where the two draw sequences of
+the same seed realign at a constant offset. The seed-20/21 streams,
+by contrast, share nothing with the curves.
+To remove the shared rows, a sensitivity analysis registered
+after this overlap was found remeasured the curves on rows drawn,
+given the same concept definitions, from one independent NumPy
+generator per seed, centroid count and concept. Each generator is
+seeded with (20 000+seed,𝑚,𝑘), and no redrawn row is in common
+with any evaluated stream. These counts and checks are produced
+by code/grid_overlap_check.py. The redraw changes the curves
+by at most 0.015 at any 𝑛and the predictions by at most 0.6 points.
+For 100 centroids and 𝐿= 500, the prediction is 9.9 instead of the
+registered 10.4, and 8.9 instead of 9.2 with 𝑛𝑐. The rank correlations
+are unchanged at 0.94 on seeds 10 and 11 and 0.83 on seeds 20 and 21.
+H
+PER-STREAM RESULTS AND RESOURCES
+Fig. 10 gives the accuracy of every policy minus FIFO on each real
+stream.
+Per-stream accuracy comparisons show how the effects of pool
+organisation and a larger FIFO window vary across streams. Fig. 11
+shows the pool controls of Sec. 5.5 per stream, and Fig. 9 the com-
+parison with a 3000-row window.
+15
+
+
+Wu et al.
+Electricity
+INSECTS abr.
+INSECTS grad.
+INSECTS inc.
+INSECTS inc.-rec.
+CoverType
+INSECTS abr.-imb.
+INSECTS grad.-imb.
+INSECTS inc.-abr.
+Airlines
+Phishing
+PokerHand
+Rialto
+Spam
+Weather
+Airlines 3b
+Airlines 3c
+CoverType 3b
+CoverType 3c
+INSECTS 3b
+INSECTS 3c
+PokerHand 3b
+PokerHand 3c
+Airlines 4d
+Airlines 4e
+CoverType 4d
+CoverType 4e
+PokerHand 4d
+PokerHand 4e
+−20
+−10
+−5
+−2
+−1
+0
+1
+2
+5
+accuracy minus FIFO (points)
+development
+first
+held-out set
+second
+held-out set
+third
+held-out set
+fourth
+held-out set
+(confirmatory)
+LTM
+reset
+window ensemble
+MICE w/o slow level
+MICE, η2 = 10
+MICE
+best trained learner
+Figure 10: Accuracy minus FIFO on each real stream, grouped by evaluation stage (fixed segments).
+5 / 500 / 20
+5 / 500 / 21
+5 / 2000 / 20
+5 / 2000 / 21
+30 / 500 / 20
+30 / 500 / 21
+30 / 2000 / 20
+30 / 2000 / 21
+100 / 500 / 20
+100 / 500 / 21
+100 / 2000 / 20
+100 / 2000 / 21
+centroids / block / seed
+0
+5
+10
+15
+−pool (points)
+(a) aligned grid, 95% CI
+−archive
+−snapshot
+Electricity
+INSECTS abr.
+INSECTS grad.
+INSECTS inc.
+INSECTS inc.-rec.
+CoverType
+INSECTS abr.-imb.
+INSECTS grad.-imb.
+INSECTS inc.-abr.
+Airlines
+Phishing
+PokerHand
+Rialto
+Spam
+Weather
+Airlines 3b
+Airlines 3c
+CoverType 3b
+CoverType 3c
+INSECTS 3b
+INSECTS 3c
+PokerHand 3b
+PokerHand 3c
+Airlines 4d
+Airlines 4e
+CoverType 4d
+CoverType 4e
+PokerHand 4d
+PokerHand 4e
+−0.5
+0.0
+0.5
+1.0
+(b) 29 real streams, fixed segments
+−archive (line: one-sided 95% bound)
+−snapshot (line: one-sided 95% bound)
+Figure 11: MICE minus the archive and the snapshot pool of size 12, fixed segments. (a) Aligned grid. (b) The 29 real streams,
+with a dotted line at −0.3 points.
+16
+
+
+Recall or Relearn?
+0.2
+0.5
+1
+2
+seconds per batch
+64
+65
+66
+67
+accuracy (%)
+1000
+1500
+20003000
+5000
+13400
+Airlines
+0.2
+0.5
+1
+2
+seconds per batch
+95.4
+95.6
+95.8
+1000
+1500
+2000
+3000
+5000
+13400
+CoverType
+FIFO, 1000 to 13 400 rows
+window ensemble
+MICE
+0.2
+0.5
+1
+2
+seconds per batch
+65
+70
+75
+80
+1000
+1500
+2000
+3000
+5000
+13400
+INSECTS
+Figure 12: Accuracy against time per batch on three real prefixes for FIFO windows of 1000 to 13 400 rows, the window ensemble
+and MICE (fixed segments). Peak GPU memory: 0.8 to 26.4 GB for FIFO, 1.0 GB for MICE.
+17

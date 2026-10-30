@@ -51,14 +51,14 @@
       <span class="dpr-home-dashboard-kicker">2026-10-21 ~ 2026-10-30</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 22 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 32 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
-    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>13</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>2 次</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>14</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>18</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-30 10:43:12 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-30 12:09:35 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-21至30日共筛读22篇论文（精读9篇、速读13篇），重点聚焦因果推断与共形预测。最值得看的是两项9分工作：基于条件期望局部半径的度量共形预测，以及面向政策上下文纵向因果效应估计的基础模型。普通读者可先精读这两篇，再顺带浏览LLM辅助表格分类与残差因果发现等8分速读。</p>
+<p>本期共扫描 32 篇论文（精读 14 篇、速读 18 篇），重点覆盖 in-context 学习与因果发现两条主线。</p>
+<p>最值得关注的是两篇 9.0 分精读：一是《Prior-Data Fitted Networks for In-Context Off-Policy Evaluation》，它把先验数据拟合网络用于上下文离策略评估；二是《Tabular foundation models are not a shortcut to calibrated clinical risk prediction》，它通过预注册模拟提醒我们，表格基础模型并不等于校准良好的临床风险预测；此外，速读中 8.0 分的成果集中在反复概念漂移下的 in-context 专家混合与非线性时序因果发现。</p>
+<p>普通读者可先读这两篇 9.0 分文章，把握“上下文学习能做什么、不能替代什么”，再按兴趣跟进因果发现方向的三篇 8.0 分工作。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -78,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">9 篇</strong>
+    <strong class="dpr-home-dashboard-count">14 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Metric Conformal Prediction via the Conditional Expected Local Radius">Metric Conformal Prediction via the Conditional Expected Local Radius</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Foundation Model for Policy In-Context Longitudinal Causal Effect Estimation">A Foundation Model for Policy In-Context Longitudinal Causal Effect Estimation</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Document Layout to Causal Topology: An End-to-End Architecture for Temporal Causal Reasoning">From Document Layout to Causal Topology: An End-to-End Architecture for Temporal Causal Reasoning</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Prior-Data Fitted Networks for In-Context Off-Policy Evaluation">Prior-Data Fitted Networks for In-Context Off-Policy Evaluation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Tabular foundation models are not a shortcut to calibrated clinical risk prediction: a pre-registered simulation against the true risk">Tabular foundation models are not a shortcut to calibrated clinical risk prediction: a pre-registered simulation against the true risk</span></li><li><span class="dpr-home-dashboard-paper-title" title="Tabular Foundation Models Dramatically Outperform Bespoke Photometric Redshift Estimators">Tabular Foundation Models Dramatically Outperform Bespoke Photometric Redshift Estimators</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>6</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>6</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>6</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -91,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">13 篇</strong>
+    <strong class="dpr-home-dashboard-count">18 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Beyond the Vote: When Do LLMs Add Value to Retrieval-Based Tabular Classification?">Beyond the Vote: When Do LLMs Add Value to Retrieval-Based Tabular Classification?</span></li><li><span class="dpr-home-dashboard-paper-title" title="Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression">Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression</span></li><li><span class="dpr-home-dashboard-paper-title" title="SCDM: Scalable Causal Discovery in Nonlinear Temporal Systems with Meta-Learning">SCDM: Scalable Causal Discovery in Nonlinear Temporal Systems with Meta-Learning</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Recall or Relearn? A Mixture of In-Context Experts for Recurring Concept Drift">Recall or Relearn? A Mixture of In-Context Experts for Recurring Concept Drift</span></li><li><span class="dpr-home-dashboard-paper-title" title="Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression">Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression</span></li><li><span class="dpr-home-dashboard-paper-title" title="SCDM: Scalable Causal Discovery in Nonlinear Temporal Systems with Meta-Learning">SCDM: Scalable Causal Discovery in Nonlinear Temporal Systems with Meta-Learning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>7</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>5</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">tabular-data <strong>9</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>8</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
 </section>
 </div>
 
