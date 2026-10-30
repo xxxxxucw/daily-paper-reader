@@ -1,0 +1,1090 @@
+Title: Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression
+
+URL Source: https://arxiv.org/pdf/2610.29530v1
+
+Published Time: Thu, 22 Oct 2026 01:06:00 GMT
+
+Number of Pages: 27
+
+Markdown Content:
+# Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+Daniel Klippert 1 2 Quang Nhat Huynh 3 Alexander Marx 1 2 
+
+§ https://github.com/causality-lab/loscar 
+
+## Abstract 
+
+Residual-based causal discovery assumes that each variable is generated from its parents and an independent noise source. It estimates this noise and tests its independence from candidate causes. For identifiable functions such as additive-noise models (ANMs) and the broader class of location-scale noise models (LSNMs), this prin-ciple identifies the causal direction, as only the causal model admits this independence. Existing LSNM methods rely on parametric assumptions to obtain standardized residuals, risking model mis-specification. In contrast, the RESIT-framework allows for nonparametric estimation of residuals to iteratively identify sink nodes, but was pro-posed for ANMs. To close this gap, we propose LOSCAR , an extension of RESIT to LSNMs that estimates the conditional mean and scale via quan-tile regression, enabling pretrained tabular foun-dation models as plug-in estimators. We com-pare it with a feasible generalized least squares (FGLS) variant, which is consistent given suitable basis functions. Across bivariate and multivariate causal-discovery benchmarks, in-context quantile regression substantially outperforms FGLS with flexible function classes, particularly for multi-variate causes. 
+
+## 1. Introduction 
+
+Causal discovery provides a rigorous framework to deter-mine under which conditions causal relations can be derived from observational data (Spirtes et al., 2000; Peters et al., 2017). Provided that all relevant sources of variation are observed, i.e., it can be assumed that confounding and selec-
+
+> 1
+
+Department of Statistics, TU Dortmund University, Ger-many 2Research Center Trustworthy Data Science and Security, University Alliance Ruhr, Germany 3Department of Economics, University of M¨ unster, Germany. Correspondence to: Daniel Klippert <daniel.klippert@tu-dortmund.de >, Alexander Marx 
+
+<alexander.marx@tu-dortmund.de >.
+
+Preprint. October 22, 2026. 
+
+tion bias are absent, and no cyclic relations exist, the causal graph can be described as a directed acyclic graph (DAG). Constraint-based approaches rely on conditional inde-pendence testing to recover the Markov equivalence class (Spirtes et al., 2000), whereas methods restricting the function class of the structural causal model identify the unique DAG. Early approaches showed identifiabil-ity of the DAG under linear non-Gaussian additive mod-els (Shimizu et al., 2006, LiNGAM). Both the linearity as-sumption (Hoyer et al., 2008) and the additivity assumption have been relaxed by subsequent works that prove identifi-cation results for post-nonlinear (Zhang & Hyv¨ arinen, 2009, PNL) and location-scale noise models (Immer et al., 2023; Strobl & Lasko, 2023, LSNMs). Alongside this line of research, another promising direction involves amortized approaches to causal discovery (Lorch et al., 2022; Petersen et al., 2023), which treat causal discov-ery as a supervised machine learning problem by training on a large corpus of synthetically generated data. Benefit-ing from the advantages of transformer models (Thompson et al., 2026) or the success of tabular foundation models (Xu et al., 2026), these approaches are scalable and show strong empirical results. These works aim to encode known identi-fication results through drawing the training data from such data generative models, however, they lack formal guaran-tees and require extensive pretraining. 
+
+Our Contributions Taking a different approach, we inte-grate pretrained tabular foundation models (Hollmann et al., 2023) as plug-in estimators. Our method, L OSCAR , extends the well-studied RESIT algorithm (Peters et al., 2014) to LSNMs. In contrast to previous work on LSNMs that rely on distributional assumptions on the noise variable (Immer et al., 2023; Duong & Nguyen, 2023; Tran et al., 2024; Klip-pert & Marx, 2026) or symmetric noise variables (Lin et al., 2024) we show that nonparametric estimation is feasible by estimating the conditional standard deviation via quantile regression. This result enables us to harness the predictive capabilities of pretrained tabular foundation models such as TabPFN (Hollmann et al., 2023) through in-context quan-tile regression without the need of retraining or fine-tuning the model. We propose two strategies through quantile 1arXiv:2610.29530v1 [stat.ML] 21 Oct 2026 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression      
+
+> Figure 1. Accuracy in % over 19 bivariate benchmarks. L OSCAR
+> and L OSCAR -GL use TabPFN for in-context quantile regression, computing the conditional scale using different variants (Sec-tion 3.1). LOSCAR -FGLS (Section 3.2) employs spline-based FGLS. L OSCAR has an average accuracy of 90 .04% .While LOSCAR -GL performs on par, the FGLS variant struggles to model complex location-scale relationships.
+
+regression and compare them to a variant using feasible GLS (Greene & Zhang, 2000) which given appropriate ba-sis functions consistently estimates the conditional mean and standard deviation without distributional assumptions. Through empirical evaluation on 19 bivariate benchmarks we show that L OSCAR using in-context quantile regression achieves state-of-the-art performance and outperforms the FGLS variant on flexible function classes (Figure 1). Fur-ther, we evaluate L OSCAR on multivariate simulated and real-world benchmarks obtaining competitive results while being scalable in low and medium dimensional settings. We first review LSNMs and their estimation through condi-tional mean and variance in Section 2, followed by a descrip-tion of L OSCAR . In Section 3.1, we derive two approaches that enable in-context quantile regression and describe the FGLS variant in Section 3.2. We discuss related work in Section 4, present experiments in Section 5, and conclude thereafter. 
+
+## 2. Residual-Based Causal Discovery 
+
+Below we describe the framework for residual-based causal discovery. First we review LSNMs, which include ANMs as a special case, and their identification results. Then, we discuss the basis of bivariate causal discovery via residual-based independence testing and how these ideas extend to the multivariate setting. 
+
+2.1. Location-Scale Noise Models 
+
+When latent confounding, cycles, and selection are absent, we can model the causal network as a directed acyclic graph (DAG). A causal DAG model is a tuple (G, P X ), where G
+
+defines a DAG and PX a probability distribution associated with the nodes of G, that has been generated through a structural causal model (SCM). In particular, an SCM C =(S, P N ) is defined as a collection of assignments S:
+
+X(j) := f (j)(PA G 
+
+> X(j)
+
+, N X(j) ), j = 1 , . . . , d, 
+
+where all NX(j) (exogenous or noise variables) are jointly independent so that PN is a product distribution. The DAG 
+
+G = ( V , E) of an SCM is obtained by creating a vertex 
+
+j ∈ V , with |V | = d, for each X(j) and drawing directed edges (i, j ) ∈ E from each parent i ∈ PA G 
+
+> X(j)
+
+to j. Without restricting the function class, recovery of the DAG G is only feasible up to its Markov equivalence class (Peters et al., 2017), for example, through assuming faithfulness. In this paper, we consider the class of location-scale noise models (Immer et al., 2023). That is, an SCM is called a location-scale noise model (LSNM) if, for each variable 
+
+X(j) with non-empty parent set PA G
+
+> X(j)
+
+̸ = ∅, the structural equation of X(j) is given by 
+
+X(j) := f (j)(PA G 
+
+> X(j)
+
+) + g(j)(PA G 
+
+> X(j)
+
+)NX(j) , (1) where f (j) and g(j) are deterministic real-valued functions with g(j)(·) > 0. If PA G 
+
+> X(j)
+
+= ∅, then X(j) = NX(j) .LSNMs naturally extend the class of additive noise models (ANMs) (Kano et al., 2003; Hoyer et al., 2008) and reduce to an ANM when g(j)(·) ≡ 1.Identifiability of the causal graph under LNSMs has been studied by Immer et al. (2023); Strobl & Lasko (2023) for bivariate models. Strobl & Lasko (2023) extend these results to the multivariate setting. They conclude that identifiablitly holds up to pathological cases. Related re-sults cover the exact identifiability conditions for Gaussian noise (Khemakhem et al., 2021), uniform and continuous Bernoulli (Sun & Schulte, 2023), and exponential fami-lies (Bodik & Chavez-Demoulin, 2025). Below, we discuss how these results can be exploited by practical estimators. 
+
+2.2. Cause-Effect Inference by Residual-Based Independence Testing 
+
+We start by describing the bivariate setting in which we call the two involved random variables X and Y . If the data has been generated according to an LSNM encoding the graph 
+
+X → Y , i.e., Y := f (X) + g(X)NY , it holds that, by assumption, (Y − f (X)) /g (X) = NY is independent of X.If the LSNM is identifiable, such an independence relation does not exist for the anti-causal direction, i.e., we cannot find functions h and k such that Y is independent of NX =(X −h(Y )) /k (Y ). This approach has its roots in the RESIT (short for regression with subsequent independence testing) framework (Peters et al., 2014) that has been developed 2Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+for ANMs. As in ANMs g(·) ≡ 1, RESIT approximates the noise terms by the residuals obtained through standard regression for both hypothetical causal models and decides for the model which does not reject the null hypothesis of independence between noise and hypothesized cause. If independence is rejected in both causal directions, the direction with the higher p-value is selected in cases where a decision is forced. 1
+
+In LSNMs, the noise is typically extracted through estimat-ing f and g. When the noise follows a standard Gaussian distribution, Immer et al. (2023) provide a weakly consistent spline-based estimator. To relax the Gaussianity assump-tions, subsequent work has developed estimators that are more robust to heavy-tailed (Tran et al., 2024) or skewed noise (Klippert & Marx, 2026), which led to performance improvements on standard benchmarks. In this paper, we build upon the result of Sun & Schulte (2023), who show that consistently estimating mean and standard deviation is sufficient. We provide a derivation of this result below and propose appropriate estimators in Section 3. 
+
+Standardized Residuals Given an LSNM for X → Y ,as defined in Eq. (1), then (Sun & Schulte, 2023) 
+
+Y − E[Y |X]Sd( Y |X) =: ˆNY ⊥⊥ X . (2) In other words, if we had a consistent estimator for E[Y |X]
+
+and Sd( Y |X) the estimated residuals ˆNY are independent of cause X. The implication of this result is that such an estimator would be applicable to most continuous noise dis-tributions, since we only require that the first two moments of NY exist. In their paper, Sun & Schulte (2023) discuss the advantages of independence-based approaches in this context, but do not derive a general estimator for the above quantities. Before introducing our proposed estimators, we briefly sketch the proof idea to provide more intuition to the re-sult in Eq. (2). We first derive that 
+
+E[Y |X] = f (X) + g(X)E[NY ],
+
+Sd( Y |X) = g(X)Sd( NY ) .
+
+Note that an estimator that consistently learns E[Y |X] will not coincide with f (X) if E[NY ]̸ = 0 . Similarly, Sd( Y |X)
+
+may differ from g(X) whenever Sd( NY )̸ = 1 . Importantly, by estimating the noise variable through Eq. (2), all terms that depend on X cancel and we are guaranteed to learn the standardized version of NY in the large sample limit (Sun & Schulte, 2023), i.e., 
+
+Y − E[Y |X]Sd( Y |X) = g(X)( NY − E[NY ]) 
+
+g(X)Sd( NY ) = NY − E[NY ]) Sd( NY ) ,
+
+> 1Such a result, however, rather indicates confounding or model misspecification (Schultheiss & B¨ uhlmann, 2024).
+
+which we will exploit in our approach. Alternatively, Lemma 4.1 by Sun & Schulte (2023) clarifies this result by showing that for any LSNM, as defined in Eq. (1), there exists a likelihood-equivalent LSNM 
+
+Y = μ(X) + σ(X) ˜NY , ˜NY = NY − E[NY ]
+
+Sd (NY ) ⊥⊥ X, 
+
+under which μ(X) = E[Y |X] and σ(X) = Sd( Y |X). We further note, that these results directly translate to the multi-variate setting, where X is replaced by X.
+
+2.3. Multivariate Causal Discovery 
+
+To infer DAGs from an iid sample of a multivariate ran-dom vector X, we adapt the RESIT (Peters et al., 2014) algorithm to LSNMs as shown in Algorithm 1. We call the resulting algorithm L OSCAR (short for Location-Scale RESIT). Similar adaptations to LSNMs have been explored by Bodik & Chavez-Demoulin (2025); Khan et al. (2026). In summary, akin to the original RESIT method, Algorithm 1 consists of two phases. Phase 1 learns a causal ordering π
+
+in which the parent set for each node k consists of all nodes that appear prior to k in the causal ordering. The causal ordering is defined as a bijective mapping π : {1, . . . , d } → {1, . . . , d } satisfying 
+
+π(i) < π (j) if j ∈ De G 
+
+> X(i)
+
+,
+
+where De G 
+
+> X(i)
+
+refers to the descendants of a node i. We start with an empty ordering π and a candidate set S =
+
+{1, . . . , d }. Then, we iteratively identify sink nodes, which we add to π and remove from S until S is empty. At each step, we estimate the standardized residuals for each node 
+
+k ∈ S by obtaining the conditional mean and standard deviation of X(k) | { X(i)}i∈S\{ k} based on one of the estimators described in Section 3. Note that both the mean and the standard deviation can be non-constant and are modeled through {X(i)}i∈S\{ k}. We omit this dependence in the notation of Algorithm 1 to avoid clutter. The sink node is then determined as the node for which the estimated 
+
+p-value between standardized residuals and corresponding parent set {X(i)}i∈S\{ k} is largest. Phase 2 of the algorithm prunes superfluous edges for each node k by iteratively checking if removing a member of the current parent set will induce a dependence between the estimated standardized residuals and the nodes appearing before k in the ordering π.
+
+Consistency The original RESIT algorithm is guaranteed to find the correct causal graph G for identifiable ANMs under causal minimality, given an independence oracle and assuming that the noise can be consistently estimated. In Algorithm 1, we only modified the procedure for estimating 3Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+Algorithm 1 LOSCAR  
+
+> 1:
+
+Input: iid sample of d-dimensional X,significance level α 
+
+> 2:
+
+# Phase 1: Causal order search  
+
+> 3:
+
+S = {1, . . . , d }, π = [ ]  
+
+> 4:
+
+while |S| > 0 do  
+
+> 5:
+
+for k ∈ S do  
+
+> 6:
+
+ˆμk, ˆσk = Estimator( X(k) | { X(i)}i∈S\{ k}) 
+
+> 7:
+
+pk = HSIC 
+
+
+
+{X(i)}i∈S\{ k}, X(k)−ˆμk
+
+> ˆσk
+
+ 
+
+> 8:
+
+end for  
+
+> 9:
+
+Let p∗ be the largest p-value.  
+
+> 10:
+
+S = S\{ k∗} 
+
+> 11:
+
+PA( k∗) = S 
+
+> 12:
+
+π = [ k∗, π ] 
+
+> 13:
+
+end while  
+
+> 14:
+
+# Phase 2: Pruning  
+
+> 15:
+
+for k = 2 , . . . , d do  
+
+> 16:
+
+for ℓ ∈ PA( π(k)) do  
+
+> 17:
+
+R = PA( π(k)) \{ ℓ} 
+
+> 18:
+
+ˆμ, ˆσ = Estimator( X(π(k)) | { X(i)}i∈R) 
+
+> 19:
+
+p = HSIC 
+
+
+
+{X(i)}i∈{ π(1) ,...,π (k−1) }, X(π(k)) −ˆμ
+
+> ˆσ
+
+ 
+
+> 20:
+
+if p > α then  
+
+> 21:
+
+Remove ℓ from PA( π(k))  
+
+> 22:
+
+end if  
+
+> 23:
+
+end for  
+
+> 24:
+
+end for  
+
+> 25:
+
+Output: [PA( π(1)) , . . . , PA( π(d))] 
+
+the noise terms and use the HSIC test. Thus, we need to assume that the data has been generated by an identifiable LSNM (cf. Section 2.1) and we exploit the result that it is sufficient to recover the standardized noise variables, as can be achieved by the multivariate extension to Eq. (2). Fur-ther, note that consistent estimation with HSIC can also be achieved via sample splitting if the estimator to extract the noise term is weakly consistent, or without sample splitting if a strongly consistent estimator is available (Mooij et al., 2016, Thm. 20). 
+
+## 3. Estimating Methods 
+
+In this section, we describe three approaches for estimat-ing the conditional mean and scale that we employ within LOSCAR to extract residuals in LSNMs. We propose two methods that estimate the scale from a pretrained in-context quantile regression model (Section 3.1). Specifically, we use TabPFN (Hollmann et al., 2023), a tabular foundation model, to obtain estimates of the conditional mean and con-ditional quantile function. The first two approaches then recover the scale from the estimated conditional quantile function in different ways. The third approach (Section 3.2) jointly estimates the mean and variance functions via fea-sible generalized least squares, which is consistent under suitable modeling assumptions. 
+
+3.1. Pretrained In-Context Quantile Regression 
+
+Following the argumentation in Section 2.2, we assume without loss of generality that the LSNM is given by 
+
+Y = μ(X) + σ(X)NY , NY ⊥⊥ X, (3) where μ(X) = E[Y |X] and σ(X) = pVar (Y |X). We obtain an estimate of μ directly from TabPFN and recover 
+
+σ from the quantile function of Y |X = x. For a ran-dom variable Z with cumulative distribution function (CDF) 
+
+FZ (z) = P(Z ≤ z), the quantile function is given by 
+
+QZ (τ ) = inf {z : FZ (z) ≥ τ }, τ ∈ (0 , 1) .
+
+Under the assumption of symmetric noise, mean and median of Y |X = x coincide, in which case the residuals can be extracted solely based on the quantile function when estimating the scale based on QY |X=x.3.1.1. Q UANTILE -D IFFERENCE SCALE ESTIMATION 
+
+As shown in Proposition 3.1, knowledge of two quantiles of 
+
+NY and the quantile function QY |X=x allows us to recover 
+
+σ(x) exactly. More importantly, σ(x) can be recovered up to scale without knowledge of the quantiles of NY . This is sufficient to recover the residuals up to scale within L OSCAR 
+
+under the LSNM assumption, as for any constant c̸ = 0 we have that 
+
+(Y − μ(X)) /(cσ (x)) ⊥⊥ X.
+
+In the implementation, we calculate the quantiles of NY
+
+under the assumption that NY ∼ N (0 , 1) . This choice, however, does not require the true distribution of NY to be Gaussian, as any choice of QNY (τ1) − QNY (τ2) only fixes the otherwise irrelevant multiplicative constant. 
+
+Proposition 3.1. Let τ1, τ 2 ∈ (0 , 1) . Under the LSNM in Equation 3, we have that 
+
+σ(x) = QY |X=x(τ1) − QY |X=x(τ2)
+
+QNY (τ1) − QNY (τ2)
+
+∝ QY |X=x(τ1) − QY |X=x(τ2).
+
+Proof . Let τ ∈ (0 , 1) . We begin by showing that 
+
+QY |X=x(τ ) = inf {y : FY |X=x(y) ≥ τ }
+
+= inf {y : P(Y ≤ y|X = x) ≥ τ }
+
+= inf {y : P(μ(x) + σ(x)NY ≤ y) ≥ τ }
+
+= inf 
+
+
+
+y : P
+
+
+
+NY ≤ y − μ(x)
+
+σ(x)
+
+
+
+≥ τ
+
+
+
+= μ(x) + σ(x) inf {ny : P(NY ≤ ny ) ≥ τ }
+
+= μ(x) + σ(x)QNY (τ ).
+
+4Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+It follows that for any τ1̸ = τ2 ∈ (0 , 1) 
+
+QY |X=x(τ1) − QY |X=x(τ2)= σ(x)QNY (τ1) − σ(x)QNY (τ2)
+
+⇐⇒ σ(x) = QY |X=x(τ1) − QY |X=x(τ2)
+
+QNY (τ1) − QNY (τ2) .
+
+For numerical stability, we use well-separated quantiles, 
+
+(τ1, τ 2) = (0 .05 , 0.95) , to avoid a conditional quantile dif-ference close to zero. In Appendix B.1.2, we compare the default setting with (τ1, τ 2) = (0 .25 , 0.75) in the bivariate setting and obtain comparable performance in the down-stream causal discovery task. 3.1.2. G AUSS -L EGENDRE SCALE ESTIMATION 
+
+Unlike the previous approach, this method uses both the estimated conditional mean and the conditional quantile function to recover σ. Hence, a drawback of this method is that errors in the estimated conditional mean directly propagate to the variance estimate. Given a fixed X = x we have that Var (Y |X = x) = E
+
+h
+
+(Y − E[Y |X = x]) 2 |X = x
+
+i
+
+=
+
+Z
+
+> Y
+
+(y − E[Y |X = x]) 2 dF Y |X=x(y).
+
+Using the well-known quantile representation where for 
+
+U ∼ Unif (0 , 1) we get Y d
+
+= QY |X=x(U ), the conditional variance can also be expressed as Var (Y |X = x) = 
+
+Z 10
+
+ QY |X=x(u) − E[Y |X = x]2du. 
+
+Thus, σ(x) = pVar (Y|X = x) can be recovered from the conditional quantile function and conditional mean. We approximate the integral using the Gauss-Legendre quadra-ture (Golub & Welsch, 1969), evaluating the estimated quan-tile function at m nodes. The approximation is exact for polynomials of degree at most 2m − 1 given that the quan-tiles are correctly estimated. Per default, we set m = 10 .We further evaluate setting m = 100 in Appendix B.1.2 to assess the sensitivity with respect to the number of knots. 3.1.3. S UITABILITY OF TAB PFN To estimate the quantile levels in practice, we perform in-context quantile regression with TabPFN (Hollmann et al., 2023). It is a tabular foundation model pretrained on a large corpus of tabular prediction tasks including classifi-cation, regression, and time-series forecasting. Further, it has been adapted to a range of tasks including causal infer-ence (Robertson et al., 2026). We use the publicly available TabPFN-3 model (Grinsztajn et al., 2026) which outper-forms classical approaches to quantile regression such as quantile XGBoost (Chen & Guestrin, 2016) and quantile regression forests (Meinshausen & Ridgeway, 2006) on a tailored quantile regression variant of TabArena (Erick-son et al., 2026). TabPFN-3 decodes quantiles at inference time by inverting the predicted CDF. We use the model as a plug-in estimator without further fine-tuning to obtain the conditional mean and a prespecified set of conditional quantile levels. In particular, let fθ denote the pretrained TabPFN model and let the context dataset consist of the given iid sample of size n, i.e., D = {(xi, y i)}ni=1 . Then we estimate the conditional τ -quantile for the i-th datapoint as the in-context prediction at the corresponding training point 
+
+ˆy(τ ) 
+
+> i
+
+= fθ (D, xi, τ ).
+
+Note that we are only interested in estimating the quantiles within the provided context and thus get the quantiles of the training (context) points. For future work, one could also consider the effect of sample splitting to estimate these quantiles. While our experiments are based on TabPFN-3, future or commercial models could be used, as well. We also eval-uated TabPFN-3.5 (J¨ ager et al., 2026) which performed, however, subpar to version 3 (cf. Appendix B.1.3). Further details regarding inference and used model checkpoints are provided in Appendix A.4. 
+
+3.2. Consistent Estimation via Feasible GLS 
+
+In this section, we discuss the estimation of mean and vari-ance using a spline-based feasible generalized least squares (FGLS) procedure. We detail estimation based on n iid samples {(xi, y i)}ni=1 that are assumed to be generated by the LSNM 
+
+Yi = B1(Xi)⊤β + exp 
+
+(  γ0 + B2(Xi)⊤γ
+
+2
+
+)
+
+NYi , (4) where NYi ⊥⊥ Xi, E[NYi ] = 0 and E[N 2 
+
+> Yi
+
+] = 1 . Here, 
+
+B1(Xi) and B2(Xi) are spline basis functions with fixed dimensions k1, k 2, respectively, that increase model flexi-bility compared to when using X in their place. Unlike 
+
+B1, we take B2 to exclude an intercept to denote γ0 ∈ R
+
+separately. The conditional mean and variance are given by 
+
+μ(Xi) = E[Yi|Xi] = B1(Xi)⊤β, (5) 
+
+σ2(Xi) = Var (Yi|Xi) = exp  γ0 + B2(Xi)⊤γ . (6) Let Ui := σ(Xi)NYi , Ω(γ) := diag (exp {B2(Xi)⊤γ}).The FGLS procedure which produces consistent estima-tors (Wooldridge, 2013, Ch. 8.4) bβFGLS and bγ under the model in Eq. 4 is given as follows. 5Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+1. Obtain the ordinary least squares (OLS) estimator bβOLS 
+
+from regressing Yi = B1(Xi)⊤β + Ui.2. Set bUi = Yi − B1(Xi)⊤ bβOLS .3. Let g0 ∈ R and E[νi|Xi] = 0 and obtain bγ via OLS from log( bU 2 
+
+> i
+
+) = g0 + B2(Xi)⊤γ + νi.4. Let B1 be the matrix with i-th row B1(Xi)⊤, Y =(Y1, . . . , Y n)⊤ and obtain 
+
+bβFGLS =
+
+
+
+B⊤ 
+
+> 1
+
+bΩ( bγ)−1B1
+
+−1
+
+B⊤ 
+
+> 1
+
+bΩ( bγ)−1Y .
+
+The third step is motivated by the fact that 
+
+log( U 2 
+
+> i
+
+) = γ0 + B2(Xi)⊤γ + log( N 2 
+
+> Yi
+
+).
+
+Let r := E[log( N 2 
+
+> Yi
+
+)] , νi := log( N 2 
+
+> Yi
+
+) − r, g0 := r + γ0.Then the exogeneity assumption E[νi|Xi] = 0 holds ensuring consistency of the corresponding OLS regres-sion (Greene & Zhang, 2000, Ch. 11). By plugging in 
+
+bβFGLS and bγ into Eq. 5 and Eq. 6, mean and variance are consistently estimated, with the latter only up to scale, since 
+
+γ0 is not recovered. It follows that the extracted residuals are consistent up to scale which is sufficient for L OSCAR 
+
+(cf. Section 2.2). We note that for numerical stability, we use a small ridge penalty in the empirical implementation of each regression step to mitigate ill-conditioning of the empirical design matrices (Hastie, 2020). 
+
+## 4. Related Work 
+
+DAG Identifiability Identifiability conditions are well established for linear non-Gaussian models (Shimizu et al., 2006, LiNGAM), causal additive models (B¨ uhlmann et al., 2014, CAM), (nonlinear) ANMs (Hoyer et al., 2008), post nonlinear additive noise models (Zhang & Hyv¨ arinen, 2009, PNL), and LSNMs (Immer et al., 2023; Strobl & Lasko, 2022). Both PNL models and LSNMs include ANMs as a special case. We review LSNMs in Section 2.1. 
+
+Quantile-Based Causal Discovery Methods that ap-proach causal discovery through quantile regression are score-based. QCCD (Tagasovska et al., 2020) employs quantile regression to derive a minimum description length (MDL) based score in line with other approaches building upon MDL-based approximations (Budhathoki & Vreeken, 2016; Marx & Vreeken, 2017) of the algorithmic Markov condition (Janzing & Sch¨ olkopf, 2010). Recent work de-rives a score based on quantile partial effects (QPE) to learn the causal order (Chen et al., 2026), but their estimation method relies on a range of sensitive hyperparameters such as the assumed QPE model or transformation functions. Here, we use in-context quantile regression for estimating conditional mean and standard deviation based on pretrained tabular foundation models which does not require further tuning. 
+
+Causal Discovery with LSNMs Besides the work dis-cussing identifiability of LSNMs, Lin et al. (2024) derive a method for symmetric noise leveraging skewness for iden-tification. The code is, however, not publicly available. Further, HOST (Duong & Nguyen, 2023) iteratively iden-tifies source nodes assuming Gaussianity. ROCHE (Tran et al., 2024) accounts for heavy-tailed noise by modeling a t-distribution, and S KEW D (Klippert & Marx, 2026) im-plicitly models skewness by assuming a skew-normal. We include the latter three as baselines. ROCHE, however, can only be applied to the bivariate setting. 
+
+Amortized Causal Discovery Through simulating data from causal networks during training, amortized causal dis-covery (Lorch et al., 2022) frames causal discovery as a supervised learning task (Petersen et al., 2023). By embed-ding causal assumptions into data generation and building upon the predictive capabilities of transformer models, more recent approaches show promising results for DAG learn-ing and data imputation (Thompson et al., 2026; Li et al., 2026; Xu et al., 2026) and learning causal graphs in the presence of confounding and non-additive models such as CDFM (Qiao et al., 2026) and F OUND CAUSE (Bl¨ obaum et al., 2026). Unlike these models, our method does not re-quire extensive training but can leverage any pretrained tab-ular foundation model that can perform quantile regression. Further, L OSCAR directly exploits identification results for LSNMs. 
+
+## 5. Experiments 
+
+We evaluate L OSCAR , using quantile-difference scale es-timation via TabPFN by default, alongside the Gauss-Legendre variant L OSCAR -GL and the FGLS variant LOSCAR -FGLS against state-of-the-art (SOTA) baselines in bivariate and multivariate settings. To avoid any biases due to scaling, we standardize all datasets. We compare accuracy and area under the decision rate curve (AUDRC) in the bivariate setting and F1 score, order errors, struc-tural Hamming distance (SHD) and structural intervention distance (SID) in the multivariate setting. Further metric details and implementation details of the baselines including a runtime analysis are provided in Appendices A.1 and A.5, respectively. Hyperparameters of L OSCAR are specified in Appendix A.4. 
+
+5.1. Bivariate Experiments 
+
+We compare against LOCI-IT, an independence-based method assuming Gaussianity, ROCHE, QCCD and the 6Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression  
+
+> Table 1. Averaged Results on Bivariate Benchmarks. Top two are in bold and the best result is underlined.
+
+Method Accuracy (%) ↑ AUDRC (%) ↑
+
+LOSCAR 90.04 ± 10.84 94.55 ± 9.17 LOSCAR -GL 89.81 ± 11.26 94.36 ± 9.81 LOSCAR -FGLS 74.97 ± 19.49 74.57 ± 26.44 SKEW D-LL 84.56 ± 19.95 89.58 ± 16.30 CAM 75.10 ± 23.17 73.90 ± 26.44 QCCD 67.64 ± 26.44 69.92 ± 33.23 ROCHE 89.52 ± 9.92 94.99 ± 7.56 LOCI-IT 84.54 ± 12.71 89.43 ± 13.63 FOUND CAUSE 86.55 ± 17.96 90.97 ± 14.76 CDFM 78.75 ± 15.21 87.53 ± 15.91 likelihood-based S KEW D-LL (consistent with multivariate SKEW D), as heteroscedastic baselines. We further include CAM (B¨ uhlmann et al., 2014) as an ANM baseline and FOUND CAUSE and CDFM as amortized causal discovery baselines. Our evaluation comprises 19 established benchmark datasets: ANM, LSNM, and multiplicative noise datasets from Tagasovska et al. (2020); the SIM datasets and T¨ ubingen pairs (Mooij et al., 2016); the Dataverse datasets (Guyon et al., 2019); and skewed ANM and LSNM datasets from Klippert & Marx (2026). Table 1 reports av-erage accuracy and AUDRC. Detailed dataset descriptions and benchmark-wise results are provided in Appendix A.2 and B.1.1. In terms of accuracy, LOSCAR achieves the best per-formance ( 90 .04% ), closely followed by L OSCAR -GL (89 .81% ). LOSCAR -FGLS trails substantially ( 74 .97% ), outperforming only QCCD. This gap between the quan-tile and FGLS variants of L OSCAR is further illustrated in Figure 1 showing the benchmark-wise accuracies. When investigating the individual benchmark results, the FGLS variant has a slight edge to the other variants on near Gaus-sian and low-noise setting. Among the baselines, ROCHE is most competitive ( 89 .52% ), while the remaining methods reach at most 86 .55% (F OUND CAUSE ). AUDRC yields a similar ranking, except that ROCHE achieves the highest score, surpassing L OSCAR by 0.44% .We report amortized approaches separately, as both were trained on ANM and LSNM models. F OUND CAUSE also includes skewed noise and performs particularly well on such datasets (see Appendix B.1.1). 
+
+5.2. Multivariate Experiments 
+
+We evaluate the L OSCAR variants against SOTA baselines on synthetic and real-world multivariate datasets. We in-  
+
+> Table 2. Results for Light Tunnel. Best amortized and non-amortized models marked (OE=Order Errors).
+
+Method F1 ↑ OE ↓ SHD ↓ SID ↓
+
+Light Tunnel (n = 10 000 , d = 20 , #edges = 39 )LOSCAR 0.430 12 45 49 
+
+LOSCAR -GL 0.430 13 45 49 
+
+LOSCAR -FGLS 0.382 16 68 52 HOST 0.000 39 89 181 SKEW D NA NA NA NA CAM 0.213 17 59 158 LiNGAM 0.068 25 82 142 NOTEARS-MLP 0.092 20 59 138 RESIT-T AB PFN 0.015 38 128 170 FOUND CAUSE 0.687 0 21 23 
+
+CDFM 0.727 1 18 26 clude S KEW D and HOST as LSNM-specific baselines, CAM, LiNGAM (Shimizu et al., 2006) and NOTEARS-MLP (Zheng et al., 2020) as ANM baselines. We addition-ally consider RESIT with TabPFN as regressor (RESIT-TAB PFN). In Appendix B, we also provide results for RE-SIT with OLS which is outperformed by RESIT-T AB PFN. FOUND CAUSE and CDFM are included as amortized base-lines. 
+
+Synthetic Datasets We generate Erd˝ os-R´ enyi graphs (Erd˝ os & R´ enyi, 1960) with d ∈ {6, 12 }
+
+nodes and b = d edges. For each d, we generate 100 ANM and LSNM datasets each of size n = 1 000 , with f (j) and 
+
+g(j) given by sums of random sigmoidal functions over the parents of each variable X(j). The noise distribution of each NX(j) is sampled uniformly from Gaussian, exponential, and skew-t. Further sampling details and results on homogeneous noise distributions are provided in Appendices A.2 and B.2.5, respectively. We focus on the LSNM results in Figure 2, which show the mean metrics as bar plots including standard errors of the mean. Exact values and corresponding ANM results includ-ing precision and recall are reported in Appendices B.2.2 and B.2.3. For d = 6, L OSCAR and L OSCAR -GL achieve the strongest performance among classical baselines in F1, order errors, and SID, while S KEW D performs best in SHD. For d = 12, S KEW D is generally comparable or slightly better, most notably in F1. Among all methods, F OUND -CAUSE performs best overall (particularly for d=12 ), while LOSCAR and L OSCAR -GL remain competitive. They out-perform F OUND CAUSE in F1 for d = 6 and, together with SKEW D, in SHD for d = 12. L OSCAR -FGLS is not com-petitive and falls short to RESIT-T AB PFN. Overall, the quantile-based variants outperform the classical baselines 7Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN FoundCause CDFM       
+
+> 0.00.20.40.60.8F1 ↑
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN FoundCause CDFM
+> 0246
+> Order errors ↓
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN FoundCause CDFM
+> 0510 15 20
+> SHD ↓
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN FoundCause CDFM
+> 010 20 30 40
+> SID ↓
+> d=6 d=12
+
+Figure 2. Comparison of L OSCAR and baselines in terms of F1, order errors, SHD and SID on LSNM data. 
+
+except S KEW D, with F OUND CAUSE achieving the strongest overall performance. Notably, in the corresponding ANM experiments (cf. Appendix B.2.3), L OSCAR -FGLS out-performs the quantile-based variants, whereas S KEW D and CAM are the strongest classical baselines. 
+
+Real-World Data For real-world evaluation, we consider the Sachs (Sachs et al., 2005) dataset and Light Tunnel dataset from the Causal Chambers repository (Gamella et al., 2025), with all details in Appendix A.2. Results for Light Tunnel are shown in Table 2. L OSCAR and L OSCAR -GL are the strongest classical baselines, while the amortized methods substantially outperform all classical approaches across metrics. In particular, F OUND CAUSE and CDFM achieve 0 and 1 order errors, respectively, compared with 12 for the second-best being L OSCAR . HOST performs poorly, potentially due to the source nodes being approximately uniform, and S KEW D did not terminate after more than 72 hours. Again, note that it is difficult to compare to amortized baselines on synthetic data or Light Tunnel, since the DGPs for these graphs are known. On Sachs most models perform comparably with the amortized baselines outperformed by the classical approaches (cf. Appendix B.2.1). We treat this result with caution as the ground truth of this dataset has been challenged (Mooij et al., 2020). 
+
+## 6. Conclusion 
+
+We introduced L OSCAR , a residual-based causal discovery method for location-scale noise models with nonparamet-ric in-context quantile regression using tabular foundation models. We proposed two variants that differ in how the con-ditional scale is estimated for residual extraction and com-pared them with a consistent FGLS-based variant. Across our experiments, the quantile-based variants consistently outperform the FGLS variant and achieve state-of-the-art (SOTA) performance on established bivariate benchmarks, while remaining on par with SOTA baselines in low- to medium-dimensional settings. 
+
+Limitations and Future Work The scalability of LOSCAR is limited by the cost of repeated model fitting and the difficulty of conditional independence testing with large conditioning sets. Moreover, its greedy search may propagate errors across successive steps. To improve ro-bustness to such errors, it would be interesting to extend LOSCAR with beam-search, as explored for RESIT by Ong et al. (2026), in future work. 
+
+Acknowledgements 
+
+This work was partially supported by the Deutsche Forschungsgemeinschaft (DFG, German Research Foun-dation) – 598263919. We acknowledge that Quang Nhat Huynh contributed to this work while employed at TU Dort-8Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+mund University and the Research Center Trustworthy Data Science and Security. In this work, we used generative AI tools for code proto-typing of parts of the code (Claude Sonnet 5 High from Anthropic). Further, we used the ChatGPT 5.6 model from OpenAI for minor language edits, aiming to enhance read-ability. LLM-generated code and text was verified, modified and tested for correctness by the authors. We take respon-sibility for the final content of this work, including text, claims, or artifacts produced with the aid of generative AI. 
+
+## References 
+
+Azzalini, A. The Skew-Normal and Related Families , vol-ume 3. Cambridge University Press, 2013. Bl¨ obaum, P., Balasubramanian, K., and Kasiviswanathan, S. P. Foundcause: Causal discovery with latent con-founders from observational data. arXiv preprint arXiv:2606.17516 , 2026. Bodik, J. and Chavez-Demoulin, V. Identifiability of causal graphs under non-additive conditionally paramet-ric causal models. Journal of Machine Learning Research ,26(264):1–55, 2025. Budhathoki, K. and Vreeken, J. Causal inference by com-pression. pp. 41–50. IEEE, 2016. B¨ uhlmann, P., Peters, J., and Ernest, J. CAM: Causal addi-tive models, high-dimensional order search and penalized regression. The Annals of Statistics , 42(6):2526–2556, 2014. Chen, T. and Guestrin, C. Xgboost: A scalable tree boosting system. In Proceedings of the 22nd acm sigkdd inter-national conference on knowledge discovery and data mining , pp. 785–794, 2016. Chen, Y., Sun, X., et al. Causal discovery via quantile partial effect. In International Conference on Learning Repre-sentations , volume 2026, pp. 148015–148046, 2026. Cundy, C., Grover, A., and Ermon, S. Bcd nets: Scalable variational approaches for bayesian causal discovery. Ad-vances in Neural Information Processing Systems , 34: 7095–7110, 2021. Duong, B. and Nguyen, T. Heteroscedastic causal structure learning. In Proceedings of the 26th European Confer-ence on Artificial Intelligence (ECAI 2023) , pp. 598–605. IOS Press, 2023. Erd˝ os, P. and R´ enyi, A. On the evolution of random graphs. 
+
+Publ. Math. Inst. Hungary. Acad. Sci. , 5:17–61, 1960. Erickson, N., Purucker, L., Tschalzev, A., Holzm¨ uller, D., Desai, P., Salinas, D., and Hutter, F. Tabarena: A living benchmark for machine learning on tabular data. Ad-vances in Neural Information Processing Systems , 38, 2026. Gamella, J. L., Peters, J., and B¨ uhlmann, P. Causal cham-bers as a real-world physical testbed for ai methodology. 
+
+Nature Machine Intelligence , 7(1):107–118, 2025. Golub, G. H. and Welsch, J. H. Calculation of Gauss quadra-ture rules. Mathematics of computation , 23(106):221– 230, 1969. Goudet, O., Kalainathan, D., Caillou, P., Guyon, I., Lopez-Paz, D., and Sebag, M. Learning functional causal mod-els with generative neural networks. Explainable and Interpretable Models in Computer Vision and Machine Learning , pp. 39, 2018. Greene, W. H. and Zhang, C. Econometric analysis , vol-ume 5. Prentice hall Upper Saddle River, NJ, 2000. Grinsztajn, L., Fl¨ oge, K., Key, O., Birkel, F., Jund, P., Roof, B., Manium, M., Hoo, S. B., B¨ uhler, M., Garg, A., et al. Tabpfn-3: Technical report. arXiv preprint arXiv:2605.13986 , 2026. Guyon, I., Statnikov, A., and Batu, B. B. Cause effect pairs in machine learning . Springer, 2019. Hagberg, A. A., Schult, D. A., and Swart, P. J. Exploring net-work structure, dynamics, and function using networkx. In Proceedings of the 7th Python in Science Conference ,pp. 11 – 15, Pasadena, CA USA, 2008. Hastie, T. Ridge regularization: An essential concept in data science. Technometrics , 62(4):426–433, 2020. Hollmann, N., M¨ uller, S., Eggensperger, K., and Hutter, F. TabPFN: A transformer that solves small tabular classi-fication problems in a second. In The Eleventh Interna-tional Conference on Learning Representations , 2023. Hoyer, P. O., Janzing, D., Mooij, J. M., Peters, J., and Sch¨ olkopf, B. Nonlinear causal discovery with additive noise models. In Advances in Neural Information Pro-cessing Systems , volume 21, 2008. Ikeuchi, T., Ide, M., Zeng, Y., Maeda, T. N., and Shimizu, S. Python package for causal discovery based on lingam. 
+
+Journal of Machine Learning Research , 24(14):1–8, 2023. Immer, A., Schultheiss, C., Vogt, J. E., Sch¨ olkopf, B., B¨ uhlmann, P., and Marx, A. On the Identifiability and Estimation of Causal Location-Scale Noise Models. In In-ternational Conference on Machine Learning , pp. 14316– 14332. PMLR, 2023. 9Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+J¨ ager, B., Erickson, N., Grinsztajn, L., Birkel, F., Fl¨ oge, K., Key, O., Kaya, K., K¨ ubler, J., Frankel, A., Schr¨ oder, T., et al. Tabpfn-3.5: Technical report. arXiv preprint arXiv:2609.17895 , 2026. Janzing, D. and Sch¨ olkopf, B. Causal inference using the algorithmic markov condition. IEEE Transactions on Information Theory , 56(10):5168–5194, 2010. Kalainathan, D. and Goudet, O. Causal discovery toolbox: Uncover causal relationships in python. arXiv preprint arXiv:1903.02278 , 2019. Kano, Y., Shimizu, S., et al. Causal inference using nonnor-mality. In Proceedings of the international symposium on science of modeling, the 30th anniversary of the infor-mation criterion , pp. 261–270, 2003. Khan, M., Shimizu, S., and Pham, T. Beyond additivity: Causal discovery in location-scale noise models with hid-den variables. arXiv preprint arXiv:2606.08196 , 2026. Khemakhem, I., Monti, R., Leech, R., and Hyvarinen, A. Causal autoregressive flows. In Banerjee, A. and Fuku-mizu, K. (eds.), Proceedings of The 24th International Conference on Artificial Intelligence and Statistics , vol-ume 130 of Proceedings of Machine Learning Research ,pp. 3520–3528. PMLR, 13–15 Apr 2021. Klippert, D. and Marx, A. Skewness-robust causal discovery in location-scale noise models. In Forty-third Interna-tional Conference on Machine Learning , 2026. Li, Z.-R., Liu, S.-Y., Wang, T.-Z., and Ye, H.-J. Tabcausal: Pretraining across causal environments for tabular causal discovery. arXiv preprint arXiv:2605.31156 , 2026. Lin, Y., Huang, Y., Liu, W., Deng, H., Ng, I., Zhang, K., Gong, M., Ma, Y.-A., and Huang, B. A skewness-based criterion for addressing heteroscedastic noise in causal discovery. In International Conference on Learning Rep-resentations , 2024. Lorch, L., Sussex, S., Rothfuss, J., Krause, A., and Sch¨ olkopf, B. Amortized inference for causal structure learning. Advances in Neural Information Processing Systems , 35:13104–13118, 2022. Marx, A. and Vreeken, J. Telling cause from effect using mdl-based local and global regression. In 2017 IEEE international conference on data mining (ICDM) , pp. 307– 316. IEEE, 2017. Marx, A. and Vreeken, J. Telling cause from effect by local and global regression. Knowledge and Information Systems , 60(3):1277–1305, 2019. Meinshausen, N. and Ridgeway, G. Quantile regression forests. Journal of machine learning research , 7(6), 2006. Meinshausen, N., Hauser, A., Mooij, J. M., Peters, J., Ver-steeg, P., and B¨ uhlmann, P. Methods for causal inference from gene perturbation experiments and validation. Pro-ceedings of the National Academy of Sciences , 113(27): 7361–7368, 2016. Mooij, J. M., Peters, J., Janzing, D., Zscheischler, J., and Sch¨ olkopf, B. Distinguishing cause from effect using ob-servational data: Methods and benchmarks. The Journal of Machine Learning Research , 17(1):1103–1204, 2016. Mooij, J. M., Magliacane, S., and Claassen, T. Joint causal inference from multiple contexts. Journal of machine learning research , 21(99):1–108, 2020. Ong, H. J. J., Lim, B. G. S., Tan, R. R. P., and Ikeda, K. Causal discovery in additive noise models using beam search. Artificial Life and Robotics , 31(1):317–326, 2026. Peters, J. and B¨ uhlmann, P. Structural intervention distance for evaluating causal graphs. Neural computation , 27(3): 771–799, 2015. Peters, J., Mooij, J. M., Janzing, D., and Sch¨ olkopf, B. Causal discovery with continuous additive noise models. 
+
+Journal of Machine Learning Research , 15(1):2009–2053, 2014. Peters, J., Janzing, D., and Sch¨ olkopf, B. Elements of causal inference: foundations and learning algorithms . The MIT Press, 2017. Petersen, A. H., Ramsey, J., Ekstrøm, C. T., and Spirtes, P. Causal discovery for observational sciences using supervised machine learning. Journal of Data Science ,21(2), 2023. Qiao, J., Cai, R., Li, Z., Chen, W., Hua, P., Xu, B., Chen, Z., Hao, Z., and Cui, P. Cdfm: Towards a general-purpose causal discovery foundation model. arXiv preprint arXiv:2607.11508 , 2026. Robertson, J., Reuter, A., Guo, S., Hollmann, N., Hutter, F., and Sch¨ olkopf, B. Do-pfn: In-context learning for causal effect estimation. Advances in Neural Information Processing Systems , 38, 2026. Rolland, P., Cevher, V., Kleindessner, M., Russell, C., Janz-ing, D., Sch¨ olkopf, B., and Locatello, F. Score matching enables causal discovery of nonlinear additive noise mod-els. In Proceedings of the 39th International Conference on Machine Learning , volume 162, pp. 18741–18753. PMLR, 17–23 Jul 2022. Sachs, K., Perez, O., Pe’er, D., Lauffenburger, D. A., and Nolan, G. P. Causal protein-signaling networks derived from multiparameter single-cell data. Science , 308(5721): 523–529, 2005. 10 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+Schultheiss, C. and B¨ uhlmann, P. Assessing the overall and partial causal well-specification of nonlinear additive noise models. Journal of Machine Learning Research , 25 (159):1–41, 2024. Shimizu, S., Hoyer, P. O., Hyv¨ arinen, A., Kerminen, A., and Jordan, M. A linear non-Gaussian acyclic model for causal discovery. Journal of Machine Learning Research ,7(10), 2006. Spirtes, P., Glymour, C. N., and Scheines, R. Causation, Prediction, and Search . MIT press, 2000. Strobl, E. V. and Lasko, T. A. Identifying patient-specific root causes with the heteroscedastic noise model. arXiv preprint arXiv:2205.13085 , 2022. Strobl, E. V. and Lasko, T. A. Identifying patient-specific root causes with the heteroscedastic noise model. Journal of Computational Science , 72:102099, 2023. Sun, X. and Schulte, O. Cause-effect inference in location-scale noise models: Maximum likelihood vs. indepen-dence testing. In Conference on Neural Information Pro-cessing Systems , 2023. Tagasovska, N., Chavez-Demoulin, V., and Vatter, T. Dis-tinguishing cause from effect using quantiles: Bivariate quantile causal discovery. In International Conference on Machine Learning , pp. 9311–9323. PMLR, 2020. Thompson, R., Zhao, H., Steinberg, D. M., and Bonilla, E. V. Arrow: A foundation model for causal discovery. 
+
+arXiv preprint arXiv:2605.07204 , 2026. Tran, Q.-D., Duong, B., Nguyen, P., and Nguyen, T. Robust estimation of causal heteroscedastic noise models. In 
+
+Proceedings of the 2024 SIAM International Conference on Data Mining (SDM) , pp. 788–796. SIAM, 2024. Wooldridge, J. M. Introductory Econometrics: A Modern Approach . South-Western Cengage Learning, Boston, MA, 5th edition, 2013. Xu, S., Mameche, S., and Vreeken, J. Learning causal orderings for in-context tabular prediction. arXiv preprint arXiv:2605.22335 , 2026. Zhang, K. and Hyv¨ arinen, A. On the identifiability of the post-nonlinear causal model. In Proc. 25th Conference on Uncertainty in Artificial Intelligence (UAI2009) , pp. 647–655. AUAI Press, 2009. Zheng, X., Dan, C., Aragam, B., Ravikumar, P., and Xing, E. P. Learning sparse nonparametric DAGs. In Interna-tional Conference on Artificial Intelligence and Statistics ,2020. 11 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+The Appendix is structured as follows. Appendix A contains all information regarding performance metrics, generated and used datasets and hyperparameter configurations of L OSCAR and the baselines we compare to. Then, Appendix B contains additional details to the experiments, as well as further ablation studies. 
+
+## A. Implementation Details 
+
+A.1. Metrics 
+
+We use the following metrics to compare our method to other baselines. 
+
+Bivariate Experiments For the bivariate experiments, we use accuracy , i.e., the number of correct decisions divided by the total number of pairs and the area under the decision rate curve (AUDRC) which measures how well the confidence of a method is aligned with its correct output (Marx & Vreeken, 2019). For L OSCAR , we compute its confidence as the absolute difference between the HSIC test statistics. To compute the confidence of CDFM and F OUND CAUSE we take the absolute difference in prediction probabilities between both directions; all remaining baselines come with their own confidence score. Given accuracy and confidence for each pair, the AUDRC is computed by first sorting all predictions by their confidence and then averaging the accuracies over the top m predictions for m = 1 , . . . , M , where M is the number of pairs. Denote ξ(i) as the index of the i-th most certain prediction, f (ξ(i)) the predicted direction and t(ξ(i)) the correct direction, then AUDRC = 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+1
+
+m
+
+> m
+
+X
+
+> i=1
+
+1[f (ξ(i)) = t(ξ(i))] .
+
+The AUDRC is bounded by 0 and 1, with larger values indicating better performance. Averages over multiple benchmarks are weighted equally, independent of the number of pairs contributing to a benchmark. For the T¨ ubingen pairs (Mooij et al., 2016), we use the recommended weighting to report accuracy and AUDRC. 
+
+Multivariate Experiments To benchmark our approach in the multivariate setting, we compute the following statistics with respect to the ground truth DAG: • F1, Precision, Recall: All metrics compare predicted to ground truth directed edges. • Order Errors: Order errors are computed as suggested by Rolland et al. (2022), where given a causal ordering π and a target adjacency matrix A (representing a DAG) they define the topological order divergence, here order errors (OE), as 
+
+OE( π, A ) = 
+
+> d
+
+X
+
+> i=1
+
+X
+
+> j:π(i)>π (j)
+
+Aij .
+
+Here, we have Aij ∈ { 0, 1} with Aij = 1 denoting an existing edge from i to j. If π is a correct ordering for A,
+
+OE( π, A ) = 0 . Otherwise, it counts the number of edges that cannot be recovered due to the choice of the causal ordering. Since all methods under comparison learn a DAG, we obtain a causal ordering π from their predicted graphs via the function topological sort of the package NetworkX (Hagberg et al., 2008). • SHD: The structural Hamming distance (SHD) measures the number of edges in the predicted adjacency matrix that are either missing or not present in the target graph. Reversed edges are counted as two errors. We use the implementation from the Causal Discovery Toolbox (Kalainathan & Goudet, 2019, CDT). • SID: The structural intervention distance (Peters & B¨ uhlmann, 2015, SID) measures the closeness of two graphs in terms of their causal inference statements. We use the Python wrapper provided by CDT (Kalainathan & Goudet, 2019). 
+
+A.2. Datasets 
+
+A.2.1. G ENERATED SYNTHETIC DATASETS 
+
+We generate Erd˝ os-R´ enyi graphs (Erd˝ os & R´ enyi, 1960) with d ∈ { 6, 12 } nodes and b = d edges to simulate synthetic data. For each configuration, we construct 100 ANM and LSNM datasets of n = 1 000 samples. The functions f (j) and g(j)
+
+12 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+are generated as sums of random sigmoidal functions of each parent variable of X(j). Following the construction of these sigmoidal functions from Tagasovska et al. (2020), we refer to the two structural equation model classes as ANs and LSs, respectively. For the noise variables NX(j) , we consider three distributions with distinct characteristics: symmetric Gaussian noise, positive-valued exponential noise, and unbounded skew-t noise with heavy tails (Azzalini, 2013). In the main experiments, the noise distribution is sampled uniformly from these three choices for each node NX(j) . We additionally evaluate each distribution separately and report the corresponding results in Appendix B.2.5. For each sample i and node X(j), the noise is generated according to one of the following two-step procedures: • σij ∼ Unif (1 , √2) , NX(j)
+
+> i
+
+∼ N (0 , σ 2 
+
+> ij
+
+),• λij ∼ Unif (1 /√2, 1) , NX(j)
+
+> i
+
+∼ Exp (λij ),• ωij ∼ Unif (0 .91 , 1.29) , NX(j)
+
+> i
+
+∼ ST (0 , ω 2, −2, 4) ,where ST (ξ, ω 2, α, ν ) denotes the skew-t distribution as defined in Azzalini (2013). These parameter ranges ensure that the variance of NX(j)
+
+> i
+
+lies within the interval (1 , 2) across all three distributions. For non-source nodes j, the noise is additionally scaled by 0.2 in the ANs setting and by 0.35 in the LSs setting. A.2.2. B IVARIATE BENCHMARK DATASETS 
+
+To assess our methods performance on the bivariate cause-effect discovery task, we evaluate it on benchmarks drawn from four data repositories: • The SIM and T ¨ ubingen datasets were introduced by Mooij et al. (2016). The SIM datasets each consist of 100 pairs with n = 1 000 each, with Gaussian-process based functions ( SIM ), a dataset with low-noise ( SIM-ln ), near Gaussian distributions ( SIM-G ) and additional confounding ( SIM-c ). From the T ¨ ubingen dataset, we extracted all univariate pairs and excluded pairs with binary variables, resulting in 99 pairs. We use the recommended weighting of the pairs to compute the accuracy and AUDRC on this dataset. Note that n varies for this dataset between a few 100 datapoints and more than 30 000 .• (Goudet et al., 2018) provide the Cha dataset (used in the cause-effect pair challenge), the Net dataset, which is generated from random neural networks, and the Multi dataset generated from polynomial mechanisms. Each dataset consists of 300 cause-effect pairs with n = 1 000 .• Tagasovska et al. (2020) introduce five synthetic benchmark datasets: two nonlinear additive noise datasets AN and 
+
+ANs , where the latter uses sigmoidal functions to ensure that the function is invertible and noise distributions drawn from a Gaussian. Accordingly, LS and LSs provide location-scale models, and last MNU models multiplicative noise with uniform noise distributions. All datasets consist of 100 pairs each with n = 1 000 .• Klippert & Marx (2026) extend the more challenging ANs and LSs datasets from Tagasovska et al. (2020) to include skewed noise variables. The “ -med ” and “ -str ” variants use noise variables drawn from the skew-normal and a generalized normal distribution with skewness −0.455 and 0.985 , respectively. Each of the datasets consists of 200 
+
+cause-effect pairs, equally split between skew-normal and generalized normal. The “ -ext ” datasets consists of 100 pairs with the noise variable drawn from a generalized normal with skewness 1.750 . All pairs consist of n = 1 000 samples. To avoid any biases due to scaling, we standardize cause and effect by default. 
+
+A.3. Real-World Multivariate 
+
+Our empirical evaluation uses two real-world datasets that we describe below. 13 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+Sachs The Sachs dataset consists of single-cell flow-cytometry measurements of d = 11 phosphoproteins and phospho-lipids in human immune cells under several perturbation conditions. The dataset is routinely used to benchmark causal discovery algorithms, whereas its ground truth network has been challenged by multiple authors (Meinshausen et al., 2016; Mooij et al., 2020). In our comparison, we included the observational-only part of the dataset consisting of n = 853 data points and 17 edges commonly used for benchmarking (Cundy et al., 2021). 2
+
+Light Tunnel The Light Tunnel dataset is part of the Causal Chambers repository (Gamella et al., 2025). The dataset consists of measurements collected from a controlled physical light-tunnel system, where light-source and polarizer settings affect multiple sensor measurements. We use all n = 10 000 observational samples from the uniform-reference condition, providing measurements of the system variables without targeted interventions. 3 The ground-truth network consists of 
+
+d = 20 nodes and 39 edges. 
+
+A.4. Hyperparameter Configuration L OSCAR 
+
+We implemented our method in Python, extending the implementation of RESIT provided through the lingam pack-age (Ikeuchi et al., 2023) 4 which also provides an efficient implementation of the HSIC independence criterion. For all experiments, we fix the significance threshold α used in Phase 2 of L OSCAR to 0.01 .We use TabPFN-3 (Grinsztajn et al., 2026) with model checkpoint tabpfn-v3-regressor-v3 default.ckpt as default in our experiments. Conditional mean and quantile levels are obtained through a single fit and predict sequence where the fitting step provides the data as context to the model. Quantile levels are obtained dependent on the instantiation of L OSCAR . L OSCAR estimates the scale based on the quantile difference (cf. Section 3.1.1) with τ1 = 0 .05 and τ2 = 1 − τ1
+
+using the quantiles of the standard normal distribution for the normalization term. L OSCAR -GL selects quantiles to compute the variance integral stated in Section 3.1.2 using the Gauss-Legendre quadrature (Golub & Welsch, 1969) adjusted to the interval (0,1). This procedure deterministically selects m quantiles at which the quantile function is evaluated to compute the integral. By default we set m = 10 . We ablate both parameter choices in Appendix B.1.2. Further, for RESIT-T AB PFN we only compute the conditional mean based on TabPFN in the RESIT algorithm. For both L OSCAR -FGLS and RESIT-OLS, the mean parameters were estimated using ridge regression with a penalty of λ = 0 .0001 . For each covariate, we used an independent cubic spline basis with 8 features and linear extrapolation beyond the boundary knots. For L OSCAR -FGLS, the variance parameters were estimated using ridge regression with λ = 0 .01 , with an independent cubic spline basis of 6 features per covariate and the same linear extrapolation scheme. 
+
+Compute and Runtime: All experiments were performed single-threaded on an NVIDIA RTX PRO 6000 Blackwell Server Edition GPU node. Variants that did not use TabPFN were deployed on CPU (single-threaded, AMD EPYC 9655 Processor). Running a single pair of the bivariate benchmark took approximately 1 to 3 seconds. For the multivariate synthetic experiments, the runtime for d = 6 and d = 12 for a single DAG were 17 seconds and ∼ 2 minutes wall-clock time, respectively, for L OSCAR , whereas L OSCAR -GL was faster for d = 12 , with L OSCAR -FGLS being fastest, taking 
+
+∼ 3 seconds for d = 12 . Details for the multivariate synthetic datasets are provided in Appendix B.2.4. As the real-world datasets contained more edges (especially Light Tunnel, which contained 20 nodes, 39 edges, and 10 000 data points) LOSCAR took longest to compute on these, taking ∼ 14 minutes on Sachs and ∼ 85 minutes on Light Tunnel, respectively. LOSCAR -GL terminated after ∼ 110 minutes on the Light Tunnel dataset. 
+
+A.5. Baselines 
+
+We used QCCD (Tagasovska et al., 2020), ROCHE (Tran et al., 2024), and LOCI (Immer et al., 2023) with their default parameters as bivariate-only baselines, where for LOCI we selected the better-performing independence based variant. The default methods as published in the corresponding papers were used. Although QCCD is also implemented for the multivariate case, we conducted the multivariate analysis with the stronger-performing baselines. CAM (B¨ uhlmann et al., 2014) was run with default parameters form the CDT wrapper (Kalainathan & Goudet, 2019) and pruning enabled since we found that activating the pruning step led to significantly stronger performance. LiNGAM was applied with its default parameters as implemented in CDT. S KEW D was applied with its default parameters, where we chose the likelihood-based variant for the bivariate comparison to be consistent with the multivariate extension that is also based on this implementation. 
+
+> 2https://github.com/ermongroup/BCD-Nets
+> 3https://github.com/juangamella/causal-chamber/tree/main/datasets/lt interventions standard v1
+> 4https://github.com/cdt15/lingam
+
+14 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+For the multivariate version we omitted the optimization step involving the expectation conditional maximization algorithm as advised by the authors to improve scalability. NOTEARS-MLP (Zheng et al., 2020) is applied with its recommended parameters λ1 = λ2 = 0 .01 .FOUND CAUSE (Bl¨ obaum et al., 2026) we use the latest version, v1.0 of F OUND CAUSE 5 with its default parameters. To force decisions for pairwise causal discovery, we directly compare prediction probabilities for both possible edges X → Y
+
+and Y → X and use their absolute difference as a score. For CDFM (Qiao et al., 2026) we apply the same rule to force decisions between pairs and otherwise use the default parameters. 6
+
+Compute and Runtime: FOUND CAUSE , CDFM, and HOST have been evaluated on an NVIDIA RTX PRO 6000 Blackwell Server Edition GPU node. All remaining baselines were executed single-threaded on CPU (AMD EPYC 9655 Processor). We note that there was no computational bottleneck, except for S KEW D, for which we terminated the experiment on the Light Tunnel dataset after more than 3 days (2 repeated attempts), however, no GPU compliant version of the method is available. Wall-clock runtimes for each method on the synthetic multivariate experiments are reported in Table 10 and further visualized in Figure 6. 
+
+## B. Additional Experiments 
+
+B.1. Additional Bivariate Experiments and Results 
+
+B.1.1. D ETAILED BIVARIATE EXPERIMENTAL RESULTS 
+
+We report the benchmark-wise accuracy and AUDRC obtained by each method in the bivariate setting in Tables 3 and 4. The quantile-based variants of L OSCAR perform well across all datasets, whereas L OSCAR -FGLS performs well for additive noise but has substantial performance drops in the LSNM case, indicating inappropriate variance estimates. Interestingly, increasing the skewness in the LSNM datasets (LSs-med, LSs-str, LSs-ext) leads to a strong increase of performance for LOSCAR -FGLS (37.5%, 58.0%, 72.0%). This behavior is in contrast to what is observed in most other methods. For CAM, QCCD and CDFM performance substantially degrades with increasing skewness, whereas other methods remain stable. Among the amortized baselines, there are substantial performance differences between F OUND CAUSE and CDFM in certain settings. While F OUND CAUSE achieves almost perfect accuracy for multiplicative uniform noise (MNU), it seems that CDFM resorts to random guessing in that case. In contrast, when there is integrated confounding (SIMc), CDFM achieves 68% accuracy, whereas F OUND CAUSE achieves 47%. This suggests certain differences in the training datasets used to obtain these causal foundation models. 
+
+Table 3. Accuracy in % over All Bivariate Benchmark Datasets. Baselines are split into conventional and amortized. The best result per benchmark is bolded.                                                                                                                                                                                                                     
+
+> Tagasovska et al. (2020) Mooij et al. (2016) Guyon et al. (2019) Klippert & Marx (2026) Method AN ANs LS LSs MNU SIM SIMc SIMln SIMG T¨ ubingen Cha Net Multi ANs-med ANs-str ANs-ext LSs-med LSs-str LSs-ext LOSCAR 100 100 100 99 100 79 82 72 76 71.69 75.67 85.67 85.67 99.0 98.0 100 96.5 97.5 93 LOSCAR -GL 100 100 99 100 100 77 81 73 76 69.34 74.67 85.33 86.00 99.0 98.0 100 98.0 97.0 93 LOSCAR -FGLS 95 100 54 38 50 79 82 81 82 69.78 76.67 81.67 77.33 97.5 94.0 99 37.5 58.0 72 SKEW D-LL 100 100 100 100 87 54 51 81 88 45.97 54.33 73.33 72.00 100.0 100.0 100 100.0 100.0 100
+> CAM 100 100 100 53 86 57 60 87 81 57.77 46.67 78.33 34.67 100.0 100.0 100 82.5 70.0 33 ROCHE 100 100 100 100 100 78 82 77 81 77.27 74.00 87.67 83.00 99.5 97.5 95 99.5 88.5 81 QCCD 100 82 100 96 99 62 72 80 64 77.09 53.67 80.33 50.67 56.0 43.5 41 95.5 21.5 11 LOCI-IT 100 100 94 89 100 78 82 73 78 60.84 72.67 86.67 79.00 99.5 99.5 98 72.0 69.0 75 FOUND CAUSE 100 100 98 94 99 54 47 71 93 60.95 67.00 73.67 94.33 100.0 99.5 93 100.0 100.0 100
+> CDFM 92 86 92 88 46 52 68 71 88 62.30 60.33 76.67 75.00 96.5 96.5 85 96.0 84.0 81
+
+B.1.2. A BLATION STUDIES BIVARIATE BENCHMARK 
+
+In the following ablation study, we varied several aspects of L OSCAR . For the default variant which uses TabPFN to estimate the conditional mean and estimates the conditional scale based on the quantile difference (Section. 3.1.1) we ablate the parameter τ1 ∈ { 0.05 , 0.25 } with τ2 = 1 − τ1, where the default is 0.05 . Similarly, for the Gauss-Legendre variant, we 
+
+> 5
+
+https://github.com/amazon-science/foundcause 
+
+> 6
+
+Commit 9968160 , https://github.com/DMIRLAB-Group/CDFM 
+
+15 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+Table 4. AUDRC in % over All Bivariate Benchmark Datasets. Baselines are split into conventional and amortized. The best result per benchmark is bolded.                                                                                                                                                                                                                     
+
+> Tagasovska et al. (2020) Mooij et al. (2016) Guyon et al. (2019) Klippert & Marx (2026) Method AN ANs LS LSs MNU SIM SIMc SIMln SIMG T¨ ubingen Cha Net Multi ANs-med ANs-str ANs-ext LSs-med LSs-str LSs-ext LOSCAR 100.00 100.00 100.00 99.96 100.00 87.81 93.72 87.60 94.09 70.36 71.83 96.79 95.69 99.93 99.94 100.00 99.79 99.85 99.09 LOSCAR -GL 100.00 100.00 99.98 100.00 100.00 88.27 92.78 87.87 94.08 66.40 71.49 96.90 96.41 99.92 99.95 100.00 99.93 99.86 98.92 LOSCAR -FGLS 98.32 100.00 52.71 22.87 66.92 88.77 92.71 84.55 93.25 62.29 76.12 92.16 77.50 99.09 97.94 99.96 16.80 40.00 54.93 SKEW D-LL 100.00 100.00 100.00 100.00 97.58 64.58 64.33 94.57 94.95 54.57 57.50 81.93 92.01 100.00 100.00 100.00 100.00 100.00 100.00
+> CAM 100.00 100.00 100.00 36.29 76.45 67.76 68.82 87.20 88.24 69.37 41.05 84.88 40.02 100.00 100.00 100.00 74.08 59.61 10.24 ROCHE 100.00 100.00 100.00 100.00 100.00 86.61 93.85 88.96 92.43 75.46 78.42 97.62 94.40 100.00 99.96 99.85 100.00 99.28 97.97 QCCD 100.00 91.23 100.00 99.87 99.99 70.69 83.31 92.19 76.30 84.38 60.52 93.89 62.68 57.15 26.68 27.93 99.68 0.62 1.41 LOCI-IT 100.00 100.00 99.41 97.42 100.00 88.74 93.16 85.97 93.24 59.62 71.33 96.97 77.76 99.99 99.99 99.89 87.28 56.98 91.39 FOUND CAUSE 100.00 100.00 99.95 99.28 99.99 63.93 56.97 80.26 99.42 66.81 73.33 89.23 99.55 100.00 100.00 99.68 100.00 100.00 100.00
+> CDFM 95.62 97.20 98.74 98.40 38.75 64.26 76.47 86.58 95.86 75.10 71.94 90.08 89.16 99.85 99.59 97.42 99.60 95.26 93.09
+
+ablate the number of quantiles m that are used for computing the integral. We use m ∈ { 10 , 100 }. Further, we added two ANM-based baselines RESIT-T AB PFN which implements RESIT using TabPFN as in-context regression method and RESIT-OLS which instead uses spline-based regression. In Tables 5 and 6 we show the accuracy and the AUDRC for each variant on all bivariate benchmarks. We can see that LOSCAR is relatively robust to the parameter choice staying within a 2.5% difference to the main variant for all benchmarks. For L OSCAR -GL, the results are similar, although performance drops of approximately 5% can be observed for T¨ ubingen and LSs-ext. To further investigate this behavior, we plot the estimated means and standard deviations for m = 10 and m = 100 for Pair 1 of the LSs benchmark as an example in Figure 3. In general, more nodes should improve the integral approximation via the Gauss-Legendre quadrature, as it is exact for polynomials of degree up to 2m − 1. However, note that we do not have access to the ground-truth quantile function, but only an estimate of it. Inaccurate estimates of the quantile function may impair the integral approximation. Figure 3 suggests that the quantile function near the quantile levels of 0 and 1 becomes more noisier, as indicated by the more rougher surface of the quantile function when m = 100 , in which case generally more knots are being placed some of which more closely to the limits. In contrast, the most outer quantile function used in the case m = 10 is much smoother hinting that it might be well-recovered. Overall, the results indicate that a higher m does not result in better performance given that there is no ground-truth quantile function available. Nonetheless, the sensitivity with respect to m is rather small as indicated by the results in Tables 5 and 6. Overall, L OSCAR -FGLS is clearly outperformed by its TabPFN supported counterparts on data which contains flexible location-scale models, whereas its performance under high skewness improves. Therefore, its mean and variance estimates must be worse than in the TabPFN variants, possibly due to a lack of regularization resulting in too flexible function fits. The ANM baselines are comparable, however, as expected they are outperformed by the location-scale variants of L OSCAR .
+
+Table 5. Accuracy in % over All Bivariate Benchmark Datasets. The best result per benchmark is bolded. We include variations of our main approach, ablating τ1 from its default 0.05 and m from its default 10 . Further, RESIT-T AB PFN is an ANM variant of LOSCAR performing in-context regression with TabPFN and last, RESIT-OLS is another ANM variant of our method leveraging standard spline-based regression.                                                                                                                                                                  
+
+> Tagasovska et al. (2020) Mooij et al. (2016) Guyon et al. (2019) Klippert & Marx (2026) Method AN ANs LS LSs MNU SIM SIMc SIMln SIMG T¨ ubingen Cha Net Multi ANs-med ANs-str ANs-ext LSs-med LSs-str LSs-ext LOSCAR (τ= 0 .05) 100 100 100 99 100 79 82 72 76 71.69 75.67 85.67 85.67 99.0 98.0 100 96.5 97.5 93
+> LOSCAR (τ= 0 .25) 100 100 100 97 100 77 82 71 76 69.75 72.33 85.33 85.67 98.5 98.0 100 96.5 96.0 92 LOSCAR -GL ( m= 10 )100 100 99 100 100 77 81 73 76 69.34 74.67 85.33 86.00 99.0 98.0 100 98.0 97.0 93
+> LOSCAR -GL ( m= 100 )100 100 99 100 100 80 82 73 77 64.41 75.00 86.67 84.67 99.0 97.5 100 99.5 94.5 87 LOSCAR -FGLS 95 100 54 38 50 79 82 81 82 69.78 76.67 81.67 77.33 97.5 94.0 99 37.5 58.0 72 RESIT-T AB PFN 100 100 63 12 075 80 74 76 60.48 73.67 78.00 38.00 100 100 100 28.0 49.5 44 RESIT-OLS 98 100 65 12 274 82 78 77 60.01 73.33 78.00 37.00 100 100 99 31.5 50.5 43
+
+B.1.3. R EMARKS TO TAB PFN V ERSION 3.5 In this article, we use TabPFN-3 (Grinsztajn et al., 2026), while in theory, our approach is agnostic to the model version of TabPFN as long as this version supports mean and quantile regression. During the time of writing, version 3.5 of TabPFN has been released (J¨ ager et al., 2026). Therefore, we ran a preliminary ablation study to compare both versions, where for 16 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+Table 6. AUDRC in % over All Bivariate Benchmark Datasets. The best result per benchmark is bolded. We include variations of our main approach, ablating τ1 from its default 0.05 and m from its default 10 . Further, RESIT-T AB PFN is an ANM variant of LOSCAR performing in-context regression with TabPFN and last, RESIT-OLS is another ANM variant of our method leveraging standard spline-based regression.                                                                                                                                                                  
+
+> Tagasovska et al. (2020) Mooij et al. (2016) Guyon et al. (2019) Klippert & Marx (2026) Method AN ANs LS LSs MNU SIM SIMc SIMln SIMG T¨ ubingen Cha Net Multi ANs-med ANs-str ANs-ext LSs-med LSs-str LSs-ext LOSCAR (q= 0 .05) 100.00 100.00 100.00 99.96 100.00 87.81 93.72 87.60 94.09 70.36 71.83 96.79 95.69 99.93 99.94 100.00 99.79 99.85 99.09
+> LOSCAR (q= 0 .25) 100.00 100.00 100.00 99.94 100.00 86.84 92.59 89.43 93.15 65.75 69.67 96.17 95.90 99.93 99.92 100.00 99.78 99.82 98.91 LOSCAR –GL ( m= 10 )100.00 100.00 99.98 100.00 100.00 88.27 92.78 87.87 94.08 66.40 71.49 96.90 96.41 99.92 99.95 100.00 99.93 99.86 98.92 LOSCAR -GL ( m= 100 )100.00 100.00 99.98 100.00 100.00 89.13 93.28 89.07 93.89 56.81 71.56 96.99 94.76 99.98 99.95 100.00 99.99 99.21 96.55 LOSCAR -FGLS 98.32 100.00 52.71 22.87 66.92 88.77 92.71 84.55 93.25 62.29 76.12 92.16 77.50 99.09 97.94 99.96 16.80 40.00 54.93 RESIT-T AB PFN 100.00 100.00 70.87 2.63 0.00 84.47 90.25 89.74 90.15 53.74 70.58 91.72 20.88 100.00 100.00 100.00 10.94 23.20 16.54 RESIT-OLS 99.93 100.00 77.16 2.78 0.11 87.56 91.50 87.29 90.59 54.00 72.90 90.87 22.54 100.00 100.00 99.99 13.28 29.47 18.01
+
+Figure 3. Shown are the estimates of the conditional mean and quantiles obtained from TabPFN-3 with m ∈ { 10 , 100 } and the corresponding scale computed as described in Section 3.1.2 on Pair 1 of the LSs dataset (Tagasovska et al., 2020). The outer contours of the shaded area correspond to the highest and lowest quantile considered by the corresponding instantiation. The estimates are used for LOSCAR -GL, where m = 10 is the default used in our experiments. 
+
+v3.5, we use the model checkpoint tabpfn-v3.5-20260909.safetensors , Release v9.0.0. We found that in our framework, TabPFN-3 performed superior to TabPFN-3.5 and traced the performance difference to the fact that TabPFN-3 returned smoother estimates of conditional mean and estimated quantiles. We illustrate this observation Figure 4, where we plot the estimated conditional mean, the default quantiles for L OSCAR as well as additional quantile ranges for Pair 1 of the LSs dataset (Tagasovska et al., 2020). 
+
+B.2. Additional Multivariate Experiments and Results 
+
+B.2.1. R ESULTS ON THE SACHS DATASET 
+
+We show the results in terms of F1, order errors, SHD and SID for the Sachs dataset in Table 7. We see that CAM and HOST perform best, despite their weak performance on Light Tunnel. L OSCAR and L OSCAR -GL perform equally with CAM in terms of order errors and fall short by 2 and 4, respectively, in terms of SHD to HOST. The amortized methods perform comparably to L OSCAR and L OSCAR -GL. B.2.2. T ABULAR COMPARISON UNDER MIXED LOCATION -S CALE NOISE 
+
+We complement the results on synthetic multivariate data with heterogeneous noise distributions shown in Figure 2 in Section 5 by reporting the exact mean performances achieved by the baselines including RESIT-OLS in Table 8. Precision and recall are additionally included, with each variant of L OSCAR generally obtaining higher precision than recall. 17 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression   
+
+> Figure 4. Shown are the estimates of the conditional mean and quantiles obtained from TabPFN-3 (left) and TabPFN-3.5 (right) on Pair 1 of the LSs dataset (Tagasovska et al., 2020). It can be observed that the estimates for TabPFN-3 exhibit greater smoothness.
+> Table 7. Results on F1, Order Errors (OE), SHD and SID for the Sachs Dataset. The best result for amortized and non-amortized models each is bolded.
+
+Method F1 ↑ OE ↓ SHD ↓ SID ↓
+
+Sachs (n = 853 , d = 11 , #edges = 17 )LOSCAR 0.296 7 19 55 LOSCAR -GL 0.320 7 17 55 LOSCAR -FGLS 0.150 9 34 55 HOST 0.400 3 15 47 
+
+SKEW D 0.296 7 19 55 CAM 0.444 7 15 55 LiNGAM 0.320 7 17 55 NOTEARS-MLP 0.333 6 16 48 RESIT-T AB PFN 0.286 9 25 52 FOUND CAUSE 0.296 8 19 50 
+
+CDFM 0.307 11 18 50 
+
+B.2.3. C OMPARISON UNDER MIXED ADDITIVE NOISE 
+
+We visualize the results achieved by all baselines across the main metrics for the multivariate synthetic ANM datasets with heterogeneous noise via the bar plot given by Figure 5 showcasing both the mean and its standard error. Exact performances are supplied in Table 9 which also displays precision and recall. The strongest conventional baselines across all metrics are SKEW D and CAM with the latter achieving better results. As an example, in terms of F1 CAM achieves 0.839 when d = 6 ,whereas L OSCAR , L OSCAR -GL and L OSCAR -FGLS achieve 0.612, 0.632 and 0.718, respectively. Furthermore, S KEW Dand CAM outperform both amortized baselines in terms of F1 and SHD, whereas in terms of order errors and SID either FOUND CAUSE or CDFM yields the best result. Unlike in the LSNM case, L OSCAR -FGLS outperforms its quantile-based counterparts. Moreover, as in the LSNM case, the performances of all variants of L OSCAR drop notably when the dimensionality increases from d = 6 to d = 12 . While this behavior is observed for most methods, there are some exceptions. Most notably, CAM is barely affected in terms of F1 and FOUND CAUSE improves when increasing d in terms of Recall (0.797 to 0.903) and order errors (0.83 to 0.74) showcasing that amortized baselines can behave unexpectedly. 18 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression 
+
+Table 8. Results on Mean F1, Precision, Recall, Order Errors, SHD and SID on Synthetic Multivariate LSNM Data with Heterogeneous Noise. Baselines are split into conventional and amortized. The best result per benchmark is bolded. 
+
+F1 ↑ Precision ↑ Recall ↑ Order errors ↓ SHD ↓ SID ↓
+
+Method d=6 d=12 d=6 d=12 d=6 d=12 d=6 d=12 d=6 d=12 d=6 d=12 LOSCAR 0.740 0.616 0.749 0.605 0.742 0.638 1.13 3.17 3.40 9.96 5.43 23.46 LOSCAR -GL 0.745 0.620 0.753 0.608 0.747 0.643 1.08 3.11 3.33 9.88 5.31 22.40 LOSCAR -FGLS 0.537 0.377 0.504 0.328 0.595 0.463 2.10 5.24 6.82 19.57 9.73 33.32 HOST 0.394 0.343 0.353 0.282 0.458 0.457 3.15 6.27 9.07 22.46 12.33 38.27 SKEW D 0.715 0.714 0.748 0.762 0.690 0.675 1.53 2.84 3.29 6.37 7.36 21.61 CAM 0.553 0.521 0.543 0.504 0.572 0.544 2.36 4.91 5.71 12.19 10.48 29.82 NOTEARS-MLP 0.404 0.384 0.400 0.376 0.420 0.399 2.99 6.14 7.39 15.24 13.78 40.41 LiNGAM 0.289 0.347 0.264 0.306 0.332 0.415 3.77 6.10 9.56 18.74 17.24 42.25 RESIT-T AB PFN 0.701 0.535 0.703 0.510 0.710 0.573 1.27 3.78 3.88 12.52 6.11 27.34 RESIT-OLS 0.286 0.204 0.218 0.135 0.432 0.443 3.28 6.31 13.22 43.53 12.68 34.46 FOUND CAUSE 0.728 0.732 0.739 0.681 0.752 0.829 0.91 1.27 3.40 7.89 4.70 10.01 
+
+CDFM 0.629 0.600 0.587 0.554 0.703 0.673 1.45 2.77 5.20 10.82 6.56 20.24 Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN FoundCause CDFM 
+
+0.00.20.40.60.8
+
+F1 ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN FoundCause CDFM
+
+0246
+
+Order errors ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN FoundCause CDFM
+
+010 20 30 
+
+SHD ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN FoundCause CDFM
+
+010 20 30 40 
+
+SID ↓ 
+
+> d=6 d=12
+
+Figure 5. Comparison of L OSCAR and baselines in terms of F1, order errors, SHD and SID on ANM data. 
+
+B.2.4. R UNTIME COMPARISON UNDER MIXED NOISE DISTRIBUTION 
+
+In Table 10 and Figure 6, we show the average runtime for our synthetic data experiments with mixed noise distribution per mechanism type and number of nodes d. We can see that all approaches terminate within a reasonable time. While S KEW D19 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression  
+
+> Table 9. Results on Mean F1, Precision, Recall, Order Errors, SHD and SID on Synthetic Multivariate ANM Data with Heterogeneous Noise.
+
+F1 ↑ Precision ↑ Recall ↑ Order errors ↓ SHD ↓ SID ↓
+
+Method d=6 d=12 d=6 d=12 d=6 d=12 d=6 d=12 d=6 d=12 d=6 d=12 LOSCAR 0.612 0.501 0.614 0.460 0.625 0.560 1.45 3.67 5.02 14.19 6.38 24.90 LOSCAR -GL 0.632 0.509 0.632 0.467 0.647 0.570 1.44 3.51 4.75 13.78 6.04 23.43 LOSCAR -FGLS 0.718 0.589 0.716 0.539 0.730 0.667 1.08 2.68 3.56 11.89 4.93 18.84 HOST 0.354 0.271 0.303 0.196 0.442 0.454 3.18 6.31 10.10 30.09 12.44 39.67 SKEW D 0.802 0.777 0.840 0.826 0.773 0.738 0.98 2.06 2.23 5.00 5.06 17.30 CAM 0.839 0.852 0.838 0.840 0.847 0.869 0.76 1.28 2.05 3.72 3.45 9.30 NOTEARS-MLP 0.363 0.365 0.336 0.312 0.407 0.448 3.15 5.98 8.73 18.80 12.99 38.01 LiNGAM 0.426 0.307 0.353 0.229 0.560 0.482 2.25 5.59 8.93 26.66 10.14 37.27 RESIT-T AB PFN 0.648 0.542 0.646 0.504 0.662 0.598 1.29 3.18 4.51 12.83 5.18 21.76 RESIT-OLS 0.648 0.527 0.597 0.435 0.738 0.711 1.29 2.87 5.38 16.94 5.79 19.39 FOUND CAUSE 0.758 0.695 0.751 0.595 0.797 0.903 0.83 0.74 3.05 10.71 3.39 5.24 
+
+CDFM 0.742 0.727 0.667 0.657 0.862 0.838 0.61 1.06 3.84 7.83 2.68 8.12 
+
+has the longest runtime (on CPU), taking on average less than 4 minutes for ANs with d = 12 , L OSCAR has a comparable runtime with ∼ 2 minutes for the d = 12 datasets, whereas L OSCAR -GL is faster and takes at most ∼ 75 seconds for ANs with d = 12 . We note, however, that our method scales better than S KEW D for larger datasets. S KEW D did not terminate on Light Tunnel ( d = 20 with 39 edges) within 72 hours, whereas L OSCAR and L OSCAR -GL took around 85 and 110 minutes, respectively. All amortized methods finish below one second and the remaining conventional baselines, which we outperform in terms of performance, are also faster. HOST, the other heteroscedastic baseline, however, also takes 51 seconds on LSs ( d = 12 ).    
+
+> Table 10. Mean ±Standard Deviation Runtime (Seconds) based on Synthetic Multivariate Data with Heterogeneous Noise. Baselines are split into conventional and amortized. The best result per benchmark is bolded.
+
+LSs ANs Method d=6 d=12 d=6 d=12 LOSCAR 17.90 ± 1.97 127.04 ± 21.30 17.61 ± 1.73 125.59 ± 22.04 LOSCAR -GL 32.42 ± 1.46 72.99 ± 4.41 31.41 ± 1.59 75.55 ± 3.48 LOSCAR -FGLS 0.58 ± 0.01 2.83 ± 0.03 0.58 ± 0.01 2.82 ± 0.03 HOST 17.70 ± 7.28 51.57 ± 35.48 13.04 ± 8.28 22.50 ± 1.13 SKEW D 50.38 ± 25.91 165.84 ± 60.74 49.36 ± 23.37 215.87 ± 88.02 CAM 1.27 ± 0.13 2.99 ± 0.59 1.24 ± 0.12 2.61 ± 0.49 NOTEARS-MLP 2.78 ± 0.81 6.40 ± 1.32 3.68 ± 1.28 12.33 ± 7.07 LiNGAM 0.72 ± 0.10 0.83 ± 0.14 0.61 ± 0.12 0.68 ± 0.09 RESIT-T AB PFN 18.87 ± 0.64 64.26 ± 2.72 19.02 ± 0.67 69.66 ± 8.44 RESIT-OLS 0.52 ± 0.01 2.32 ± 0.03 0.51 ± 0.00 2.30 ± 0.02 FOUND CAUSE 0.36 ± 0.02 0.53 ± 0.04 0.37 ± 0.04 0.53 ± 0.04 
+
+CDFM 0.02 ± 0.01 0.03 ± 0.01 0.02 ± 0.01 0.03 ± 0.01 B.2.5. C OMPARISON UNDER HOMOGENEOUS NOISE DISTRIBUTIONS 
+
+In this section, we display and summarize the results that arise when the noise distribution in the generation of the synthetic multivariate data is held fixed at either exponential, Gaussian or skew-t distribution. Apart from this nuance, the datasets were generated as in the heterogeneous noise case, where 100 datasets for both ANMs and LSNMs for d = 6 , 12 were created. The parameterizations used are detailed in Section A.2. 20 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM 
+
+> 10 −2
+> 10 −1
+> 10 0
+> 10 1
+> 10 2
+> seconds (log scale)
+
+Runtime (s) ↓ SEM type LSs 
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+> 10 −2
+> 10 −1
+> 10 0
+> 10 1
+> 10 2
+> seconds (log scale)
+
+Runtime (s) ↓ SEM type ANs  
+
+> d=6 d=12
+
+Figure 6. Average runtimes in seconds (s). 
+
+We visualize the mean performances with respect to F1, order errors, SHD and SID as well as precision and recall for completeness using bar plots as in the previous sections. For LSNMs, the results are shown in Figures 7, 8 and 9 for the exponential, Gaussian, and skew-t distribution, respectively. Equivalently, the ANM results are provided by Figures 10, 11 and 12. 
+
+LSNM Setting Under exponential noise, L OSCAR and L OSCAR -GL constitute the strongest conventional baselines but are slightly outperformed by F OUND CAUSE . Similarly under skew-t noise, L OSCAR and L OSCAR -GL perform best with regard to all metrics when d = 6 with S KEW D and F OUND CAUSE being competitive. However, when d = 12 , S KEW D and FOUND CAUSE slightly outperform L OSCAR and L OSCAR -GL. Under Gaussianity, the assumptions of S KEW D and HOST are fulfilled. This leads to notable performance gains in HOST compared to the other noise settings. HOST outperforms all variants of L OSCAR with respect to all metrics and dimensions and, together with S KEW D, yields the best performances out of the conventional baselines. F OUND CAUSE , however, performs even better making it the most reliable choice here. In summary, the results signalize that the quantile-based variants of L OSCAR are well-suited to handle asymmetric noise in LSNMs, as they achieve stable and strong performances across the different noise distributions. This is not surprising given the nonparametric nature of the method. In comparison, while also making no distributional assumptions, L OSCAR -FGLS performs poorly in the LSNM setting. 
+
+ANM Setting As in the mixed distribution setting, L OSCAR -FGLS outperforms the quantile variants of L OSCAR under ANMs across exponential and Gaussian noise. Interestingly, under the skew-t distribution this is reversed. Moreover, the variants of L OSCAR remain competitive in the exponential settings, but are comparatively worse under Gaussian and skew-t
+
+noise. Under the exponential distribution, the best performances are achieved by F OUND CAUSE , CDFM, CAM and RESIT-OLS (d = 6 ). All variants of L OSCAR are slightly worse but much more reliable than the other baselines. Compared to the LSNM case, HOST does not become a valid option in the Gaussian noise case, where S KEW D, CAM as well as the amortized methods display the strongest results. This also applies to the skew-t settings, where CAM performs best regarding every metric. 21 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM 
+
+0.00.20.40.6
+
+F1 ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+02468
+
+Order errors ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+010 20 30 40 
+
+SHD ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+020 40 
+
+SID ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.6
+
+Precision ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.60.8
+
+Recall ↑
+
+d=6 d=12 
+
+Figure 7. Comparison of L OSCAR and baselines in terms of F1, order errors, SHD and SID on LSNM data with exponential noise. 
+
+22 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM 
+
+0.00.20.40.60.8
+
+F1 ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+02468
+
+Order errors ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+010 20 30 40 
+
+SHD ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+020 40 
+
+SID ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.60.8
+
+Precision ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00 0.25 0.50 0.75 1.00 Recall ↑
+
+d=6 d=12 
+
+Figure 8. Comparison of L OSCAR and baselines in terms of F1, order errors, SHD and SID on LSNM data with Gaussian noise. 
+
+23 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM 
+
+0.00.20.40.6
+
+F1 ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+02468
+
+Order errors ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+010 20 30 40 
+
+SHD ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+020 40 
+
+SID ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.60.8
+
+Precision ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.6
+
+Recall ↑
+
+d=6 d=12 
+
+Figure 9. Comparison of L OSCAR and baselines in terms of F1, order errors, SHD and SID on LSNM data with skew-t noise. 
+
+24 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM 
+
+0.00.20.40.60.8
+
+F1 ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+02468
+
+Order errors ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+010 20 30 
+
+SHD ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+020 40 
+
+SID ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.60.8
+
+Precision ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.60.8
+
+Recall ↑
+
+d=6 d=12 
+
+Figure 10. Comparison of L OSCAR and baselines in terms of F1, order errors, SHD and SID on ANM data with exponential noise. 
+
+25 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM 
+
+0.00.20.40.60.8
+
+F1 ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0246
+
+Order errors ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+010 20 30 
+
+SHD ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+010 20 30 40 
+
+SID ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.60.8
+
+Precision ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00 0.25 0.50 0.75 1.00 Recall ↑
+
+d=6 d=12 
+
+Figure 11. Comparison of L OSCAR and baselines in terms of F1, order errors, SHD and SID on ANM data with Gaussian noise. 
+
+26 Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM 
+
+0.00.20.40.60.8
+
+F1 ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+02468
+
+Order errors ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+010 20 30 
+
+SHD ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+020 40 
+
+SID ↓
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.60.8
+
+Precision ↑
+
+> Loscar Loscar-GL Loscar-FGLS HOST SkewD CAM Notears-MLP LiNGAM RESIT-TabPFN RESIT-OLS FoundCause CDFM
+
+0.00.20.40.60.8
+
+Recall ↑
+
+d=6 d=12 
+
+Figure 12. Comparison of L OSCAR and baselines in terms of F1, order errors, SHD and SID on ANM data with skew-t noise. 
+
+27

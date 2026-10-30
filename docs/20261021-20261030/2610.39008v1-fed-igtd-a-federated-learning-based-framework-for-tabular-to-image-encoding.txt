@@ -1,0 +1,945 @@
+Title: Fed-IGTD: A federated learning-based framework for tabular-to-image encoding
+
+URL Source: https://arxiv.org/pdf/2610.39008v1
+
+Published Time: Fri, 30 Oct 2026 02:14:01 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+1
+
+# Fed-IGTD: A federated learning-based framework for tabular-to-image encoding 
+
+David Chushig-Muzo, Eva Milara, Francisco J. Lara-Abelenda, Luis Carlos Estrada-Petrocelli, Diego H. Peluffo-Ord ´ o ˜ nez 
+
+Abstract —Tabular-to-image encoding methods, which transform tabular data into image-like representations, have shown promising results in predictive tasks. Despite their benefits, these methods follow a centralized paradigm, in which the data are collected and models are trained on a central device. This raises privacy and security concerns, particularly the risk of data leakage, unauthorized data collection and access to users’ private information. Federated Learning (FL) provides a decentralized framework in which multiple clients jointly optimize a shared model without directly sharing training data. We introduce Fed-IGTD, a horizontal FL-based approach in which clients share a common feature space and upload only local statistics, from which the server reconstructs the global correlation matrix and obtains a feature-to-pixel mapping to train a convolutional neural network via Federated Averaging (FedAvg). We studied two differential privacy (DP) mechanisms: (i) a one-shot Gaussian mechanism protecting the correlation-aggregation step; and 
+
+(ii) a client-level DP-FedAvg variant protecting the training with privacy loss composed via a R ´ enyi-DP accountant. We evaluated Fed-IGTD on five datasets under a systematic sweep of non-IID severity and privacy budgets. Privacy protection applied to the mapping-construction step has little impact on predictive performance. By contrast, DP-FedAvg substantially degrades utility at moderate privacy budgets with a small client cohort ( K = 5 ). Ablation study indicates that this degradation is driven mainly by the injected noise rather than by uniform averaging or update clipping. Macro-F1 exhibits sensitivity to performance degradation than accuracy under non-IID heterogeneity and class imbalance. These findings have direct implications for cross-silo federated deployments characterized by a limited number of participating institutions and heterogeneous local data distributions. These results show the potential of tabular-to-image encoding methods for supporting privacy-preserving learning in decentralized settings. 
+
+Index Terms —Tabular-to-image methods, spatial encoding methods, synthetic images, IGTD, Tabular2image, federated learning 
+
+✦
+
+1 INTRODUCTION 
+
+# TABULAR data is ubiquitous across domains such as healthcare, finance, and bioinformatics [1]. Ensemble tree-based models have been extensively used for predic-tive tasks using tabular data because of their high perfor-mance [2]. The adoption of deep learning architectures has been challenging because these models are not inherently designed to handle the characteristics of tabular data. Unlike images, which exhibit an inherent spatial structure where neighboring pixels are related and convolutional filters can capture patterns, tabular data lack inherent spatial organi-zation [3]. Recent studies in representation learning for tabular data have led to significant progress [1]. In particular, trans-forming tabular data into synthetic images has enabled the application of image-based models to structured data [4]. Several tabular-to-image encoding methods have been pro-posed, including DeepInsight [5], REFINED [6], TINTO [7], IGTD [8], TabSOM [9]. These methods perform a feature-to-pixel mapping such that features which present similarity 
+
+• David Chushig-Muzo, and Eva Milara are with the Department of Signal Theory and Communications, Telematics and Computing Systems, Rey Juan Carlos University (URJC), Madrid, Spain. E-mail: {david.chushig, eva.milara }@urjc.es 
+
+• Francisco J. Lara-Abelenda is with the Faculty of Experimental Sci-ences, Universidad Francisco de Vitoria, Madrid, Spain. E-mail: fran-cisco.lara@ufv.es 
+
+• Luis Carlos Estrada-Petrocelli is with Faculty of Engineering, Univer-sidad Latina de Panam´ a (ULATINA), Panama City, Panama. E-mail: lestrada@ulatina.edu.pa 
+
+• Diego H. Peluffo-Ord´ o ˜ nez is with the School of Mathematical and Computational Sciences, Yachay Tech University, Ecuador. E-mail: dpeluffo@yachaytech.edu.ec 
+
+in the input data are placed close together spatially. Ob-taining this mapping requires a global view of inter-feature relationships across the dataset. This centralized paradigm is particularly challenging in high-stakes domains, where tabular data are both highly sensitive and distributed, such as hospitals holding patient records, financial institutions maintaining transaction histories, or geographically dis-tributed sensor networks. In these settings, regulatory and privacy constraints often prohibit the centralization of raw data, posing significant challenges for training models that require data to be collected and processed in a single loca-tion. Federated Learning (FL) is a novel paradigm to address these challenges, enabling distributed joint training using decentralized data across heterogeneous devices [10]. In-stead of transmitting data from devices to the server, each device uses its local data to independently train a model and only shares model parameters with the server. These local parameters are then aggregated by the server to update the global model [11]. FL keeps sensitive information on local devices, addressing privacy, and regulatory concerns, which are crucial in high-stakes domains such as healthcare, Inter-net of Things, finance among others [11], [12]. Although FL has shown excellent results, its application within tabular-to-image methods has been partially explored. In this paper, we propose a horizontal FL-based tabular-to-image framework named Fed-IGTD. It reconstructs the global IGTD correlation matrix from local client statis-tics, without centralizing raw data. The server aggregates these statistics to compute the correlation matrix, then arXiv:2610.39008v1 [cs.LG] 28 Oct 2026 2
+
+runs IGTD’s optimization to derive a shared feature-to-pixel mapping, which are broadcast to all clients. Each client converts its local data into images using this shared mapping, and a Convolutional Neural Network (CNN) is trained across clients via Federated Averaging (FedAvg). We employ two Differential Privacy (DP) mechanisms: (i) 
+
+a one-shot Gaussian mechanism protecting the correlation-aggregation step; and (i) a client-level DP-FedAvg variant protecting the full training loop, with privacy loss composed via a R´ enyi-DP accountant. The main contributions of this paper are the following:  
+
+> •
+
+A novel horizontal FL adaptation of IGTD in which the feature-to-pixel mapping is derived from a re-constructed global correlation matrix, obtained via additive aggregation of per-client statistics rather than access to raw data.  
+
+> •
+
+A one-shot Gaussian mechanism that clips and per-turbs client-side statistics before aggregation, pro-viding a formal DP guarantee for the correlation-aggregation stage in the IGTD algorithm.  
+
+> •
+
+A client-level DP-FedAvg to protect the iterative CNN training process, with per-round clipping and Gaussian perturbation of client updates and privacy loss composed across training rounds using a R´ enyi DP accountant.  
+
+> •
+
+An evaluation of Fed-IGTD across five datasets span-ning healthcare, finance, chemistry/agriculture, sig-nal processing, and radar/physics. The evaluation considers controlled variations in non-IID severity and privacy budgets, providing a broader empirical characterization of federated tabular-to-image learn-ing than prior limited-domain evaluations. The remainder of this paper is organized as follows. Section 2 reviews related work in FL and tabular-to-image encoding methods. Section 3 describes the Fed-IGTD. Sec-tion 4 presents the datasets used, the experimental setup, and main results. Section 5 discusses limitations and direc-tions for future work, and Section 6 presents conclusions. 
+
+2 RELATED WORK 
+
+2.1 Federated learning 
+
+FL enables a shared global model to be trained across decentralized data holders by exchanging model updates rather than raw data [13]. In horizontal FL, clients share an identical feature schema but hold different samples, whereas in vertical FL, clients hold partially overlapping features over the same entities. These approaches require different training and aggregation strategies. In horizontal FL, clients independently train models on their local data and con-tribute model updates to a global aggregation procedure. In contrast, vertical FL typically requires entity alignment (e.g., via private set intersection) and split-model training across the partitioned feature space. Fed-IGTD operates in the horizontal FL setting. FedAvg is the standard aggregation algorithm for hor-izontal FL. At each round, a subset of clients initializes local training from the current global model, and the server aggregates the resulting local models, typically us-ing a sample-size-weighted average, to obtain the global model [14]. Although FedAvg was originally analyzed un-der the IID assumption, practical FL systems often exhibit statistical heterogeneity, as clients’ data reflect distinct local populations (e.g., hospital patient populations or regional customer bases). This non-IID setting has motivated meth-ods such as FedProx, which introduces a proximal term that penalizes local model deviation from the global model, improving training stability under heterogeneous data [15]. Beyond statistical heterogeneity, prior work has identified architectural limitations of parameter-only FedAvg. In par-ticular, FedBN showed that standard batch normalization is problematic under FedAvg because its mean and variance are non-learnable buffers and are therefore excluded from parameter aggregation, preventing the global model from appropriately updating its normalization statistics [16]. FL does not provide formal privacy guarantees. Al-though raw data remain decentralized, the model updates exchanged during training may still disclose information about individual training samples, making FL vulnerable to attacks such as membership inference, inference of prop-erties associated with training data among others [11]. DP provides formal privacy by perturbing data or model com-putations with calibrated noise, thereby reducing the risk of revealing information about individual users [11]. DP-SGD applies this principle at the sample level by clipping and perturbing individual gradients during centralized train-ing [17]. Since DP-SGD releases a noisy statistic at each mini-batch step, naive sequential composition over thousands of iterations can result in excessively loose ε bounds. The moments accountant and its R´ enyi DP (RDP) formulation enable tighter privacy accounting across repeated releases, with the accumulated privacy loss converted to a standard 
+
+(ε, δ ) guarantee at the end of training [18]. DP-FedAvg extends this framework to provide client-level privacy in FL. Each client’s model update is clipped to a bounded norm, and Gaussian noise is added to the aggregated update before it is applied to the global model, providing privacy at the level of client participation rather than individual records [14]. We adopt the client-level threat model of DP-FedAvg. 
+
+2.2 Tabular-to-image encoding methods 
+
+Tabular-to-image methods aims to construct a feature-to-pixel mapping that preserves the underlying feature re-lationships by placing related features to spatially close pixels in the resulting image [4]. These approaches employ linear and nonlinear dimensionality reduction techniques, such as Principal Component Analysis (PCA), t-distributed Stochastic Neighbor Embedding (t-SNE), Uniform Manifold Approximation and Projection (UMAP), Multidimensional Scaling (MDS), to embed features into a two-dimensional space from which pixel coordinates are derived. For in-stance, DeepInsight uses t-SNE, PCA and kernel PCA to project features into a two-dimensional space, which is then rasterized into a fixed-size image grid shared across all samples [5]. REFINED uses MDS and a hill-climbing algorithm to place correlated features near one another [6]. TINTO uses PCA and t-SNE to determine feature locations and the resulting coordinates are then transposed, scaled, and rounded to integer values [7]. 3
+
+Unlike dimensionality reduction methods, IGTD directly optimizes a feature-to-pixel assignment through iterative pairwise swaps, minimizing the discrepancy between the rank orderings of feature-wise and pixel-wise distances on the target grid [8]. Its rank-based objective depends on the data only through a correlation matrix, which can be reconstructed exactly from additive per-client statistics. This structure yields a relatively simple and computation-ally efficient objective, making IGTD particularly efficient to federated optimization compared with the non-convex, iterative objectives of methods such as t-SNE and UMAP. IGTD is among the most widely used tabular-to-image en-coding methods, having been applied across domains such as cybersecurity [19], [20], the automotive industry [21], and biomedical engineering [22], [23], [24], [25], [26]. Despite these benefits, a decentralized version of IGTD that pro-vides formal privacy guarantees has not been systematically investigated. The combination of FL with tabular-to-image conversion is, to our knowledge, addressed by a single prior study [27]. The authors proposes FedVI, a FL module within a broader cross-domain financial risk-modeling framework [27]. It uses vertical FL, in which clients hold different, only par-tially overlapping feature schemas for the same entities ( e.g., 
+
+a bank and a credit bureau holding different attributes of the same customers). A dual-stream schema-alignment mecha-nism combines semantic and statistical similarity measures to align heterogeneous feature spaces before constructing a shared image representation. FedVI reconstructs the correlation matrix used as input to its IGTD layout step through Gram-matrix aggregation, using a mechanism broadly similar to the horizontal ap-proach presented in this study. However, in its vertical, heterogeneous-schema setting, the reconstruction is approx-imate under non-IID data, with no formal error bounds provided. Additionally, FedVI does not employ DP or pro-vide noise calibration and privacy-loss accounting. Hence, FedVI’s privacy analysis is heuristic and does not provide formal privacy guarantees. It relies on the assumption that recovering the original sample matrix from the aggregated Gram matrix is infeasible when the feature dimension is substantially smaller than the number of samples. 
+
+3 FED -IGTD 
+
+Fed-IGTD is a federated framework for transforming tab-ular data into a shared image representation composed of two stages: mapping image construction and federated training .In the first stage, clients communicate only aggregate statistics from which the server reconstructs the global fea-ture relationships required by IGTD. The server then com-putes a single feature-to-pixel mapping and global feature-normalization parameters and broadcasts them to all clients. In the second stage, clients generate images once using the shared mapping and normalization, and train a CNN using either standard FedAvg or DP-FedAvg. In each round, the server sends the global model, receives client updates, and updates the model using either FedAvg (weighted aver-age, no clipping) or DP-FedAvg (clip locally, server adds Gaussian noise to the sum; uniform average). A schematic diagram of Fed-IGTD is shown in Figure 1. 
+
+3.1 Problem setup 
+
+We consider a federated learning system with K clients. Client k holds a local dataset Xk ∈ Rnk ×d, consisting of nk
+
+samples and d features. We denote the r-th sample of client 
+
+k by xkr ∈ Rd. The local datasets form a disjoint row-wise partition of the pooled dataset as follows: 
+
+X = [ X⊤ 
+
+> 1
+
+, . . . , X ⊤ 
+
+> K
+
+]⊤ ∈ RN ×d,
+
+where N = PKk=1 nk and samples xkr are never sent to the server or to other clients. Fed-IGTD aims to construct a shared feature-to-pixel assignment ϕ∗ : F → P , where 
+
+F = {1, . . . , d }P = {(h, w ) | h ∈ { 1, . . . , H }, w ∈ { 1, . . . , W }} 
+
+denote the feature indices and the spatial locations of an 
+
+H ×W image, respectively. The mapping ϕ∗ is optimized via an iterative pairwise-swap process by assigning each feature to a unique pixel location while preserving the pairwise relationships between features in the input data. Once the mapping is constructed, each client independently converts its local samples into images and uses them to train a CNN through federated learning. To derive a globally consistent feature-to-pixel mapping without centralizing input data, Fed-IGTD leverages the fact that the feature correlations re-quired by IGTD can be exactly reconstructed from additive statistics computed independently across clients. 
+
+3.2 Reconstruction of feature relationships 
+
+IGTD constructs an image layout by comparing pairwise feature dissimilarities with pairwise spatial distances on the target image grid. Let P ∈ Rd×d denote the Pearson correla-tion matrix, with Pij = ρij and define the corresponding feature dissimilarity matrix Q ∈ Rd×d, Qij = 1 − | ρij |.Thus, strongly positively or negatively correlated features have small dissimilarity, whereas weakly correlated features have larger dissimilarity. The key observation underlying Fed-IGTD is that the Pearson correlation matrix can be reconstructed from ad-ditive statistics, without sharing input samples. Rather than computing P , each client k computes the feature-sum vector 
+
+Sk and the Gram matrix Gk:
+
+Sk =
+
+> nk
+
+X
+
+> r=1
+
+xkr ∈ Rd
+
+Gk = X⊤ 
+
+> k
+
+Xk ∈ Rd×d
+
+where nk corresponds to its sample count and the server obtains the corresponding pooled statistics by summation: 
+
+S =
+
+> K
+
+X
+
+> k=1
+
+Sk
+
+G =
+
+> K
+
+X
+
+> k=1
+
+Gk
+
+where N = PKk=1 nk. Using these values, the server recon-structs the global mean ˆμ, the second-moment matrix ˆM ,and the reconstructed covariance matrix ˆΣ as: 
+
+ˆμ = SN4
+
+Fig. 1: Fed-IGTD workflow. 
+
+ˆM = GN
+
+ˆΣ = ˆM − ˆμˆμ⊤
+
+The reconstructed Pearson correlation matrix ˆP is then obtained element-wise as follows: 
+
+ˆPij = ˆΣij 
+
+q ˆΣii ˆΣjj 
+
+, i, j = 1 , . . . , d, 
+
+Finally, we obtain the reconstructed dissimilarity matrix: 
+
+ˆQij = 1 − | ˆPij |.
+
+Note that ˆP coincides with the Pearson correlation matrix that would be computed from centralized data. This means that the reconstruction is independent of the degree of statistical heterogeneity in the client partitions. This property is relevant for Fed-IGTD because an exact reconstruction of P implies that the server can reproduce the same feature-to-pixel layout that would be obtained from centralized data, without requiring any further access to client data. Thus, non-IID label or feature skew across clients has no effect on the correlation-matrix reconstruction, and therefore no effect on the IGTD-derived image layout itself. 
+
+3.3 IGTD layout construction 
+
+Given the reconstructed dissimilarity matrix ˆQ, the server performs the IGTD optimization without further commu-nication with the clients. Let D ∈ RHW ×HW denote the fixed Euclidean distance matrix between all positions on the H × W image grid. For a candidate feature-to-pixel assignment ϕ, the spatial distance between features i and 
+
+j is Dϕ(i),ϕ (j).IGTD seeks an assignment for which the ranking of feature dissimilarities agrees with the ranking of their corre-sponding spatial distances. The optimization is performed following a swapping-based procedure as follows: 
+
+ϕ∗ = arg min 
+
+> ϕ
+
+X
+
+> i<j
+
+rank( ˆQij ) − rank  Dϕ(i),ϕ (j)
+
+ .
+
+Starting from an initial assignment ϕ0, candidate feature positions are iteratively exchanged. A proposed swap is accepted when it strictly reduces the rank-discrepancy ob-jective; otherwise, the current assignment is retained. The optimization terminates after a predefined iteration budget or after a specified number of consecutive non-improving proposals. When the number of features d is smaller than the number of grid positions H×W (d < HW ), the distance matrix is padded with dummy features at maximal distance from all real features, ensuring every grid position receives an assignment while dummy positions are pushed to the periphery of the layout. The final mapping ϕ∗ is then broadcast to every client as a feature-to-pixel lookup table. The communication cost of this one-shot broadcast is O(d),independent of the number of local samples and of the number of subsequent federated training rounds. An im-portant consequence is that the computationally expensive IGTD optimization is performed only once at the server. Clients do not independently optimize their layouts and therefore cannot produce inconsistent image representations as a consequence of local sample distributions. Every client maps the same feature to the same pixel location. 
+
+3.4 Feature normalization and local image construc-tion 
+
+IGTD image construction requires each feature to be nor-malized to a common range (typically between 0 and 1) Before feature values are assigned to pixels. In Fed-IGTD, each client reports its local per-feature minimum 
+
+mmin  
+
+> k
+
+= min r xkr and maximum mmax  
+
+> k
+
+= max r xkr (taken independently for each feature). The server reconstructs the global extrema through element-wise aggregation: 
+
+ˆxmin = min  
+
+> k
+
+mmin 
+
+> k
+
+ˆxmax = max  
+
+> k
+
+mmax 
+
+> k5
+
+Each client independently applies the shared assignment 
+
+ϕ∗ and global normalization parameters ˆxmin and ˆxmax to convert its local samples into images. For a sample x ∈ Rd,the normalized value of feature i is assigned to the pixel specified by ϕ∗:
+
+Img( x)ϕ∗(i) = zi(x) = clip 
+
+ xi − ˆxmin ,i 
+
+ˆxmax ,i − ˆxmin ,i 
+
+, 0, 1
+
+
+
+Pixels corresponding to dummy features are assigned a fixed background value. Image construction is performed 
+
+once , before the first federated training. The resulting local image datasets are then reused throughout the subsequent training rounds. Consequently, the per-round communica-tion consists only of model parameters or model updates. Note that the image representation itself is not repeatedly transmitted or reconstructed. 
+
+3.5 Federated CNN training 
+
+The locally generated images are used to train a CNN classifier. At federated round t, the server broadcasts the current global model θ(t) to the selected clients. Each client performs local optimization on its image dataset and obtains a model update: 
+
+δ(t) 
+
+> k
+
+= θ(t) 
+
+> k
+
+− θ(t)
+
+For FedAvg, the server aggregates client updates using weights proportional to the number of local training sam-ples. For a participating set Kt, the global update is: 
+
+θ(t+1) = θ(t) + X
+
+> k∈K t
+
+nk
+
+P 
+
+> j∈K t
+
+nj
+
+δ(t)
+
+> k
+
+No clipping or additional noise is required for standard FedAvg. When formal privacy protection of the model-training process is required, Fed-IGTD can use client-level DP-FedAvg (described below). In DP-FedAvg, each client update is first clipped locally to a fixed L2 norm bound S:
+
+˜δ(t) 
+
+> k
+
+= δ(t) 
+
+> k
+
+min 1, S
+
+∥δ(t) 
+
+> k
+
+∥2
+
+!
+
+The clipped updates are transmitted to the server without noise. The server then sums the clipped updates, adds Gaussian noise to the aggregate, and divides by the number of participating clients: 
+
+θ(t+1) = θ(t) + 1
+
+|K t|
+
+ X
+
+> k∈K t
+
+˜δ(t) 
+
+> k
+
++ N  0, (σS )2I
+
+Unlike FedAvg, this DP-FedAvg aggregation uses uni-form averaging rather than weights proportional to nk. This ensures that each participating client contributes a bounded amount to the aggregate and provides the fixed sensi-tivity required for client-level differential privacy. Thus, the two training modes differ only in their model-update aggregation mechanism. Plain FedAvg receives un-clipped client updates and performs sample-size-weighted averag-ing, whereas DP-FedAvg clips each client update and adds Gaussian noise to the aggregate before applying a uniform average. 
+
+3.6 Privacy approaches 
+
+Fed-IGTD’s federated aggregation never transmits raw rows, but statistics such as a Gram matrix are not them-selves anonymous: an aggregated Gram matrix, especially with few clients or small nk, can still leak information about the underlying data distribution. Hence, we provide two complementary mechanisms for differential privacy: 
+
+(i) a Gaussian differential privacy mechanism protecting the correlation-matrix aggregation step that determines the IGTD image layout; and (ii) a client-level DP-FedAvg mech-anism protecting the CNN training process itself across all federated rounds. 
+
+3.6.1 Differential privacy for correlation aggregation 
+
+To bound the sensitivity of the statistics Sk and Gk to any single training sample, each client clips every sample of Xk
+
+to a fixed L2 norm bound c as follows: 
+
+˜xr = xr · min 
+
+
+
+1, c
+
+∥xr ∥2
+
+
+
+This clipping bounds the L2 sensitivity of the released statis-tics to the replacement of a single sample: ∆S = 2 c for the sum vector, and ∆G = 2 c2 for the Gram matrix. Each client then adds independent Gaussian noise, calibrated via the standard Gaussian mechanism, to its local statistics before upload: 
+
+σS = ∆Sε/ 2
+
+q
+
+2 ln(1 .25 /δ )
+
+σG = ∆Gε/ 2
+
+q
+
+2 ln(1 .25 /δ )
+
+with the total privacy budget ε split evenly between the two released statistics via basic sequential composition, and the noised Gram matrix symmetrized. This yields local (ε, δ )-differential privacy at the row level for the correlation-matrix construction step: an adversary observing the ag-gregated, noised statistics cannot determine, beyond the guarantee afforded by ε, whether any particular row was present in any client’s dataset. 
+
+3.6.2 Client-level differential privacy FedAvg with R ´ enyi-DP accounting 
+
+To protect the CNN training process, we adapt DP-FedAvg [14], which enforces client-level rather than row-level privacy: the unit of protection is whether a given institution participated in training, not whether any individual row within that institution’s data was used. Each participating client’s model update δ(t) 
+
+> k
+
+is clipped to a fixed L2 norm bound S, the server sums the clipped updates, adds Gaus-sian noise scaled to the clip bound, and applies the noised average to the global model. Because every client’s clipped update has L2 norm at most S, the sensitivity of the sum P 
+
+> k
+
+˜δ(t) 
+
+> k
+
+to any single client joining, leaving, or arbitrarily changing its update is exactly S – a clean, fixed bound independent of K or of any individual client’s local dataset size, which is precisely the property client-level DP requires. Each round constitutes one release of the Gaussian mechanism with noise multiplier σ. Rather than composing 6
+
+privacy loss across the T rounds via naive sequential com-position (which multiplies the per-round ε by T and yields prohibitively loose bounds for T in the tens of rounds) we track privacy loss in R´ enyi-divergence space using an R´ enyi-differential-privacy (RDP) accountant, composing the 
+
+T per-round Gaussian-mechanism RDP curves additively and converting to a single (ε, δ ) guarantee only after all T
+
+rounds have completed: 
+
+ε = RDP -to -DP 
+
+> T
+
+X
+
+> t=1
+
+RDP N (0 ,σ 2)(α), δ 
+
+!
+
+minimized over the R´ enyi order α. Because our simulated federation uses a fixed cohort of K = 5 clients, all of whom participate in every round (no random per-round subsampling from a larger population), we set the accoun-tant’s sample rate to 1.0, honestly reflecting the absence of any privacy amplification via subsampling; in an extension to a larger cross-silo population with random per-round participation, this amplification could be claimed to further tighten ε for the same σ.
+
+4 RESULTS 
+
+In this section, we present the datasets used, experimental setup as well as the classification results using Fed-IGTD. 
+
+4.1 Datasets 
+
+The evaluated datasets are sourced from public repositories, spanning five domains: healthcare (Pima Indians Diabetes), finance (German Credit), chemistry/agriculture (Wine Quality), signal processing (Sonar), and physics/radar (Ionosphere). Table 1 summarizes the datasets, including the number of samples and features. TABLE 1: Datasets used in this study.             
+
+> Dataset Samples Features Pima Indians Diabetes 768 8German Credit 1000 20 Wine Quality (White) 4898 11 Connectionist Bench (Sonar) 208 60 Ionosphere 351 34
+
+For Wine Quality, the original quality score is binarized into two classes: quality ≥ 6 (good) and quality < 6 (not good). For German Credit, categorical features are encoded using ordinal label encoding. For Ionosphere, one constant feature (zero-variance) was removed, consequently, 33 of the original 34 features were used. 
+
+4.2 Experimental setup 
+
+Data splitting. For each dataset, we hold out 20% of the samples as a stratified test set (evaluated centrally), with the remaining 80% partitioned across clients for federated train-ing. We simulate a cross-silo federation of K = 5 clients, all of whom participate in every communication round. To systematically control non-IID severity, we adopt the com-monly used Dirichlet-based label-skew protocol, in which each client’s class proportions are sampled from a Dirichlet distribution with concentration parameter α. Larger α yields a distribution closer to IID, whereas smaller α produces stronger label skew. This provides a single interpretable parameter for controlling the degree of heterogeneity. We considered a concentration parameter α ∈ { 1000 , 1.0, 0.1},corresponding to approximately IID, moderately non-IID, and severely non-IID partitions. 
+
+Federated simulation. Each client independently computes its local statistics (nk, S k, G k), which are aggregated by the server to reconstruct the global correlation matrix and normalization bounds. The resulting IGTD mapping is op-timized via swap-based iterative manner with a maximum of 3000 iterations and a patience threshold of 400 consecu-tive non-improving proposals. The image grid dimensions 
+
+H ×W are chosen as the smallest near-square grid satisfying 
+
+H × W ≥ d for each dataset’s feature count d.
+
+Model architecture and training. Each client trains a com-pact CNN classifier consisting of two convolutional layers (16 and 32 channels, 3 × 3 kernels) with Group Normal-ization followed by a fully connected layer (64 units) with dropout ( p = 0 .3) and a final classification layer. Models are trained via Adam (learning rate 10 −3) for 15 federated rounds with 1 local epoch per round, using either standard FedAvg (weighted by local sample count, no clipping) or client-level DP-FedAvg. As a centralized reference, we train the same architecture on the pooled training data using the centrally computed IGTD mapping. 
+
+Privacy configuration. For the one-shot Gram-matrix DP mechanism, we sweep the privacy budget ε ∈ { 8, 2, 0.5}
+
+at fixed δ = 10 −5, alongside a non-private baseline, holding non-IID severity fixed at α = 1.0 to isolate the effect of privacy noise from that of client hetero-geneity. For DP-FedAvg, we sweep the noise multiplier 
+
+σ ∈ { 10 −4, 0.05 , 0.1, 0.2, 0.4, 0.8, 1.5, 3, 6, 12 }, reporting the actually-achieved ε at δ = 10 −5 as computed by the R´ enyi-DP accountant after composing privacy loss across all 15 training rounds, rather than a nominal, unaccounted noise level. The DP-FedAvg sweep uses the noise-free federated correlation reconstruction to construct the IGTD mapping. DP-FedAvg protects only the federated training, not the mapping-construction step. The R´ enyi-DP accountant eval-uates R’enyi orders α ∈ 1.1, 1.2, . . . , 10 .9 ∪ 11 , 12 , . . . , 63 ,comprising 143 orders in total, and reports the tightest resulting (ε, δ ) bound. The per-client update clip bound S
+
+is calibrated per dataset via a short, non-private probe (3 rounds without noise), taking the median observed update norm as a practical estimate. 
+
+Communication cost. Mapping construction requires each client to upload one Gram matrix ( O(d2)) and one sum vector ( O(d)) in a single round, after which the server broadcasts the resulting mapping as an O(d) lookup ta-ble plus O(d) normalization bounds – a fixed, one-time cost independent of subsequent training. Federated training then transmits one full model parameter vector per client per round, for 15 rounds, regardless of d; for the model architecture used here (Section 4.2), this per-round cost is several orders of magnitude larger than the one-time O(d2)
+
+mapping-construction cost for every dataset in our suite, since d ≤ 60 ≪ the number of model parameters. 
+
+Evaluation. We report two metrics: test accuracy and macro-averaged F1 score, the latter weighting all classes equally and therefore more sensitive to degradation on un-derrepresented classes. All federated and centralized results 7
+
+are averaged over 5 independent seeds (3 for Wine Quality, due to its larger sample count and correspondingly higher per-run training cost), each seed governing the train/test split, the Dirichlet client partition, and model initialization jointly. We report mean and standard deviation across seeds. 
+
+4.3 IGTD correlation matrix using centralized and fed-erated approach 
+
+Figure 2 compares the centrally computed IGTD correla-tion matrix P with its federated reconstruction ˆP for two datasets corresponding to the minimum and maximum feature dimensionalities in our evaluation: Diabetes ( d = 8 )and Sonar ( d = 60 ). For both datasets, P and ˆP are visually indistinguishable, while the difference matrix P − ˆP exhibits no discernible structure, with residuals on the order of 
+
+10 −15 . These differences are several orders of magnitude smaller than any correlation discrepancy expected to affect the resulting IGTD layout and are consistent with floating-point round-off rather than systematic reconstruction er-ror. The correlation matrices for the rest of datasets are shown in Figure 8 of Appendix A. The same behavior was observed across all datasets, with maximum absolute differences ranging from 1.98 × 10 −15 for German Credit to 
+
+1.68 ×10 −11 for Wine Quality. The slightly larger residual for Wine Quality is attributable to accumulated floating-point error associated with its substantially larger sample size, rather than to approximation in the federated reconstruc-tion. These results confirm that ˆP reproduces P to numerical precision across the evaluated datasets, independently of sample size and feature dimensionality. 
+
+4.4 Centralized versus federated predictive perfor-mance 
+
+Figure 3 compares centralized and federated predictive per-formance under FedAvg across five clients with moderate label skew ( α = 1 .0) and without DP, establishing a baseline prior to the introduction of more severe non-IID heterogene-ity or privacy perturbation. As shown in Figure 3 (a), fed-erated training yields consistently lower accuracy than the centralized reference across most datasets, with decreases ranging from approximately two to ten percentage points for Diabetes (from 0.734 to 0.716), German Credit (from 0.780 to 0.749), Wine Quality (from 0.789 to 0.748), and Sonar (from 0.851 to 0.748). In contrast, Ionosphere demonstrates greater robustness to federated training, with accuracy de-creasing only from 0.947 to 0.938. It is also the only dataset for which the confidence intervals of the centralized and federated estimates exhibit substantial overlap, indicating limited performance loss under federation. The macro-F1 values in Figure 3 (b) reveal a larger centralized–federated performance gap than is apparent from accuracy alone, particularly for Sonar and German Credit. This finding reflects the greater sensitivity of macro-F1 to class-specific performance degradation. Unlike ac-curacy, macro-F1 assigns equal weight to each class, pre-venting errors concentrated in minority classes from be-ing masked by the performance of the majority class. Ionosphere again exhibits the smallest and most stable centralized–federated discrepancy across both metrics, sug-gesting that the impact of federated training is inherently dataset-dependent. 
+
+4.5 Effect of non-IID severity across domains 
+
+We first characterize the three federation severity levels (IID, Moderate, and Severe) at the client level. Figure 9 in Appendix B shows the resulting Dirichlet label-skew parti-tions across all datasets, with each row reporting client-level sample counts and class distributions for the three sever-ity levels, together with the mean normalized per-client entropy. Note that 1.0 indicates a perfectly balanced class distribution and 0.0 indicates a single-class distribution. For every dataset, increasing federation severity is accompanied by a monotonic reduction in mean entropy, although the underlying partition characteristics vary across datasets. For instance, German Credit exhibits the most extreme severe partition in terms of mean entropy (0.18), with four of the five clients receiving fewer than 10 samples, effectively concentrating the available training data in a single domi-nant client. Ionosphere provides a contrasting case, with a relatively high mean entropy of 0.62 despite approximately 85% of the samples being assigned to a single client, because the dominant client’s local class distribution remains com-paratively balanced. This highlights an important limitation of mean client entropy as a measure of federation severity, as it captures within-client class balance but does not account for heterogeneity in client-level sample sizes. Consequently, substantial imbalance in sample allocation across clients may coexist with relatively high mean entropy. Using these partitions, Figure 4 presents the per-seed trajectories of accuracy and macro-F1 across the three fed-eration severity levels. Diabetes, German Credit, and Wine Quality exhibit the expected trend of progressively de-clining performance as heterogeneity increases, with accu-racy trajectories remaining relatively close to their respec-tive means, whereas macro-F1 exhibits greater seed-to-seed dispersion. This variability is particularly pronounced for Diabetes and German Credit under severe skew, where macro-F1 spans approximately 0.4–0.65 despite compara-tively tightly clustered accuracy values. Sonar and Ionosphere exhibit different results to increas-ing non-IID severity. For Sonar, both accuracy and macro-F1 initially improve from IID to Moderate skew before declin-ing sharply under Severe skew, with individual seed tra-jectories diverging and crossing between the Moderate and Severe conditions rather than following a common trend. This behavior may be attributable to the limited sample size of Sonar, with only 208 observations distributed across five clients, thereby increasing the sensitivity of the resulting models to random client assignments as per-client sample sizes become increasingly constrained under severe skew. Ionosphere exhibits the most pronounced degradation. Ac-curacy and macro-F1 remain relatively stable and close to the performance ceiling under IID and Moderate conditions, but diverge substantially under Severe skew, with macro-F1 spanning approximately 0.4–0.9 across seeds. As the severe partition concentrates most samples on a single client while maintaining a comparatively balanced class distribution within that client (see Figure 9), the observed instability 8pregnancies glucose bp skin insulin bmi pedigree age pregnancies glucose bp skin insulin bmi pedigree age 
+
+Centralized correlation P
+
+(diabetes, 8 features) 
+
+> pregnancies glucose bp skin insulin bmi pedigree age pregnancies glucose bp skin insulin bmi pedigree age
+
+Federated reconstruction  ̂ P
+
+(5 clients, α=1.0) 
+
+> pregnancies glucose bp skin insulin bmi pedigree age pregnancies glucose bp skin insulin bmi pedigree age
+
+Difference P −̂ P
+
+(max abs diff = 3.11e-15) 
+
+> −1.00
+> −0.75
+> −0.50
+> −0.25 0.00 0.25 0.50 0.75 1.00
+> −1.00
+> −0.75
+> −0.50
+> −0.25 0.00 0.25 0.50 0.75 1.00
+> −3
+> −2
+> −101231e −15
+
+(a) 60 features (unlabeled)       
+
+> Centralized correlation P
+> (sonar, 60 features)
+> 60 features (unlabeled)
+> Federated reconstruction  ̂ P
+> (5 clients, α=1.0)
+> 60 features (unlabeled)
+> Difference P−̂ P
+> (max abs diff = 8.84e-15)
+> −1.00
+> −0.75
+> −0.50
+> −0.25 0.00 0.25 0.50 0.75 1.00
+> −1.00
+> −0.75
+> −0.50
+> −0.25 0.00 0.25 0.50 0.75 1.00
+> −8
+> −6
+> −4
+> −2024681e −15
+
+(b) 
+
+Fig. 2: Comparison of centralized and federated correlation matrix. Considering the dataset of: (a) Diabetes (8 features); and (b) Sonar (60 features). Diabetes German Credit Wine Quality Sonar Ionosphere 
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+> Test accuracy
+
+Centralized Federated (no DP, α=1.0) 
+
+(a) Diabetes German Credit Wine Quality Sonar Ionosphere 
+
+0.0 0.2 0.4 0.6 0.8 1.0 
+
+> Test F1
+
+Centralized Federated (no DP, α=1.0) 
+
+(b) 
+
+Fig. 3: Centralized and federated predictive performance under FedAvg with five clients ( α = 1 .0, without differ-ential privacy). (a) Test accuracy; and (b) Test macro-F1. appears to be driven primarily by substantial across-client sample-size imbalance rather than within-client class im-balance. This behavior constitutes a distinct failure mode relative to the progressive degradation observed across the other datasets and highlights the limitations of entropy as a standalone measure of federation severity. Under Severe skew, both Sonar and Ionosphere exhibit markedly greater seed-to-seed variability in macro-F1 than in accuracy, consis-tent with its greater sensitivity to class-specific performance degradation. 
+
+4.6 Effect of differential privacy on the correlation-aggregation step 
+
+Figure 5 isolates the utility cost associated with protecting the one-shot correlation-aggregation step used to construct the IGTD image mapping, while fixing the non-IID severity at α = 1 .0. By fixing the degree of non-IID heterogeneity, this configuration isolates the contribution of privacy per-turbation to predictive results. In contrast to the degradation observed under severe non-IID conditions, mean accuracy remains stable across all five datasets over the evaluated privacy range, including at ε = 0 .5. The individual seed trajectories likewise remain closely clustered as the privacy budget decreases, with no substantial increase in between-seed variability. Because the Gram-matrix aggregation step is reconstructed exactly regardless of the noise added to the released statistics, DP noise here perturbs only the IGTD layout itself, a considerably smaller and more localized disturbance than the client-composition changes that drive the instability seen under severe non-IID skew. 90.0 0.2 0.4 0.6 0.8 1.0 Test accuracy     
+
+> Diabetes
+> 0.0 0.2 0.4 0.6 0.8 1.0 German Credit
+> 0.0 0.2 0.4 0.6 0.8 1.0 Wine Quality
+> 0.0 0.2 0.4 0.6 0.8 1.0 Sonar
+> 0.0 0.2 0.4 0.6 0.8 1.0 Ionosphere
+> IID Moderate Severe 0.0 0.2 0.4 0.6 0.8 1.0 Test F1
+> IID Moderate Severe 0.0 0.2 0.4 0.6 0.8 1.0
+> IID Moderate Severe 0.0 0.2 0.4 0.6 0.8 1.0
+> IID Moderate Severe 0.0 0.2 0.4 0.6 0.8 1.0
+> IID Moderate Severe 0.0 0.2 0.4 0.6 0.8 1.0
+
+Fig. 4: Per-seed accuracy (top row) and macro-F1 (bottom row) trajectories across the non-IID severity sweep (IID, Moderate, Severe). Each thin line traces one seed’s value across the three settings; the dashed black line marks the mean. Macro-F1 exhibits a similar pattern, with only minor deviations for German Credit and Wine Quality, where a small decline at ε = 8 is followed by recovery at tighter privacy budgets ( ε = 2 and ε = 0 .5). This non-monotonic variation does not appear to reflect a systematic privacy-induced degradation, as the initial decline does not persist or increase with further reductions in ε. Moreover, none of the datasets exhibits the pronounced seed-to-seed di-vergence observed for Ionosphere and Sonar under severe non-IID conditions. Notably, even these two datasets, which showed the greatest sensitivity to federation heterogeneity in previous subsection, maintain relatively stable and tightly clustered trajectories under the present privacy setting. These results indicate that the privacy cost of protecting only the mapping-construction step is small relative to the cost of severe non-IID skew, or client-level DP-FedAvg applied throughout the training process. This difference can be attributed to the distinct points at which privacy noise is introduced. Gram-matrix DP perturbs a single, low-dimensional statistic computed once prior to train-ing, whereas DP-FedAvg perturbs model updates at every training round, allowing the effects of noise to accumulate throughout optimization. 
+
+4.7 Characterizing the privacy–utility tradeoff in client-level DP-FedAvg 
+
+Figure 6 characterizes the DP-FedAvg privacy–utility trade-off by examining two complementary quantities: the frac-tion of client updates clipped per round (left) and the resulting test macro-F1 (right), both as a function of the achieved privacy budget ε. For three of the five datasets (Diabetes, German Credit, and Wine Quality), the two quan-tities exhibit a clear inverse relationship: decreasing ε is associated with a progressively higher clipping fraction and lower macro-F1. This behavior aligns with the mechanism described above, as noise grows relative to the clip bound S,a larger share of client updates are truncated before aggre-gation, degrading the federated model’s effective training signal. Sonar and Ionosphere, however, deviate from this pat-tern. For Sonar, the clipping fraction remains nearly constant across the ε range, decreasing slightly from 0.46 to 0.44 at the tightest privacy budgets, while macro-F1 nevertheless de-clines sharply from approximately 0.74 to 0.40. Ionosphere exhibits a similar disconnect, with the clipping fraction varying only modestly and non-monotonically, reaching a peak of approximately 0.48 before declining to 0.40, whereas macro-F1 drops from approximately 0.95 to 0.27. For these two datasets, the clipping fraction alone does not fully explain the observed degradation in macro-F1, suggesting that the magnitude of the injected Gaussian noise relative to the model and dataset sizes constitutes an additional determinant of DP-FedAvg utility. This effect appears par-ticularly pronounced for smaller datasets, such as Sonar with 208 samples, as well as for datasets that exhibited comparatively greater instability under severe skew in the non-IID experiments. These results indicate that the clipping fraction is an important, but not sufficient, determinant of the DP-FedAvg utility decline. Clipping appears to be the primary contributor to performance degradation in larger and more homogeneous datasets, while the magnitude of the injected noise relative to model and dataset scale in-troduces an additional, dataset-dependent effect that is not captured by clipping frequency alone. 
+
+4.8 Privacy–utility tradeoffs across privacy mecha-nisms 
+
+Figure 7 provides a direct comparison of the two privacy mechanisms evaluated in this study across all five datasets. Gram-matrix DP (blue) exhibits negligible variation across the range of evaluated privacy budgets, indicating that privacy protection confined to the one-shot correlation-aggregation step incurs minimal utility degradation, even 10 0.0 0.2 0.4 0.6 0.8 1.0 Test accuracy                    
+
+> Diabetes
+> 0.0 0.2 0.4 0.6 0.8 1.0 German Credit
+> 0.0 0.2 0.4 0.6 0.8 1.0 Wine Quality
+> 0.0 0.2 0.4 0.6 0.8 1.0 Sonar
+> 0.0 0.2 0.4 0.6 0.8 1.0 Ionosphere
+> No DP
+> ε= 8
+> ε= 2
+> ε= 0.5 0.0 0.2 0.4 0.6 0.8 1.0 Test F1
+> No DP
+> ε= 8
+> ε= 2
+> ε= 0.5 0.0 0.2 0.4 0.6 0.8 1.0
+> No DP
+> ε= 8
+> ε= 2
+> ε= 0.5 0.0 0.2 0.4 0.6 0.8 1.0
+> No DP
+> ε= 8
+> ε= 2
+> ε= 0.5 0.0 0.2 0.4 0.6 0.8 1.0
+> No DP
+> ε= 8
+> ε= 2
+> ε= 0.5 0.0 0.2 0.4 0.6 0.8 1.0
+
+Fig. 5: Per-seed accuracy (top row) and macro-F1 (bottom row) trajectories across the Gram-matrix differential privacy sweep, at fixed moderate non-IID severity ( α = 1 .0). Each thin line traces one seed’s value across the four privacy budgets (No DP, ε = 8 , ε = 2 , ε = 0 .5); the dashed black line marks the mean. under stringent privacy constraints. In contrast, DP-FedAvg (orange), which applies privacy protection at each round of the federated training procedure, exhibits a pronounced utility decline as ε decreases across all five datasets. The systematic divergence between the two curves demonstrates that extending privacy protection from a single aggregation step to the entire iterative training process substantially increases the associated utility cost, despite the two mech-anisms being evaluated under comparable nominal privacy budgets. The magnitude of the DP-FedAvg utility degradation is strongly dataset-dependent. Ionosphere exhibits the most pronounced and seed-sensitive decline, with macro-F1 de-creasing from near-ceiling performance to a range of ap-proximately 0.3–0.5 under the most stringent privacy bud-gets. This observation is consistent with the earlier finding that Ionosphere’s DP-FedAvg instability is more closely associated with the magnitude of the injected noise than with clipping frequency. In particular, a model operating near ceiling performance may have limited tolerance to perturbations before noise-induced changes substantially affect its decision boundary. Wine Quality and Sonar exhibit similarly pronounced degradation, with macro-F1 declining to approximately 0.35–0.40 at the tightest privacy budgets. In contrast, Diabetes and German Credit exhibit a more moderate decline followed by partial recovery, with the DP-FedAvg confidence intervals overlapping those of Gram-matrix DP across substantial portions of the intermediate-
+
+ε range. These results suggest that, for these datasets, although the direction of the privacy-induced utility loss is consistent, its magnitude remains subject to substantial seed-level variability, particularly given the limited number of random seeds (3) considered in the experiments. This comparison has direct practical implications for the deployment of Fed-IGTD. A fixed nominal privacy budget 
+
+ε does not entail a uniform utility cost, as the resulting performance degradation depends critically on the stage of the pipeline to which privacy protection is applied. Privacy protection of the mapping-construction step alone incurs negligible utility loss and may therefore be considered a default configuration. In contrast, extending privacy protec-tion to the full training procedure through DP-FedAvg intro-duces a substantially greater utility cost. For several datasets in our evaluation, particularly those that are smaller or more sensitive to perturbations, maintaining practical utility un-der stringent privacy constraints may consequently require a larger client cohort or a less restrictive privacy target. 
+
+5 DISCUSSION 
+
+This paper introduces Fed-IGTD, a horizontal FL-based framework for privacy-preserving tabular-to-image trans-formation based on IGTD. The proposed approach enables the correlation structure required by IGTD to be recon-structed through federated aggregation, without requiring the underlying tabular data to leave individual clients. Across the five datasets, the results demonstrate substantial dataset dependence in the robustness of Fed-IGTD to fed-eration, statistical heterogeneity, and DP. For instance, Iono-sphere, despite achieving near-ceiling performance under centralized and IID settings, exhibits pronounced sensitivity to severe non-IID skew and DP-FedAvg noise, whereas Diabetes and German Credit show comparatively grad-ual performance degradation. This pattern suggests that models operating near the performance ceiling may have limited tolerance to perturbations, such that relatively small changes in the learned decision boundary can result in substantial losses in predictive performance. Sonar exhibits a different form of sensitivity, which is consistent with its limited sample size. With only 208 samples distributed across five clients, variations in client-level data assignments can have a comparatively large influence on the resulting 11 10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+0.4 0.5 0.6 0.7 Diabetes Fraction clipped 
+
+10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+0.3 0.4 0.5 0.6 0.7 Test F1 
+
+10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+0.3 0.4 0.5 0.6 0.7 German Credit Fraction clipped 
+
+10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+0.4 0.5 0.6 0.7 0.8 Test F1 
+
+10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+0.2 0.4 0.6 0.8 Wine Quality Fraction clipped 
+
+10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+0.3 0.4 0.5 0.6 0.7 Test F1 
+
+10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+0.35 0.40 0.45 0.50 0.55 Sonar Fraction clipped 
+
+10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+0.4 0.6 0.8 Test F1 
+
+10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+ε (log scale) 0.35 0.40 0.45 0.50 0.55 0.60 Ionosphere Fraction clipped 
+
+10 0
+
+10 2
+
+10 4
+
+10 6
+
+10 8
+
+ε (log scale) 0.2 0.4 0.6 0.8 1.0 Test F1 
+
+Fig. 6: DP-FedAvg mechanistic diagnostic across five datasets. Left column: fraction of client updates hit by clipping vs. achieved privacy budget ε (log scale, decreasing left to right). Right column: test macro-F1 vs. the same ε, for reference. 12 10 0 
+
+> 10 2
+> 10 4
+> 10 6
+> 10 8
+> 0.0 0.2 0.4 0.6 0.8 1.0 Diabetes Test F1
+> 10 0
+> 10 2
+> 10 4
+> 10 6
+> 10 8
+> 0.0 0.2 0.4 0.6 0.8 1.0 German Credit Test F1
+> 10 0
+> 10 2
+> 10 4
+> 10 6
+> 10 8
+> 0.0 0.2 0.4 0.6 0.8 1.0 Wine Quality Test F1
+> 10 0
+> 10 2
+> 10 4
+> 10 6
+> 10 8
+> 0.0 0.2 0.4 0.6 0.8 1.0 Sonar Test F1
+> 10 0
+> 10 2
+> 10 4
+> 10 6
+> 10 8
+> ε(log scale) 0.0 0.2 0.4 0.6 0.8 1.0 Ionosphere Test F1
+> Gram-matrix DP (one-shot mapping step only) DP-FedAvg (full training loop)
+
+Fig. 7: Comparison of the two privacy mechanisms on test macro-F1: Gram-matrix DP protecting only the one-shot mapping-construction step (blue) versus client-level DP-FedAvg protecting the full training loop (orange), plotted against the achieved privacy budget ε (log scale, decreasing left to right) across five datasets. local data distributions and, consequently, on the global model. The consistency of these patterns across the non-IID severity analysis, the DP-FedAvg clipping analysis, and the direct comparison of privacy mechanisms further indicates that dataset characteristics play a substantive role in deter-mining federated robustness. These findings underscore the importance of reporting dataset scale, class distribution, and baseline performance when evaluating federated tabular-to-image methods, as aggregate predictive performance alone may not adequately characterize robustness across different data regimes. The privacy experiments also reveal an important dis-tinction between protecting a single preprocessing step and protecting the complete learning procedure. Gram-matrix DP introduces limited utility degradation across the evalu-ated privacy budgets because privacy protection is applied only to the one-shot correlation-aggregation step preceding model training. In contrast, client-level DP-FedAvg applies perturbation throughout the iterative training process, re-sulting in substantially greater and more dataset-dependent utility degradation, particularly for the small client cohort (K = 5 ) considered in this study. These results motivate a layered approach to privacy protection in practical de-ployments of Fed-IGTD. When protection of the correlation-aggregation step is sufficient for the intended threat model, Gram-matrix DP offers a comparatively low-cost privacy mechanism. When protection of the complete training pro-cess is required, DP-FedAvg provides stronger end-to-end protection but may require additional resources, such as a larger client cohort, or a less stringent privacy target to preserve useful predictive performance. The appropriate mechanism therefore depends not only on the desired pri-vacy budget but also on which components of the pipeline must be protected. The evaluation also highlights the importance of metric selection when assessing federated and privacy-preserving learning. Across the experiments, macro-F1 was generally more sensitive to degradation than accuracy, particularly under severe non-IID skew and strong DP perturbation. This difference reflects the fact that accuracy can remain relatively stable when performance deteriorates dispropor-tionately on minority classes, whereas macro-F1 gives equal weight to each class. Consequently, accuracy alone may ob-scure practically important degradation in class-imbalanced federated settings. This consideration is particularly rele-vant for cross-institutional deployments, where heteroge-neous class distributions and limited per-client sample sizes are common. We therefore recommend reporting macro-averaged or per-class metrics alongside accuracy when evaluating federated tabular-to-image methods, especially under distribution shift or privacy constraints. To our knowledge, FedVI remains the only previously published system that combines FL with tabular-to-image encoding, providing an important point of comparison for Fed-IGTD. The two approaches differ in several fundamen-tal points. First, FedVI adopts vertical FL in which heteroge-neous client feature spaces require a dual-stream schema-alignment procedure, resulting in an approximate recon-struction of the correlation matrix under heterogeneous data distributions. In contrast, Fed-IGTD adopts horizontal FL that permits the required correlation structure to be recon-structed, independent of client heterogeneity. Second, the privacy treatment differs substantially be-tween the two frameworks. FedVI does not provide aformal DP mechanism or explicit privacy-loss accounting. Fed-IGTD, by contrast, incorporates two formally speci-fied privacy mechanisms with explicit guarantees: Gaussian perturbation of the one-shot correlation-aggregation step and client-level DP-FedAvg for protection throughout the training process. The latter is composed using a R’enyi differential privacy accountant to obtain an explicit (ε, δ )
+
+guarantee rather than relying on an uncalibrated noise level. 13 
+
+Third, whereas the empirical evaluation of FedVI is limited to two financial credit-risk datasets and three participating clients, our evaluation spans five domains, including health-care, finance, chemistry/agriculture, signal processing, and radar/ physics, and systematically examines both non-IID severity and privacy budgets. This evaluation reveals dataset-dependent robustness patterns that are not apparent from a single-domain setting. 
+
+6 CONCLUSIONS 
+
+This work introduced Fed-IGTD, a horizontal FL for privacy-preserving tabular-to-image transformation based on IGTD. Fed-IGTD preserves the IGTD representation without requiring raw tabular data to leave individual clients. Results on five datasets demonstrated that the framework preserves utility under IID federation and showed that privacy protection applied only to the one-shot correlation-aggregation step incurs substantially lower utility costs than protecting the full training procedure with client-level DP-FedAvg, whose utility degradation becomes particularly pronounced in small-client regimes and under stringent privacy budgets. Fed-IGTD provides a principled framework for integrating tabular-to-image representation learning with horizontal federated learning and formal pri-vacy guarantees, while offering a foundation for extending this approach to larger federations, heterogeneous feature schemas, secure aggregation, and broader privacy–utility analyses. The results demonstrate the potential of IGTD-based image representations to facilitate the application of deep learning to diverse tabular data domains within privacy-constrained and distributed settings. 
+
+APPENDIX ACORRELATION MATRICES USING CENTRALIZED AND FEDERATED APPROACH 
+
+APPENDIX BDIRICHLET LABEL -SKEW PARTITIONING 
+
+ACKNOWLEDGMENTS 
+
+REFERENCES 
+
+[1] Jiang JP, Liu SY, Cai HR, Zhou QL, Ye HJ. Representation learning for tabular data: A comprehensive survey. IEEE Transactions on Pattern Analysis and Machine Intelligence. 2026. [2] Somvanshi S, Das S, Javed S, Antariksa G, Hossain A. A survey on tabular data: from tree-based methods to tabular deep learning. ACM Computing Surveys. 2026. [3] Wang Z, Zheng M, Liu PX. Robust and Interpretable Tabular Data Classification via Multi-Channel Image Conversion and Channel-Wise Gating. Neural Networks. 2026:109316. [4] Liu J, Castillo-Cara M, Garc´ ıa-Castro R. A comprehensive bench-mark of spatial encoding methods for tabular data with deep neural networks. Information Fusion. 2025:104088. [5] Sharma A, Vans E, Shigemizu D, Boroevich KA, Tsunoda T. DeepInsight: A methodology to transform a non-image data to an image for convolution neural network architecture. Scientific reports. 2019;9(1):11399. [6] Bazgir O, Zhang R, Dhruba SR, Rahman R, Ghosh S, Pal R. Repre-sentation of features as images with neighborhood dependencies for compatibility with convolutional neural networks. Nature communications. 2020;11(1):4391. [7] Castillo-Cara M, Talla-Chumpitaz R, Garc´ ıa-Castro R, Orozco-Barbosa L. TINTO: converting tidy data into image for classifi-cation with 2-dimensional convolutional neural networks. Soft-wareX. 2023;22:101391. [8] Zhu Y, Brettin T, Xia F, Partin A, Shukla M, Yoo H, et al. Converting tabular data into images for deep learning with convolutional neural networks. Scientific reports. 2021;11(1):11325. [9] Chushig-Muzo D, de Cara M ´ AR, Milara E, Lara-Abelenda FJ, Zhinin-Vera L, Peluffo-Ord ´ o ˜ nez DH. TabSOM: A tabular-to-image encoding method based on self-organizing maps. arXiv preprint arXiv:260813513. 2026. [10] McMahan B, Moore E, Ramage D, Hampson S, y Arcas BA. Communication-efficient learning of deep networks from decen-tralized data. In: Artificial intelligence and statistics. Pmlr; 2017. p. 1273-82. [11] Chen J, Yan H, Liu Z, Zhang M, Xiong H, Yu S. When federated learning meets privacy-preserving computation. ACM Computing Surveys. 2024;56(12):1-36. [12] Shenoy D, Bhat R, Krishna Prakasha K. Exploring privacy mech-anisms and metrics in federated learning. Artificial Intelligence Review. 2025;58(8):223. [13] Zhang C, Xie Y, Bai H, Yu B, Li W, Gao Y. A survey on federated learning. Knowledge-based systems. 2021;216:106775. [14] McMahan HB, Ramage D, Talwar K, Zhang L. Learning dif-ferentially private recurrent language models. arXiv preprint arXiv:171006963. 2017. [15] Li T, Sahu AK, Zaheer M, Sanjabi M, Talwalkar A, Smith V. Federated optimization in heterogeneous networks. Proceedings of Machine learning and systems. 2020;2:429-50. [16] Li X, Jiang M, Zhang X, Kamp M, Dou Q. Fedbn: Federated learning on non-iid features via local batch normalization. arXiv preprint arXiv:210207623. 2021. [17] Chua L, Ghazi B, Kamath P, Kumar R, Manurangsi P, Sinha A, et al. Scalable DP-SGD: Shuffling vs. poisson subsampling. Advances in Neural Information Processing Systems. 2024;37:70026-47. [18] Mironov I. R´ enyi differential privacy. In: 2017 IEEE 30th computer security foundations symposium (CSF). IEEE; 2017. p. 263-75. [19] Nazarri MNAA, Yusof MHM, Almohammedi AA. Generating network intrusion image through IGTD algorithm for CNN classi-fication. In: 2023 3rd International Conference on Computing and Information Technology (ICCIT). IEEE; 2023. p. 172-7. [20] Yzzogh H, Benaboud H. Evaluating orb and sift with neural network as alternatives to cnn for traffic classification in sdn environments. IEEe Access. 2025;13:51484-98. [21] Hosseini M, Chitsaz I. Knock probability determination employ-ing convolutional neural network and IGTD algorithm. Energy. 2023;284:129282. [22] Poonam K, Kotra VS, Guha R, Chakrabarti PP. Hierarchical clas-sification of frontotemporal dementia subtypes utilizing tabular-to-image data conversion with deep learning methods. In: In-ternational Conference on Pattern Recognition. Springer; 2025. p. 386-401. [23] Lara-Abelenda FJ, Chushig-Muzo D, Peiro-Corbacho P, G ´ omez-Mart´ ınez V, W¨ agner AM, Granja C, et al. Transfer learning for a tabular-to-image approach: A case study for cardiovas-cular disease prediction. Journal of Biomedical Informatics. 2025;165:104821. [24] S ¨ onmez ME. Comparative evaluation of tabular-to-image deep learning pipelines for EEG-based epileptic seizure recognition: A comprehensive benchmark with statistical analysis and explain-able AI. Computers in Biology and Medicine. 2026;214:111896. [25] Wang S, Upadhyay D, Zaman M, Naik K, Rai SN. Diabetes Risk Modeling through Tabular-to-Image Transformations and Ensem-ble Learning. Informatics in Medicine Unlocked. 2026:101748. [26] G ´ omez-Mart´ ınez V, Chushig-Muzo D, Soguero-Ruiz C. Tabular-to-Image Encoding Methods for Melanoma Detection: A Proof-of-Concept. Applied Sciences. 2026;16(5):2459. [27] Yuan K, Wu J. FedVI: Financial Cross-Domain Federated Learning with Scarce Overlapping Samples via Visual Representation of Heterogeneous Tabular Data and Meta-Optimization. Entropy. 2026;28(6):637. 14 f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 f17 f18 f19 f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 f17 f18 f19 
+
+Centralized correlation P
+
+(german_credit, 20 features) 
+
+> f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 f17 f18 f19
+
+f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 f17 f18 f19 
+
+Federated reconstruction  ̂ P
+
+(5 clients, α=1.0) 
+
+> f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 f17 f18 f19
+
+f0 f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12 f13 f14 f15 f16 f17 f18 f19 
+
+Difference P −̂ P
+
+(max abs diff = 1.98e-15) 
+
+−1.00 
+
+−0.75 
+
+−0.50 
+
+−0.25 0.00 0.25 0.50 0.75 1.00 
+
+−1.00 
+
+−0.75 
+
+−0.50 
+
+−0.25 0.00 0.25 0.50 0.75 1.00 
+
+−1.5 
+
+−1.0 
+
+−0.5 0.0 0.5 1.0 1.5 1e −15 
+
+(a) radar_0 radar_2 radar_3 radar_4 radar_5 radar_6 radar_7 radar_8 radar_9 radar_10 radar_11 radar_12 radar_13 radar_14 radar_15 radar_16 radar_17 radar_18 radar_19 radar_20 radar_21 radar_22 radar_23 radar_24 radar_25 radar_26 radar_27 radar_28 radar_29 radar_30 radar_31 radar_32 radar_33 radar_0 radar_2 radar_3 radar_4 radar_5 radar_6 radar_7 radar_8 radar_9 radar_10 radar_11 radar_12 radar_13 radar_14 radar_15 radar_16 radar_17 radar_18 radar_19 radar_20 radar_21 radar_22 radar_23 radar_24 radar_25 radar_26 radar_27 radar_28 radar_29 radar_30 radar_31 radar_32 radar_33 
+
+Centralized correlation P
+
+(ionosphere, 33 features) 
+
+> radar_0 radar_2 radar_3 radar_4 radar_5 radar_6 radar_7 radar_8 radar_9 radar_10 radar_11 radar_12 radar_13 radar_14 radar_15 radar_16 radar_17 radar_18 radar_19 radar_20 radar_21 radar_22 radar_23 radar_24 radar_25 radar_26 radar_27 radar_28 radar_29 radar_30 radar_31 radar_32 radar_33
+
+radar_0 radar_2 radar_3 radar_4 radar_5 radar_6 radar_7 radar_8 radar_9 radar_10 radar_11 radar_12 radar_13 radar_14 radar_15 radar_16 radar_17 radar_18 radar_19 radar_20 radar_21 radar_22 radar_23 radar_24 radar_25 radar_26 radar_27 radar_28 radar_29 radar_30 radar_31 radar_32 radar_33 
+
+Federated reconstruction  ̂ P
+
+(5 clients, α=1.0) 
+
+> radar_0 radar_2 radar_3 radar_4 radar_5 radar_6 radar_7 radar_8 radar_9 radar_10 radar_11 radar_12 radar_13 radar_14 radar_15 radar_16 radar_17 radar_18 radar_19 radar_20 radar_21 radar_22 radar_23 radar_24 radar_25 radar_26 radar_27 radar_28 radar_29 radar_30 radar_31 radar_32 radar_33
+
+radar_0 radar_2 radar_3 radar_4 radar_5 radar_6 radar_7 radar_8 radar_9 radar_10 radar_11 radar_12 radar_13 radar_14 radar_15 radar_16 radar_17 radar_18 radar_19 radar_20 radar_21 radar_22 radar_23 radar_24 radar_25 radar_26 radar_27 radar_28 radar_29 radar_30 radar_31 radar_32 radar_33 
+
+Difference P −̂ P
+
+(max abs diff = 1.11e-15) 
+
+−1.00 
+
+−0.75 
+
+−0.50 
+
+−0.25 0.00 0.25 0.50 0.75 1.00 
+
+−1.00 
+
+−0.75 
+
+−0.50 
+
+−0.25 0.00 0.25 0.50 0.75 1.00 
+
+−1.00 
+
+−0.75 
+
+−0.50 
+
+−0.25 0.00 0.25 0.50 0.75 1.00 1e −15 
+
+(b) fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_so2 total_so2 density pH sulphates alcohol fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_so2 total_so2 density pH sulphates alcohol 
+
+Centralized correlation P
+
+(wine, 11 features) 
+
+> fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_so2 total_so2 density pH sulphates alcohol
+
+fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_so2 total_so2 density pH sulphates alcohol 
+
+Federated reconstruction  ̂ P
+
+(5 clients, α=1.0) 
+
+> fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_so2 total_so2 density pH sulphates alcohol
+
+fixed_acidity volatile_acidity citric_acid residual_sugar chlorides free_so2 total_so2 density pH sulphates alcohol 
+
+Difference P −̂ P
+
+(max abs diff = 1.63e-11) 
+
+−1.00 
+
+−0.75 
+
+−0.50 
+
+−0.25 0.00 0.25 0.50 0.75 1.00 
+
+−1.00 
+
+−0.75 
+
+−0.50 
+
+−0.25 0.00 0.25 0.50 0.75 1.00 
+
+−1.5 
+
+−1.0 
+
+−0.5 0.0 0.5 1.0 1.5 1e −11 
+
+(c) 
+
+Fig. 8: Comparison of centralized and federated correlation matrix. Considering the dataset of: (a) German Credit; (b) Ionosphere; and (c) Wine Quality. 15 C1 C2 C3 C4 C5 025 50 75 100 125 150 
+
+> Diabetes
+
+IID ( α=1000) entropy=0.93     
+
+> C1 C2 C3 C4 C5 050 100 150 200 250
+
+Moderate ( α=1.0) entropy=0.87     
+
+> C1 C2 C3 C4 C5 0100 200 300 400
+
+Severe ( α=0.1) entropy=0.22     
+
+> C1 C2 C3 C4 C5 050 100 150 200
+> German Credit
+
+entropy=0.88     
+
+> C1 C2 C3 C4 C5 0100 200 300
+
+entropy=0.63     
+
+> C1 C2 C3 C4 C5 0200 400 600 800 1000
+
+entropy=0.18     
+
+> C1 C2 C3 C4 C5 0200 400 600 800 1000
+> Wine Quality
+
+entropy=0.92     
+
+> C1 C2 C3 C4 C5 0250 500 750 1000 1250 1500
+
+entropy=0.84     
+
+> C1 C2 C3 C4 C5 0500 1000 1500 2000 2500
+
+entropy=0.52     
+
+> C1 C2 C3 C4 C5 010 20 30 40
+> Sonar
+
+entropy=1.00     
+
+> C1 C2 C3 C4 C5 025 50 75 100 125 150
+
+entropy=0.88     
+
+> C1 C2 C3 C4 C5 020 40 60 80 100
+
+entropy=0.27     
+
+> C1 C2 C3 C4 C5 020 40 60
+> Ionosphere
+
+entropy=0.94     
+
+> C1 C2 C3 C4 C5 020 40 60 80 100
+
+entropy=0.71     
+
+> C1 C2 C3 C4 C5 0100 200 300
+
+entropy=0.62 class 0 class 1 
+
+Fig. 9: Dirichlet label-skew partitioning across non-IID severity for the datasets used in this study (5 clients each). Each row corresponds to one dataset; columns show the client-level sample counts and class balance under IID ( α = 1000 ), Moderate ( α = 1 .0), and Severe ( α = 0 .1) partitioning. Bar height gives each client’s total sample count, colored by class; the entropy annotation reports the mean per-client normalized class-balance entropy (1.0 = perfectly balanced across classes, 0.0 = single-class), averaged over all five clients.

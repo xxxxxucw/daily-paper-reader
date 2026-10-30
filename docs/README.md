@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-08</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-21 ~ 2026-10-30</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 9 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 22 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>5</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>4</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>13</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-08 12:15:47 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-30 10:43:12 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-08日报：9篇入榜、5篇精读4篇速读，两篇9分论文领跑“可靠自进化”与“免重训练不确定性估计”。</p>
-<p>最值得看：用不完美代理奖励做可靠自进化，以及机器学习多群截面无需重训练的不确定性估计；速读可顺带关注LLM忠实因子解释、交互感知电路发现与表格基础模型的隐私分类。</p>
-<p>普通读者建议先读两篇9分精读，抓住“可靠性/不确定性”主线，再按兴趣扫速读。</p>
+<p>2026-10-21至30日共筛读22篇论文（精读9篇、速读13篇），重点聚焦因果推断与共形预测。最值得看的是两项9分工作：基于条件期望局部半径的度量共形预测，以及面向政策上下文纵向因果效应估计的基础模型。普通读者可先精读这两篇，再顺带浏览LLM辅助表格分类与残差因果发现等8分速读。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +78,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">5 篇</strong>
+    <strong class="dpr-home-dashboard-count">9 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Reliable Self-Evolution with Imperfect Proxy Rewards">Reliable Self-Evolution with Imperfect Proxy Rewards</span></li><li><span class="dpr-home-dashboard-paper-title" title="Reliable Uncertainty Estimation for Machine-Learned Multigroup Cross Sections Without Retraining">Reliable Uncertainty Estimation for Machine-Learned Multigroup Cross Sections Without Retraining</span></li><li><span class="dpr-home-dashboard-paper-title" title="Symmetry-Informed Causal Partial Identification">Symmetry-Informed Causal Partial Identification</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Metric Conformal Prediction via the Conditional Expected Local Radius">Metric Conformal Prediction via the Conditional Expected Local Radius</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Foundation Model for Policy In-Context Longitudinal Causal Effect Estimation">A Foundation Model for Policy In-Context Longitudinal Causal Effect Estimation</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Document Layout to Causal Topology: An End-to-End Architecture for Temporal Causal Reasoning">From Document Layout to Causal Topology: An End-to-End Architecture for Temporal Causal Reasoning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>2</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>6</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +91,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">4 篇</strong>
+    <strong class="dpr-home-dashboard-count">13 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="How the Audit Rule Shapes Faithful Factor Explanations in LLMs">How the Audit Rule Shapes Faithful Factor Explanations in LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Slaying the Hydra: Interaction-Aware Circuit Discovery in Language Models">Slaying the Hydra: Interaction-Aware Circuit Discovery in Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Efficient Provably Private Classification with a Tabular Foundation Model">Efficient Provably Private Classification with a Tabular Foundation Model</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Beyond the Vote: When Do LLMs Add Value to Retrieval-Based Tabular Classification?">Beyond the Vote: When Do LLMs Add Value to Retrieval-Based Tabular Classification?</span></li><li><span class="dpr-home-dashboard-paper-title" title="Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression">Residual-Based Causal Discovery via Pretrained In-Context Quantile Regression</span></li><li><span class="dpr-home-dashboard-paper-title" title="SCDM: Scalable Causal Discovery in Nonlinear Temporal Systems with Meta-Learning">SCDM: Scalable Causal Discovery in Nonlinear Temporal Systems with Meta-Learning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>7</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>5</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
 </section>
 </div>
 
