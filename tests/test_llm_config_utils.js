@@ -115,7 +115,12 @@ function testGetDeepSeekPreset() {
   assert.deepEqual(getDeepSeekPreset('paratera'), {
     key: 'paratera', label: '并行科技',
     baseUrl: 'https://llmapi.paratera.com/v1',
-    models: ['DeepSeek-V4-Flash', 'DeepSeek-V4-Pro'],
+    models: [
+      'DeepSeek-V4.1-Flash-1017',
+      'DeepSeek-V4.1-Flash',
+      'DeepSeek-V4-Pro-0813',
+      'DeepSeek-V4-Flash-0731',
+    ],
   });
   assert.equal(inferDeepSeekPreset('https://llmapi.paratera.com/v1/'), 'paratera');
   assert.equal(inferDeepSeekPreset('https://llmapi.paratera.com'), 'paratera');
@@ -196,10 +201,10 @@ function testShouldUseXApiKeyHeader() {
 
 function testBuildStreamingChatPayload() {
   assert.deepEqual(buildStreamingChatPayload({
-    baseUrl: 'https://llmapi.paratera.com/v1', model: 'DeepSeek-V4-Flash',
+    baseUrl: 'https://llmapi.paratera.com/v1', model: 'DeepSeek-V4.1-Flash-1017',
     messages: [{ role: 'user', content: 'hi' }],
   }), {
-    model: 'DeepSeek-V4-Flash', messages: [{ role: 'user', content: 'hi' }], stream: true,
+    model: 'DeepSeek-V4.1-Flash-1017', messages: [{ role: 'user', content: 'hi' }], stream: true,
   });
   assert.deepEqual(
     buildStreamingChatPayload({
@@ -232,10 +237,11 @@ function testBuildStreamingChatPayload() {
 }
 
 function testBuildConnectivityTestPayload() {
+  const parateraPreset = getDeepSeekPreset('paratera');
   const parateraPayload = buildConnectivityTestPayload({
-    baseUrl: 'https://llmapi.paratera.com/v1', model: 'DeepSeek-V4-Flash',
+    baseUrl: parateraPreset.baseUrl, model: parateraPreset.models[0],
   });
-  assert.equal(parateraPayload.model, 'DeepSeek-V4-Flash');
+  assert.equal(parateraPayload.model, 'DeepSeek-V4.1-Flash-1017');
   assert.deepEqual(parateraPayload.thinking, { type: 'disabled' });
   assert.deepEqual(
     buildConnectivityTestPayload({

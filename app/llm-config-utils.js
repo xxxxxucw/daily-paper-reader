@@ -24,7 +24,12 @@
       key: 'paratera',
       label: '并行科技',
       baseUrl: 'https://llmapi.paratera.com/v1',
-      models: Object.freeze(['DeepSeek-V4-Flash', 'DeepSeek-V4-Pro']),
+      models: Object.freeze([
+        'DeepSeek-V4.1-Flash-1017',
+        'DeepSeek-V4.1-Flash',
+        'DeepSeek-V4-Pro-0813',
+        'DeepSeek-V4-Flash-0731',
+      ]),
     }),
   });
 
