@@ -1,0 +1,846 @@
+Title: Counterfactual Test-Time Augmentation for Shortcut Removal in Language Models
+
+URL Source: https://arxiv.org/pdf/2610.33904v1
+
+Published Time: Tue, 27 Oct 2026 01:05:05 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+# Counterfactual Test-Time Augmentation for Shortcut Removal in Language Models 
+
+Katie Matton 
+
+MIT 
+
+kmatton@mit.edu 
+
+Rosalind W. Picard 
+
+MIT 
+
+John Guttag 
+
+MIT 
+
+Maggie Makar 
+
+University of Michigan 
+
+## Abstract 
+
+Large language models (LLMs) can exploit shortcuts, i.e., correlations present in training data that may not hold at test time. This can lead to poor predictions when correlations shift. Most existing solutions for removing shortcuts operate at training time, requiring labeled training data, model weight access, and significant computational resources. Here, we study the problem of test-time shortcut removal. We propose a family of counterfactual test-time augmentation (CTTA) methods: given an example, each method uses an auxiliary model to generate counterfactual edits in which the shortcut value is changed, and then takes a weighted average of the LLM’s predictions across these edits. We prove that the optimal shortcut-invariant predictor is a member of this CTTA family, and we characterize its weights. The weights depend on the training distribution, and therefore are, in general, not identifiable from the trained model and unlabeled test data. However, we present assumptions under which the weights can be obtained using the token probabilities of the trained LLM, and propose tests to detect violations of these assumptions. We use these tests to develop Select-CTTA, an aggregate method that selects among CTTA methods. Empirically, we find that Select-CTTA outperforms test-time baselines and approaches the performance of models fine-tuned on shortcut-balanced data. 
+
+## 1 Introduction 
+
+Despite impressive performance on a range of tasks, large language models (LLMs) remain brittle. They have been shown to abandon correct answers when users push back (Sharma et al., 2024), change answers when multiple-choice options are reordered (Pezeshkpour & Hruschka, 2024), and rely on demographic stereotypes when making decisions about people (Tamkin et al., 2023). Each of these failures is related to a common issue: LLMs are prone to relying on shortcuts , i.e., correlations in training data that may not hold at inference time. As a result, LLMs use heuristics, such as prefer option A and agree with the user , that reduce training loss but lead to errors during deployment (Zheng et al., 2024; Sharma et al., 2024). Reliance on shortcuts is a major impediment to LLM safety and reliability. Most existing methods for removing shortcuts in language models are designed to be applied at training time. However, training an LLM requires many resources, including labeled training data, access to model weights, and substantial compute. Users often lack these resources. Hence, here we study a different approach: removing shortcuts from LLMs at test-time without access to model weights or labeled data. 
+
+We propose a family of test-time shortcut removal methods that we call counterfactual test-time augmentation (CTTA). Given a test example, each CTTA method uses an auxiliary model to create counterfactual edits in which the shortcut value is changed. We then take a weighted average of the 
+
+> Preprint. arXiv:2610.33904v1 [cs.LG] 24 Oct 2026
+
+LLM’s predictions across the edits. As we show in this work, if the chosen weights do not depend on the shortcut value observed in the example, the resulting predictor is shortcut-invariant. Among the set of predictors that are shortcut invariant, we want the one with the lowest error, i.e., the 
+
+optimal shortcut-invariant predictor . We prove that under a common model of shortcut learning, the optimal shortcut-invariant predictor is a member of the CTTA family. The optimal weights depend on the training distribution and therefore, in general, cannot be identified without access to the training data. However, we present a set of assumptions under which the weights can be obtained using the observable token probabilities of the trained LLM. We call the resulting method Model-Weighted CTTA. Since the assumptions needed to recover the optimal weights are not always met in practice, we also study simple fixed weighting schemes, such as uniform weighting, that do not require a weight estimation step. We prove fixed weighting schemes have a desirable property: they achieve the same AUROC as the optimal shortcut-invariant predictor, although they are miscalibrated. To select among CTTA methods, we propose Select-CTTA, a procedure that performs diagnostic tests to detect violations of the Model-Weighted CTTA assumptions. When the checks pass, Select-CTTA selects Model-Weighted CTTA; otherwise, it selects uniform weights. We evaluate the CTTA methods on two text classification benchmarks and six LLMs, spanning multi-ple model families and sizes. Select-CTTA consistently achieves the best or near-best performance among CTTA methods and outperforms test-time calibration baselines. In many cases, it approaches the performance of models trained on gold-standard balanced data, while requiring substantially fewer resources. Our contributions are: (1) We propose a family of Counterfactual Test Time Augmentation (CTTA) methods as a solution for test-time shortcut removal in LLMs. (2) We theoretically analyze the optimality of our proposed methods, providing an understanding of when they match (and fail to match) the performance of the optimal shortcut-invariant predictor. (3) We introduce Select-CTTA, a procedure that adaptively selects between model-based and uniform CTTA weights using label-free diagnostic tests. (4) We demonstrate that Select-CTTA outperforms test-time baselines and often approaches the performance of fine-tuning on shortcut-balanced data at substantially lower cost. 
+
+## 2 Problem Setting 
+
+We now formalize the problem of test-time shortcut removal in LLMs. We describe our assumed data generating process, define our objective, and describe the resources we assume are accessible at test-time. 
+
+Data Generating Process. Following prior work (Makar et al., 2022; Feder et al., 2023), we assume that the data are generated according to the causal DAG in Figure 1. At test time, we observe texts X ∈ X , where X is the space of finite text sequences. In this anti–causal setting, each text is generated from a binary label Y ∈ { 0, 1} and a categorical shortcut feature S ∈ S . We write the label-relevant content of X as XY ∈ X Y and assume that Y affects X only through XY . For example, consider biographical texts X with occupation for labels Y and gender as the shortcut 
+
+S. The label Y determines the occupation-related content XY (e.g., job responsibilities), while the shortcut is reflected in the names and pronouns used. We assume that the shortcut feature and its possible values S are known. We also assume that XY and S can, in theory, be recovered from X
+
+through functions XY := eY (X) and S := eS (X). However, we do not assume that these functions are known. We denote the distribution of data that the LLM was trained on as Ptrain and the distribution of test data as Ptest . We assume that Ptest differs from Ptrain only in terms of the association between the shortcut S and label Y , with everything else fixed. Formally, we assume that Ptest ∈ P for P defined as: P :=  Ptrain (Y ) P (S | Y )
+
+Ptrain (XY | Y ) Ptrain (X | XY , S ) ,
+
+where P (S | Y ) is an arbitrary conditional distribution. While the test conditional is unrestricted, we assume the training distribution satisfies the following positivity conditions: Ptrain (Y = y) > 0,
+
+Ptrain (S = s | Y = y) > 0 and Ptrain (XY = xY | Y = y) > 0 for all y ∈ { 0, 1}, s ∈ S , and xY in the support of XY .2S YXyX
+
+Figure 1: Causal graph of the data-generating process. The label Y and shortcut S may be correlated (dashed bidirected edge). Y affects the text X only through XY . Shading indicates observed at test-time. 
+
+Objective. We consider predictors f : X → [0 , 1] that map a text x to the predicted probability that 
+
+Y = 1 . We define the risk of f under a distribution P as 
+
+RP (f ) := E(X,Y )∼P
+
+ℓ(f (X), Y ),
+
+where ℓ is the logistic loss. We want a predictor whose risk does not depend on the relationship between the shortcut and the label, since this may change arbitrarily at test time. We denote the set of 
+
+shortcut-invariant predictors as: 
+
+Finv := f : RP (f ) = RP ′ (f ) for all P, P ′ ∈ P .
+
+Among the predictors in Finv , we seek the optimal shortcut-invariant predictor , defined as: 
+
+f ∗ := arg min  
+
+> f∈F inv
+
+RP (f ),
+
+where P is any distribution in P. Under the assumed data generating process, f ∗ is equal to the conditional distribution of the label given the label-relevant content of the text (Makar et al., 2022): 
+
+f ∗(x) = P  Y = 1 | XY = eY (x),
+
+where P is any distribution in P.
+
+Resources. We assume access to three resources at test time. 
+
+(1) Trained LLM: an LLM M that we can query in two modes. In classification mode, Mc(x) ∈ [0 , 1] 
+
+denotes the LLM’s predicted probability that Y = 1 given x. In likelihood mode, Ml(x) denotes the probability assigned by the LLM to the input text sequence. For a text x = ( x1, . . . , x T ), this is computed autoregressively from the LLM’s token probabilities as Ml(x) := QTt=1 M(xt | x<t ).Throughout our theoretical analysis, we make the assumption that the classification mode recovers the true training conditional, i.e., Mc(x) = Ptrain (Y = 1 | X = x). When analyzing Model-Weighted CTTA (Section 3.2), we additionally assume that the likelihood model recovers the training marginal of X, i.e., Ml(x) = Ptrain (X = x).
+
+(2) Counterfactual shortcut editor: a model τ : X × S → X that, given a text x and target shortcut value s, generates a counterfactual version of x in which the shortcut is set to s and the remaining content is unchanged. Formally, for x′ = τ (x, s ), it holds that eS (x′) = s and eY (x) = eY (x′). We additionally assume that all counterfactual edits lie in the support of the training distribution. In practice, we implement τ with a language model prompted to change only the parts of the text that express the shortcut. 
+
+(3) Unlabeled test data: a set of N unlabeled texts Btest := {xi}Ni=1 where each x ∼ Ptest (X).
+
+## 3 Methods 
+
+To address the problem of test-time shortcut removal, we propose a family of methods that we call Counterfactual Test-Time Augmentation (CTTA). We first define this family and show that the optimal shortcut-invariant predictor belongs to it (Section 3.1). We then introduce Model-Weighted CTTA and establish conditions under which it recovers the optimal predictor (Section 3.2). Next, we analyze Fixed-Weight CTTA and show that it achieves the same AUROC as the optimal predictor, despite generally being miscalibrated (Section 3.3). Finally, we introduce Select-CTTA, a label-free procedure that adaptively selects between Model-Weighted and Fixed-Weight CTTA (Section 3.4). 33.1 The CTTA Family 
+
+Given a test example, each CTTA method uses the editor to produce a counterfactual edit for each shortcut value, queries the trained LLM on each edited example, and returns a weighted average of the resulting predictions. Formally, we define a CTTA predictor as: 
+
+Definition 1 (CTTA predictor) . Let w := {ws}s∈S be a set of weight functions ws : X → [0 , 1] 
+
+satisfying P 
+
+> s∈S
+
+ws(x) = 1 for every x ∈ X . The CTTA predictor with weights w is 
+
+fw(x) := X
+
+> s∈S
+
+ws(x) Mc τ (x, s ). (1) Next, we characterize the shortcut-invariance and optimality of CTTA predictors. 
+
+Shortcut Invariance. Evaluating the LLM on counterfactual edits removes dependence on the shortcut value originally observed in x, making the weight functions the only potential source of shortcut dependence. Therefore, a CTTA predictor is shortcut-invariant if its weight functions depend on the text only through its label-relevant content, i.e., ws(x) = ws(x′) whenever eY (x) = eY (x′)
+
+(proof in Appendix A.1). Fixed weights satisfy this condition automatically, while Model-Weighted CTTA satisfies it under the assumptions introduced below. 
+
+Optimality. The optimal shortcut-invariant predictor can be recovered through CTTA with weights 
+
+w∗ 
+
+> s
+
+(x) := Ptrain 
+
+ S = s | XY = eY (x). Intuitively, the optimal weights marginalize out the shortcut 
+
+S while conditioning on the label relevant content XY . We state this formally in Proposition 1 and provide a proof in Appendix A.2. 
+
+Proposition 1. For each s ∈ S , let w∗ 
+
+> s
+
+(x) := Ptrain 
+
+ S = s | XY = eY (x), and write w∗ =
+
+{w∗ 
+
+> s
+
+}s∈S . Then for all x ∈ X , fw∗ (x) = f ∗(x).
+
+The optimal weights depend on the training distribution and are generally not identifiable from the trained LLM and unlabeled test data alone. We next present assumptions under which they can be recovered using the LLM’s token probabilities. 
+
+3.2 Model-Weighted CTTA 
+
+We consider a CTTA predictor that weights each counterfactual edit by its probability under the trained LLM. We define Model-Weighted CTTA weights as 
+
+wMW  
+
+> s
+
+(x) := Ml(τ (x, s )) 
+
+P 
+
+> s′∈S
+
+Ml(τ (x, s ′)) .
+
+We next give two assumptions under which these weights recover the optimal CTTA weights. 
+
+(A1) Idealized Likelihood Model. The likelihood mode of the trained LLM recovers the training marginal of X, i.e., Ml(x) = Ptrain (X = x) for all x ∈ X .Together with our standing assumption that the classification mode satisfies Mc(x) = Ptrain (Y = 1 |
+
+X = x), (A1) implies that the likelihood and classification modes both reflect the same underlying training distribution Ptrain . We refer to this property as likelihood-classifier alignment .
+
+(A2) Idealized Editor. For each example x, the editor τ creates edits whose probabilities under the training distribution differ only because of the shortcut value. That is, any residual variation in the text (e.g., length, fluency, or phrasing) contributes equally to the probability of each edit. Formally, for all s, s ′ ∈ S ,
+
+Ptrain 
+
+ X = τ (x, s ) | XY = eY (x), S = s
+
+= Ptrain 
+
+ X = τ (x, s ′) | XY = eY (x), S = s′.
+
+Under (A1) and (A2), the likelihood of each counterfactual edit is proportional to the joint training probability of its label-relevant content and shortcut value: 
+
+Ml τ (x, s ) ∝ Ptrain 
+
+ XY = eY (x), S = s,
+
+where the proportionality constant does not depend on s. Normalizing therefore gives: 
+
+wMW  
+
+> s
+
+(x) = Ptrain 
+
+ S = s | XY = eY (x) = w∗ 
+
+> s
+
+(x).
+
+4Thus, Model-Weighted CTTA uses the optimal CTTA weights and recovers the optimal shortcut-invariant predictor. We state this formally in Proposition 2 and provide a proof in Appendix A.3. 
+
+Proposition 2. Suppose (A1) and (A2) hold. For each s ∈ S , define 
+
+wMW  
+
+> s
+
+(x) := Ml(τ (x, s )) 
+
+P 
+
+> s′∈S
+
+Ml(τ (x, s ′)) ,
+
+and write wMW := {wMW  
+
+> s
+
+}s∈S . Then, for all x ∈ X , fwMW (x) = f ∗(x).
+
+3.3 Fixed-Weight CTTA 
+
+Since the assumptions of Model-Weighted CTTA might not hold in practice, we also consider Fixed-Weight CTTA methods, which do not need a weight estimation step. We define fixed weights as those that do not depend on the input example x, i.e., ws(x) = ws for all x ∈ X . Two natural choices are 
+
+Uniform CTTA , which assigns equal weight to each shortcut value, ws = 1 /|S| , and Neutral CTTA ,which places all weight on a designated neutral value s0, i.e., ws0 = 1 and ws = 0 for s̸ = s0. For example, when gender is the shortcut, the neutral edit may remove all references to gender from the text. To understand the relationship between fixed weight predictors and f ∗, we first consider the prediction that the trained LLM Mc makes on a single counterfactual edit. In our assumed DAG (Figure 1), the label-relevant content XY and the shortcut S are conditionally independent given the label Y . As a result, the model’s log-odds decompose into a term determined by the label-relevant content and a term determined only by the shortcut value (proof in Appendix A.4): 
+
+logit Mc(τ (x, s )) = logit f ∗(x) + λ(s),λ(s) := log Ptrain (S = s | Y = 1) 
+
+Ptrain (S = s | Y = 0) . (2) This shows that Mc shifts the optimal log-odds by a constant that depends only on the shortcut value: 
+
+λ(s) > 0 if s is more common among training examples with label 1 than among those with label 
+
+0, while λ(s) = 0 if s is equally prevalent in the two classes. Substituting the decomposition into Equation 1, we obtain 
+
+fw(x) = X
+
+> s∈S
+
+ws σ(logit f ∗(x) + λ(s)) , (3) where σ(z) = (1 + e−z )−1. For any fixed weights w, the right-hand side is strictly increasing in 
+
+logit f ∗(x). Thus, fixed-weight CTTA preserves the ranking induced by f ∗ and obtains optimal AUROC. We state this formally in Proposition 3 and provide a proof in Appendix A.5. 
+
+Proposition 3. For any fixed weights w = {ws}s∈S ,
+
+fw(x) > f w(x′) ⇐⇒ f ∗(x) > f ∗(x′)
+
+for all x, x ′ ∈ X . Consequently, fw and f ∗ achieve the same AUROC under every P ∈ P .
+
+3.4 Select-CTTA 
+
+Model-Weighted CTTA can recover the optimal shortcut-invariant predictor, but only under assump-tions that may fail in practice. We therefore introduce Select-CTTA, a procedure for choosing between Model-Weighted and fixed-weight CTTA at test time. It uses a batch of unlabeled test data to perform three diagnostic tests. The first examines the strength of the shortcut, while the second two provide complementary diagnostics for violations of the Model-Weighted CTTA assumptions. If all tests pass, it uses Model-Weighted CTTA. Otherwise, it uses Uniform CTTA. We prefer Uniform to Neutral CTTA because identifying a truly neutral shortcut value may be infeasible in practice. We provide details on how to implement the tests in Appendix B. 
+
+Test 1: Shortcut Strength. If the shortcut has a weak association with the label, then λ(s) is small, and fixed weight predictors are near-optimal (see Equation 3). In this regime, estimating the optimal weights offers little potential benefit and can introduce additional error, so we choose Uniform CTTA. Ideally, to assess shortcut strength, we’d examine λ(s). However, the values λ(s) are not directly estimatable because f ∗ is unknown. Instead, we estimate shortcut strength using the model’s predictions on counterfactual edits. By Equation 2, for any s, s ′ ∈ S ,
+
+logit Mc(τ (x, s )) − logit Mc(τ (x, s ′)) = λ(s) − λ(s′).
+
+5Thus, |λ(s) − λ(s′)| measures how much changing the shortcut from s′ to s shifts the model’s prediction, making it a measure of shortcut strength. For each test example xi, we define the shift between shortcut values s and s′ as 
+
+di(s, s ′) := logit Mc(τ (xi, s )) − logit Mc(τ (xi, s ′)) .
+
+We compute the mean shift, ∆s,s ′ := 1
+
+> N
+
+PNi=1 di(s, s ′). We define the estimated shortcut strength as the largest absolute mean shift over shortcut value pairs, ∆ := max s,s ′∈S |∆s,s ′ |. We use Uniform CTTA when ∆ < δ str , where δstr is a shortcut-strength threshold. We discuss how to choose δstr ,and the corresponding parameters for the other tests, in Appendix B. 
+
+Test 2: Weight Collapse. We check whether the Model-Weighted CTTA weights have collapsed, meaning that they systematically assign most of the weight to the same shortcut value across examples. Though collapse does not necessarily indicate an assumption violation, assumption violations can lead to collapse. A violation of (A1) can cause collapse if the discrepancy between the LLM’s likelihood and the true training probability varies systematically with the shortcut value. A violation of (A2) can cause collapse if the editor systematically produces more probable edits for one shortcut value. For example, edits to one value may involve only a small, natural substitution, while edits to another may require longer or less fluent rewrites. We measure weight collapse by computing, for each shortcut value, its median weight across the test batch, and taking the largest of these values: 
+
+C := max  
+
+> s∈S
+
+median i=1 ,...,N wMW  
+
+> s
+
+(xi).
+
+If C exceeds a threshold δcol , we treat the weights as collapsed and use Uniform CTTA. We addition-ally apply an analogous check within the pair of shortcut values with the largest estimated shortcut shift, flagging cases where one member systematically receives much more weight than the other. This can reveal pairwise collapse that is obscured when weight is spread across other shortcut values. Although this test catches some cases in which (A1) or (A2) is violated, it is not comprehensive: the weights can be incorrect without being collapsed. Test 3 provides a complementary check of assumption violations. 
+
+Test 3: Likelihood-Classifier Alignment. Under our problem setup, assumption (A1) implies that the likelihood mode Ml and the classification mode Mc of the LLM reflect the same underlying training distribution. Thus, the shortcut-label relationship encoded by each should be consistent. For example, if changing the shortcut from s′ to s makes Mc more likely to predict Y = 1 , then the probability that Ml puts on s relative to s′ should be higher for examples whose label-relevant content is more indicative of class 1.We focus on the pair of shortcut values (s, s ′) with the largest estimated shortcut shift, since it provides the strongest signal for testing this alignment. Without loss of generality, we order the pair so that changing the shortcut from s′ to s increases the classifier’s predicted probability of label 1. We would like to rank examples by how strongly their label-relevant content indicates class 1, i.e., by 
+
+f ∗(x). By Equation 2, any single counterfactual edit induces the same ranking as f ∗(x) and can be used. In practice, we use the average logit across edits for a more stable ranking. For each example, we measure the relative weight on s as, 
+
+rs(x) := wMW  
+
+> s
+
+(x)
+
+wMW  
+
+> s
+
+(x) + wMW  
+
+> s′
+
+(x) .
+
+Under likelihood-classifier alignment and (A2), rs(x) should increase with f ∗(x). We therefore compute the Spearman rank correlation ρ between rs(x) and the average classifier logit across edits (which has the same ranking as f ∗). If ρ < δ align , where δalign > 0 is an alignment threshold, the test fails and Select-CTTA uses Uniform CTTA. Such misalignment can arise if the likelihood mode encodes a different shortcut-label relationship from the classifier, violating (A1), or if editor errors distort the likelihoods in an example-dependent way, violating (A2). 
+
+## 4 Experiments 
+
+4.1 Tasks 
+
+We examine two different binary classification tasks. Data processing details are in Appendix C. 6Math Grading (Sycophancy). LLMs have been shown to exhibit sycophantic behavior when providing feedback on math solutions (Sharma et al., 2024). In this task, the input X is a problem and a proposed solution, and the label Y ∈ { 0, 1} indicates whether the solution is correct. We use the PRM800K dataset (Lightman et al., 2023), which contains problems from MATH (Hendrycks et al., 2021) with model-generated solutions and human-provided correctness labels. As the shortcut 
+
+S, we insert one of three opinion statements at the end of the input: I think this solution is correct , Ithink this solution is incorrect , and I’m unsure whether this solution is correct .
+
+Occupation Classification (Gender). We use the Bias in Bios dataset (De-Arteaga et al., 2019), a text classification benchmark introduced to study gender bias in occupation prediction. We use biographies labeled as attorney or paralegal. Each input X is a biography, the label Y ∈ { 0, 1} is occupation, and the shortcut S ∈ { man , woman } is the gender of the biography subject. 
+
+4.2 Experimental Settings Training Distributions. In our first experiments, we fine-tune models on data with a controlled shortcut strength given by p ∈ [0 .5, 1] . For a designated shortcut value s, we set Ptrain (S = s |
+
+Y = 0) = p and Ptrain (S = s | Y = 1) = 1 − p. For each label setting, we split the remaining probability mass evenly among the remaining shortcut values. Our main experiments use p = 0 .95 
+
+and Ptrain (Y = 1) = 0 .5. Appendix E.2 reports results across a range of shortcut strengths. 
+
+Test Distributions. For each training distribution, we reverse the shortcut-label association at test time: 
+
+Ptest (S = s | Y = 1) = Ptrain (S = s | Y = 0) and Ptest (S = s | Y = 0) = Ptrain (S = s | Y = 1) .We use Ptest (Y = 1) = 0 .5. For the math task, we use 2,600 examples, and for the occupation task, we use 582 examples. Appendix E.1 reports results under milder distribution shifts. 
+
+Models. We use six instruction-tuned LLMs from three open-weight model families: Gemma 3 (4B and 12B; Gemma Team et al., 2025), Mistral (7B and Nemo 12B; Jiang et al., 2023), and Qwen 2.5 (1.5B and 7B; Yang et al., 2024). 
+
+Model Settings. We evaluate each LLM under three training conditions: all-tokens finetuning , where we fine-tune the model to predict both the input tokens and classification label; completion-only finetuning , where we fine-tune only on the classification label; and zero-shot , where we do not fine-tune at all. 
+
+Baselines. We compare the CTTA methods to each other and to existing test-time methods. For the math task, we consider two Neutral CTTA variants: unsure , which uses the unsure opinion statement, and removal , which omits an opinion statement. For occupation, Neutral CTTA uses a language model to remove gender references. In our zero-shot experiments, we compare to Out-of-Context (OOC) prompting (Cotta & Maddison, 2024), a shortcut-robustness method designed for the zero-shot setting. OOC is similar to Uniform CTTA, but it generates edits with the predictor LLM itself, and its editing prompt instructs the model to preserve a stratification variable, which in the anti-causal setting of Figure 1 is the LLM’s predicted label. We also compare to Batch Calibration (BC) (Zhou et al., 2024) and Contextual Calibration (CC) (Zhao et al., 2021), two test-time calibration methods. They are not designed specifically for shortcut removal, so we additionally introduce shortcut-conditioned variants of each, which perform calibration separately for each shortcut value. In our finetuning experiments, we also report the performance of models fine-tuned on balanced data. We consider this a reference rather than a baseline, since it assumes access to labeled training data and model weights. 
+
+Counterfactual Editor. For the math task, the shortcut edits are straightforward and can be applied in a rule-based manner. For the occupation task, we perform gender edits using Claude Opus (details in Appendix D.6). 
+
+Hyperparameters. In Select-CTTA, we set δstr = 0 .5, δcol = 0 .8, and δalign = 0 .5. During model inference, we use a temperature of 1 in all experiments. 
+
+Metrics. We evaluate how well predictions rank examples using AUROC. We measure calibration using Expected Calibration Error (ECE), with results for additional metrics in Appendix E.3. 
+
+4.3 Results Fine-tuned Models. We first evaluate the methods on fine-tuned models, where we control the strength of the shortcut. Table 1 reports results on the reversed test split. Across both tasks, 7Table 1: Results for models fine-tuned with shortcut strength p = 0 .95 and evaluated on the reversed test split. Values are averaged over models. Bold: best in the column. Underlined: not significantly different from the best (95% paired bootstrap interval of the difference includes zero). CTTA methods substantially outperform test-time baselines in most cases, with Select-CTTA consistently among the top-performing methods.                                                                                                             
+
+> All-tokens loss Completion-only loss Math Occupation Math Occupation Method AUROC ↑ECE ↓AUROC ↑ECE ↓AUROC ↑ECE ↓AUROC ↑ECE ↓
+> Standard (No Aug) 0.062 0.894 0.271 0.572 0.077 0.893 0.378 0.506 BC 0.062 0.895 0.271 0.581 0.077 0.893 0.378 0.506 BC (shortcut-cond.) 0.436 0.201 0.550 0.262 0.430 0.201 0.613 0.325 CC 0.062 0.860 0.271 0.577 0.077 0.820 0.378 0.485 CC (shortcut-cond.) 0.111 0.543 0.933 0.160 0.430 0.213 0.890 0.204 Neutral CTTA (removal) 0.659 0.312 0.919 0.079 0.662 0.369 0.942 0.117
+> Neutral CTTA (unsure) 0.700 0.447 ––0.673 0.451 ––Uniform CTTA 0.700 0.153 0.913 0.176 0.676 0.155 0.945 0.151 Model-Weighted CTTA 0.745 0.141 0.930 0.051 0.654 0.315 0.814 0.229 Select CTTA 0.725 0.152 0.930 0.051 0.676 0.155 0.945 0.151
+> Balanced Training (Ref.) 0.688 0.132 0.938 0.067 0.791 0.066 0.945 0.078
+
+Table 2: Results for models without fine-tuning, evaluated on the reversed test split. Values are averaged over models. Bold: best in the column. Underlined: not significantly different from the best (95% paired bootstrap interval of the difference includes zero). Compared with non-CTTA baselines, Select-CTTA achieves higher AUROC and lower ECE on Math, and provides a favorable trade-off between AUROC and ECE on Occupation.                                                      
+
+> Math Occupation Method AUROC ↑ECE ↓AUROC ↑ECE ↓
+> Standard (No Aug) 0.113 0.704 0.762 0.235 BC 0.113 0.779 0.762 0.225 BC (shortcut-cond.) 0.489 0.323 0.564 0.315 CC 0.113 0.712 0.762 0.248 CC (shortcut-cond.) 0.187 0.596 0.806 0.293 OOC 0.552 0.242 0.777 0.214
+> Uniform CTTA 0.609 0.152 0.792 0.215 Neutral CTTA (removal) 0.619 0.363 0.785 0.218 Neutral CTTA (unsure) 0.606 0.307 ––Model-Weighted CTTA 0.621 0.364 0.793 0.222 Select CTTA 0.609 0.152 0.792 0.215
+
+CTTA methods substantially outperform existing test-time baselines. In the all-tokens setting, Model-Weighted CTTA performs best. Model-Weighted CTTA relies on the assumption that the classification mode and the likelihood mode of the LLM reflect the same training distribution, which is likely when input and label tokens are optimized jointly. Conversely, this assumption is likely to fail when only the label token is optimized. In line with this, we observe that Uniform outperforms Model-Weighted CTTA in the completion-only setting. The strong AUROC of Uniform and Neutral CTTA is also consistent with our theoretical result that fixed-weight CTTA obtains the optimal ranking. These differences across training settings motivate selecting adaptively between Model-Weighted and Uniform CTTA. Select-CTTA does this effectively: it consistently matches or closely tracks the stronger of the two methods, and achieves the best overall performance. Select-CTTA is also competitive with models trained on balanced data, despite requiring neither labeled training data nor model weight access at test time. In some settings, CTTA exceeds the balanced training reference; we discuss this in Appendix E.4. 
+
+Zero-Shot Models. Table 2 reports results on the same test data used in the finetuning experiments, but for models evaluated without finetuning. The CTTA variants remain effective in this setting and are generally competitive with or outperform existing test-time baselines. The gains are especially 8−0.4 −0.2 0.0 0.2 0.4      
+
+> ΔECE = ECE U−ECE MW
+> −0.2
+> −0.1 0.0 0.1 0.2
+> ΔAUROC = AUROC MW  − AUROC U
+> Model-Weighted better →
+> Model-Weighted better  →
+> Model-Weighted better on both Uniform better on both
+> Select-CTTA decision
+> Chooses Model-Weighted Chooses Uniform Group mean
+> Model setting
+> All-tokens fi ne-tuning Completion-only fi ne-tuning Zero-shot
+
+Figure 2: Select-CTTA decisions on the reversed test split ( p = 0 .95 ). Each point represents one model, fine-tuning setting, and task combination. Positive values indicate that Model-Weighted CTTA outperforms Uniform CTTA. Select-CTTA selects the better-performing CTTA method in most settings. pronounced on the math task, where CTTA improves the mean AUROC from 0.113 for the unaug-mented model to above 0.60 . In comparison, the strongest existing baseline achieves 0.552 AUROC, while several others fail to improve over the unaugmented model. Select-CTTA chooses Uniform CTTA consistently on both tasks. On math, Model-Weighted CTTA achieves slightly higher AUROC, but Uniform CTTA is much better calibrated; on occupation, the CTTA variants perform similarly. Overall, Select-CTTA achieves a strong balance of AUROC and ECE across both tasks. 
+
+Select-CTTA Analysis. We examine the decisions made by Select-CTTA for individual experimental settings in Figure 2. When Select-CTTA chooses Model-Weighted, Model-Weighted performs better on average in both AUROC and ECE (blue diamond). Conversely, when Select-CTTA chooses Uniform, Uniform performs better on average (orange diamond). Overall, Select-CTTA chooses the better-performing CTTA method most of the time. Select-CTTA tends to choose Model-Weighted CTTA in the settings where its assumptions are most plausible. In particular, it predominantly selects Model-Weighted CTTA for all-tokens fine-tuning, while favoring Uniform CTTA for completion-only fine-tuning and zero-shot models. Importantly, the selector does not observe the fine-tuning regime; this pattern emerges strictly from the label-free diagnostic tests. This supports the use of the diagnostics to determine when the assumptions underlying Model-Weighted CTTA are sufficiently well satisfied. 
+
+## 5 Related Work 
+
+Reliance on shortcuts is a well-documented failure mode of deep learning models (Beery et al., 2018; Geirhos et al., 2020), including language models (McCoy et al., 2019; Du et al., 2023). Most existing shortcut removal methods are applied at training time. They include balancing and re-weighting the training data (Sagawa et al., 2019; Liu et al., 2021; Idrissi et al., 2022); training with regularization penalties that encourage invariance to the shortcut (Arjovsky et al., 2019; Veitch et al., 2021; Makar et al., 2022); and counterfactual data augmentation (CDA), which augments the training set with edited examples in which the shortcut value is changed (Zmigrod et al., 2019; Feder et al., 2023). CDA is the closest train-time analogue of our approach: it uses the same counterfactual edits, but requires training the model on them. 9A smaller body of work examines test-time methods for shortcut removal. Most methods are designed to target a specific shortcut. For example, Pezeshkpour & Hruschka (2024) and Wang et al. (2024) correct for positional bias by aggregating predictions over permutations of answer options, and Weston & Sukhbaatar (2023) mitigate sycophancy by prompting the model to rewrite the input with the user’s opinion removed before answering. These approaches can be viewed as special cases of Uniform and Neutral CTTA, respectively. Other work corrects LLM predictions without reference to a specific shortcut, by calibrating against content-free inputs or batch statistics (Zhao et al., 2021; Zhou et al., 2024). Closest to our work, Out-of-Context (OOC) prompting (Cotta & Maddison, 2024) replaces a user-specified shortcut with uniformly sampled values and aggregates the resulting predictions. OOC is similar to Uniform CTTA (see Section 4.2 for differences). The authors show that it achieves a form of shortcut invariance. They do not analyze which aggregation of the edited predictions is optimal, which is the central question of our work and the basis for Model-Weighted and Select-CTTA. Finally, CTTA inherits its structure from test-time augmentation (TTA), which averages a model’s predictions over transformed copies of an input (e.g., Krizhevsky et al., 2012; Simonyan & Zisserman, 2014). Later work on TTA selects the augmentation policy (Lyzhov et al., 2020) or learns the aggregation weights (Shanmugam et al., 2021) from labeled validation data. In contrast, the transfor-mations in CTTA are counterfactual edits of a known shortcut rather than generic label-preserving perturbations, and we derive the optimal aggregation weights analytically and recover them without labels. 
+
+## 6 Discussion 
+
+Shortcut reliance is a major obstacle to LLM safety and reliability. Most solutions for shortcut removal require resources that are often unavailable to LLM users, such as labeled training data and model weight access. We show that shortcut reliance can instead be substantially reduced at test time through Counterfactual Test-Time Augmentation (CTTA), which aggregates predictions across counterfactual edits of the shortcut. We characterize when different CTTA predictors are optimal, evaluate their performance empirically, and propose Select-CTTA, an adaptive procedure for selecting among them at test time. Our approach has several limitations that suggest directions for future work. CTTA assumes that the shortcut and its possible values are known; a useful extension would be to combine CTTA with methods for shortcut discovery. Our theory relies on assumptions about the distribution shift and the accuracy of the counterfactual editor that may fail to hold in practice. Although we find that CTTA remains effective even for zero-shot models, where our assumptions are less likely to be satisfied, it would still be useful to design methods that are more robust to imperfect editors and broader distribution shifts. It would also be useful to develop alternatives to Model-Weighted CTTA that do not require access to token likelihoods, enabling its use with API-only models. 
+
+## References 
+
+Martin Arjovsky, Léon Bottou, Ishaan Gulrajani, and David Lopez-Paz. Invariant risk minimization. 
+
+arXiv preprint arXiv:1907.02893 , 2019. Sara Beery, Grant Van Horn, and Pietro Perona. Recognition in terra incognita. In European conference on computer vision , pp. 472–489. Springer, 2018. Leonardo Cotta and Chris J Maddison. Test-time fairness and robustness in large language models. 
+
+arXiv preprint arXiv:2406.07685 , 2024. Maria De-Arteaga, Alexey Romanov, Hanna Wallach, Jennifer Chayes, Christian Borgs, Alexandra Chouldechova, Sahin Geyik, Krishnaram Kenthapadi, and Adam Tauman Kalai. Bias in bios: A case study of semantic representation bias in a high-stakes setting. In Proceedings of the Conference on Fairness, Accountability, and Transparency , pp. 120–128, 2019. Mengnan Du, Fengxiang He, Na Zou, Dacheng Tao, and Xia Hu. Shortcut learning of large language models in natural language understanding. Communications of the ACM , 67(1):110–120, 2023. 10 Amir Feder, Yoav Itzhak Wald, Claudia Shi, and David Blei. Causal-structure driven augmentations for text ood generalization. Advances in Neural Information Processing Systems , 2023. Robert Geirhos, Jörn-Henrik Jacobsen, Claudio Michaelis, Richard Zemel, Wieland Brendel, Matthias Bethge, and Felix A Wichmann. Shortcut learning in deep neural networks. Nature Machine Intelligence , 2(11):665–673, 2020. Gemma Team, Aishwarya Kamath, Johan Ferret, Shreya Pathak, Nino Vieillard, Ramona Merhej, Sarah Perrin, Tatiana Matejovicova, Alexandre Ramé, Morgane Rivière, et al. Gemma 3 technical report. arXiv preprint arXiv:2503.19786 , 2025. Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. Advances in Neural Information Processing Systems , 2021. Badr Youbi Idrissi, Martin Arjovsky, Mohammad Pezeshki, and David Lopez-Paz. Simple data balancing achieves competitive worst-group-accuracy. In Conference on Causal Learning and Reasoning , pp. 336–351. PMLR, 2022. Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chaplot, Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El Sayed. Mistral 7b, 2023. URL https://arxiv.org/ abs/2310.06825 .Alex Krizhevsky, Ilya Sutskever, and Geoffrey E Hinton. Imagenet classification with deep convolu-tional neural networks. Advances in neural information processing systems , 25, 2012. Hunter Lightman, Vineet Kosaraju, Yura Burda, Harri Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. arXiv preprint arXiv:2305.20050 , 2023. Evan Z Liu, Behzad Haghgoo, Annie S Chen, Aditi Raghunathan, Pang Wei Koh, Shiori Sagawa, Percy Liang, and Chelsea Finn. Just train twice: Improving group robustness without training group information. In International conference on machine learning , pp. 6781–6792. PMLR, 2021. Alexander Lyzhov, Yuliya Molchanova, Arsenii Ashukha, Dmitry Molchanov, and Dmitry Vetrov. Greedy policy search: A simple baseline for learnable test-time augmentation. In Conference on uncertainty in artificial intelligence , pp. 1308–1317. PMLR, 2020. Maggie Makar, Ben Packer, Dan Moldovan, Davis Blalock, Yoni Halpern, and Alexander D’Amour. Causally motivated shortcut removal using auxiliary labels. In International Conference on Artificial Intelligence and Statistics , pp. 739–766. PMLR, 2022. R Thomas McCoy, Ellie Pavlick, and Tal Linzen. Right for the wrong reasons: Diagnosing syntactic heuristics in natural language inference. In Proceedings of the 57th annual meeting of the association for computational linguistics , pp. 3428–3448, 2019. Pouya Pezeshkpour and Estevam Hruschka. Large language models sensitivity to the order of options in multiple-choice questions. In Findings of the Association for Computational Linguistics: NAACL 2024 , pp. 2006–2017, 2024. Shiori Sagawa, Pang Wei Koh, Tatsunori B Hashimoto, and Percy Liang. Distributionally robust neural networks for group shifts: On the importance of regularization for worst-case generalization. 
+
+arXiv preprint arXiv:1911.08731 , 2019. Divya Shanmugam, Davis Blalock, Guha Balakrishnan, and John Guttag. Better aggregation in test-time augmentation. In 2021 IEEE/CVF international conference on computer vision (ICCV) ,pp. 1194–1203. IEEE, 2021. Mrinank Sharma, Meg Tong, Tomek Korbak, David Duvenaud, Amanda Askell, Sam Bowman, Esin Durmus, Zac Hatfield-Dodds, Scott Johnston, Shauna Kravec, et al. Towards understanding sycophancy in language models. In International Conference on Learning Representations , volume 2024, pp. 110–144, 2024. 11 Karen Simonyan and Andrew Zisserman. Very deep convolutional networks for large-scale image recognition. arXiv preprint arXiv:1409.1556 , 2014. Alex Tamkin, Amanda Askell, Liane Lovitt, Esin Durmus, Nicholas Joseph, Shauna Kravec, Karina Nguyen, Jared Kaplan, and Deep Ganguli. Evaluating and mitigating discrimination in language model decisions. arXiv preprint arXiv:2312.03689 , 2023. Victor Veitch, Alexander D’Amour, Steve Yadlowsky, and Jacob Eisenstein. Counterfactual invariance to spurious correlations: Why and how to pass stress tests. arXiv preprint arXiv:2106.00545 , 2021. Peiyi Wang, Lei Li, Liang Chen, Zefan Cai, Dawei Zhu, Binghuai Lin, Yunbo Cao, Lingpeng Kong, Qi Liu, Tianyu Liu, et al. Large language models are not fair evaluators. In Proceedings of the 62nd annual meeting of the association for computational linguistics (volume 1: Long papers) , pp. 9440–9450, 2024. Jason Weston and Sainbayar Sukhbaatar. System 2 attention (is something you might need too). 
+
+arXiv preprint arXiv:2311.11829 , 2023. An Yang, Beichen Zhang, Binyuan Hui, Bofei Gao, Bowen Yu, Chengpeng Li, Dayiheng Liu, Jian-hong Tu, Jingren Zhou, Junyang Lin, et al. Qwen2. 5-math technical report: Toward mathematical expert model via self-improvement. arXiv preprint arXiv:2409.12122 , 2024. Zihao Zhao, Eric Wallace, Shi Feng, Dan Klein, and Sameer Singh. Calibrate before use: Improving few-shot performance of language models. In International conference on machine learning , pp. 12697–12706. Pmlr, 2021. Chujie Zheng, Hao Zhou, Fandong Meng, Jie Zhou, and Minlie Huang. Large language models are not robust multiple choice selectors. In International Conference on Learning Representations ,volume 2024, pp. 19426–19454, 2024. Han Zhou, Xingchen Wan, Lev Proleev, Diana Mincu, Jilin Chen, Katherine Heller, and Subhrajit Roy. Batch calibration: Rethinking calibration for in-context learning and prompt engineering. In 
+
+International Conference on Learning Representations , volume 2024, pp. 49–70, 2024. Ran Zmigrod, Sabrina J Mielke, Hanna Wallach, and Ryan Cotterell. Counterfactual data augmenta-tion for mitigating gender stereotypes in languages with rich morphology. In Proceedings of the 57th annual meeting of the association for computational linguistics , pp. 1651–1661, 2019. 12 A CTTA Proofs 
+
+A.1 Shortcut Invariance of CTTA Predictors Proposition 4. Let w = {ws}s∈S be a collection of weight functions that depend on the text only through its label-relevant content, i.e., ws(x) = ws(x′) for all s ∈ S whenever eY (x) = eY (x′).
+
+Then fw ∈ F inv .Proof. We first show that fw(x) depends on x only through eY (x). Fix x ∈ X and s ∈ S , and let 
+
+x′ := τ (x, s ).
+
+By the editor assumptions, eY (x′) = eY (x) and eS (x′) = s. Moreover, the DAG in Figure 1 implies 
+
+X ⊥ Y | (XY , S ).
+
+Since XY and S are functions of X, and the classification mode recovers the training conditional, it follows that Mc(τ (x, s )) = Ptrain (Y = 1 | X = x′)= Ptrain 
+
+ Y = 1 | XY = eY (x), S = s.
+
+Thus, for each s, Mc(τ (x, s )) depends on x only through eY (x). By assumption, the same is true of 
+
+ws(x). Therefore, 
+
+fw(x) = X
+
+> s∈S
+
+ws(x) Ptrain 
+
+ Y = 1 | XY = eY (x), S = s =: h(eY (x)) 
+
+for some function h.Every P ∈ P has the same joint distribution of (Y, X Y ):
+
+P (Y, X Y ) = Ptrain (Y )Ptrain (XY | Y ).
+
+Hence 
+
+RP (fw) = EP
+
+ℓ h(XY ), Y  
+
+is the same for every P ∈ P . Therefore, 
+
+RP (fw) = RP ′ (fw) for all P, P ′ ∈ P ,
+
+and thus fw ∈ F inv .
+
+A.2 Optimality of CTTA Proposition 1. For each s ∈ S , let w∗ 
+
+> s
+
+(x) := Ptrain 
+
+ S = s | XY = eY (x), and write w∗ =
+
+{w∗ 
+
+> s
+
+}s∈S . Then for all x ∈ X , fw∗ (x) = f ∗(x).Proof. Fix x ∈ X and s ∈ S . Let x′ := τ (x, s ). By the editor assumptions, eY (x′) = eY (x) and 
+
+eS (x′) = s.The DAG in Figure 1 implies 
+
+X ⊥ Y | (XY , S ).
+
+Since XY and S are functions of X, and the classification mode recovers the training conditional, it follows that 
+
+Mc(τ (x, s )) = Ptrain (Y = 1 | X = x′) = Ptrain 
+
+ Y = 1 | XY = eY (x), S = s.
+
+Substituting this expression and the definition of w∗ 
+
+> s
+
+into Equation equation 1 gives 
+
+fw∗ (x) = X
+
+> s∈S
+
+Ptrain 
+
+ S = s | XY = eY (x)Ptrain 
+
+ Y = 1 | XY = eY (x), S = s
+
+= Ptrain 
+
+ Y = 1 | XY = eY (x)
+
+= f ∗(x).
+
+The second equality follows from the law of total probability conditioned on XY = eY (x), and the final equality follows from the characterization of f ∗ in Section 2, applied to Ptrain ∈ P .13 A.3 Optimality of Model-Weighted CTTA Proposition 2. Suppose (A1) and (A2) hold. For each s ∈ S , define 
+
+wMW  
+
+> s
+
+(x) := Ml(τ (x, s )) 
+
+P 
+
+> s′∈S
+
+Ml(τ (x, s ′)) ,
+
+and write wMW := {wMW  
+
+> s
+
+}s∈S . Then, for all x ∈ X , fwMW (x) = f ∗(x).Proof. Fix x ∈ X . For each s ∈ S , the editor assumptions imply that 
+
+eY (τ (x, s )) = eY (x) and eS (τ (x, s )) = s. 
+
+By (A1), 
+
+Ml(τ (x, s )) = Ptrain (X = τ (x, s )) .
+
+We can factor this probability as 
+
+Ptrain (X = τ (x, s )) = Ptrain 
+
+ X = τ (x, s ) | XY = eY (x), S = s
+
+· Ptrain 
+
+ XY = eY (x), S = s.
+
+By (A2), the first factor is the same for every s ∈ S . Thus, for some constant c(x) that does not depend on s,
+
+Ml(τ (x, s )) = c(x) Ptrain 
+
+ XY = eY (x), S = s.
+
+Substituting into the definition of the Model-Weighted CTTA weights gives 
+
+wMW  
+
+> s
+
+(x) = c(x)Ptrain 
+
+ XY = eY (x), S = sP 
+
+> s′∈S
+
+c(x)Ptrain 
+
+ XY = eY (x), S = s′
+
+= Ptrain 
+
+ XY = eY (x), S = s
+
+Ptrain 
+
+ XY = eY (x)
+
+= Ptrain 
+
+ S = s | XY = eY (x)
+
+= w∗ 
+
+> s
+
+(x).
+
+Therefore, wMW = w∗ at x. Since x was arbitrary, the equality holds for all x ∈ X . Proposition 1 then gives 
+
+fwMW (x) = fw∗ (x) = f ∗(x)
+
+for all x ∈ X .
+
+A.4 Single Edit Log-Odds Decomposition Lemma 1. For all x ∈ X and all s ∈ S ,
+
+logit Mc τ (x, s ) = logit f ∗(x) + λ(s), λ(s) := log Ptrain (S = s | Y = 1) 
+
+Ptrain (S = s | Y = 0) .
+
+Proof. Fix x ∈ X and s ∈ S . As in the proof of Proposition 4, the editor assumptions, the DAG in Figure 1, and the assumed training-optimality of the classifier imply, 
+
+Mc τ (x, s ) = Ptrain 
+
+ Y = 1 | XY = eY (x), S = s.
+
+By Bayes’ rule and the conditional independence XY ⊥ S | Y implied by the DAG in Figure 1, 
+
+Ptrain 
+
+ Y = 1 | XY = eY (x), S = s
+
+Ptrain 
+
+ Y = 0 | XY = eY (x), S = s = Ptrain 
+
+ Y = 1 | XY = eY (x)
+
+Ptrain 
+
+ Y = 0 | XY = eY (x) Ptrain (S = s | Y = 1) 
+
+Ptrain (S = s | Y = 0) .
+
+Taking logs and using 
+
+f ∗(x) = Ptrain 
+
+ Y = 1 | XY = eY (x)
+
+gives 
+
+logit Mc τ (x, s ) = logit f ∗(x) + λ(s).
+
+14 A.5 Rank Optimality of Fixed-Weight CTTA Proposition 3. For any fixed weights w = {ws}s∈S ,
+
+fw(x) > f w(x′) ⇐⇒ f ∗(x) > f ∗(x′)
+
+for all x, x ′ ∈ X . Consequently, fw and f ∗ achieve the same AUROC under every P ∈ P .Proof. By Lemma 1, for any x ∈ X and s ∈ S ,
+
+Mc τ (x, s ) = σ logit f ∗(x) + λ(s).
+
+Thus, for fixed weights w = {ws}s∈S ,
+
+fw(x) = X
+
+> s∈S
+
+ws σ logit f ∗(x) + λ(s).
+
+Define 
+
+g(z) := X
+
+> s∈S
+
+ws σ z + λ(s).
+
+Since σ′(z) > 0 for all z, and the weights are nonnegative and sum to one, 
+
+g′(z) = X
+
+> s∈S
+
+ws σ′ z + λ(s) > 0.
+
+Thus, g is strictly increasing. Therefore, 
+
+fw(x) > f w(x′) ⇐⇒ logit f ∗(x) > logit f ∗(x′).
+
+Since logit is also strictly increasing, 
+
+fw(x) > f w(x′) ⇐⇒ f ∗(x) > f ∗(x′).
+
+Thus, fw and f ∗ induce the same ranking of examples. Since AUROC depends only on this ranking, they achieve the same AUROC under every P ∈ P .
+
+## B Select-CTTA Details 
+
+This appendix gives the full definitions of the three Select-CTTA tests from Section 3.4. We first describe the inputs we use to perform the tests, which are computed from the unlabeled test batch and trained LLM. We then describe each test in turn. Each test checks whether a different condition holds. If any of the three tests fail, Select-CTTA chooses uniform weights. Otherwise, it chooses Model-Weighted CTTA. 
+
+Inputs. For each example xi in the unlabeled test batch and each shortcut value s ∈ S , we query the trained LLM on the counterfactual edit τ (xi, s ) and record two numbers: the classifier’s log-odds on the edit, ℓi(s) := logit Mc(τ (xi, s )) , and the Model-Weighted CTTA weight on the edit, 
+
+wi(s) := wMW  
+
+> s
+
+(xi). Every test is computed from these two N × |S| matrices. The mean shift between two shortcut values across examples in the test batch is ∆s,s ′ := 
+
+> 1
+> N
+
+P
+
+> i
+
+ ℓi(s) − ℓi(s′). We define the principal pair (s+, s −) as the pair with the largest abso-lute mean shift. We order (s+, s −) so that ∆s+,s − > 0; that is, s+ is the value the classifier associates with class 1. These are the two edits the classifier disagrees about most, so they are where a wrong weight costs the most. Tests 2 and 3 examine the relative weight on s+ within this pair, 
+
+ri := wi(s+)
+
+wi(s+) + wi(s−) .
+
+Test 1: Shortcut strength. Fail if ∆s+,s − < δ str . If even the most different pair of edits barely changes the prediction, all weightings give nearly the same predictor and there is nothing to gain from estimating weights. 15 Test 2: Weight collapse. Fail if the weights typically concentrate on one edit. We check this in two places: • Within the principal pair: fail if median i ri lies outside [ 1 − δcol , δ col ].• Across all values: fail if max s median i wi(s) > δ col .With two shortcut values these are the same check. We use medians so that a few extreme examples do not trigger the test: the optimal weights may legitimately be concentrated for some examples, and we only want to flag systematic concentration. 
+
+Test 3: Likelihood-classifier alignment. Let ci := 1
+
+> |S|
+
+P 
+
+> s
+
+ℓi(s) be the mean log-odds across edits for example xi. By Equation 2, ci ranks examples in the same order as f ∗. This test examines the Spearman correlation ρ between ri and ci and fails if it is below δalign . A positive ρ means the likelihood puts more weight on s+ for examples whose content looks more like class 1, as the optimal weights do. If ri is constant, ρ is undefined and we set it to 0, so the test fails. 
+
+Decision. We use Model-Weighted CTTA if every test passes, with equality counting as a pass. Otherwise, we use Uniform CTTA. Table 3 summarizes the tests. We use δstr = 0 .5, δcol = 0 .8, and 
+
+δalign = 0 .5. These values were fixed before the tests were run on any experimental setting and were not tuned afterwards. Select-CTTA makes one decision per trained LLM and test batch and applies the chosen weights to every example in the batch. 
+
+Choosing the thresholds. In our assumed problem setting, falling back to Uniform CTTA when the model weights are accurate costs only calibration, since Uniform CTTA keeps the optimal ranking (Proposition 3). In contrast, accepting inaccurate weights can also hurt the ranking. Therefore, we recommend setting the thresholds conservatively. Each threshold has a natural scale: • δstr is in log-odds. Every CTTA predictor is a convex combination of the edit predictions 
+
+Mc(τ (x, s )) , so its log-odds lie between the smallest and largest edit log-odds. When the de-composition in Equation 2 holds, the shifts di(s, s ′) do not vary across examples. Therefore, the predictions of all CTTA predictors on an example lie within ∆ log-odds of each other. In particular, Uniform CTTA deviates from the optimal weights by at most ∆ log-odds at every example, while keeping the optimal ranking (Proposition 3). Choose δstr as the largest deviation in log-odds one is willing to accept in exchange for skipping weight estimation. • δcol is the largest share of the weight the typical example may put on a single edit. Collapsed weights put nearly all of it on one edit, so the threshold should be set between 0.5 and 1, with lower values making the test stricter. Knowledge of the label proportions in the test data can inform the choice: the more imbalanced the labels, the more concentrated the optimal weights, and the higher the threshold should be. • δalign is a rank correlation. 0 means the weights do not correlate with the label-relevant content. 
+
+1 means they order examples as the optimal weights do. The threshold sets how much of this agreement to require, with higher values making the test stricter. Table 3: The Select-CTTA tests. Model-Weighted CTTA is used only if every test passes.                     
+
+> Test Fall back to Uniform CTTA if Threshold 1. Shortcut strength ∆s+,s −< δ str 0.5
+> 2. Weight collapse median iri/∈[1 −δcol , δ col ]or max smedian iwi(s)> δ col 0.8
+> 3. Alignment Spearman( ri, c i)< δ align 0.5
+
+16 C Dataset Details 
+
+C.1 Math Grading (Sycophancy) 
+
+We use math problems from the MATH dataset (Hendrycks et al., 2021), with labels from phase 2 of the PRM800K project (Lightman et al., 2023). PRM800K contains model-generated step-by-step solutions to MATH problems, each with human-provided correctness labels of its steps. To go from step-by-step correctness labels to a single correctness label, we use the following criteria. We label a solution as correct if the human labelers finished it without rating any step as wrong and its final answer matches the MATH reference answer after string normalization. We label a solution as 
+
+incorrect if any of the steps are labeled as incorrect and the final answer does not match the MATH reference answer after string normalization. We drop solutions that do not fit into either of these categories (e.g., a wrong step but a matching answer). When a solution has labelings from multiple raters, we merge them by majority. Due to compute restrictions, we enforce a length ceiling on examples. We consider only examples whose combined problem-solution text is at most 768 tokens using the Qwen2.5 tokenizer. We drop problems that don’t have at least one correct and one incorrect solution that fall under this length ceiling. From the 5,176 eligible problems, we draw 3,200 at random: 1,750 for training, 150 for validation, and 1,300 for testing. For each problem, we randomly sample one correct and one incorrect solution to include as examples. Class 1 is correct .The model’s input is the problem and the solution, formatted as Problem: ... followed by 
+
+Solution: and the solution steps. The shortcut is a sentence appended after a blank line. It has three values: I think this solution is correct , I think this solution is incorrect , and I’m unsure whether this solution is correct . We control the shortcut-label correlation during training and testing by appending shortcut sentences to examples in a label-dependent way (see Appendix D.1 and Appendix D.2). 
+
+C.2 Occupation Classification (Gender) 
+
+We use biographies from the Bias in Bios (De-Arteaga et al., 2019) dataset. We use those that are labeled attorney or paralegal, with the dataset’s gender annotation as the shortcut value. We remove exact duplicate texts. Biographies that contain the words attorney , lawyer , or paralegal make the task trivial, so when we include these examples, we first apply an LLM edit that removes these words (see Appendix D.6 for our text editing procedure). Class 1 is paralegal .We use 1,000 examples per class for training and 100 examples per class for validation. These examples are selected from the original Bias in Bios training pool. To control the shortcut strength during training (see Appendix D.1), we select examples to satisfy a specified gender-occupation relationship Ptrain (S | Y ). Paralegals are rare and mostly women in the source data: the training split has 173 paralegal biographies about men and 973 about women, compared to 13,064 attorney biographies about men and 8,105 attorney biographies about women. Therefore, sub-sampling cannot produce training sets with a chosen gender-occupation correlation of reasonable size for some shortcut strength settings. To reach the 1,100 examples needed for each class, we instead create additional biographies of each gender using counterfactual gender edits (see Appendix D.6). We use a test set that has 291 biographies per class. To create desired shortcut distributions Ptest (S |
+
+Y ), we apply counterfactual gender edits. The 291 paralegal examples represent every paralegal biography from the Bias in Bios dev and test splits that does not contain an explicit profession keyword and that our editor could render as both genders and as neutral (gender references removed). This paralegal set includes 48 biographies about men and 243 biographies about women, before editing. For the attorney test examples, we choose another 291 biographies, with the original gender counts swapped compared to the paralegals (243 about men and 48 about women before editing). For details on how we choose which examples to edit see Appendix D.2. 17 D Experimental Details 
+
+D.1 Training Distributions 
+
+In our first experiments, we fine-tune models on data with a controlled shortcut strength given by p ∈ [0 .5, 1] . For a designated shortcut value s, we set Ptrain (S = s | Y = 0) = p and 
+
+Ptrain (S = s | Y = 1) = 1 − p. For each label setting, we split the remaining probability mass evenly among the remaining shortcut values. For the math task, the designated shortcut value is the incorrect 
+
+opinion, and for the occupation task, it is man . At p = 0 .95 , for the math task, an incorrect solution includes the correct, incorrect, and unsure opinions with probabilities (0 .025 , 0.95 , 0.025) , and a correct solution includes the opinions with probabilities (0 .475 , 0.05 , 0.475) . For the occupation task, 
+
+Ptrain (man | attorney ) = 0 .95 and Ptrain (man | paralegal ) = 0 .05 . The balanced training sets used for the reference models include every shortcut value with the same probability under both labels. To create training datasets with the desired shortcut-label relationships, we first compute the number of examples in each (label, shortcut value) cell . This is the class size times Ptrain (S | Y ), rounded to integers. To fill these cells for the math task, we randomly sample examples from each label to assign to each shortcut value, with proportions corresponding to Ptrain (S | Y ). To fill the cells for the occupation task, we first fill with unedited biographies and then supplement with edited biographies, while ensuring that the number of edited biographies is the same for the paralegal and attorney classes. 
+
+D.2 Test Distributions 
+
+We evaluate methods on three different test distributions: the matched split follows the training 
+
+Ptrain (S | Y ); the reversed split swaps the two labels’ settings of this distribution, so Ptest (S | Y =1) = Ptrain (S | Y = 0) ; and the balanced split uses p = 0 .5, under which the shortcut is independent of the label while its marginal is the same as in the other two splits. Table 4 gives the cell counts at 
+
+p = 0 .95 . Analogous to the training distributions, for the test distributions, the number of examples in each (label, shortcut value) cell is the class size times Ptest (S | Y ), rounded to integers. To fill the cells, we follow the same procedure as we do to create training datasets, using edited examples for the occupation task to fill in cells that do not have a sufficient number of original examples, and keeping the number of edits balanced across the two classes. We use fixed test pools for both tasks, so the underlying test examples are the same across the three splits. Table 4: Test split cell counts at p = 0 .95 . Each split shows the same 2,600 solutions (1,300 per class) or 582 biographies (291 per class).                                                       
+
+> Math: Y=incorrect Math: Y=correct Split correct incorrect unsure correct incorrect unsure Matched 33 1,235 32 618 65 617 Reversed 618 65 617 33 1,235 32 Balanced 325 650 325 325 650 325 Occupation: Y=attorney Occupation: Y=paralegal Split man woman man woman Matched 276 15 15 276 Reversed 15 276 276 15 Balanced 146 145 146 145
+
+D.3 Models 
+
+The six models are Qwen2.5-1.5B-Instruct, Qwen2.5-7B-Instruct, gemma-3-4b-it, gemma-3-12b-it, Mistral-7B-Instruct-v0.3, and Mistral-Nemo-Instruct-2407, all from the Hugging Face Hub. Each model is prompted as a chat: a system turn with the task instruction, a user turn with the input text, and an assistant turn that answers with a single letter. The instructions are:  
+
+> Math. You are a math grading assistant. You will be shown a problem and a proposed step-by-step solution. Decide whether the solution is correct: the reasoning and the final answer must both be right. Respond with ‘A’ if the solution is correct and ‘B’ if it is incorrect.
+
+18 Occupation. You are an occupation classification assistant. Given a short professional biography, respond with ‘A’ if the person is an attorney and ‘B’ if the person is a paralegal. 
+
+The letters are single tokens under every tokenizer used. In classification mode, Mc(x) is the softmax over the logits of the two letters at the position of the assistant’s answer. In likelihood mode, Ml(x)
+
+is the product of the model’s token probabilities over the input text within the chat; the tokens shared by all edits of an example (the instruction and the chat formatting) are not scored. Gemma’s chat template has no system turn, so the instruction is placed at the start of the user turn. 
+
+D.4 Model Training Settings Fine-tuning. All-tokens fine-tuning minimizes the cross-entropy of every token of the chat, including the instruction and the input text, so the fine-tuned model is also a language model of the training text. Completion-only fine-tuning minimizes the cross-entropy of the assistant turn only. Both train all model weights for six epochs with learning rate 2 × 10 −5 on a cosine schedule, 32 examples per optimizer step, bfloat16 precision, and 8-bit AdamW, on one 96 GB GH200 GPU per run with a single training seed. Chats are at most 512 tokens (occupation) or 1,024 tokens (math); nothing is truncated. The model is evaluated on the validation set after every epoch and one epoch is kept. All-tokens runs keep the epoch with the lowest validation all-tokens loss, so that the kept model is the best language model of the training text. Completion-only runs keep the epoch with the lowest validation cross-entropy of the answer letter. 
+
+Zero-shot. The untuned instruction-tuned models are prompted as above. Because an untuned model may prefer one answer letter, every rendering is scored twice, once with each assignment of the letters to the classes, and the two class probabilities are averaged. The two text log-likelihoods are averaged as well. 
+
+D.5 Baselines 
+
+Both calibration baselines correct the classifier’s predicted class probabilities by a term that does not depend on the label. They differ in how they estimate that term. 
+
+Batch Calibration (BC) (Zhou et al., 2024) estimates the model’s prior over classes from the unlabeled test batch. For each class, it averages the model’s log-probability of that class over the batch and subtracts this average from the log-probability of every example. We renormalize the corrected log-probabilities to obtain class probabilities. The shortcut-conditioned variant estimates one prior per shortcut value, averaging only over the examples observed with that value, and corrects each example with the prior of its own value. 
+
+Contextual Calibration (CC) (Zhao et al., 2021) estimates the prior from inputs that carry no information about the label. We use their three content-free inputs, N/A , [MASK] , and the empty string, and place each where the biography or problem would appear in the prompt. We average the model’s class probabilities over the three inputs. For each test example, we divide its predicted class probabilities by these averages and renormalize, which makes the content-free inputs receive a uniform prediction. These three inputs carry no shortcut value, so the shortcut-conditioned variant needs a content-free input for each value. We write these for each task. For occupation, we write ten short biographies that say nothing about the person’s work and render each as a man and as a woman. We average the class probabilities over the ten biographies of a gender. For math, we take the test problem, replace the solution with the line [solution omitted] , and append the opinion sentence. This input depends on the problem, so we estimate one set of averages per problem and opinion. The conditioned variant divides each example’s predicted probabilities by the averages for the shortcut value it was observed with, and renormalizes. 
+
+Out-of-Context prompting (OOC) follows Algorithm 1 and the prompts of Cotta & Maddison (2024). This method uses the same model to generate edits and predictions. In each of three rounds, it first rewrites the input to hide the shortcut, then rewrites again to insert a shortcut value drawn uniformly at random, and finally predicts on the result. Both rewriting prompts include a stratification variable that is provided as “secret information” to the model. As in the original paper, for this, we use the model’s own prediction of the label on the original text. Following the paper, we sample 19 rewrites at temperature 0.8. We report the mean class probability over the three rounds rather than the original majority vote so that CE and ECE are defined. The balanced-training reference is the same base model fine-tuned with the same recipe on the balanced training set of Appendix D.1, predicting on the observed (unaugmented) text. 
+
+D.6 Counterfactual Editor Edit Uses. In this work, we generate edits for two different purposes. First, we generate edits to create train and test sets with specific shortcut strength settings, as described in Appendix D.1 and Appendix D.2. Second, we generate edits at test time as part of our CTTA methods. In both cases, we use the same basic editing pipeline, which is described below. The only two differences are as follows. First, the edits used to create the train and test sets are applied to original examples, whereas the edits used for the CTTA methods are applied to the test examples used in each experiment. This means that if a test example was generated through editing, we edit this example again, so that the CTTA method is applied to the example observed at test time. Second, the edits used to create train and test sets include edits that scrub the text to remove explicit references to the label, whereas the edits used as part of CTTA only involve editing the value of the shortcut variable. 
+
+Edit Pipeline. For math, an edit replaces or removes the opinion sentence, so edits are exact. For occupation, we use three kinds of edits, all produced by Claude Opus: flip , which changes every signal of the subject’s gender (pronouns, gendered nouns, honorifics, first names, and names inside e-mail addresses or handles) to the target gender; neutralize , which removes every signal of the subject’s gender (we replace gendered pronouns with they and reduce first names to an initial); and 
+
+scrub , which rephrases the words attorney , lawyer , and paralegal without introducing a substitute title. The rules require the editor to change nothing else, including awkward phrasing, and allow it to declare an edit infeasible. Claude Sonnet then judges each rewrite, seeing only the input text, the rewrite, and the target. A rewrite that fails is corrected once by Claude Opus and judged again. Each rewrite also passes five automatic checks: the text changed, no profession word remains, the detected gender markers agree with the edit, the word count is within 0.75 to 1.30 times the original, and no banned substitute title was introduced. Rewrites that fail are discarded. 
+
+D.7 Metrics and Confidence Intervals 
+
+All metrics are computed from the predicted probability of class 1: accuracy at threshold 0.5, AUROC, cross-entropy, and expected calibration error with 15 equal-width bins. Confidence intervals are 95% percentile bootstrap intervals over 2,000 resamples of the test set. For occupation a resample draws biographies, and for math it draws problems and keeps both solutions of each. In the tables, each entry is the metric averaged over the six models. The interval is computed by averaging the metric over the models within each resample, and comparisons between methods are paired, using the same resamples for both. Select CTTA makes one decision per fine-tuned model and test split. 
+
+D.8 Assets and licenses. 
+
+PRM800K (Lightman et al., 2023), including the MATH problems it contains (Hendrycks et al., 2021), is released under the MIT license. We use the Bias in Bios data (De-Arteaga et al., 2019) as distributed on the Hugging Face Hub ( LabHC/bias_in_bios ), which is listed under the MIT license. The six classifier models are distributed under the Apache 2.0 license (Qwen2.5 and Mistral) or the Gemma Terms of Use (Gemma 3). 20 E Additional Results 
+
+E.1 Results Across Test Distributions 
+
+Tables 5 and 6 include the fine-tuned and zero-shot results on the three test splits described in Appendix D.2: reversed , where the shortcut-label association is the opposite of training; balanced ,where the shortcut is independent of the label; and matched , where it agrees with training. Table 5: Fine-tuned models ( p = 0 .95 ) on the reversed (Rev.), balanced (Bal.), and matched (Match.) test splits. Mean over the six models; one block per training loss. Bold: best in the column. Underlined: not significantly different from the best (95% paired bootstrap interval of the difference includes zero). The math CTTA rows are identical across splits because the math edits are templated edits on the same solutions. The occupation CTTA rows differ slightly because the edits involve using a language model to edit the observed gender in the text, which differs across test splits. On the matched split, the shortcut is useful, and the methods that do not attempt shortcut removal perform best. On the other splits, Select-CTTA is consistently among the top-performing methods and achieves a strong balance between AUROC and ECE.                                                                                                                                                                                                                                                                                             
+
+> Math (Sycophancy) Occupation (Gender) AUROC ↑ECE ↓AUROC ↑ECE ↓
+> Method Rev. Bal. Match. Rev. Bal. Match. Rev. Bal. Match. Rev. Bal. Match.
+> All-tokens loss
+> Standard (No Aug) 0.062 0.563 0.961 0.894 0.452 0.011 0.271 0.747 0.988 0.572 0.292 0.038 Batch calibration 0.062 0.563 0.961 0.895 0.452 0.011 0.271 0.747 0.988 0.581 0.300 0.026
+> Batch calibration (shortcut-cond.) 0.436 0.645 0.550 0.201 0.060 0.087 0.550 0.890 0.652 0.262 0.077 0.126 Contextual calibration 0.062 0.563 0.961 0.860 0.424 0.048 0.271 0.747 0.988 0.577 0.297 0.047 Contextual calibration (shortcut-cond.) 0.111 0.568 0.956 0.543 0.161 0.274 0.933 0.886 0.804 0.160 0.162 0.192 Uniform CTTA 0.700 0.700 0.700 0.153 0.153 0.153 0.913 0.913 0.912 0.176 0.177 0.176 Neutral CTTA (removal) 0.659 0.659 0.659 0.312 0.312 0.312 0.919 0.920 0.922 0.079 0.081 0.081 Neutral CTTA (unsure) 0.700 0.700 0.700 0.447 0.447 0.447 ––––––Model-Weighted CTTA 0.745 0.745 0.745 0.141 0.141 0.141 0.930 0.924 0.921 0.051 0.054 0.055 Select CTTA 0.725 0.725 0.725 0.152 0.152 0.152 0.930 0.924 0.921 0.051 0.054 0.055
+> Balanced Training (Reference) 0.688 0.703 0.707 0.132 0.139 0.147 0.938 0.949 0.958 0.067 0.069 0.072 Completion-only loss
+> Standard (No Aug) 0.077 0.583 0.964 0.893 0.454 0.016 0.378 0.793 0.992 0.506 0.268 0.030
+> Batch calibration 0.077 0.583 0.964 0.893 0.454 0.015 0.378 0.793 0.992 0.506 0.266 0.036 Batch calibration (shortcut-cond.) 0.430 0.657 0.437 0.201 0.051 0.162 0.613 0.927 0.682 0.325 0.084 0.237 Contextual calibration 0.077 0.583 0.964 0.820 0.385 0.094 0.378 0.793 0.992 0.485 0.262 0.043 Contextual calibration (shortcut-cond.) 0.430 0.643 0.820 0.213 0.091 0.207 0.890 0.922 0.938 0.204 0.163 0.152 Uniform CTTA 0.676 0.676 0.676 0.155 0.155 0.155 0.945 0.945 0.945 0.151 0.152 0.151 Neutral CTTA (removal) 0.662 0.662 0.662 0.369 0.369 0.369 0.942 0.943 0.944 0.117 0.113 0.111 Neutral CTTA (unsure) 0.673 0.673 0.673 0.451 0.451 0.451 ––––––Model-Weighted CTTA 0.654 0.654 0.654 0.315 0.315 0.315 0.814 0.810 0.812 0.229 0.231 0.231 Select CTTA 0.676 0.676 0.676 0.155 0.155 0.155 0.945 0.945 0.945 0.151 0.152 0.151
+> Balanced Training (Reference) 0.791 0.788 0.786 0.066 0.064 0.064 0.945 0.950 0.956 0.078 0.076 0.070
+
+E.2 Shortcut Strength 
+
+Table 7 reports results for models fine-tuned at shortcut strengths p ∈ { 0.50 , 0.75 , 0.95 }, each evaluated on the reversed split of its own setting. At p = 0 .50 the reversed and matched splits coincide. The balanced fine-tuning reference is the same balanced fine-tune at every p.
+
+E.3 Accuracy and Cross-Entropy 
+
+Tables 8 and 9 report accuracy at threshold 0.5 and cross-entropy on the reversed split for the p = 0 .95 
+
+setting for fine-tuned and zero-shot models. 
+
+E.4 Discussion of Balanced Training Comparison 
+
+In Table 1, Model-Weighted CTTA sometimes outperforms the shortcut-balanced training reference in the all-tokens setting. We hypothesize that this is because Model-Weighted CTTA combines two distinct sources of label information, whereas the balanced reference relies on only one. Both 21 Table 6: Zero-shot models on the three test splits. OOC was run on the reversed and balanced splits only. Bold: best in the column. Underlined: not significantly different from the best (95% paired bootstrap interval of the difference includes zero). The math CTTA rows are identical across splits because the math edits are templated edits on the same solutions. The occupation CTTA rows differ slightly because the edits involve using a language model to edit the observed gender in the text, which differs across test splits. On the matched split, the shortcut is useful, and the methods that do not attempt shortcut removal perform best. On the other splits, Select-CTTA achieves the best balance of AUROC and ECE.                                                                                                                                                         
+
+> Math (Sycophancy) Occupation (Gender) AUROC ↑ECE ↓AUROC ↑ECE ↓
+> Method Rev. Bal. Match. Rev. Bal. Match. Rev. Bal. Match. Rev. Bal. Match. Standard (No Aug) 0.113 0.549 0.948 0.704 0.390 0.166 0.762 0.789 0.814 0.235 0.219 0.208 BC 0.113 0.549 0.948 0.779 0.393 0.087 0.762 0.789 0.814 0.225 0.204 0.186
+> BC (shortcut-cond.) 0.489 0.576 0.543 0.323 0.214 0.237 0.564 0.791 0.568 0.315 0.206 0.310 CC 0.113 0.549 0.948 0.712 0.390 0.156 0.762 0.789 0.814 0.248 0.230 0.215 CC (shortcut-cond.) 0.187 0.556 0.904 0.596 0.360 0.217 0.806 0.789 0.765 0.293 0.285 0.296 OOC 0.552 0.582 –0.242 0.222 –0.777 0.781 –0.214 0.210 –Uniform CTTA 0.609 0.609 0.609 0.152 0.152 0.152 0.792 0.792 0.792 0.215 0.215 0.215 Neutral CTTA (removal) 0.619 0.619 0.619 0.363 0.363 0.363 0.785 0.785 0.786 0.218 0.218 0.217 Neutral CTTA (unsure) 0.606 0.606 0.606 0.307 0.307 0.307 ––––––Model-Weighted CTTA 0.621 0.621 0.621 0.364 0.364 0.364 0.793 0.792 0.792 0.222 0.223 0.224 Select CTTA 0.609 0.609 0.609 0.152 0.152 0.152 0.792 0.792 0.792 0.215 0.215 0.215
+
+methods use the classification predictions of a trained LLM. These predictions are more reliable for the balanced reference, which is trained on shortcut-balanced data ( p = 0 .50 ), than for Model-Weighted CTTA, which uses a model trained with a strong shortcut ( p = 0 .95 ). However, Model-Weighted CTTA also incorporates label information through its likelihood-based weights. Because the shortcut is strongly associated with the label during training, the model assigns higher likelihood to counterfactual edits whose shortcut values agree with the label suggested by the input’s content. The resulting weights therefore provide an indirect prediction of the label. Although each of the two signals used by Model-Weighted CTTA may be less accurate than the balanced reference’s classification predictions, they may make different errors. Combining these complementary signals can therefore allow Model-Weighted CTTA to outperform the balanced reference. 22 Table 7: Shortcut strength sweep on the reversed split. The mean over the six models is shown. Bold: best in the column. Underlined: not significantly different from the best (95% paired bootstrap interval of the difference includes zero). At p = 0 .50 the shortcut is absent from training. As shortcut strength increases, standard predictors and calibration baselines degrade sharply in most cases, while CTTA largely preserves AUROC and calibration. Select-CTTA consistently provides strong performance across tasks, shortcut strengths, and fine-tuning objectives, often approaching balanced training. 
+
+Math (Sycophancy) Occupation (Gender) AUROC ↑ ECE ↓ AUROC ↑ ECE ↓
+
+Method p = 0 .50 p = 0 .75 p = 0 .95 p = 0 .50 p = 0 .75 p = 0 .95 p = 0 .50 p = 0 .75 p = 0 .95 p = 0 .50 p = 0 .75 p = 0 .95 
+
+All-tokens loss 
+
+Standard (No Aug) 0.706 0.380 0.062 0.132 0.438 0.894 0.949 0.878 0.271 0.069 0.102 0.572 BC 0.706 0.380 0.062 0.067 0.441 0.895 0.949 0.878 0.271 0.057 0.062 0.581 BC (shortcut-cond.) 0.711 0.636 0.436 0.066 0.064 0.201 0.949 0.857 0.550 0.055 0.074 0.262 CC 0.706 0.380 0.062 0.162 0.437 0.860 0.949 0.878 0.271 0.077 0.076 0.577 CC (shortcut-cond.) 0.687 0.532 0.111 0.164 0.231 0.543 0.948 0.959 0.933 0.126 0.151 0.160 Uniform CTTA 0.724 0.721 0.700 0.133 0.133 0.153 0.950 0.955 0.913 0.073 0.101 0.176 Neutral CTTA (removal) 0.681 0.659 0.659 0.090 0.240 0.312 0.946 0.946 0.919 0.079 0.091 0.079 Neutral CTTA (unsure) 0.708 0.707 0.700 0.135 0.280 0.447 – – – – – –Model-Weighted CTTA 0.724 0.728 0.745 0.135 0.080 0.141 0.951 0.958 0.930 0.068 0.079 0.051 
+
+Select CTTA 0.724 0.727 0.725 0.133 0.120 0.152 0.950 0.957 0.930 0.073 0.086 0.051 
+
+Balanced Training (Reference) 0.703 0.694 0.688 0.139 0.134 0.132 0.949 0.942 0.938 0.069 0.065 0.067 Completion-only loss 
+
+Standard (No Aug) 0.783 0.585 0.077 0.048 0.237 0.893 0.950 0.837 0.378 0.076 0.082 0.506 BC 0.783 0.585 0.077 0.033 0.230 0.893 0.950 0.837 0.378 0.062 0.080 0.506 BC (shortcut-cond.) 0.783 0.710 0.430 0.034 0.092 0.201 0.950 0.798 0.613 0.061 0.095 0.325 CC 0.783 0.585 0.077 0.102 0.235 0.820 0.950 0.837 0.378 0.076 0.121 0.485 CC (shortcut-cond.) 0.780 0.780 0.430 0.159 0.139 0.213 0.950 0.893 0.890 0.103 0.113 0.204 Uniform CTTA 0.783 0.796 0.676 0.047 0.112 0.155 0.951 0.886 0.945 0.072 0.061 0.151 Neutral CTTA (removal) 0.781 0.772 0.662 0.046 0.184 0.369 0.950 0.885 0.942 0.078 0.060 0.117 
+
+Neutral CTTA (unsure) 0.782 0.788 0.673 0.047 0.226 0.451 – – – – – –Model-Weighted CTTA 0.782 0.783 0.654 0.048 0.124 0.315 0.951 0.877 0.814 0.073 0.069 0.229 Select CTTA 0.783 0.796 0.676 0.047 0.112 0.155 0.951 0.886 0.945 0.072 0.061 0.151 
+
+Balanced Training (Reference) 0.788 0.790 0.791 0.064 0.066 0.066 0.950 0.947 0.945 0.076 0.076 0.078 
+
+Table 8: Accuracy and cross-entropy (CE) of the fine-tuned models on the reversed split ( p = 0 .95 ), mean over the six models. Bold: best in the column. Underlined: not significantly different from the best (95% paired bootstrap interval of the difference includes zero). In most cases, CTTA substantially improves accuracy and cross-entropy over the unaugmented model and standard calibration baselines. Model-Weighted CTTA is strongest under all-tokens loss but degrades substantially under completion-only loss. Select-CTTA obtains some of the benefits of Model-Weighted CTTA by selecting it in some cases in the all-tokens setting, and it avoids its failures by consistently choosing Uniform CTTA in the completion-only setting. 
+
+All-tokens loss Completion-only loss Math (Sycophancy) Occupation (Gender) Math (Sycophancy) Occupation (Gender) Method Acc ↑ CE ↓ Acc ↑ CE ↓ Acc ↑ CE ↓ Acc ↑ CE ↓
+
+Standard (No Aug) 0.059 2.937 0.292 1.830 0.064 3.014 0.386 2.180 BC 0.058 2.934 0.283 1.792 0.066 3.012 0.382 2.176 BC (shortcut-cond.) 0.496 0.715 0.513 0.917 0.462 0.734 0.557 1.564 CC 0.078 2.990 0.286 1.859 0.076 3.125 0.431 2.412 CC (shortcut-cond.) 0.224 1.198 0.776 0.450 0.549 0.770 0.740 0.770 Uniform CTTA 0.519 0.718 0.783 0.503 0.521 0.720 0.868 0.435 
+
+Neutral CTTA (removal) 0.525 1.060 0.822 0.390 0.530 1.248 0.849 0.480 Neutral CTTA (unsure) 0.513 1.570 – – 0.513 1.633 – –Model-Weighted CTTA 0.619 0.652 0.848 0.337 0.522 1.191 0.680 0.999 Select CTTA 0.597 0.667 0.848 0.337 0.521 0.720 0.868 0.435 
+
+Balanced Training (Reference) 0.571 0.670 0.855 0.343 0.715 0.552 0.863 0.365 
+
+23 Table 9: Accuracy and cross-entropy (CE) of the zero-shot models on the reversed split. Bold: best in the column. Underlined: not significantly different from the best (95% paired bootstrap interval of the difference includes zero). Select-CTTA consistently chooses Uniform CTTA and obtains top performance across all metrics and tasks. 
+
+Math (Sycophancy) Occupation (Gender) Method Acc ↑ CE ↓ Acc ↑ CE ↓
+
+Standard (No Aug) 0.278 5.353 0.669 2.073 BC 0.159 5.037 0.701 1.780 BC (shortcut-cond.) 0.468 1.689 0.615 2.863 CC 0.254 5.275 0.672 2.113 CC (shortcut-cond.) 0.334 3.761 0.653 2.195 OOC 0.532 1.463 0.684 1.711 
+
+Uniform CTTA 0.565 0.825 0.692 1.734 Neutral CTTA (removal) 0.558 2.939 0.687 1.809 Neutral CTTA (unsure) 0.564 2.118 – –Model-Weighted CTTA 0.558 1.853 0.695 1.840 Select CTTA 0.565 0.825 0.692 1.734 
+
+24

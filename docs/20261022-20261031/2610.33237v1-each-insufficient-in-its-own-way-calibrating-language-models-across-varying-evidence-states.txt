@@ -1,0 +1,1489 @@
+Title: Each Insufficient in Its Own Way: Calibrating Language Models Across Varying Evidence States
+
+URL Source: https://arxiv.org/pdf/2610.33237v1
+
+Published Time: Tue, 27 Oct 2026 00:15:10 GMT
+
+Number of Pages: 27
+
+Markdown Content:
+# Each Insufficient in Its Own Way: Calibrating Language Models Across Varying Evidence States 
+
+Jiayi Li ⋆ Dennis L. Shung ⋄ Bradly C. Stadie ⋆⋆Northwestern University ⋄Mayo Clinic 
+
+Abstract 
+
+How can a language model know whether it has enough evidence to answer? Language models tend to answer even when the evidence they have is insufficient. Deciding whether to an-swer or gather more evidence requires a cali-brated estimate of how likely an answer is to be correct with the available evidence. However, most calibration work treats the input as fixed, without asking how this estimate should change with the evidence. We introduce evidence-state calibration , which requires a model’s confi-dence before answering to match its probabil-ity of answering correctly and to change ac-cordingly whenever the evidence changes this probability. We propose SuffiCE ( Suffi ciency 
+
+Confidence Estimation), which fine-tunes the confidence already present in a model’s next-token distribution to match how often the model answers correctly from each evidence state. Across clinical diagnosis and multi-hop ques-tion answering with four models from two fam-ilies, SuffiCE reduces the Brier score by up to 60% and increases AUROC by up to 0.16. Its confidence matches the empirical success rate and responds not only to the amount of evidence but also to which evidence is present, showing that models can learn to judge whether their current evidence is enough to answer. 
+
+1 Introduction 
+
+Before answering a question, one must judge whether the information at hand is enough to an-swer it. In high-stakes settings, a physician who di-agnoses before gathering enough information may miss the real disease. For example, a patient who has been tired for two months may seem iron de-ficient, but a careful clinician would order more blood tests, which may reveal celiac disease, an autoimmune cause of poor iron absorption. Language models facing insufficient informa-tion, however, often reach confident but incorrect conclusions (Kirichenko et al., 2025; Yin et al., 
+
+Figure 1: Given a question with two different sets of evidence, the model’s probability of answering correctly (gray) differs, and its confidence before answering (yel-low) should match it for each. (a) Calibrated confidence matches both. (b) Miscalibrated confidence mismatches the dynamic of the true probability. 
+
+2023). A common remedy for such overconfidence is to abstain below a confidence threshold (Wen et al., 2025). This works only if the model is cali-brated, so that answers given x% confidence are cor-rect about x% of the time (Guo et al., 2017; Geng et al., 2024). To achieve this, existing methods train language models to provide calibrated con-fidence estimates for generated answers (Kapoor et al., 2024; Bani-Harouni et al., 2026b). However, most calibration work holds the ev-idence fixed for each question, so it can check whether confidence is calibrated but not whether it varies correctly as a function of the evidence. In interactive settings, the available information evolves as models ask clarifying questions (Zhang and Choi, 2025) or seek additional information (Li et al., 2024). At each turn, the model must decide whether to answer or keep gathering evidence. To make this decision, a model needs a confi-dence estimated from the available evidence alone, before it produces any answer. We call the evidence available to a model at a given moment its evidence state. We then define evidence-state calibration 
+
+1arXiv:2610.33237v1 [cs.CL] 23 Oct 2026 as requiring the confidence before answering to match the probability of answering correctly, so that whenever the evidence changes this probabil-ity, the confidence changes by the same amount (Figure 1). Testing this requires observing the same prob-lem under different evidence states. Rather than contrasting the extremes of complete and missing information (Kirichenko et al., 2025) or follow-ing a single fixed sequence of accumulating evi-dence (Zhang et al., 2026), we construct granular states for each problem, spanning minimal to com-plete evidence and including different combina-tions of information. Granularity matters because sufficient evidence states are alike, but each insuf-ficient one is insufficient in its own way. 1 Some insufficient states can still be answered from what the model already knows (Joren et al., 2025), while others lack the one piece of evidence the answer depends on. We therefore measure each state’s sufficiency by how often the model answers cor-rectly from it, not by whether the required facts are present, and teach the model to anticipate this success rate before answering. With these success rates as targets, we propose SuffiCE ( Suffi ciency Confidence Estimation), to our knowledge the first method that trains a model’s confidence before answering to be evidence-state calibrated. It reads the confidence directly from the model’s own next-token distribution. The con-fidence is the model’s probability of choosing to answer instead of asking for more information. No additional classifier or generated number is needed. This avoids an ambiguity in verbalized confidence. When a model states that it is 80% confident, it is unclear whether to trust the stated number or the probability the model assigned to generating it. We instead train the model’s own probability directly to match the success rate across our diverse evi-dence states. The result is a model that can tell, before answering, whether what it currently knows is enough to answer correctly. We evaluate on two clinical diagnosis datasets, MIMIC (Hager et al., 2024) and MedQA (Jin et al., 2021), and the multi-hop question answer-ing dataset MuSiQue (Trivedi et al., 2022). Across three Qwen models from 4B to 27B parameters and Kimi K2.6, SuffiCE improves calibration for every model and dataset, reducing the Brier score  
+
+> 1After the opening line of Leo Tolstoy’s Anna Karenina
+> (1878): “Happy families are all alike; every unhappy family is unhappy in its own way.”
+
+of the base logit by up to 60% and increasing its AUROC by up to 0.16. Its confidence also follows the evidence state. An estimator trained on com-plete evidence alone falls short on every metric, so these gains come from training across evidence states. In practice, answering only when SuffiCE is confident gives fewer wrong answers than any baseline. 
+
+2 Related Work 
+
+Deciding whether to answer or gather more evi-dence requires a calibrated judgment of whether the current evidence suffices. This connects three lines of work: interactive information seeking ex-plores how models acquire evidence, information sufficiency and unanswerability examine whether an input supports an answer, and confidence cali-bration studies whether confidence reflects actual accuracy. 
+
+Interactive information seeking. In an interac-tive setting, a model can gather more informa-tion before answering by asking clarifying ques-tions (Zhang and Choi, 2025; Li et al., 2024), re-trieving documents (Jiang et al., 2023; Asai et al., 2024), or ordering diagnostic tests and searching for medical evidence (Schmidgall et al., 2026; Dang et al., 2026). Deciding when enough has been gathered typically relies on a confidence or uncertainty signal (Jiang et al., 2023; Zhang and Choi, 2025; Li et al., 2024), and MediQ shows that improving confidence estimation can enhance interactive diagnostic accuracy (Li et al., 2024). Our approach aims to provide such a signal, es-timating before answering how likely the current evidence is to yield a correct answer. Closest to our work, LA-CDM trains multi-turn diagnosis with a verbalized confidence that guides whether to re-quest another test, but this confidence evaluates a hypothesis the model has already generated (Bani-Harouni et al., 2026a). We instead estimate success before generating an answer and train this estimate across controlled evidence states of the same prob-lem, capturing how changes in evidence affect the likelihood of success. 
+
+Information sufficiency and unanswerability. 
+
+Whether an input contains enough information to answer a question has been widely studied through unanswerability (Rajpurkar et al., 2018; Yin et al., 2023). Benchmarks test whether models ab-stain when information is insufficient (Kirichenko 2et al., 2025), including settings where key evi-dence is removed from otherwise answerable ques-tions (Trivedi et al., 2022; Machcha et al., 2026). Detection methods assess sufficiency using model hidden states (Slobodkin et al., 2023; Lavi et al., 2026) or by identifying missing information (Jain and Garimella, 2026), and training methods teach models to abstain when information is insuffi-cient (Zhai et al., 2026). A shared limitation is that sufficiency is a binary label attached to the input, so a partially informative input counts as either suf-ficient or not, regardless of which model answers it. Joren et al. (2025) take a first step, showing that models often answer correctly from insufficient context. Whether evidence is enough depends on the model answering, so we define sufficiency by the model’s success, how often it answers correctly from each controlled evidence state. 
+
+Confidence calibration. A model is calibrated when its confidence matches its accuracy (Guo et al., 2017). Training-free estimates based on ver-balized judgments (Tian et al., 2023; Xiong et al., 2024), sampled-answer consistency (Kuhn et al., 2023), or token probabilities (Kadavath et al., 2022) can be informative, but calibration varies across tasks (Vashurin et al., 2025). Trained methods es-timate answer correctness (Kapoor et al., 2024), verbalize calibrated confidence (Lin et al., 2022; Bani-Harouni et al., 2026b; Damani et al., 2026; Li et al., 2025), or predict success before answer-ing (Kadavath et al., 2022; Lugoloobi et al., 2026). However, they do not explicitly train confidence to track success across changing evidence states. Zhang et al. (2026) evaluate confidence as hints accumulate in a fixed sequence but do not train on these changing states. We instead train and eval-uate confidence across controlled evidence states, varying both the amount and type of evidence to track changes in empirical success (Appendix E). 
+
+3 Method 
+
+Our method, SuffiCE, has three stages. We first construct multiple evidence states for each problem (§3.2), then estimate a fixed answering policy’s success rate on each state from repeated answers (§3.3), and finally train an estimator to predict this rate from the state alone, before answering (§3.4). 
+
+3.1 Problem Formulation 
+
+Problem i consists of a question qi, a pool of evi-dence Ei, and a gold answer y∗ 
+
+> i
+
+. An evidence state 
+
+x = ( qi, I ) pairs the question with the evidence 
+
+I ⊆ Ei available to the model. A fixed answering policy π0 samples an answer 
+
+ˆy ∼ π0(· | x), which a grader scores as g(ˆ y, y ∗ 
+
+> i
+
+) ∈{0, 1}. The success probability of an evidence state is 
+
+p∗(x) = Pr 
+
+> ˆy∼π0(·| x)
+
+g(ˆ y, y ∗ 
+
+> i
+
+) = 1 . (1) We measure how sufficient a state is by p∗(x), be-cause the decision to answer or gather more in-formation hinges on how likely an answer is to be correct. Sufficiency therefore depends on the model as well as the information. A state is suffi-cient when its information, together with what the model already knows, lets the model reach the cor-rect answer, whether or not the information itself is complete. The same state can thus be sufficient for one model and insufficient for another. 
+
+3.2 Evidence States 
+
+For each problem i, we construct mi evidence states xi,s = ( qi, I i,s ), s = 1 , . . . , m i, each pairing the question with a subset Ii,s ⊆ Ei of its evidence. We write x for a generic state when the indices are not needed. All states of a problem share the question and gold answer and differ only in the evidence shown, so differences in success between them are attributable to the evidence. The model is never told which state it is in and sees only the question and the evidence, so it must judge from their content whether the evidence is enough. Train-ing on the same problem under different evidence teaches it which evidence makes a correct answer reachable. Evidence states vary in both the amount and the composition of evidence. Since success depends on which evidence is present, not on the order it was gathered, states can combine evidence freely, including states that hold the amount fixed and vary the composition (§5.3). The states are specific to each dataset (§4). 
+
+Evidence-state calibration. We seek a confi-dence cθ(x) ∈ [0 , 1] that a model with parameters θ
+
+computes from the state x alone, before any answer is generated. Evidence-state calibration requires it to satisfy two criteria, where expectations are taken over the constructed evidence states. 
+
+1. Calibration. Across all states assigned the same confidence c, the average success probability is 
+
+c (Guo et al., 2017): 
+
+Ep∗(x) | cθ(x) = c = c ∀c ∈ range( cθ). (2) 3Figure 2: Overview of SuffiCE. Each evidence state x = ( q, I ) pairs an input question q with the available evidence            
+
+> I.Top: A frozen answering policy samples Kanswers per evidence state, and the fraction graded correct is the empirical success rate ˆp(x).Bottom: The estimator reads its confidence from the softmax over the logits of A
+> (Answer) and S(Seek), and is trained with soft-label binary cross-entropy to match ˆp(x).
+
+2. Evidence sensitivity. A change in evidence moves confidence as much as it moves success: 
+
+cθ(xi,t ) − cθ(xi,s ) ≈ p∗(xi,t ) − p∗(xi,s ). (3) Here xi,s and xi,t denote any two evidence states 
+
+s and t of the same problem i, so the difference in confidence should match the difference in success. To see why calibration alone is not enough, we split the squared error of a confidence by problem. For problem i with mi states, let ¯cθ,i and ¯p∗ 
+
+> i
+
+de-note the averages of cθ and p∗ over its states, and for any two of its states s, t ∈ { 1, . . . , m i}, let 
+
+δst =  cθ(xi,t ) − cθ(xi,s ) −  p∗(xi,t ) − p∗(xi,s )
+
+be the gap between the change in confidence and the change in success from s to t, which is zero when Eq. (3) holds exactly. 
+
+Error Decomposition Proposition 1. For any confidence cθ,
+
+E(cθ − p∗)2 = Ei
+
+(¯ cθ,i − ¯p∗ 
+
+> i
+
+)2
+
++ Ei
+
+h 12m2
+
+> i
+
+P 
+
+> s,t
+
+δ2
+
+> st
+
+i
+
+, (4) 
+
+where the sum runs over all ordered pairs of states of problem i, and each problem is weighted by its number of states. 
+
+The first term is the error in each problem’s aver-age success, and the second is the error within each problem, which is zero exactly when criterion 2 holds with equality (proof in Appendix D.1). Cali-bration does not constrain the second term. Giving every state its problem’s average success satisfies criterion 1 exactly but leaves this term at the vari-ance of success within each problem, which only following the evidence can reduce. Since both terms are nonnegative, we seek a confidence that drives the left side to zero and thus satisfies both criteria. 
+
+3.3 Monte Carlo Estimation of Success Probability 
+
+Because computing the true success probability 
+
+p∗(x) exactly would require grading every answer the policy could generate, we estimate it by sam-pling from the fixed answering policy (Figure 2, top). A single answer is only correct or incorrect, so we draw K independent answers per state and average their grades. For each evidence state x of problem i, we sample ˆy(1) , . . . , ˆy(K) ∼ π0(· | x),grade each as r(k) = g(ˆ y(k), y ∗ 
+
+> i
+
+), and define the empirical success rate as 
+
+ˆp(x) = 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+r(k). (5) Since r(k) ∼ Bernoulli( p∗(x)) , E[ˆ p(x) | x] = 
+
+p∗(x), so ˆp(x) is an unbiased Monte Carlo estimate of the frozen policy’s success probability. The estimate ˆp(x) is specific to the answering policy π0, so the sufficiency of a state x always refers to whether π0 can answer correctly given the information in x, and the confidence we train is calibrated to this policy. Since computing ˆp(x)
+
+requires the gold answer, which is unavailable at decision time, we use it only as a training target. 
+
+3.4 Sufficiency Confidence Estimator 
+
+At decision time, the model must therefore predict 
+
+ˆp(x) from the evidence state alone. We read this prediction from the model’s own next-token dis-tribution rather than adding a separate classifier head (Figure 2, bottom). Each evidence state is placed in a prompt that asks the model, without 4answering the task, whether the currently available information is sufficient for it to answer correctly, and defines two actions, A to answer now because the information is sufficient, and S to seek more information because it is not. Rather than letting the model generate a response, we read the proba-bilities it assigns to A and S as the first token of its reply (prompt in Appendix B.1). Let ℓA(x) and ℓS (x) denote the logits assigned to A and S at the first response position from a single forward pass. We take the softmax over these two logits, giving cθ(x) = Pθ(A | x) = exp( ℓA)/ exp( ℓA) + exp( ℓS ). We call cθ(x) the 
+
+sufficiency confidence of state x, and the model that produces it the sufficiency confidence estimator .We train cθ(x) to match the empirical success rate using soft-label binary cross-entropy: 
+
+L(x) = − ˆp(x) log cθ(x)
+
+−  1 − ˆp(x) log  1 − cθ(x). (6) Binary cross-entropy is a strictly proper scoring rule (Gneiting and Raftery, 2007) and is linear in the target, so with the unbiased labels of §3.3 the expected loss at each state is minimized by cθ(x) = 
+
+p∗(x) despite sampling noise in ˆp(x). Training on this loss also controls both terms of Proposition 1. 
+
+Corollary 1. For any confidence cθ, let E[L] be the loss of Eq. (6) averaged over all evidence states and over the K sampled answers that determine 
+
+ˆp(x), and L∗ the minimum expected loss over all confidences, reached exactly at cθ = p∗. Then 
+
+E(cθ − p∗)2 ≤ 12
+
+ E[L] − L ∗, (7) 
+
+so each term of Eq. (4) is at most 12
+
+ E[L] − L ∗.
+
+Lowering the loss therefore lowers an upper bound on both terms, and the bound reaches zero exactly at cθ = p∗ (proof in Appendix D.2). 
+
+4 Experimental Setup 
+
+Datasets. We evaluate on two clinical diagno-sis datasets and one multi-hop question answer-ing dataset, which range from mostly answered correctly to mostly not (details in Appendix A.1). MIMIC (Hager et al., 2024) consists of real emergency-department admissions for four abdom-inal diseases, and the model chooses among the four. MedQA (Jin et al., 2021) contains ques-tions from the United States Medical Licensing Examination, and the model names the diagnosis in free text. Both are written as structured clini-cal cases following AgentClinic (Schmidgall et al., 2026). MuSiQue (Trivedi et al., 2022) composes multi-hop questions over Wikipedia from single-hop questions, each answered by one supporting paragraph, and the model gives a short answer. All states of a problem are assigned to the same split to avoid leakage between training and test. 
+
+Evidence states. Clinical cases are divided into history, physical examination, imaging, and other tests such as laboratory and pathology. Each state adds a different subset of the remaining sections to the history. Question only Distractors only {e1}{e2}{e1, e2}{e1, e3}{e2, e3}{e1, e2, e3}      
+
+> Chain
+> Distr.
+> 32
+> –
+> 111
+> Branching
+> +Distr.
+> 322111
+> e1e2e3e1e2e3
+
+Figure 3: Evidence states of MuSiQue for chain and branching questions. Hatched cells give the number of distractors padding each state to three paragraphs. 
+
+In MuSiQue, we use 3-hop questions, whose ev-idence units are the three supporting paragraphs, one per sub-question. In chain questions, each answer is needed to ask the next sub-question (e1 → e2 → e3), while in branching questions, e1
+
+and e2 answer independent sub-questions that both feed the final one, e3. States range from the ques-tion alone and distractors only (related paragraphs that MuSiQue retrieves but that do not help answer the question) to one, two, or all three supporting paragraphs (Figure 3, examples in Appendix F.2). Every state but the question-only one shows three paragraphs, padded with distractors in one shuffled order per question, so neither the number nor the position of paragraphs reveals the state. 
+
+Baselines. We compare against three baselines on the same untrained model. Base logit (Base ) is our sufficiency confidence estimator before train-ing, reading P (A | x) under the prompt of §3.4. 
+
+Verbalized asks the model to state the probabil-ity that it could answer correctly from the avail-able information (Tian et al., 2023). Platt scal-ing (Platt, 1999) rescales the base logit to fit the success rates in the training set, so it can recalibrate the confidence but not reorder states (prompts in Appendix B). 5MIMIC MedQA MuSiQue 
+
+Method Brier ↓ AUROC ↑ ρ∆ ↑ Brier ↓ AUROC ↑ ρ∆ ↑ Brier ↓ AUROC ↑ ρ∆ ↑
+
+Kimi K2.6 
+
+Base logit 0.219 ±0.000 0.686 ±0.000 0.320 ±0.000 0.223 ±0.000 0.707 ±0.000 0.413 ±0.000 0.184 ±0.000 0.750 ±0.000 0.430 ±0.000 
+
+Verbalized 0.131 ±0.001 0.686 ±0.003 0.247 ±0.013 0.162 ±0.001 0.650 ±0.001 0.374 ±0.010 0.174 ±0.003 0.724 ±0.003 0.412 ±0.011 
+
+Platt 0.124 ±0.000 0.686 ±0.000 0.296 ±0.000 0.150 ±0.000 0.707 ±0.000 0.438 ±0.000 0.142 ±0.000 0.750 ±0.000 0.431 ±0.000 
+
+SuffiCE 0.105 ±0.002 0.844 ±0.005 0.474 ±0.045 0.141 ±0.005 0.795 ±0.033 0.467 ±0.064 0.134 ±0.004 0.787 ±0.005 0.632 ±0.009 
+
+Qwen3.8-27B 
+
+Base logit 0.127 ±0.000 0.788 ±0.000 0.353 ±0.000 0.143 ±0.000 0.744 ±0.000 0.413 ±0.000 0.182 ±0.000 0.738 ±0.000 0.274 ±0.000 
+
+Verbalized 0.112 ±0.000 0.770 ±0.007 0.222 ±0.003 0.174 ±0.001 0.772 ±0.001 0.355 ±0.000 0.203 ±0.001 0.682 ±0.002 0.345 ±0.008 
+
+Platt 0.099 ±0.000 0.788 ±0.000 0.286 ±0.000 0.126 ±0.000 0.744 ±0.000 0.438 ±0.000 0.123 ±0.000 0.738 ±0.000 0.423 ±0.000 
+
+SuffiCE 0.080 ±0.004 0.857 ±0.012 0.447 ±0.040 0.091 ±0.005 0.826 ±0.008 0.489 ±0.019 0.092 ±0.008 0.830 ±0.014 0.717 ±0.024 
+
+Qwen3.5-9B 
+
+Base logit 0.124 ±0.000 0.689 ±0.000 0.247 ±0.000 0.268 ±0.000 0.746 ±0.000 0.367 ±0.001 0.197 ±0.000 0.752 ±0.000 0.356 ±0.000 
+
+Verbalized 0.143 ±0.003 0.727 ±0.002 0.177 ±0.011 0.290 ±0.001 0.706 ±0.002 0.356 ±0.004 0.145 ±0.003 0.688 ±0.004 0.310 ±0.012 
+
+Platt 0.110 ±0.000 0.689 ±0.000 0.254 ±0.000 0.134 ±0.000 0.746 ±0.000 0.514 ±0.001 0.099 ±0.000 0.752 ±0.000 0.389 ±0.000 
+
+SuffiCE 0.098 ±0.010 0.819 ±0.028 0.393 ±0.034 0.107 ±0.005 0.815 ±0.011 0.630 ±0.012 0.078 ±0.002 0.828 ±0.006 0.666 ±0.015 
+
+Qwen3.5-4B 
+
+Base logit 0.143 ±0.000 0.761 ±0.000 0.311 ±0.000 0.132 ±0.000 0.763 ±0.000 0.452 ±0.000 0.122 ±0.000 0.779 ±0.000 0.335 ±0.000 
+
+Verbalized 0.190 ±0.001 0.763 ±0.001 0.095 ±0.009 0.250 ±0.005 0.739 ±0.006 0.286 ±0.027 0.164 ±0.000 0.601 ±0.001 0.224 ±0.003 
+
+Platt 0.097 ±0.000 0.761 ±0.000 0.274 ±0.000 0.108 ±0.000 0.763 ±0.000 0.488 ±0.000 0.097 ±0.000 0.779 ±0.000 0.400 ±0.000 
+
+SuffiCE 0.085 ±0.003 0.830 ±0.014 0.458 ±0.097 0.103 ±0.003 0.773 ±0.011 0.524 ±0.072 0.086 ±0.004 0.818 ±0.007 0.606 ±0.020 
+
+Table 1: Results on the three datasets for Kimi K2.6, Qwen3.8-27B, Qwen3.5-9B, and Qwen3.5-4B, comparing our method with baselines. Results are mean ± SD over three seeds. The best result for each model is in bold. 
+
+Implementation details. We evaluate four an-swering models, three Qwen models of increas-ing size (Qwen3.5-4B, Qwen3.5-9B, and Qwen3.8-27B) and Kimi K2.6 from a different model family. The answering policy π0 can be any frozen policy. Our main experiments use the estimator’s own base model, to study how well a model can judge its own evidence state. Success rates are estimated from 
+
+K = 10 sampled answers per state. Further details are in Appendix A.3. 
+
+Metrics. Let ci,s = cθ(xi,s ) be the sufficiency confidence of state s of problem i and ˆpi,s its em-pirical success rate. The Brier score, the mean of (ci,s − ˆpi,s )2 over the test set, measures over-all error. AUROC , averaged over the K sampled answers, measures how well confidence ranks cor-rect answers above incorrect ones. Both pool the whole test set, so they reward knowing which prob-lems are hard. The change correlation ρ∆ =Corr( ci,t −ci,s , ˆpi,t − ˆpi,s ), computed over all pairs of states of the same problem from a state s to a state t with more evidence (Appendix C.4), instead tests whether confidence follows success as the evidence state changes, as criterion 2 requires. 
+
+5 Results 
+
+5.1 Overall Performance 
+
+SuffiCE achieves the best result on every metric in every setting (Table 1). Each model is calibrated to its own success rates, so methods are compared only for the same model (Appendix A.2). SuffiCE lowers the Brier score by 20–60% relative to the base logit and by 5–28% relative to Platt scaling, the strongest baseline. SuffiCE not only calibrates better but also ranks states better. Platt scaling fits the same labels but only rescales the base confi-dence, leaving the order of states, and thus AUROC and selective accuracy, unchanged, whereas Suf-fiCE raises AUROC by up to 0.16. SuffiCE also raises the change correlation ρ∆ above every base-line, so its confidence moves with success as the evidence changes, which §5.3 examines in detail. 0 .2 .4 .6 .8 1        
+
+> Predicted con fi dence
+> 0.2 .4 .6 .8 1
+> Empirical success rate
+> (a) Base logit
+> 0.2 .4 .6 .8 1
+> Predicted con fi dence
+> (b) Su ff iCE
+> Ideal MedQA MIMIC MuSiQue
+
+Figure 4: SuffiCE brings confidence closer to perfect calibration on every dataset. Calibration curves on the test set (a) before and (b) after SuffiCE. 
+
+Calibration across datasets. The base logit is miscalibrated by different amounts across datasets, 6and SuffiCE improves calibration on all three, mov-ing each curve toward the ideal diagonal (Figure 4, Qwen3.5-9B). The other models follow the same pattern (Appendix C.1). 
+
+Selective answering. If the model answers only the questions it is most confident about and abstains on the rest, SuffiCE is the most accurate at nearly every percentage of questions answered (Table 2 and Appendix C.2). On MIMIC, the questions it is most confident about are almost always answered correctly. 
+
+Answered Base Verb. SuffiCE MIMIC 10% 97.2 95.3 100.0 
+
+30% 93.4 95.3 98.5 
+
+50% 89.9 92.4 95.5 
+
+MedQA 10% 93.7 74.3 99.1 
+
+30% 77.8 73.4 84.2 
+
+50% 65.4 63.3 74.0 
+
+MuSiQue 10% 55.2 52.5 68.9 
+
+30% 45.3 47.7 56.2 
+
+50% 39.4 34.7 42.6 
+
+Table 2: Accuracy (%) when the model answers the given percentage of questions it is most confident about. 
+
+5.2 Ablation 
+
+To test whether the estimator needs diverse evi-dence states, we train Qwen3.5-9B only on the full state of each training problem and evaluate it on the whole test set (Figure 5). Success on full states still varies across problems, so this estima-tor learns which problems are hard but never sees missing evidence. SuffiCE outperforms it on every metric and dataset, both with the same number of training epochs and with the same number of steps (Appendix C.3). MIMIC MedQA MuSiQue         
+
+> 0.05 0.10 0.15
+> .122 .140 .107 .098 .107 .078
+> (a) Brier ↓
+> MIMIC MedQA MuSiQue
+> 0.2 0.4 0.6 0.8
+> .294 .489 .486 .393 .630 .666
+> (b) ρΔ↑
+> Full only All (Su ff iCE)
+
+Figure 5: Training across evidence states improves both calibration and evidence sensitivity. Estimators trained for the same number of epochs on full states only versus on all evidence states (SuffiCE). 
+
+5.3 Evidence-State Analysis Confidence rises with the decisive evidence, not with more evidence. SuffiCE closely tracks the empirical success rate across states, rising only when new evidence makes the question answerable, whereas the base logit rises with every paragraph added (Figure 6, more measures in Appendix C.4). For both question types, success stays near zero until the final hop e3 is shown. On chain questions, the base logit treats each earlier hop as progress and is confident enough to answer given {e1, e 2}
+
+(0.71), although the model almost never succeeds (0.06), while SuffiCE stays low (0.16) until e3 ar-rives. On branching questions, the base logit rises with each branch, while SuffiCE stays low for ei-ther branch alone and for both, since neither helps without e3. SuffiCE is never told the question type or which paragraph fills which hop, so it judges from the content alone whether the reasoning chain is complete. It thus separates evidence that makes a question answerable from evidence that only adds information (Appendix F.1). ∅  
+
+> {e1}{e1, e2}{e1, e2, e3}
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Probability
+> (a) Chain
+> ∅
+> {e1}{e2}{e1, e2}{e1, e2, e3}
+> (b) Branching
+> Empirical success Base Su ff iCE
+
+Figure 6: SuffiCE tracks the empirical success rate as supporting paragraphs are added, while the base logit rises with every paragraph. MuSiQue test set, for (a) chain and (b) branching questions. 
+
+Holding the amount fixed, content decides suc-cess. Even when every state has the same amount of evidence, SuffiCE distinguishes which states can be answered (Figure 7). Each state shows two of the three supporting paragraphs, and success is high only when the final hop e3 is among them. The base logit is similarly confident on all three states, responding to how much evidence there is, whereas SuffiCE stays low on {e1, e 2} and rises for both states with e3.
+
+Confidence separates decisive from suggestive evidence. In clinical diagnosis, the decisive evi-dence differs from patient to patient. Table 3 shows a MedQA case of Hirschsprung disease. The X-7{e1, e2} { e1, e3} { e2, e3}
+
+Evidence shown    
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Probability
+> .06 .71 .16 .59 .73 .46 .57 .63 .57
+> (a) Chain
+> {e1,e2} { e1,e3} { e2,e3}
+
+Evidence shown   
+
+> .07 .48 .19 .43 .50 .37 .43 .59 .39
+> (b) Branching
+> Empirical success Base Su ff iCE
+
+Figure 7: With the same amount of evidence, SuffiCE tells which states can be answered. Each MuSiQue state shows two of the three supporting paragraphs, for (a) chain and (b) branching questions. Only SuffiCE stays low until the final hop e3 is shown. 
+
+ray is the pivot of the workup. It reveals a distal obstruction and prompts the rectal biopsy, but it cannot tell Hirschsprung disease from other causes of obstruction. Only the biopsy, which finds no ganglion cells, confirms the diagnosis. The base logit is nearly certain in every state, whereas Suf-fiCE stays uncertain with the X-ray in state {1, 4}
+
+and becomes confident only once the biopsy is added in state {1, 3, 4}. With a suitable confidence threshold, SuffiCE would therefore seek more in-formation before answering. Unlike the base logit, SuffiCE thus recognizes which evidence settles the diagnosis and which only signals that more infor-mation is needed. 
+
+A 2-day-old boy has bilious vomiting, has not passed meconium since birth, and has a distended abdomen. What is the diagnosis? Answer: Hirschsprung disease  
+
+> 1
+
+HISTORY Home birth without complications, bilious vomiting, and no meconium since birth.  
+
+> 2
+
+PE Firm, distended abdomen with decreased bowel sounds and palpable bowel loops.  
+
+> 3
+
+BIOPSY Rectal biopsy: no ganglion cells in the submucosa or myenteric plexus.  
+
+> 4
+
+IMAGING Abdominal X-ray: dilated bowel loops and no rectal gas, suggesting a distal obstruction. State {1} {1,2} {1,4} {1,3,4} {1,2,3,4}
+
+Success 0.20 0.40 0.40 1.00 1.00 Base 0.96 0.99 0.99 1.00 1.00 SuffiCE 0.50 0.47 0.51 0.97 0.97 
+
+Table 3: A MedQA case of Hirschsprung disease (Qwen3.5-9B). Each state is the set of evidence shown. Success is the fraction of ten sampled answers that are correct. Base and SuffiCE give the sufficiency confi-dence. 
+
+5.4 Cross-Policy Confidence Estimation 
+
+To test whether the estimator must be the answer-ing model, we fix the answering policy to Kimi K2.6 and train Qwen estimators of three sizes on its success rates (Figure 8). A large enough esti-mator predicts another model’s success as well as that model does itself. The 27B estimator matches or exceeds Kimi K2.6’s own estimate on every dataset in Brier score, and in ρ∆ on MedQA and MuSiQue. Trained only on Kimi K2.6’s success rates and never shown its answers, the estimator thus learns to anticipate from the evidence state alone how well another model can answer. Smaller estimators are less accurate, and the 4B estimator falls well short of Kimi K2.6’s own estimate. 0.075 0.100 0.125 0.150 0.175 .171 .128 .162 .145 .103 .159 .113 .103 .125 .141 .105 .134            
+
+> MedQA MIMIC MuSiQue
+> lower is better (a) Brier score
+> 0.2 0.4 0.6 0.8
+> .279 .329 .519 .342 .516 .538 .480 .442 .684 .467 .474 .632
+> MedQA MIMIC MuSiQue
+> higher is better (b) ρΔ
+> Qwen3.5-4B Qwen3.5-9B Qwen3.8-27B Kimi K2.6 (self)
+
+Figure 8: Qwen estimators of three sizes are trained to predict the success rates of Kimi K2.6, compared with Kimi K2.6 predicting its own (self). 
+
+6 Conclusion 
+
+To our knowledge, this is the first work to train a model’s confidence before answering to be cali-brated across varying evidence states. The decision to answer or gather more evidence is made before any answer exists, so a model is only as reliable as this judgment. We formalized it as evidence-state calibration , requiring confidence to be calibrated and to change as much as the chance of success whenever the evidence changes, which calibration alone does not guarantee. SuffiCE outperforms every baseline, and its confidence rises with the de-cisive evidence, not with every piece added. Such confidence is a step toward language models that can judge, in high-stakes settings, when the evi-dence at hand is enough to answer. 8Limitations 
+
+SuffiCE shows strong calibration and evidence sen-sitivity across four answering models and three datasets, but it has three limitations. First, we pre-construct evidence states rather than gather evi-dence in live multi-turn interactions, a controlled setting that lets us attribute differences in success and confidence to the evidence itself. Second, to limit cost, we estimate each target from ten sam-pled answers per state, and more samples would give more precise targets. Third, SuffiCE has not been tested in real clinical scenarios, and its confi-dence should not replace clinical judgment. 
+
+References 
+
+Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and Hannaneh Hajishirzi. 2024. Self-rag: Learning to retrieve, generate, and critique through self-reflection. In ICLR .David Bani-Harouni, Chantal Pellegrini, Ege Özsoy, Nassir Navab, and Matthias Keicher. 2026a. Lan-guage agents for hypothesis-driven clinical decision making with reinforcement learning. In ICLR . pro-ceedings.iclr.cc. David Bani-Harouni, Chantal Pellegrini, Paul Stangel, Ege Özsoy, Kamilia Zaripova, Nassir Navab, and Matthias Keicher. 2026b. Rewarding doubt: A rein-forcement learning approach to calibrated confidence expression of large language models. In ICLR . pro-ceedings.iclr.cc. Mehul Damani, Isha Puri, Stewart Slocum, Idan Shen-feld, Leshem Choshen, Yoon Kim, and Jacob An-dreas. 2026. Beyond binary rewards: Training lms to reason about their uncertainty. In ICLR . proceed-ings.iclr.cc. Xilin Dang, Kexin Chen, Xiaorui Su, Ayush Noori, Iñaki Arango, Lucas Vittor, Xinyi Long, Yuyang Du, Marinka Zitnik, and Pheng-Ann Heng. 2026. Know-guard: Knowledge-driven abstention for multi-round clinical reasoning. In ICLR . proceedings.iclr.cc. Jiahui Geng, Fengyu Cai, Yuxia Wang, Heinz Koeppl, Preslav Nakov, and Iryna Gurevych. 2024. A sur-vey of confidence estimation and calibration in large language models. In Proceedings of the 2024 Con-ference of the North American Chapter of the Asso-ciation for Computational Linguistics: Human Lan-guage Technologies (Volume 1: Long Papers) , pages 6577–6595, Mexico City, Mexico. Association for Computational Linguistics. Tilmann Gneiting and Adrian E. Raftery. 2007. Strictly proper scoring rules, prediction, and estimation. 
+
+Journal of the American Statistical Association ,102(477):359–378. Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Wein-berger. 2017. On calibration of modern neural net-works. In ICML , volume 70 of Proceedings of Ma-chine Learning Research , pages 1321–1330. PMLR. Paul Hager, Friederike Jungmann, Robbie Holland, Ku-nal Bhagat, Inga Hubrecht, Manuel Knauer, Jakob Vielhauer, Marcus Makowski, Rickmer Braren, Geor-gios Kaissis, and Daniel Rueckert. 2024. Evalua-tion and mitigation of the limitations of large lan-guage models in clinical decision-making. Nature Medicine , 30(9):2613–2622. Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. 2022. LoRA: Low-rank adaptation of large language models. In International Conference on Learning Representations .Akriti Jain and Aparna Garimella. 2026. Knowing what’s missing: Assessing information sufficiency in question answering. In Findings of the Associ-ation for Computational Linguistics: EACL 2026 ,pages 4163–4174, Rabat, Morocco. Association for Computational Linguistics. Zhengbao Jiang, Frank Xu, Luyu Gao, Zhiqing Sun, Qian Liu, Jane Dwivedi-Yu, Yiming Yang, Jamie Callan, and Graham Neubig. 2023. Active retrieval augmented generation. In Proceedings of the 2023 Conference on Empirical Methods in Natural Lan-guage Processing , pages 7969–7992, Singapore. As-sociation for Computational Linguistics. Di Jin, Eileen Pan, Nassim Oufattole, Wei-Hung Weng, Hanyi Fang, and Peter Szolovits. 2021. What disease does this patient have? a large-scale open domain question answering dataset from medical exams. Ap-plied Sciences , 11(14):6421. Hailey Joren, Jianyi Zhang, Chun-Sung Ferng, Da-Cheng Juan, Ankur Taly, and Cyrus Rashtchian. 2025. Sufficient context: A new lens on retrieval augmented generation systems. In ICLR .Saurav Kadavath, Tom Conerly, Amanda Askell, Tom Henighan, Dawn Drain, Ethan Perez, Nicholas Schiefer, Zac Hatfield-Dodds, Nova DasSarma, Eli Tran-Johnson, Scott Johnston, Sheer El-Showk, Andy Jones, Nelson Elhage, Tristan Hume, Anna Chen, Yuntao Bai, Sam Bowman, Stanislav Fort, and 17 others. 2022. Language models (mostly) know what they know. Preprint , arXiv:2207.05221. Sanyam Kapoor, Nate Gruver, Manley Roberts, Kather-ine Collins, Arka Pal, Umang Bhatt, Adrian Weller, Samuel Dooley, Micah Goldblum, and Andrew Gor-don Wilson. 2024. Large language models must be taught to know what they don’t know. In NeurIPS .Diederik P. Kingma and Jimmy Ba. 2015. Adam: A method for stochastic optimization. In International Conference on Learning Representations .Polina Kirichenko, Mark Ibrahim, Kamalika Chaudhuri, and Samuel J. Bell. 2025. Abstentionbench: Reason-ing llms fail on unanswerable questions. In NeurIPS .
+
+9Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. 2023. Semantic uncertainty: Linguistic invariances for un-certainty estimation in natural language generation. In ICLR .Maor Juliet Lavi, Tova Milo, and Mor Geva. 2026. De-tecting (un)answerability in large language models with linear directions. In Proceedings of the 19th Conference of the European Chapter of the Associa-tion for Computational Linguistics (Volume 1: Long Papers) , pages 682–699, Rabat, Morocco. Associa-tion for Computational Linguistics. Shuyue Stella Li, Vidhisha Balachandran, Shangbin Feng, Jonathan Ilgen, Emma Pierson, Pang Wei Koh, and Yulia Tsvetkov. 2024. Mediq: Question-asking llms and a benchmark for reliable interactive clinical reasoning. In NeurIPS .Yibo Li, Miao Xiong, Jiaying Wu, and Bryan Hooi. 2025. Conftuner: Training large language models to express their confidence verbally. In NeurIPS .Stephanie Lin, Jacob Hilton, and Owain Evans. 2022. Teaching models to express their uncertainty in words. Transactions on Machine Learning Research .William Lugoloobi, Thomas Foster, William Bankes, and Chris Russell. 2026. LLMs encode their failures: Predicting success from pre-generation activations. In Conference on Language Modeling .Sravanthi Machcha, Sushrita Yerra, Sahil Gupta, Aish-warya Sahoo, Sharmin Sultana, Hong Yu, and Zong-hai Yao. 2026. Knowing when to abstain: Medical LLMs under clinical uncertainty. In Proceedings of the 19th Conference of the European Chapter of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 6153–6182, Rabat, Morocco. Association for Computational Linguistics. John Platt. 1999. Probabilistic outputs for support vec-tor machines and comparisons to regularized likeli-hood methods. In Advances in Large Margin Classi-fiers , pages 61–74. MIT Press. Pranav Rajpurkar, Robin Jia, and Percy Liang. 2018. Know what you don’t know: Unanswerable ques-tions for SQuAD. In Proceedings of the 56th Annual Meeting of the Association for Computational Lin-guistics (Volume 2: Short Papers) , pages 784–789, Melbourne, Australia. Association for Computational Linguistics. Samuel Schmidgall, Rojin Ziaei, Carl Harris, Ji Woong Kim, Eduardo Pontes Reis, Jeffrey Jopling, and Michael Moor. 2026. Agentclinic: a multimodal benchmark for tool-using clinical AI agents. npj Digit. Medicine , 9(1):499. Aviv Slobodkin, Omer Goldman, Avi Caciularu, Ido Dagan, and Shauli Ravfogel. 2023. The curious case of hallucinatory (un)answerability: Finding truths in the hidden states of over-confident large language models. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing ,pages 3607–3625, Singapore. Association for Com-putational Linguistics. Katherine Tian, Eric Mitchell, Allan Zhou, Archit Sharma, Rafael Rafailov, Huaxiu Yao, Chelsea Finn, and Christopher Manning. 2023. Just ask for cali-bration: Strategies for eliciting calibrated confidence scores from language models fine-tuned with human feedback. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Process-ing , pages 5433–5442, Singapore. Association for Computational Linguistics. Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot, and Ashish Sabharwal. 2022. MuSiQue: Multi-hop questions via single-hop question composition. 
+
+Transactions of the Association for Computational Linguistics , 10:539–554. Roman Vashurin, Ekaterina Fadeeva, Artem Vazhentsev, Lyudmila Rvanova, Daniil Vasilev, Akim Tsvigun, Sergey Petrakov, Rui Xing, Abdelrahman Sadallah, Kirill Grishchenkov, Alexander Panchenko, Timothy Baldwin, Preslav Nakov, Maxim Panov, and Artem Shelmanov. 2025. Benchmarking uncertainty quan-tification methods for large language models with LM-polygraph. Transactions of the Association for Computational Linguistics , 13:220–248. Bingbing Wen, Jihan Yao, Shangbin Feng, Chenjun Xu, Yulia Tsvetkov, Bill Howe, and Lucy Lu Wang. 2025. Know your limits: A survey of abstention in large language models. Transactions of the Association for Computational Linguistics , 13:529–556. Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie Fu, Junxian He, and Bryan Hooi. 2024. Can llms express their uncertainty? an empirical evaluation of confidence elicitation in llms. In ICLR .Zhangyue Yin, Qiushi Sun, Qipeng Guo, Jiawen Wu, Xipeng Qiu, and Xuanjing Huang. 2023. Do large language models know what they don’t know? In 
+
+Findings of the Association for Computational Lin-guistics: ACL 2023 , pages 8653–8665, Toronto, Canada. Association for Computational Linguistics. Haotian Zhai, Jingcheng Liang, and Dongyeop Kang. 2026. Abstain-r1: Calibrated abstention and post-refusal clarification via verifiable RL. In Findings of the Association for Computational Linguistics: ACL 2026 , pages 19674–19695, San Diego, California, United States. Association for Computational Lin-guistics. Caiqi Zhang, Ruihan Yang, Xiaochen Zhu, Chengzu Li, Tiancheng Hu, Yijiang River Dong, Deqing Yang, and Nigel Collier. 2026. Confidence estimation for LLMs in multi-turn interactions. In Findings of the Association for Computational Linguistics: ACL 2026 , pages 25661–25676, San Diego, California, United States. Association for Computational Lin-guistics. 
+
+10 Michael JQ Zhang and Eunsol Choi. 2025. Clarify when necessary: Resolving ambiguity through in-teraction with LMs. In Findings of the Association for Computational Linguistics: NAACL 2025 , pages 5541–5558, Albuquerque, New Mexico. Association for Computational Linguistics. 
+
+11 Appendix Contents 
+
+A Experimental Details 13 
+
+A.1 Datasets . . . . . . . . . . . . . . 13 A.2 Answering Policies . . . . . . . . 14 A.3 Training Details . . . . . . . . . . 14 
+
+B Prompts 15 
+
+B.1 Sufficiency Confidence . . . . . . 15 B.2 Answering . . . . . . . . . . . . . 15 B.3 Verbalized Baseline . . . . . . . . 15 B.4 LLM Judges . . . . . . . . . . . . 15 
+
+C Additional Results 17 
+
+C.1 Calibration Curves for All Models 17 C.2 Selective Answering for All Models 17 C.3 Step-Matched Ablation . . . . . . 17 C.4 Additional Evidence-State Analysis 17 C.5 Cross-Domain Transfer . . . . . . 18 
+
+D Proofs 20 
+
+D.1 Proof of Proposition 1 . . . . . . . 20 D.2 Proof of Corollary 1 . . . . . . . . 21 
+
+E Comparison with Related Work 23 F Case Studies 24 
+
+F.1 MuSiQue Case Studies . . . . . . 24 F.2 Full Evidence States of the Case Studies . . . . . . . . . . . . . . . 24 
+
+G Ethical Considerations 27 
+
+12 A Experimental Details 
+
+A.1 Datasets 
+
+The three datasets range widely in difficulty (Ta-ble 4). For Qwen3.5-9B, the mean success rate on the test set is 0.81 on MIMIC, 0.50 on MedQA, and 0.25 on MuSiQue, so we test the confidence both where most states are answered correctly and where most are not.                         
+
+> MIMIC MedQA MuSiQue Answer 4-way choice free text short answer Problems 140 / 60 146 / 63 200 / 80 States 840 / 360 728 / 302 1,500 / 600
+> Mean success rate ˆp
+> Qwen3.5-4B 0.82 / 0.81 0.45 / 0.44 0.27 / 0.25 Qwen3.5-9B 0.84 / 0.81 0.50 / 0.50 0.29 / 0.25 Qwen3.8-27B 0.87 / 0.83 0.64 / 0.62 0.34 / 0.31 Kimi K2.6 0.87 / 0.82 0.76 / 0.71 0.44 / 0.43
+
+Table 4: Dataset statistics, given as train / test. The mean success rate ˆp of each answering model is taken over all evidence states. 
+
+MIMIC. We use emergency admissions from MIMIC-IV-Ext Clinical Decision Making (Hager et al., 2024). We sample 50 admissions for each of four abdominal diseases, appendicitis, cholecysti-tis, diverticulitis, and pancreatitis, and the task is to choose one of the four. We convert each admission to the OSCE layout of AgentClinic (Schmidgall et al., 2026). The history, laboratory results, and radiology reports are copied verbatim, and an LLM (GPT-5.1) writes only a one-sentence objective naming the presenting complaints and splits the free-text physical examination into sections with-out changing its values. Microbiology results are never shown, since cultures return after the diag-nostic decision. We split admissions into training and test sets stratified by disease. 
+
+MedQA. We use the OSCE-style cases of the ex-tended AgentClinic-MedQA set (Schmidgall et al., 2026), which are derived from USMLE ques-tions (Jin et al., 2021), and the task is to name the diagnosis in free text. We exclude 5 of its 214 cases, four with no test results and one with a non-standard format, which leaves 209. States that show only imaging or only the other tests exist for the 97 cases that have both kinds of test. We split cases by diagnosis, which keeps near-duplicate vignettes on the same side and makes every test diagnosis unseen during training. 
+
+MuSiQue. We use 3-hop questions from MuSiQue-Ans (Trivedi et al., 2022), and the task is to give a short answer. For each question, we sample three distractors from its non-supporting paragraphs. Its three supporting paragraphs and three distractors are shuffled once with a seed derived from the question, and every state shows its paragraphs in that order. Training questions come from the MuSiQue training set and test questions from its development set, since its test set has no released answers, with no single-hop question shared between them. MuSiQue’s own decompositions distinguish two question types (Table 5). In a chain question each hop needs the answer of the previous one, whereas in a branching question the first two hops are independent and only the final hop combines them. A branching question therefore has a state with e2 alone, while in a chain e2 is only useful after e1. The full inputs of the branching example appear in Table 16.                          
+
+> Chain (3hop1) e1→e2→e3
+> Who was appointed arbitrator by the first convert to the faith that is the most common religion in Southeast Asia?
+> Answer: Abu Musa Ashaari Hop Sub-question Answer
+> e1What is the most common religion in Southeast Asia? Islam
+> e2Who was the first convert to the faith called #1 ?Ali
+> e3Who was appointed arbitrator by
+> #2 ?Abu Musa Ashaari
+> Branching (3hop2) e1+e2→e3
+> When did the party Alaska generally supports take control of the determiner of rules of the US House and US Senate?
+> Answer: January 2015 Hop Sub-question Answer
+> e1Which political party does Alaska generally support? Republicans
+> e2Who determines the rules of the US House and US Senate? The Senate
+> e3When did #1 take control of the
+> #2 ?January 2015
+
+Table 5: The two MuSiQue question types, with sub-questions from MuSiQue’s decompositions (capitaliza-tion normalized). #k stands for the answer of hop k,supported by paragraph ek. In the chain, each hop de-pends on the previous one, so each stage has its own color. In the branching question, e1 and e2 are indepen-dent and share a color, and e3 combines their answers. 
+
+13 A.2 Answering Policies 
+
+The main experiments study self-calibration. Each model in Table 1 serves as both the answering pol-icy and the estimator, so it estimates its own chance of success, and every method for that model is compared against the exact same targets. 
+
+Targets for self-calibration. For each model, the frozen model with thinking disabled samples 
+
+K = 10 answers per evidence state, and the frac-tion graded correct is the success rate of that state. These success rates are the only targets used for that model. The base logit reads P (A | x) from this model before training, and verbalized confidence prompts this model for the probability that it could answer correctly. Platt scaling fits its two param-eters to this model’s success rates on the training set, and SuffiCE trains a LoRA adapter on a copy of this model to predict the same success rates. All four are evaluated against the success rates of this model on the test set. Methods are therefore com-pared only for the same model, since each model has its own targets. The cross-policy experiment of §5.4 is the only exception, where Qwen estimators are trained on and evaluated against the success rates of Kimi K2.6. 
+
+Difficulty. Success rates differ across answering models, little on MIMIC but widely on MedQA and MuSiQue (Table 4), so the same evidence state has a different target for each answering policy. 
+
+Precision of the targets. Each target is estimated from K = 10 answers, so even a perfect estimator that outputs the true success rate p∗ has a nonzero Brier score against it. This noise floor is the ex-pected binomial sampling variance p∗(1 − p∗)/K ,which we estimate without bias by ˆp(1 − ˆp)/(K−1) 
+
+averaged over the test set. On every dataset, the Brier score of SuffiCE is over 13 times this floor (Table 6). Sampling noise therefore accounts for only a small part of any method’s error, and ten an-swers per state are enough to compare estimators.         
+
+> Dataset Noise floor SuffiCE Brier MIMIC 0.003 0.092 MedQA 0.008 0.111 MuSiQue 0.007 0.097
+
+Table 6: Noise floor, the expected Brier score of a per-fect estimator against ten-answer success rates, com-pared with the Brier score of SuffiCE (Table 1). Both are averaged over the four answering models, on the test set. 
+
+A.3 Training Details 
+
+The settings shared by all models and datasets are listed in Table 7. All models are run with thinking disabled. Answers are sampled at temperature 1.0 without top-p or top-k truncation. The estimator is a rank-32 LoRA adapter (Hu et al., 2022) on a copy of the estimator’s base model, which is the answering model itself except in the cross-policy experiment (§5.4), initialized to have no effect, so before training it gives the base logit. All training and sampling run on Tinker. 
+
+Grading. Each sampled answer is graded as cor-rect or incorrect against the reference. On MIMIC, an answer is correct if, after lowercasing and re-moving everything but letters, it is exactly the name of the correct disease among the four options, and any other answer is incorrect. On MedQA, GPT-5.6 Luna judges whether a physician would accept the answer as the same diagnosis as the reference. On MuSiQue, an answer is correct if it matches the reference or one of its aliases after SQuAD normalization (lowercasing and removing punc-tuation and articles), and otherwise GPT-5.6 Luna judges it given the question and the reference. Both judges decode greedily, and their prompts are in Appendix B.4.                       
+
+> Setting Value
+> Success-rate estimation
+> Answers per state K10 Temperature 1.0 Top-p/ top-knone LLM judge (if used) GPT-5.6 Luna
+> Estimator training
+> LoRA rank 32 Loss soft-label BCE Optimizer Adam (Kingma and Ba, 2015) Learning rate 1×10 −4
+> Adam β1,β2,ϵ0.9, 0.95, 10 −8
+> Learning-rate schedule linear decay to 0 Batch size 8Seeds 3 (batch order, adapter init.)
+> Verbalized baseline
+> Runs 3
+
+Table 7: Settings shared by all models and datasets. 
+
+14 B Prompts 
+
+We list every prompt verbatim, grouped by role. Placeholders are in braces. {question} is the MuSiQue question or the clinical case’s objective, 
+
+{context} and {case} are the evidence shown in the current state, and {task line} is the dataset-specific line of Table 8. All prompts are given as a single user message with thinking disabled, except the judges, which also receive a system message. 
+
+Dataset {task line} 
+
+MIMIC Which of the following is the most likely diagnosis: appendicitis, cholecystitis, diverticulitis, or pancreatitis? MedQA What is the most likely diagnosis? MuSiQue (none, the question is the whole task) 
+
+Table 8: The dataset-specific task line of the sufficiency and verbalized prompts. 
+
+B.1 Sufficiency Confidence 
+
+The sufficiency confidence estimator and the base logit read the probabilities of A and S as the first token of the reply (§3.4). 
+
+Sufficiency prompt (all datasets) 
+
+Decide whether the currently available information is sufficient for you to answer the task correctly. Do not answer the task itself. A = the information is sufficient; answer now. S = the information is insufficient; seek more information. Task: {question} {task line} Available information: {context} Is the available information sufficient? Respond with exactly one letter: A or S. 
+
+B.2 Answering 
+
+The frozen answering policy samples ten answers per state with these prompts, from which the em-pirical success rate is computed (§3.3). 
+
+Answering prompt: MIMIC 
+
+{case} This is all the information available about the patient. Based on this information, which of the following is the most likely diagnosis? appendicitis cholecystitis diverticulitis pancreatitis Respond with only one of these four words, nothing else. 
+
+Answering prompt: MedQA 
+
+{case} This is all the information available about the patient. Based on this information, what is the most likely diagnosis? Respond with only the diagnosis, nothing else. 
+
+Answering prompt: MuSiQue 
+
+Answer the question using the provided information and your own knowledge. If you are unsure, give your best guess. Give only the final answer, with no explanation, in at most 100 characters. {case} Answer: 
+
+B.3 Verbalized Baseline 
+
+The first number in the reply is taken as the confi-dence, with “85%” read as 0.85. 
+
+Verbalized confidence prompt (all datasets) 
+
+Based on the currently available information, estimate the probability that you could answer the task correctly without seeking any additional information. Do not answer the task itself. Respond with a single number between 0 and 1, where 0 means the current information is certainly insufficient for a correct answer and 1 means it is certainly sufficient. Task: {question} {task line} Available information: {context} Probability: 
+
+B.4 LLM Judges 
+
+MedQA answers are graded by the judge below. MuSiQue answers that are not a normalized exact match with the reference or one of its aliases are graded by the MuSiQue judge. MIMIC answers are graded by exact match. All methods for a model are evaluated against the same grades, so differences between methods do not come from differences in grading. 
+
+MedQA judge: system 
+
+You are an expert physician grading a diagnostic answer against a reference diagnosis. First explain your reasoning briefly, then give a grade of 1 (correct) or 0 (incorrect). 
+
+MedQA judge: user 
+
+Correct diagnosis: {correct_diagnosis} Doctor's diagnosis: {predicted_diagnosis} Grade 1 if a physician would accept the doctor's diagnosis as the same diagnosis as the correct one. Accept synonyms, abbreviations, alternate spellings, historical or modern terminology, and diagnoses at an equivalent level of specificity. A more specific form of the correct diagnosis is also acceptable. Grade 0 if the doctor's diagnosis: - is a different condition, even a closely related one, - is only a broader disease category that contains the correct diagnosis but does not identify the more specific 
+
+15 diagnosis the correct one requires, - lists several possibilities without committing to the correct one, or - is missing. Respond in exactly this format: <reasoning>At most three sentences comparing the two diagnoses.</reasoning> <grade>1 or 0</grade> 
+
+MuSiQue judge: system 
+
+You are grading short answers to multi-hop questions against a reference answer. First explain your reasoning briefly, then give a grade of 1 (correct) or 0 (incorrect). 
+
+MuSiQue judge: user 
+
+Question: {question} Reference answer: {answer} Model answer: {predicted} Grade 1 only if the response clearly commits to an answer that is semantically correct according to the reference. Grade 0 if it gives multiple alternative answers without clearly committing to the correct one, or if it gives a wrong answer to the question alongside the correct one. Ignore extra details that do not answer the question, even if they are inaccurate. Differences in wording or formatting are acceptable when they preserve the same underlying answer. A broader place, category, or entity, or a related-but-different event, is not equivalent to the reference. Dates are the only exception: differences in date precision are acceptable when they preserve the correct time period, so an exact date, month/year, year, or decade may be treated as equivalent when consistent with the reference. Extremely broad periods such as centuries are not sufficient substitutes for a specific year or date. Respond in exactly this format: <reasoning>At most two sentences.</reasoning> <grade>1 or 0</grade> 
+
+16 C Additional Results 
+
+C.1 Calibration Curves for All Models 
+
+We extend the calibration curves of Figure 4 to all four answering models (Figure 9). 0.2 .4 .6 .8 1              
+
+> Empirical success rate
+> Qwen3.5-4B
+> (a) Base logit (b) Su ff iCE
+> 0.2 .4 .6 .8 1
+> Empirical success rate
+> Qwen3.5-9B
+> 0.2 .4 .6 .8 1
+> Empirical success rate
+> Qwen3.8-27B
+> 0.2 .4 .6 .8 1
+> Predicted con fi dence
+> 0.2 .4 .6 .8 1
+> Empirical success rate
+> Kimi K2.6
+> 0.2 .4 .6 .8 1
+> Predicted con fi dence
+> Ideal MedQA MIMIC MuSiQue
+
+Figure 9: Calibration curves of Qwen3.5-4B, Qwen3.5-9B, Qwen3.8-27B, and Kimi K2.6 on the test set, (a) before and (b) after SuffiCE. 
+
+The base confidence errs in no consistent di-rection. Under the same prompt, Qwen3.5-9B is overconfident on every dataset, Qwen3.8-27B and Kimi K2.6 are underconfident on every dataset, and Qwen3.5-4B is overconfident on MedQA but under-confident on MIMIC and MuSiQue. No single cor-rection therefore repairs the base confidence across models and datasets. Many base curves are also not monotone, so a state with higher confidence is not reliably more answerable. Platt scaling can shift such a curve toward the diagonal but cannot straighten it, since it keeps the order of states. 
+
+SuffiCE moves every curve toward the diagonal. 
+
+After training, every Qwen curve lies closer to the diagonal. The confidence also adapts to the range of each dataset, spanning low values on MuSiQue, where most states cannot be answered, and con-centrating near the top on MIMIC, where most are answered correctly. The same prompt and objective produce both, so the estimator learns the scale of each dataset from its targets rather than imposing a fixed one. 
+
+SuffiCE carries over to another model family. 
+
+Before training, Kimi K2.6 is strongly undercon-fident on every dataset. SuffiCE moves its curve toward the diagonal on each. 
+
+C.2 Selective Answering for All Models 
+
+Across all four answering models and three datasets, SuffiCE has the highest accuracy at most percentages of questions answered, with the small-est margin for Qwen3.5-4B on the clinical datasets (Figure 10, extending Table 2). 
+
+Method Brier ↓ AUROC ↑ ρ∆ ↑
+
+MIMIC 
+
+Full only 0.130 ±0.005 0.745 ±0.014 0.251 ±0.024 
+
+SuffiCE 0.098 ±0.010 0.819 ±0.028 0.393 ±0.034 
+
+MedQA 
+
+Full only 0.131 ±0.004 0.782 ±0.007 0.554 ±0.008 
+
+SuffiCE 0.107 ±0.005 0.815 ±0.011 0.630 ±0.012 
+
+MuSiQue 
+
+Full only 0.101 ±0.006 0.794 ±0.015 0.532 ±0.049 
+
+SuffiCE 0.078 ±0.002 0.828 ±0.006 0.666 ±0.015 
+
+Table 9: Step-matched ablation for Qwen3.5-9B. The full-only estimator is trained for the same number of steps as SuffiCE. 
+
+C.3 Step-Matched Ablation 
+
+The ablation of §5.2 trains the full-only estimator for the same number of epochs as SuffiCE. Since it has one state per problem instead of four to eight, it then takes far fewer gradient steps. Here we instead train it for the same number of steps as SuffiCE, with all other hyperparameters unchanged (Table 9). SuffiCE remains better on every metric and dataset, so the gap comes from training across evidence states, not from the number of updates. 
+
+C.4 Additional Evidence-State Analysis Ordering of pairs in ρ∆. Each pair of states en-ters once, ordered from less to more evidence. The 17 0 50 100 0.50 0.60 0.70 0.80 0.90 1.00                          
+
+> Accuracy
+> MedQA
+> Qwen3.5-4B
+> 050 100 0.50 0.60 0.70 0.80 0.90 1.00
+> Qwen3.5-9B
+> 050 100 0.60 0.70 0.80 0.90 1.00
+> Qwen3.8-27B
+> 050 100 0.75 0.80 0.85 0.90 0.95 1.00
+> Kimi K2.6
+> 050 100 0.80 0.85 0.90 0.95 1.00
+> Accuracy
+> MIMIC
+> 050 100 0.85 0.90 0.95 1.00 050 100 0.85 0.90 0.95 1.00 050 100 0.85 0.90 0.95 1.00 050 100
+> % of questions answered
+> 0.30 0.40 0.50 0.60 0.70
+> Accuracy
+> MuSiQue
+> 050 100
+> % of questions answered
+> 0.40 0.60 0.80 1.00 050 100
+> % of questions answered
+> 0.40 0.60 0.80 1.00 050 100
+> % of questions answered
+> 0.40 0.50 0.60 0.70 0.80 0.90 1.00 Su ff iCE Platt Base logit Verbalized
+
+Figure 10: Selective answering on the test set of every dataset (rows) and model (columns). Each curve plots the accuracy of the answered questions against the percentage answered, answering the questions with the highest confidence first. Higher is better. Platt scaling preserves the ranking of the base logit, so their curves coincide. 
+
+correlation subtracts the average change, so confi-dence that rises equally whenever evidence is added gets no credit, and ρ∆ rewards confidence that rises more for the evidence that raises success more. We report two measures of evidence sensitivity beyond ρ∆ for every answering model (Table 10). • ∆MAE (lower is better) tests whether con-fidence changes by the right amount as the evidence changes. For every pair of distinct states s, t of the same problem i, the same pairs as ρ∆, it takes the absolute gap between the change in confidence and the change in empirical success, (ci,t − ci,s ) − (ˆ pi,t − ˆpi,s ) ,and averages over all pairs in the test set. It is zero when confidence rises and falls by ex-actly as much as success. Where ρ∆ tests the direction of each change, ∆MAE tests its size. • ρwithin (higher is better) tests whether con-fidence separates more and less answerable problems that have the same kind of evidence. It groups the test set by state type, such as all H ISTORY states (on MuSiQue, by ques-tion type and state), computes the Pearson correlation between confidence and empirical success within each group, and averages over groups. Every state in a group holds the same kind of evidence, so recognizing the state type alone does not raise it. SuffiCE has the lowest ∆MAE in 11 of the 12 combinations of model and dataset, so its confi-dence changes by about as much as success does, not only in the same direction. The one exception is Kimi K2.6 on MIMIC, where verbalized confi-dence is slightly lower. For Kimi K2.6, success on MIMIC changes by at most 0.1 for about three quarters of the pairs of states, so a confidence that barely moves has a low ∆MAE, and verbalized confidence moves about half as much as SuffiCE. On ρ∆, which gives no credit for staying still, Suf-fiCE is far better (Table 1). SuffiCE also has the highest ρwithin for every model and dataset, with the largest margin on MIMIC, where whether the evidence suffices depends on the particular patient, so it does not merely learn an average confidence for each state type. 
+
+C.5 Cross-Domain Transfer 
+
+To test whether what SuffiCE learns is specific to one dataset, we train it on one clinical dataset and 18 MIMIC MedQA MuSiQue 
+
+Method ∆MAE ↓ ρwithin ↑ ∆MAE ↓ ρwithin ↑ ∆MAE ↓ ρwithin ↑
+
+Kimi K2.6 
+
+Base logit 0.333 ±0.000 0.217 ±0.000 0.282 ±0.000 0.290 ±0.000 0.355 ±0.000 0.164 ±0.000 
+
+Verbalized 0.182 ±0.001 0.222 ±0.007 0.193 ±0.002 0.247 ±0.004 0.367 ±0.003 0.123 ±0.029 
+
+Platt 0.190 ±0.000 0.210 ±0.000 0.202 ±0.000 0.290 ±0.000 0.351 ±0.000 0.173 ±0.000 
+
+SuffiCE 0.188 ±0.008 0.496 ±0.022 0.188 ±0.013 0.430 ±0.059 0.292 ±0.003 0.216 ±0.021 
+
+Qwen3.8-27B 
+
+Base logit 0.260 ±0.000 0.299 ±0.000 0.281 ±0.000 0.440 ±0.000 0.353 ±0.000 0.026 ±0.000 
+
+Verbalized 0.193 ±0.000 0.248 ±0.003 0.238 ±0.001 0.480 ±0.003 0.400 ±0.003 0.138 ±0.007 
+
+Platt 0.198 ±0.000 0.253 ±0.000 0.219 ±0.000 0.450 ±0.000 0.337 ±0.000 0.110 ±0.000 
+
+SuffiCE 0.180 ±0.006 0.497 ±0.007 0.218 ±0.009 0.634 ±0.023 0.240 ±0.010 0.257 ±0.025 
+
+Qwen3.5-9B 
+
+Base logit 0.217 ±0.000 0.137 ±0.000 0.259 ±0.000 0.398 ±0.000 0.383 ±0.000 0.190 ±0.000 
+
+Verbalized 0.251 ±0.003 0.235 ±0.016 0.256 ±0.001 0.381 ±0.004 0.343 ±0.002 0.193 ±0.004 
+
+Platt 0.202 ±0.000 0.204 ±0.000 0.234 ±0.000 0.433 ±0.000 0.307 ±0.000 0.195 ±0.000 
+
+SuffiCE 0.182 ±0.004 0.454 ±0.107 0.205 ±0.005 0.592 ±0.024 0.243 ±0.006 0.229 ±0.015 
+
+Qwen3.5-4B 
+
+Base logit 0.269 ±0.000 0.386 ±0.000 0.264 ±0.000 0.514 ±0.000 0.309 ±0.000 0.168 ±0.000 
+
+Verbalized 0.326 ±0.003 0.383 ±0.004 0.304 ±0.007 0.409 ±0.019 0.336 ±0.001 0.123 ±0.003 
+
+Platt 0.201 ±0.000 0.368 ±0.000 0.236 ±0.000 0.512 ±0.000 0.304 ±0.000 0.207 ±0.000 
+
+SuffiCE 0.178 ±0.014 0.487 ±0.034 0.222 ±0.010 0.530 ±0.036 0.258 ±0.004 0.230 ±0.011 
+
+Table 10: Evidence-state analysis for every answering model. ∆MAE compares changes in confidence with changes in empirical success between states of the same problem, and ρwithin correlates confidence with success among problems that share a state type. The best result for each model is in bold. 
+
+Metric Base logit Cross-domain In-domain Train MIMIC → test MedQA Brier ↓ 0.268 ±0.000 0.189 ±0.027 0.107 ±0.005 
+
+AUROC ↑ 0.746 ±0.000 0.779 ±0.009 0.815 ±0.011 
+
+ρ∆ ↑ 0.367 ±0.001 0.401 ±0.027 0.630 ±0.012 
+
+ρwithin ↑ 0.398 ±0.000 0.491 ±0.029 0.592 ±0.024 
+
+Train MedQA → test MIMIC Brier ↓ 0.124 ±0.000 0.167 ±0.004 0.098 ±0.010 
+
+AUROC ↑ 0.689 ±0.000 0.746 ±0.016 0.819 ±0.028 
+
+ρ∆ ↑ 0.247 ±0.000 0.316 ±0.005 0.393 ±0.034 
+
+ρwithin ↑ 0.137 ±0.000 0.321 ±0.038 0.454 ±0.107 
+
+Table 11: Cross-domain transfer between the clinical datasets (Qwen3.5-9B). Cross-domain and in-domain are SuffiCE trained on the other dataset and on the test dataset itself. The best result in each row is in bold and the second best in italics. 
+
+evaluate it on the other without further training (Table 11). MIMIC asks for one of four diseases and MedQA for a free-text diagnosis, and success is far more common on MIMIC. 
+
+Which evidence matters transfers. In both di-rections, the transferred estimator ranks states bet-ter than the base logit in AUROC and ρ∆. It also better separates more and less answerable cases that share a state type, recovering about half of the in-domain gain in ρwithin (§C.4) over the base logit in both directions. What SuffiCE learns about which evidence settles a case thus carries over across datasets. 
+
+The overall success level does not transfer. The transferred confidence stays close to the success rate of the training dataset. Trained on MIMIC, where most states succeed, it remains too confi-dent on MedQA, though less so than the base logit. Trained on MedQA, it is too cautious on MIMIC and is worse calibrated than the base logit. This error shifts the level of confidence, not the order of states, so ranking transfers while calibration does not. 19 D Proofs 
+
+Proposition 1 says that the error of a confidence splits into two parts: how far off it is on average for each problem, and how far its changes between states of the same problem are from the changes in success. Calibration constrains only the first part. Corollary 1 shows that the training loss bounds both parts. We first define the notation shared by both results, then restate and prove Proposition 1 (§D.1) and Corollary 1 (§D.2). 
+
+Setup. Let there be n problems, indexed by i =1, . . . , n . Problem i consists of a question qi, a pool of evidence Ei, and a gold answer y∗ 
+
+> i
+
+(§3.1). It has 
+
+mi ≥ 1 evidence states, indexed by s = 1 , . . . , m i.State s pairs the question with a subset Ii,s ⊆ Ei of the evidence, xi,s = ( qi, I i,s ). Let N = Pni=1 mi
+
+be the total number of states. For a state x, let 
+
+p∗(x) ∈ [0 , 1] be the success probability of the answering policy π0 (Eq. (1)) and cθ(x) ∈ [0 , 1] 
+
+the confidence of the estimator. Within problem i, we abbreviate cs = cθ(xi,s )
+
+and ps = p∗(xi,s ), and define the error at state 
+
+s as ϵs = cs − ps. The problem averages of the confidence, the success probability, and the error are 
+
+¯cθ,i = 1
+
+mimiX
+
+> s=1
+
+cs, ¯p∗ 
+
+> i
+
+= 1
+
+mimiX
+
+> s=1
+
+ps,
+
+¯ϵ = ¯ cθ,i − ¯p∗ 
+
+> i
+
+.
+
+For any s, t ∈ { 1, . . . , m i}, the change gap 
+
+δst = ( ct − cs) − (pt − ps)
+
+is the difference between the change in confidence and the change in success probability from state 
+
+s to state t. Finally, E denotes the uniform av-erage over all N states, and Ei the average of a per-problem quantity over problems, with problem 
+
+i weighted by mi/N , its share of all states. With this weight, averaging any function f of a state over all states equals first averaging it within each problem and then applying Ei,
+
+E[f ] = 1
+
+N
+
+> n
+
+X
+
+> i=1
+> mi
+
+X
+
+> s=1
+
+f (xi,s )=
+
+> n
+
+X
+
+> i=1
+
+mi
+
+N · 1
+
+mimiX
+
+> s=1
+
+f (xi,s )=
+
+> n
+
+X
+
+> i=1
+
+mi
+
+N ¯fi = Ei
+
+ ¯fi
+
+,
+
+(8) where ¯fi = 1
+
+> mi
+
+P 
+
+> s
+
+f (xi,s ) is the average of f over the states of problem i. A plain average over prob-lems, 1
+
+> n
+
+P 
+
+> i
+
+¯fi, agrees with E[f ] only when all prob-lems have the same number of states. 
+
+D.1 Proof of Proposition 1 Proposition 1 (restated). For any confidence cθ,
+
+E(cθ − p∗)2 = Ei
+
+(¯ cθ,i − ¯p∗ 
+
+> i
+
+)2
+
++ Ei
+
+h 12m2
+
+> i
+
+Pmi
+
+> s=1
+
+Pmi 
+
+> t=1
+
+δ2
+
+> st
+
+i
+
+.
+
+The left side is the mean squared error over all states. The first term on the right is the error across problems, in each problem’s average success. The second is the error within each problem, half the average squared change gap over all ordered pairs of its states. 
+
+Proof. We prove the identity for a single problem 
+
+i and then average over problems. All sums over s
+
+and t run from 1 to mi.
+
+Step 1: split the error into its average and its spread. Writing ϵs = ¯ ϵ + ( ϵs − ¯ϵ) and expanding the square, 
+
+1
+
+mi
+
+X
+
+> s
+
+ϵ2 
+
+> s
+
+= ¯ ϵ 2 + 2¯ ϵmi
+
+X
+
+> s
+
+(ϵs − ¯ϵ)+ 1
+
+mi
+
+X
+
+> s
+
+(ϵs − ¯ϵ)2.
+
+The middle term is zero. Since ¯ϵ = ¯ cθ,i − ¯p∗ 
+
+> i
+
+=
+
+> 1
+> mi
+
+P 
+
+> s
+
+ϵs is the average of the errors, the errors above the average exactly cancel those below it, 
+
+X
+
+> s
+
+(ϵs − ¯ϵ) = X
+
+> s
+
+ϵs − mi¯ϵ = mi¯ϵ − mi¯ϵ = 0 .
+
+Step 2: rewrite the spread with pairs of states. 
+
+The spread is the last term of Step 1, 1
+
+> mi
+
+P
+
+> s
+
+(ϵs −
+
+¯ϵ)2, the average squared deviation of the errors from their mean, that is, their variance over the states of problem i. It is zero exactly when ev-ery state of the problem has the same error. We now show that it equals half the average squared difference between the errors of two states. Let 
+
+ds = ϵs − ¯ϵ, so P 
+
+> s
+
+ds = 0 by Step 1. Expanding 
+
+(dt − ds)2 = d2 
+
+> t
+
++ d2 
+
+> s
+
+− 2dsdt and summing over 20 all s and t,
+
+X
+
+> s,t
+
+(ϵt − ϵs)2 = X
+
+> s,t
+
+(dt − ds)2
+
+= 2 mi
+
+X
+
+> s
+
+d2 
+
+> s
+
+− 2
+
+X 
+
+> s
+
+ds
+
+2
+
+= 2 mi
+
+X
+
+> s
+
+d2
+
+> s
+
+= 2 mi
+
+X
+
+> s
+
+(ϵs − ¯ϵ)2.
+
+Dividing by 2m2 
+
+> i
+
+gives 1
+
+> mi
+
+P
+
+> s
+
+(ϵs − ¯ϵ)2 =
+
+> 12m2
+> i
+
+P
+
+> s,t
+
+(ϵt − ϵs)2.
+
+Step 3: identify the change gap. Rearranging, 
+
+ϵt − ϵs = ( ct − pt) − (cs − ps) = ( ct − cs) − (pt −
+
+ps) = δst . Combining the three steps, for every problem i,
+
+1
+
+mi
+
+X
+
+> s
+
+ϵ2
+
+> s
+> Step 1
+
+= ¯ϵ 2 + 1
+
+mi
+
+X
+
+> s
+
+(ϵs − ¯ϵ)2
+
+> Step 2
+
+= ¯ϵ 2 + 12m2
+
+> i
+
+X
+
+> s,t
+
+(ϵt − ϵs)2
+
+> Step 3
+
+= (¯ cθ,i − ¯p∗ 
+
+> i
+
+)2 + 12m2
+
+> i
+
+X
+
+> s,t
+
+δ2
+
+> st
+
+,
+
+where the last line substitutes ¯ϵ = ¯ cθ,i − ¯p∗ 
+
+> i
+
+and 
+
+ϵt − ϵs = δst . The left side is the mean squared error of problem i. On the right, the first term is the squared error of the problem’s average confidence, and the second is half the average squared change gap over its ordered pairs of states. 
+
+Step 4: average over problems. Steps 1–3 give the identity for one problem. The proposition av-erages over all states, so we group the states by problem and weight each problem by its share of states, using Eq. (8) with f = ( cθ − p∗)2. Substi-tuting the per-problem identity for each problem’s mean squared error and splitting the sum, 
+
+E(cθ − p∗)2 = X
+
+> i
+
+mi
+
+N
+
+h 1
+
+mi
+
+X
+
+> s
+
+ϵ2
+
+> s
+
+i
+
+= X
+
+> i
+
+mi
+
+N
+
+h
+
+(¯ cθ,i − ¯p∗ 
+
+> i
+
+)2 + 12m2
+
+> i
+
+X
+
+> s,t
+
+δ2
+
+> st
+
+i
+
+= X
+
+> i
+
+mi
+
+N (¯ cθ,i − ¯p∗ 
+
+> i
+
+)2 + X
+
+> i
+
+mi
+
+N · 12m2
+
+> i
+
+X
+
+> s,t
+
+δ2
+
+> st
+
+= Ei
+
+(¯ cθ,i − ¯p∗ 
+
+> i
+
+)2 + Ei
+
+h 12m2
+
+> i
+
+P 
+
+> s,t
+
+δ2
+
+> st
+
+i
+
+,
+
+where the last line uses the definition of Ei as the average over problems with weight mi/N . This is Eq. (4). □
+
+Remarks. Calibration alone does not remove the second term. Suppose cθ gives every state of a problem the same value, for example the prob-lem’s average success ¯p∗ 
+
+> i
+
+. Then ct − cs = 0 , so 
+
+δst = −(pt − ps), and the second term becomes 
+
+> 12m2
+> i
+
+P
+
+> s,t
+
+(pt −ps)2, which by the identity of Step 2, applied to ps in place of ϵs, equals the variance of 
+
+p∗ over the states of problem i. This value does not depend on which constant is chosen, so a con-fidence that ignores the evidence cannot reduce it, even if it is perfectly calibrated. 
+
+The Brier score measures the same error. The Brier score (§4) compares the confidence with the empirical success rate ˆp(x) rather than with 
+
+p∗(x). Since ˆp(x) averages K independent grades, each equal to 1 with probability p∗(x), it satis-fies E[ˆ p(x) | x] = p∗(x) and Var(ˆ p(x) | x) = 
+
+p∗(x)(1 − p∗(x)) /K . For a confidence computed from x alone, the cross term vanishes, and 
+
+E(cθ − ˆp)2 = E(cθ − p∗)2
+
++ 1 
+
+> K
+
+Ep∗(1 − p∗),
+
+where the expectation on the left also averages over the sampled grades. The last term does not depend on the confidence, so differences in Brier score between methods reflect differences in the error that Proposition 1 decomposes. 
+
+D.2 Proof of Corollary 1 Corollary 1 (restated). For any confidence cθ,let E[L] be the loss of Eq. (6) averaged over all evidence states and over the K sampled answers that determine ˆp(x), and L∗ the minimum expected loss over all confidences, reached exactly at cθ =
+
+p∗. Then 
+
+E(cθ − p∗)2 ≤ 12
+
+ E[L] − L ∗,
+
+so each term of Proposition 1 is at most 12 (E[L] −L∗).
+
+Proof. Recall the soft-label binary cross-entropy of Eq. (6), at each evidence state x,
+
+L(x) = − ˆp(x) log cθ(x)
+
+−  1 − ˆp(x) log  1 − cθ(x).
+
+Let H(p) = −p log p − (1 − p) log(1 − p) be the binary entropy and KL( p ∥ c) = p log pc + (1 −
+
+p) log 1−p 
+
+> 1−c
+
+the divergence between Bernoulli distri-butions with means p and c, with the convention 
+
+0 log 0 = 0 . The confidence of SuffiCE is a soft-max and so lies strictly between 0 and 1, which 21 keeps every logarithm finite. The loss is linear in 
+
+ˆp(x), so taking the expectation over the sampled grades replaces ˆp(x) by E[ˆ p(x) | x] = p∗(x). At each state, writing p∗ and cθ for p∗(x) and cθ(x),the expected loss is therefore 
+
+EL(x) | x = −p∗ log cθ − (1 − p∗) log(1 − cθ).
+
+To separate the part that depends on cθ from the part that does not, we use the entropy of the target, 
+
+H(p∗) = −p∗ log p∗ − (1 − p∗) log(1 − p∗). By this definition, H(p∗)+ p∗ log p∗ +(1 −p∗) log(1 −
+
+p∗) = 0 , so adding these terms to the expected loss leaves it unchanged: 
+
+EL(x) | x = H(p∗) + p∗ log p∗
+
++ (1 − p∗) log(1 − p∗)
+
+− p∗ log cθ
+
+− (1 − p∗) log(1 − cθ).
+
+Grouping the two terms with the factor p∗ and the two with the factor 1 − p∗,
+
+EL(x) | x = H(p∗) + p∗ log p∗ − log cθ
+
+
+
++ (1 − p∗) log(1 − p∗)
+
+− log(1 − cθ),
+
+and writing each difference of logarithms as the logarithm of a ratio, 
+
+EL(x) | x = H(p∗) + p∗ log p∗
+
+cθ
+
++ (1 − p∗) log 1 − p∗
+
+1 − cθ
+
+= H(p∗) + KL( p∗ ∥ cθ).
+
+Averaging this identity over all evidence states gives 
+
+E[L] = EH(p∗) + EKL( p∗ ∥ cθ).
+
+The first term depends only on the answering pol-icy, not on the confidence, so no choice of cθ can change it. The second term is an average of di-vergences, each nonnegative and zero only when 
+
+cθ(x) = p∗(x). Every confidence therefore has 
+
+E[L] ≥ E[H(p∗)] , with equality exactly when 
+
+cθ(x) = p∗(x) at every state. Hence the minimum expected loss is L∗ = E[H(p∗)] , reached exactly at cθ = p∗, and 
+
+E[L] − L ∗ = EKL( p∗ ∥ cθ).
+
+Pinsker’s inequality for Bernoulli distributions states KL( p ∥ c) ≥ 2( p − c)2. Applying it at every state and averaging, 
+
+E[L] − L ∗ = EKL( p∗ ∥ cθ)
+
+≥ 2 E(cθ − p∗)2,
+
+which is Eq. (7). By Proposition 1, the two terms are nonnegative and sum to E[( cθ − p∗)2], so each is at most 12 (E[L] − L ∗). □
+
+For SuffiCE, this means that lowering the train-ing loss lowers an upper bound on both terms of Proposition 1, the error in each problem’s average success and the error in how confidence changes be-tween states of the same problem. The bound holds only over the states the loss is averaged over, which is why SuffiCE trains on many evidence states of each problem rather than on full states alone (§5.2). 22 Method Pre-answer Trained Controlled evidence subsets Within-problem evaluation Own token probability P(IK) (Kadavath et al., 2022) ✓ ✓ – – –Pre-generation probes (Lugoloobi et al., 2026) ✓ ✓ – – –Calibration tuning (Kapoor et al., 2024) – ✓ – – ✓                      
+
+> Rewarding Doubt (Bani-Harouni et al., 2026b) –✓–––LA-CDM (Bani-Harouni et al., 2026a) –✓–––P(Sufficient) (Zhang et al., 2026) ––––✓
+> SuffiCE ✓✓✓✓✓
+> Table 12: Comparison with the closest prior work along the five properties defined below. ✓yes, – no.
+
+E Comparison with Related Work 
+
+We compare our setting with the closest prior work on confidence estimation along five properties (Ta-ble 12). • Pre-answer : the confidence is produced be-fore any answer is generated, so it can decide whether to answer or to gather more evidence. • Trained : the confidence estimator is trained, rather than read from an untrained model or elicited by prompting. • Controlled evidence subsets : the same prob-lem is observed with different combinations of evidence, not only with evidence that accu-mulates in a fixed order. • Within-problem evaluation : the evaluation tests whether changes in confidence follow changes in success across states of the same problem. • Own token probability : the confidence is the model’s next-token probability, with no added classifier head or verbalized number. P(IK) (Kadavath et al., 2022) trains an added value head to predict, from the question alone, whether the model will answer correctly. It adds source doc-uments and hints only at evaluation and does not relate the change in P(IK) to the change in accuracy. Pre-generation probes (Lugoloobi et al., 2026) train linear probes on the model’s activations before generation to predict success, with each problem shown in a single fixed prompt. Calibration tun-ing (Kapoor et al., 2024) fine-tunes the model to judge whether a proposed answer is correct, read from its token probability. Rewarding Doubt (Bani-Harouni et al., 2026b) uses reinforcement learning to train the model to state a confidence from 0 to 10 in an answer it has already generated, with each question asked without context. LA-CDM (Bani-Harouni et al., 2026a) trains a stated confidence in a diagnosis the agent has already proposed, and the evidence is limited to the tests its agent chose to request. P(Sufficient) (Zhang et al., 2026) prompts the model for the probability that the information so far entails its answer. Its clues arrive in a fixed order, and its evaluation measures per-turn calibra-tion and whether confidence rises over turns. Each prior method shares some of these proper-ties, and ours is the only one that has all five. No prior method trains the model’s own token probabil-ity before an answer exists. P(IK) (Kadavath et al., 2022) and pre-generation probes (Lugoloobi et al., 2026) estimate success before answering but read it from an added head or probe, while calibration tun-ing (Kapoor et al., 2024) and P(Sufficient) (Zhang et al., 2026) use the model’s token probability but score an answer it has already given. SuffiCE in-stead trains the model’s own probability of choos-ing to answer, so the same next-token probability that would decide whether to answer or gather more evidence is calibrated, with no extra head and no an-swer to generate first. We choose this formulation because the model’s next-token distribution already assigns a probability to answering versus seeking more evidence, so no classifier head is added and the confidence is the model’s own preference be-tween the two actions. A full-only estimator with the same formulation falls short of SuffiCE (§5.2), so the gains come from training across evidence states. Two further properties set SuffiCE apart, and no prior method has either. Training on con-trolled evidence subsets of the same problem lets the estimator learn which evidence decides success, rather than only which problems are hard (§5.2). Evaluating within each problem tests this directly, showing that confidence rises with the decisive evi-dence and not with every piece added (§5.3). 23 F Case Studies 
+
+F.1 MuSiQue Case Studies 
+
+We examine two branching (3hop2) questions from the MuSiQue test set in detail (Tables 13 and 14). In both, the branches e1 and e2 answer two inde-pendent sub-questions, and only the final hop e3
+
+combines their answers into the requested date. 
+
+Case 1: When the Republicans took control of the Senate. The branches establish that Alaska supports the Republicans ( e1) and that the Senate sets its own rules ( e2), but only e3 gives the date on which the Republicans regained the Senate. With both branches shown, no sampled answer is correct. The base logit nonetheless jumps from at most 0.02 to 0.50, treating the two branches as progress de-spite the lack of sampled success. SuffiCE stays at or below 0.02, matching this low success rate. Once e3 is shown, 20% of sampled answers are cor-rect. SuffiCE rises to 0.19, closely matching this rate, while the base logit falls to 0.11 and becomes underconfident. 
+
+Case 2: When the Dutch reached New Zealand. 
+
+The branches establish that The Lord of the Rings was filmed in New Zealand ( e1) and that the Dutch first brought enslaved people to New York ( e2), but only e3 gives the date on which the Dutch naviga-tor Abel Tasman reached New Zealand. Again no sampled answer is correct with both branches, yet the base logit climbs with each branch to 0.98. Suf-fiCE reaches only 0.16. With full evidence, 30% of sampled answers are correct. SuffiCE gives 0.34, again close to this rate, while the base logit stays at 0.96 and is far overconfident. 
+
+Comparing the two full states. The two ques-tions share the same structure and both show all three supporting paragraphs, yet they differ in how often they are answered correctly. SuffiCE follows this difference, matching each success rate within 0.04, whereas the base logit misses in opposite di-rections. The confidence of SuffiCE is not fixed by the evidence being complete, so it judges not only whether the reasoning chain is complete but also how likely the answering model is to succeed once it is. 
+
+F.2 Full Evidence States of the Case Studies 
+
+We give the complete inputs behind the clinical case study of §5.3 and the first MuSiQue case study of §F.1 word for word, with the evidence states                                     
+
+> When did the party Alaska generally supports take control of the determiner of rules of the US House and US Senate?
+> Answer: January 2015
+> e1Alaska has voted Republican in nearly every presidential election since statehood. →Republicans
+> e2Each chamber of Congress sets its own rules (Article I), and the Senate adopts its Standing Rules. →the Senate
+> e3Republicans regained the Senate majority in the Congress that began in January 2015, having last held it in January 2007. →January 2015 Evidence ∅e1e2e1+e2e1+e2+e3
+> Success 0.10 0.00 0.00 0.00 0.20 Base 0.02 0.02 0.00 0.50 0.11 SuffiCE 0.01 0.01 0.01 0.02 0.19
+
+Table 13: Case study on a 3hop2 MuSiQue question (Qwen3.5-9B), where the branches e1 and e2 together lead to the final hop e3. Columns are evidence states, marked by which supporting facts are shown ( ∅ for none).                                    
+
+> When did the people who first imported slaves to New York come to the country where The Lord of the Rings was filmed?
+> Answer: 13 December 1642
+> e1The Lord of the Rings trilogy was filmed entirely in New Zealand. →New Zealand
+> e2Enslaved Africans were first brought into New York by the Dutch, and later the English. →the Dutch
+> e3Dutch navigator Abel Tasman was the first European to sight New Zealand, on 13 December 1642.
+> →13 December 1642 Evidence ∅e1e2e1+e2e1+e2+e3
+> Success 0.00 0.00 0.00 0.00 0.30 Base 0.12 0.15 0.65 0.98 0.96 SuffiCE 0.02 0.03 0.06 0.16 0.34
+
+Table 14: A second case study on a 3hop2 MuSiQue question (Qwen3.5-9B), in the format of Table 13. The shaded state has both branches but not the final hop. 
+
+of each example and the evidence they contain (Tables 15 and 16). The state names and evidence labels, such as {1, 4} or e1, are defined only for analysis and are never shown to the model. The model sees only the question and the evidence as it appears in the input, with the section headings of the clinical case but no indication of which state it is in. 24 Objective Assess and diagnose the infant brought in by a concerned mother due to bilious vomiting and inability to pass meconium, with observed abdominal distension. Answer: Hirschsprung’s disease  
+
+> 1
+
+HISTORY Demographics: 2-day-old male infant. History: The infant was born via a home birth without complications. The mother reports that the infant has had bilious vomiting and has not been able to pass meconium since birth. She also notes that the infant’s abdomen appears distended. Primary symptom: Bilious vomiting. Secondary symptoms: Inability to pass meconium, Abdominal distension. Past medical history: Newborn, no prior medical history. Birth was uneventful. Social history: The infant is the first child of the family. No known family history of genetic or congenital diseases. Review of systems: The infant shows signs of distress, possibly due to abdominal discomfort.  
+
+> 2
+
+PE Vital signs: Temperature 37.5 ◦C (99.5 ◦F), Blood pressure not applicable for age, Heart rate 145 bpm, Respiratory rate 40 breaths/min. Abdominal examination: Inspection: Noticeable distension. Auscultation: Decreased bowel sounds. Percussion: Tympanic sound noted, indicating gas. Palpation: The abdomen is firm and distended, with palpable bowel loops; the infant shows signs of discomfort during palpation.  
+
+> 3
+
+BIOPSY Rectal biopsy, histopathology: Absence of ganglion cells in the submucosa and myenteric plexus, consistent with Hirschsprung’s disease.  
+
+> 4
+
+IMAGING Abdominal X-ray, findings: Dilated loops of bowel with no gas in the rectum, suggestive of a distal obstruction. State Sections shown 
+
+{1} HISTORY 
+
+{1, 2} HISTORY , PE 
+
+{1, 4} HISTORY , I MAGING 
+
+{1, 3, 4} HISTORY , B IOPSY , I MAGING 
+
+{1, 2, 3, 4} HISTORY , PE, B IOPSY , I MAGING 
+
+Table 15: Full input of the MedQA case of Table 3 and the evidence states shown there. Each state shows the objective followed by the listed sections, verbatim. 
+
+25 Question When did the party Alaska generally supports take control of the determiner of rules of the US House and US Senate? 
+
+Answer: January 2015  
+
+> e1
+
+Alaska. Alaska regularly supports Republicans in presidential elections and has done so since statehood. Republicans have won the state’s electoral college votes in all but one election that it has participated in (1964). No state has voted for a Democratic presidential candidate fewer times. Alaska was carried by Democratic nominee Lyndon B. Johnson during his landslide election in 1964, while the 1960 and 1968 elections were close. Since 1972, however, Republicans have carried the state by large margins. In 2008, Republican John McCain defeated Democrat Barack Obama in Alaska, 59.49% to 37.83%. McCain’s running mate was Sarah Palin, the state’s governor and the first Alaskan on a major party ticket. Obama lost Alaska again in 2012, but he captured 40% of the state’s vote in that election, making him the first Democrat to do so since 1968.  
+
+> e2
+
+Standing Rules of the United States Senate. The Standing Rules of the Senate are the parliamentary procedures adopted by the United States Senate that govern its procedure. The Senate’s power to establish rules derives from Article One, Section 5 of the United States Constitution: “Each House may determine the rules of its proceedings. . . ”  
+
+> e3
+
+2014 United States Senate elections. The Republicans regained the majority of the Senate in the 114th Congress, which started in January 2015; the Republicans had not controlled the Senate since January 2007. They had needed a net gain of at least six seats to obtain a majority. They held all of their seats, and gained nine Democratic - held seats. Republicans defeated five Democratic incumbents:  
+
+> d1
+
+Democratic Party of Oregon. The Democratic Party of Oregon, based in Portland, is the official Oregon affiliate of the United States Democratic Party. It is recognized by the state of Oregon as a major political party, along with the Oregon Republican Party. The State Central Committee, made up of two delegates elected from each of Oregon’s 36 counties and one additional delegate for every 15,000 registered Democrats, is the main authoritative body of the party. After Oregon was admitted into the Union in 1859, the Democratic party controlled the state. Oregon elected twice as many Democrats as Republicans between 1859 and 1879 in statewide elections for governor, secretary of state, state treasurer, and congressmen. The party holds 38 members in the State House that has 60 representatives total, and 18 members in the State Senate, out of 30 delegates total. The party also holds the Governor’s office (Kate Brown), Attorney General (Ellen Rosenblum), Labor Commissioner (Val Hoyle), and State Treasurer (Tobias Read). The Democrats also have both U.S senate positions in their state and send four of the five U.S House representatives from Oregon to D.C.  
+
+> d2
+
+Tammany Hall. Tammany Hall, also known as the Society of St. Tammany, the Sons of St. Tammany, or the Columbian Order, was a New York City political organization founded in 1786 and incorporated on May 12, 1789, as the Tammany Society. It was the Democratic Party political machine that played a major role in controlling New York City and New York State politics and helping immigrants, most notably the Irish, rise up in American politics from the 1790s to the 1960s. It typically controlled Democratic Party nominations and political patronage in Manhattan from the mayoral victory of Fernando Wood in 1854 and used its patronage resources to build a loyal, well - rewarded core of district and precinct leaders; after 1850 the great majority were Irish Catholics.  
+
+> d3
+
+Political party. At the same time, the political party reached its modern form, with a membership disciplined through the use of a party whip and the implementation of efficient structures of control. The Home Rule League Party, campaigning for Home Rule for Ireland in the British Parliament was fundamentally changed by the great Irish political leader Charles Stewart Parnell in the 1880s. In 1882, he changed his party’s name to the Irish Parliamentary Party and created a well-organized grass roots structure, introducing membership to replace “ad hoc” informal groupings. He created a new selection procedure to ensure the professional selection of party candidates committed to taking their seats, and in 1884 he imposed a firm ‘party pledge’ which obliged MPs to vote as a bloc in parliament on all occasions. The creation of a strict party whip and a formal party structure was unique at the time. His party’s efficient structure and control contrasted with the loose rules and flexible informality found in the main British parties; – they soon came to model themselves on the Parnellite model. State Paragraphs shown, in order Question only —Distractors only d1 d2 d3
+
+{e1} d1 e1 d3
+
+{e2} e2 d1 d3
+
+{e1, e 2} e2 d1 e1
+
+{e1, e 3} d1 e1 e3
+
+{e2, e 3} e2 d1 e3
+
+{e1, e 2, e 3} e2 e1 e3
+
+Table 16: Full input and all eight evidence states of the 3hop2 MuSiQue question of Table 13. Supporting paragraphs 
+
+e1–e3 and distractors d1–d3 are shown verbatim. The six paragraphs of each question are shuffled once into a fixed order, here e2, d 1, d 2, e 1, e 3, d 3, and every state shows its paragraphs in that order, so a paragraph’s position does not reveal the state. Every state except the question-only one shows three paragraphs, padded with distractors. 
+
+26 G Ethical Considerations 
+
+Our clinical experiments use MIMIC-IV-Ext Clin-ical Decision Making (Hager et al., 2024), a de-identified dataset accessed through PhysioNet un-der its data use agreement, and we do not release its data. SuffiCE is a research method and is not intended for clinical use. We used Claude and Chat-GPT as AI assistants in preparing this manuscript, in accordance with the ACL policy on AI writing assistance. 27
