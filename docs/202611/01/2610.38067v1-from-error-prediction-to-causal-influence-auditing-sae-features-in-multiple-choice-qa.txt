@@ -1,0 +1,616 @@
+Title: From Error Prediction to Causal Influence: Auditing SAE Features in Multiple-Choice QA
+
+URL Source: https://arxiv.org/pdf/2610.38067v1
+
+Published Time: Fri, 30 Oct 2026 00:41:30 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# From Error Prediction to Causal Influence: Auditing SAE Features in Multiple-Choice QA 
+
+Aria Nourbakhsh Adelaide Danilov Oleksandr Marchenko Breneur Salima Lamsiyah 
+
+Department of Computer Science (DCS), University of Luxembourg 
+
+Correspondence: aria.nourbakhsh@uni.lu 
+
+Abstract 
+
+Sparse autoencoders (SAEs) can predict inter-nal features associated with model errors, but association alone does not establish causal in-fluence. We study this distinction in multiple-choice question answering, where answer pref-erence can be measured by the logit margin between the correct answer and the compet-ing choices. Across eight datasets, we ana-lyze Gemma 3 1B and 4B with Gemma Scope SAEs. We propose a pipeline to filter out the features that have high correlation with format and content artifacts, such as prompt and answer permutation, and evaluate the re-maining ones with causal feature interventions. Our results show that SAE activations contain predictive signals about wrongness and uncer-tainty across models and datasets. After fil-tering artifact-contaminated features, selected features for causal intervention at question and option spans produce larger absolute margin shifts and a higher wrong-to-correct rate than randomly selected features, indicating greater causal leverage. However, answer flips are rare, and we do not observe stable effect di-rections across meaning-preserving changes in prompt format and answer order. An adapted HalluSAE baseline produces larger final-token margin changes, but relies on substantially con-taminated features and does not significantly improve correction rates. Therefore, the identi-fied features reflect context-dependent answer competition rather than the mechanism of in-correct answer errors. 
+
+1 Introduction 
+
+Large language Models (LLMs) can produce out-puts that are incorrect or unsupported by the con-text (Ji et al., 2023). In multiple-choice evalua-tion, observed behavior can also change under se-mantically equivalent prompt forms or answer or-ders (Pezeshkpour and Hruschka, 2024; Ganesh et al., 2026). An incorrect answer may reflect a learned misconception (Lin et al., 2022), un-certainty or competition between plausible candi-dates (Kuhn et al., 2023; Farquhar et al., 2024), or a surface-form bias (Yang et al., 2025). One of the tools to study the behavior of LLMs is Sparse autoencoders (SAEs). SAEs decom-pose language-model activations into sparse fea-ture dictionaries (Cunningham et al., 2024; Gao et al., 2024; Rajamanoharan et al., 2024a; Shu et al., 2025). They support large-scale feature anal-ysis and predictions (McDougall et al., 2025; Chen et al., 2026), but predictive or attributive features need not be causal mechanisms (Makelov et al., 2024; Karvonen et al., 2025; Gulko et al., 2025; Kantamneni et al., 2025). A feature may correlate with an incorrect answer because it tracks uncer-tainty, answer format, option position, topic, or final-token decision pressure rather than because it causes the model to choose that answer (Sclar et al., 2024; Orgad et al., 2025). This distinction is the main idea of the current work. In this paper, we explore three questions about SAE features: whether SAE activations predict errors, whether intervening on a feature changes answer preferences, and whether those changes cor-rect errors. Forced-choice evaluation provides an explicit output space for comparing answer log-its (Stoehr et al., 2024; Wang et al., 2024; Ganesh et al., 2026). We explore these questions on two instruction-tuned Gemma 3 models (Gemma Team, 2025); we combine behavioral probes, artifact-risk screening, contrastive direct logit attribution, and instance interventions to answer the above ques-tions. Our results show that SAE features can predict forced-choice errors, but many of them are entan-gled with format, topic, or answer-choice structure. Only question- and option-span interventions pro-duce larger distributional shifts, and only a small number of samples flip to the correct answer. Hence, our contributions are: 1arXiv:2610.38067v1 [cs.CL] 27 Oct 2026 • We introduce a pipeline for discovering behav-iorally predictive SAE features across eight datasets and six token positions. This pipeline combines multiple stages to select predictive and causal features for the model’s answer choices while filtering out features that are highly correlated and contaminated by the datasets, prompt, answer letter, and other arti-facts. • We causally evaluate the filtered features using steering. We found that features extracted from question and option spans produce larger margin changes and a higher wrong-to-correct rate than random-active controls, but answer flips are rare, and effect directions are unstable across steering methods, prompt templates, and answer permutations. • We quantify artifact entanglement in both our candidates and an adapted HalluSAE (Chen et al., 2026) baseline. HalluSAE is predictive and produces large final-token margin shifts; however, 95 .5% of its nonzero feature units fail our artifact-risk criterion. This shows that predictive performance and logit influ-ence do not by themselves establish artifact-independent causal mechanisms. 
+
+2 Related Work 
+
+Sparse Autoencoders for Language Model In-terpretability. Sparse autoencoders are among the promising methods for decomposing dense language-model activations into interpretable la-tent features. Early work showed that SAEs can recover features that are more interpretable than in-dividual neurons (Cunningham et al., 2024), while later work improved reconstruction and sparsity tradeoffs through larger-scale training and architec-tural variants such as Gated SAEs and JumpReLU SAEs (Gao et al., 2024; Rajamanoharan et al., 2024a,b). At a high level, an SAE is trained on internal model activations to reconstruct a dense activation vector from a much larger but sparse set of latent features. Given a model activation x ∈ Rd, the encoder maps it to nonnegative feature activations 
+
+z ∈ Rm, often with m ≫ d:
+
+z = σ(Wenc (x − bdec ) + benc ) , (1) 
+
+ˆx = bdec + Wdec z. (2) The SAE is trained to reconstruct x while keep-ing z sparse, for example with an L1-regularized objective: 
+
+LSAE = ∥x − ˆx∥22 + λ∥z∥1. (3) Here, each column of Wdec can be interpreted as a learned feature direction, and the scalar zi indicates how strongly feature i is active on a given token. Several recent methods uses SAE features for steering, including activation additions, refusal steering, in-context-learning improvement, and knowledge-selection control (Soo et al., 2025; Chal-nev et al., 2024; O’Brien et al., 2025; Cho and Hockenmaier, 2025; Zhao et al., 2025). These stud-ies show that sparse directions can sometimes be used as actionable control handles. 
+
+Mechanistic analyses of multiple-choice answer-ing. Prior work distinguishes answering a ques-tion from producing its associated option label. Lieberum et al. (2023) identify attention heads that promote the correct answer letter. Wiegreffe et al. (2025) use activation patching and vocabu-lary projections to distinguish answer-symbol se-lection from its subsequent promotion in the output distribution. Wong et al. (2026) identify linearly decodable option-correctness signals and evidence that selecting answer content precedes mapping it to an output symbol. Related causal analyses iden-tify attention heads contributing to option-symbol bias (Yang et al., 2025). These findings motivate distinguishing knowledge-related behavior from format-dependent processing. Our study comple-ments this work by testing whether behaviorally predictive SAE features, screened for potential arti-facts, support reliable error correction under feature interventions and changes in prompt format. 
+
+Evaluation, Artifacts, and Controls. The SAE literature increasingly stresses that feature discov-ery pipelines need rigorous controls. SAEBench and related evaluation work argue for task-specific benchmarks rather than relying only on qualita-tive feature labels (Karvonen et al., 2025; Makelov et al., 2024; Gulko et al., 2025). Sparse probing work questions when sparse features are actually useful for known downstream concepts (Kantam-neni et al., 2025; Peng et al., 2025), and work on feature explanation falsification highlights the risk that a single description can overstate what a fea-ture reliably represents (Ma et al., 2025). Our work builds on this line of work by ask-ing a narrower causal question: whether features 2associated with wrong forced-choice answers af-fect logit difference and preference between correct vs. wrong answers. Because predictive features can still be non-causal, polysemantic, or artifact-driven (Fereidouni et al., 2026; Kantamneni et al., 2025), we use ablation and steering as diagnostic tests and incorporate artifact controls before inter-preting a feature mechanistically. 
+
+3 Methodology 
+
+This work has two main phases. Phase 1 is used for feature candidate discovery and selection. In Phase 2, we perform causal interventions. Figure 1 summarizes the full pipeline. 
+
+3.1 Phase 1 Behavioral extraction. For each multiple-choice prompt i, let Li be the available answer letters and 
+
+yi the gold letter. Let gi(v) denote the next-token logit for token v at the answer position. For each answer letter ℓ ∈ L i, let T (ℓ) be its set of valid single-token encodings. We pool their logits and normalize across the available letters: 
+
+zi,ℓ = log X 
+
+> v∈T(ℓ)
+
+egi(v), (4) 
+
+pi(ℓ) = ezi,ℓ 
+
+P 
+
+> k∈L i
+
+ezi,k . (5) Let wi be the highest-scoring non-gold letter. The quantities zi,y i and zi,w i are the pooled logits from Eq. 4, evaluated at the gold letter yi and the strongest wrong letter wi, respectively. Their dif-ference defines the correct-vs.-top-wrong margin: 
+
+mi = zi,y i − zi,w i . (6) We additionally record pi(yi), pi(wi), and answer-letter entropy Hi = − P 
+
+> ℓ∈L i
+
+pi(ℓ) log pi(ℓ).
+
+SAE feature extraction. We encode residual-stream states using pretrained Gemma Scope 2 SAEs (McDougall et al., 2025). Each behavioral in-stance i corresponds to one rendered prompt under a particular template, answer permutation, and re-sponse mode (Sec. 4.2). For feature f and token set 
+
+Pi, we max-pool token activations as a feature may occur multiple times in different spans (Sec. 4.2): 
+
+Ai,f = max 
+
+> t∈Pi
+
+ai,t,f . (7) where ai,t,f is the SAE activation of feature f at token position t in behavioral instance i.
+
+Feature discovery. Within each dataset–model– SAE–response-mode–position setting, we summa-rize each feature by its activation support and frequency, mean and maximum activation, class-conditional means, and correlations with mi, Hi,
+
+pi(yi), pi(wi), zi,y i , and zi,w i .We use two complementary analyses. The 
+
+candidate-ranking probe fits L1-regularized logis-tic regressions for four binary targets: wrong vs. correct (WvC), low vs. high margin (LMvHM), wrong high-confidence vs. correct high-confidence or high-margin (WHC), and wrong vs. correct among low-margin instances (WLM). Ridge re-gressions are used for the continuous margin and entropy targets. A separate statistical audit fits the same six targets using at most 1,000 features per setting, prioritizing features active on the largest number of behavioral instances. We also com-pute per-feature Pearson and Spearman correla-tions to measure linear and monotonic associations with each behavioral target, bootstrap intervals for binary mean-activation differences, and mutual-information estimates. Appendix Table 7 gives the exact target definitions and thresholds. 
+
+Artifact controls. Multiple-choice prompts can create format-related shortcuts, so we evaluate four possible confounds for each feature active on at least 20 behavioral instances. Each control pro-duces a raw score, which we convert to a within-run percentile. The option-letter score qletter  
+
+> f
+
+measures whether activation depends on the correct answer label af-ter subtracting the mean activation within matched example–template groups. For example, a feature that consistently activates more when the correct an-swer is labeled A receives a high option-letter score. The prompt score qprompt  
+
+> f
+
+measures dependence on the prompt template after the corresponding adjustment within matched example–permutation groups. The permutation score qperm  
+
+> f
+
+measures in-stability across answer-order permutations, and the text score qtext  
+
+> f
+
+is the strongest association with question categories, text lengths, answer-text simi-larities, or TF-IDF/SVD text components. We summarize the four controls with 
+
+af = max {qletter  
+
+> f
+
+, q prompt  
+
+> f
+
+, q perm  
+
+> f
+
+, q text  
+
+> f
+
+}. (8) For example, qletter  
+
+> f
+
+= .90 means that the feature has stronger option-letter dependence than 90% 
+
+among the tested features in that setting. We take the maximum score as strong evidence that any 3Phase 1: discovery and filtering    
+
+> Phase 2: DLA and intervention
+> Multiple-choice
+> datasets
+> Behavioral
+> extraction
+> logits, margin,
+> entropy, confidence
+> SAE activation
+> extraction
+> FP, Q, O, GR,
+> C/TW spans
+> Feature profiles
+> and screens
+> probes, statistics,
+> profile differences
+> Artifact-aware
+> selection
+> controls, support,
+> coverage, top-300
+> Prompt-template and
+> answer-permutation
+> controls
+> Artifact controls
+> letter, prompt,
+> permutation, text/topic
+> Oracle answer spans
+> C and TW kept
+> separate
+> Contrastive DLA
+> crosslink
+> correct vs.
+> top-wrong logits
+> Candidate
+> manifest
+> directional groups
+> for intervention
+> Feature
+> interventions
+> zero, mean,
+> steering
+> Interpretation
+> sparse, mixed
+> decision features
+> Baselines
+> random-active,
+> artifact/semantic,
+> HalluSAE
+> Clean-feature funnel: all feature evidence -> artifact risk af<= 0.80 -> density and support filters -> dataset coverage and sign consistency -> top-300
+> shortlist -> DLA-filtered intervention manifest
+> separate shortlist
+
+Figure 1: Overview of the discovery and intervention pipeline. Behavioral measurements and SAE activations feed predictive, statistical, and artifact-aware screening. Contrastive DLA then prioritizes separate non-oracle and oracle candidates for feature interventions and baseline comparisons. Position codes are FP (final prompt token), Q (question span), O (option span), GR (generated reasoning), C (correct-choice text), and TW (top-wrong-choice text); C and TW are oracle spans. 
+
+single confound is sufficient to assign a high risk. Appendix A gives the exact control statistics, co-variates, and clean-feature eligibility criteria. 
+
+Predictive shortlist. For each model–layer– SAE-width–feature unit f , we aggregate validation-weighted candidate-ranking evidence across datasets, response modes, and token positions. A unit is eligible only if its maximum artifact risk is at most 0.80 , its activation frequency is below 0.95 in every contributing setting, it is active on at least 100 behavioral instances in one setting, and it has evidence from at least two datasets. We also require coefficient-sign consistency of at least 0.60 . Within each token position, this consistency is 
+
+cf = |P
+
+r sf,r |
+
+P
+
+r |sf,r | . (9) where sf,r is signed, validation-weighted evidence derived from a candidate-ranking probe coefficient; the unit-level value is averaged across contribut-ing positions. We rank eligible units by artifact-penalized evidence and retain the top 300 sepa-rately for the non-oracle and oracle pools. 
+
+DLA-based selection. After artifact-aware top-k
+
+selection, we use contrastive direct logit attribution (DLA) as another heuristic before interventions. DLA specifies whether an active feature’s decoder direction points toward the correct-answer logit or the strongest wrong-answer logit. A feature may be more active on incorrect instances while its decoder direction has little direct alignment with the correct-versus-wrong logit contrast; it can therefore predict errors without directly shifting the model toward either answer. Let df be the decoder direction of feature f , and uℓ the mean unembedding direction for the valid token variants of answer letter ℓ. DLA is defined as: 
+
+CDLA 
+
+i,f = Ai,f d⊤
+
+f (uyi − uwi ). (10) Positive values support the correct-vs. top-wrong margin, negative values support the top-wrong an-swer, and magnitude measures alignment strength. We then retain features satisfying fixed directional-consistency or high-magnitude mixed-direction cri-teria, detailed in Appendix B. 
+
+3.2 Phase 2 Feature interventions. For a selected feature f
+
+and intervention span Pi, we target a nominal acti-vation τi,t,f by applying the decoder-vector update 
+
+r′
+
+i,t = ri,t + ( τi,t,f − ai,t,f )df , t ∈ Pi. (11) Here, ri,t is the residual-stream vector at token position t in instance i at the intervention layer, and r′
+
+i,t is its updated value. We test zero replacement ( τi,t,f = 0 ), mean replacement ( τi,t,f = μf ), and upward steering (τi,t,f = ai,t,f + λσ f ). Here, μf and σf are the mean and standard deviation of the row-level 4Dataset Source split Nsamples Choices CommonSenseQA train 4,000 5TruthfulQA MC1 validation 817 2–13 HaluEval QA data 4,000 2Wiki-FACTOR data 1,560 4Med-HALT R-NOTA dev 2,636 4MMLU validation 1,531 4SciQ train 4,000 4FEVER dev 4,000 3
+
+Table 1: Datasets, source splits, sample counts, and numbers of answer choices before prompt expansion. 
+
+max-pooled activation Ai,f across behavioral in-stances in the same dataset–model–layer–SAE-width–response-mode–position configuration. 
+
+4 Experiments 
+
+4.1 Datasets and splits 
+
+We evaluate on eight multiple-choice datasets, sum-marized in Table 1. We select 4000 random sam-ples, cap them at most 2000 characters, and convert each sample to the same lettered-choice interface. CommonSenseQA tests commonsense reason-ing among plausible alternatives (Talmor et al., 2019). TruthfulQA MC1 tests whether a model favors true answers over common misconceptions (Lin et al., 2022). MMLU covers academic and professional knowledge across different subjects (Hendrycks et al., 2021). SciQ contains science questions; we use only its questions and answer choices without the supporting passage (Welbl et al., 2017). HaluEval QA asks the model to dis-tinguish a supported answer from a hallucinated one using the supplied passage (Li et al., 2023). Wiki-FACTOR contrasts factual Wikipedia contin-uations with contradictory alternatives (Muhlgay et al., 2024). Med-HALT R-NOTA evaluates errors in medical reasoning (Pal et al., 2023). FEVER is converted to classification among Supported , Re-futed , and Not enough information , without evi-dence sentences (Thorne et al., 2018). We split original examples into discovery, valida-tion, and test partitions (approximately 60/20/20). 
+
+4.2 Prompting and activation positions 
+
+Different prompts can change the behavior of the models (Sclar et al., 2024). Therefore, We use three prompt templates that vary option-label syn-tax and the answer cue. Options are formatted as A. , (A) , or A: , accompanied by cues such as Answer: , The correct option is , or               
+
+> Code Token position Role FP final prompt token primary decision readout Qquestion/context span non-oracle context Ocomplete option block non-oracle choices GR generated rationale non-oracle generation Cgold-choice text oracle diagnostic TW top-wrong-choice text oracle diagnostic
+
+Table 2: Reported activation positions. Multi-token fea-ture activations are aggregated by taking their maximum over the corresponding span. 
+
+Final answer: . Their structures and response cues are given in Appendix Table 12. As LLMs are sensitive to the positions of answer letters (Pezeshkpour and Hruschka, 2024; Molfese et al., 2025), we apply 3 permutations to the answer letters and their order, adding to the original order of the answers in the dataset. We also evaluate three response modes: In forced letter (FL), the prediction is the highest-scoring answer letter at the next-token position. In reason first (RF), the model generates a rationale followed by a final letter. In letter then reason (LTR), it generates the letter before its explanation. Both generative modes use greedy decoding with at most 80 new tokens. Generated answers are parsed to response letters; failed RF parses are recovered using an appended Final answer: cue. For all modes, margin, answer probabilities, and entropy are computed from the answer-letter logits. Table 2 summarizes the six activation positions we extract the SAE features. After sampling and length filtering, we extract SAE activations from 1,472,694. rendered prompt instances. 
+
+4.3 Models and SAEs 
+
+We study the instruction-tuned Gemma 3 models at 1B and 4B scales (Gemma Team, 2025). For each model, we use the corresponding Gemma Scope 2 residual-stream SAEs (McDougall et al., 2025). We analyze layers 17 and 22 for Gemma 3 1B and layers 22 and 29 for Gemma 3 4B, using 16K- and 65K-width SAEs at each layer. 
+
+4.4 Feature Selection 
+
+We construct separate non-oracle (FP, Q, O, and GR) and oracle (C and TW) candidate pools. For each dataset, model, layer, SAE width, response mode, and position, we fit the six candidate-ranking probes from Section 3.1 on discovery instances, us-ing fixed regularization ( C = .1 for classification 5and α = 100 for regression). From each candidate-ranking probe, we retain up to 100 features ranked by absolute coefficient. A feature at rank r con-tributes Q/ log 2(r + 1) , where Q is the candidate-ranking probe’s validation quality (Appendix A). We then group records for the same model–layer– SAE-width–feature unit across targets, datasets, re-sponse modes, and positions. The aggregate score rewards repeated, directionally consistent evidence and penalizes artifact risk, dense activation, and discovery–validation gaps. We apply the eligibility criteria described in Sec-tion 3.1 to form separate non-oracle and oracle shortlists. DLA selection uses only discovery and validation instances, with the thresholds specified in Appendix B, yielding 55 non-oracle and 22 ora-cle feature units. Interventions are evaluated only on test instances. 
+
+4.5 Intervention Setup 
+
+We intervene on one SAE feature at a time in forced-letter runs using the residual update in Eq. 11. For each dataset–model–layer–SAE-width– feature–position combination, we max-pool its saved token activations within each behavioral in-stance and select up to ten active test instances with the largest pooled values. The edit is applied to ev-ery token in the corresponding span of FP, Q, or O for non-oracle experiments, and C or TW for oracle spans. 1
+
+For each selected instance, we compare zero replacement ( τ = 0 ), mean replacement ( τ =
+
+μf ) (Marks et al., 2025), and upward steering (τ = ai,t,f + λσ f ) (O’Brien et al., 2025) for 
+
+λ ∈ { 1, 2, 4} against a no-intervention pass on the same prompt. For any outcome x, we de-fine ∆x = xint − xbase intervention minus no-intervention. We denote the change in the correct-vs.-strongest-wrong margin by ∆m, changes in the gold and strongest-wrong logits by ∆zy and ∆zw,changes in their probabilities by ∆py and ∆pw,and the change in answer-letter entropy by ∆H. A positive ∆m indicates a shift toward the correct answer. 
+
+> 1GR contributes to feature discovery and DLA selection but is not an intervention span. In letter-then-reason mode it occurs after the answer; in reason-first mode, causal testing would require online intervention during autoregressive gener-ation, which the present fixed-span implementation does not support.
+
+4.6 Baselines 
+
+We use two baselines. Random-active interven-tion controls sample five eligible features that are active on the test split for each forced-letter FP, Q, or O run. For each feature, we select up to ten test instances with the highest activation and apply the same interventions used for selected fea-tures. Also, for comparison, we adapted the Hal-luSAE baseline (Chen et al., 2026), which com-putes DLA on discovery instances for each dataset– model–SAE-width setting at FP and selects 100 features in total across the two selected layers. It then fits a class-balanced L1 logistic wrong-vs.-correct classifier, selecting its regularization by five-fold cross-validation on discovery data and reporting validation and test performance. We use layers 17/22 for 1B and 22/29 for 4B instead of reproducing HalluSAE’s Stage-I layer localization. We additionally run ten random-active selection repetitions, each containing 100 features. For the causal FP comparison, we match the number of HalluSAE and selected run-specific feature tests within each dataset–model–layer–SAE-width and apply the same interventions on test instances. 
+
+5 Results and Discussion 
+
+5.1 MCQA Performance 
+
+The performance of the two Gemma models on each dataset differs substantially. We define the wrong-high-confidence (WHC) rate as the percent-age of all test instances on which the model answers incorrectly while assigning at least 0.70 probabil-ity to its strongest wrong answer. Macro-averaged across datasets, accuracy is 43 .8% for the 1B model and 58 .6% for the 4B model; the corresponding WHC rates are 52 .0% and 39 .3% . The 4B model has higher accuracy and a lower WHC rate on ev-ery dataset. Appendix Table 6 reports the complete dataset–model breakdown. 
+
+5.2 Statistical Audit 
+
+We report the statistical audit described in Sec-tion 3.1, using up to 1,000 features per setting and evaluating discovery-trained models on validation and test instances. Table 3 reports final-prompt-token (FP) test per-formance over 192 runs. LMvHM and WHC have the highest mean AUROC (.739), followed by WvC (.715) and WLM (.706). WLM has a higher F1 (.805) despite its lower AUROC, consistent with the class imbalance induced by restricting the task 6to low-margin instances. Entropy is more pre-dictable than margin: its median R2 is .285, com-pared with .117 for margin.                         
+
+> Target Metric Test summary WvC AUROC / F1 .715 / .644 LMvHM AUROC / F1 .739 / .711 WHC AUROC / F1 .739 / .688 WLM AUROC / F1 .706 / .805 Margin R2/r.117 / .357 Entropy R2/r.285 / .541
+> Table 3: FP test performance over 192 runs: eight datasets, eight model–layer–SAE configurations, and three response modes. Binary metrics are means; regres-sion R2and Pearson rare medians.
+
+Appendix D gives the exact statistical-audit setup, and Table 7 defines the six targets. Tables 8 and 9 report all six activation positions, and Ta-bles 10 and 11 provide the full eight-dataset break-down. 
+
+5.3 Feature Selection 
+
+Table 4 summarizes the candidate-ranking aggrega-tion described in Section 4.4. Aggregation produced 81,304 non-oracle and 48,888 oracle units. After the clean-candidate fil-ters in Sec. 4.4, 2,205 non-oracle and 1,100 oracle units remained, from which we retained the top 300 in each pool. Their mean artifact risks are .712 and .724, respectively. Appendix Figure 2 shows that strong unpenalized predictive evidence also occurs above the artifact-risk gate, motivating the separate artifact filter. Among the non-oracle top 300, the strongest evidence comes from FP for 99 units, O for 93, Q for 56, and GR for 52. The oracle shortlist is nearly 151 for C and 149 for TW 149. Pool Ranked Eligible Selected Mean af          
+
+> Non-oracle 81,304 2,205 300 .712 Oracle C/TW 48,888 1,100 300 .724
+> Table 4: Validation-ranked feature selection over eight datasets. Ranked counts are aggregated feature units; el-igible units pass all clean-candidate filters. afis artifact risk.
+
+Finally, we compute DLA on discovery and vali-dation instances for all 600 shortlisted features. Ap-plying the fixed direction, magnitude, and rank cri-teria in Appendix B retains features with consistent correct- or top-wrong-answer alignment, together with features having large but mixed-direction at-tribution. This yields 55 distinct non-oracle and 22 distinct oracle feature units for intervention. 
+
+5.4 Causal Interventions 
+
+Single-feature interventions cause measurable but sparse changes whose directions are mixed. Ta-ble 5 places the non-oracle, random-active, and oracle results in one comparison. W2C, C2W, and W2W denote wrong-to-correct, correct-to-wrong, and wrong-to-different-wrong flips, respectively. 
+
+Selected versus random. Table 5 reports the position-specific event counts and average shifts. Appendix Table 16 reports the pooled selected– random differences and their bootstrap intervals. Pooling interventions at Q and O, selected features produce a larger mean absolute margin change than random-active controls ( .187 vs. .146 ). They also correct a larger fraction of initially wrong inter-vention events ( .189% vs. .058% ). Across 5,000 bootstrap resamples of model–layer–width–feature units, the selected-minus-random differences are 
+
++.041 [ .014 , . 067] for mean |∆m| and +.132 per-centage points [+ .024 , +.257] for the W2C rate. Both intervals lie above zero, providing evidence that selected features exceed random controls on these two outcomes. By contrast, the intervals for the C2W rate and |∆py| include zero, so these outcomes show no clear selected–random differ-ence. At FP, selected features produce a smaller mean absolute margin change than random features (.154 vs. .237 ; difference −.083 [ −.118 , −.047] ). Thus, selected features outperform random controls specifically on Q/O mean |∆m| and W2C rate; this advantage does not extend to all outcomes or to FP. The matched HalluSAE comparison is reported in Appendix Table 15. 
+
+Effects across steering strengths, positions, and surface forms. Appendix Figure 3 reports the steering-strength results, and Appendix Table 14 reports outcomes at both the event and feature– prompt-pair levels. Each pair consists of one SAE feature applied to one test prompt and eval-uated under five intervention variants. Selected Q/O |∆m| increases from .164 at +1 σf to .268 
+
+at +4 σf , but only 51 .8% of pairs increase mono-tonically. After adjustment for intervention size and context, the selected–random margin-change difference remains distinguishable at O ( .049 [.014 , . 084] ), but not at Q or pooled Q/O (Table 17). Selected–random differences in sign agreement 7Set Pos. N U W2C C2W W2W ∆m |∆m| |∆py |                                                                                       
+
+> Selected FP 2,500 73 299+.016 .154 .0031 Random FP 9,950 320 18 22 19 +.007 .237 .0039 HalluSAE FP 3,650 73 593-.275 1.760 .0052 Selected Q21,110 425 16 17 8+.002 .158 .0010 Random Q15,150 320 1910 -.001 .135 .0011 Selected O20,170 415 19 19 23 -.005 .216 .0021 Random O13,395 320 743-.004 .159 .0016 Oracle C6,805 145 694-.003 .132 .0012 Oracle TW 7,790 160 050-.002 .135 .0009
+> Table 5: Final test-set intervention outcomes. Ncounts feature–instance–intervention events and Ucounts run-specific feature tests; each feature–instance pair contributes five intervention events. pyis the gold-letter probability. HalluSAE matches the selected FP candidate count within dataset–model–layer–width strata, but not the number of active instances. Oracle C/TW spans have no random-active counterpart.
+
+across matched permutations and templates also have intervals including zero. Oracle C/TW inter-ventions include both repairs and damage (6 W2C and 14 C2W events), without a matched random-active comparison. These results support local in-fluence on answer preferences, but do not establish a general correction advantage. 
+
+5.5 HalluSAE Baseline Comparison 
+
+Appendix Table 13 summarizes the baseline’s pre-dictive performance, artifact audit, and overlap with our selected features. Most features retained by the adapted HalluSAE classifier do not pass our artifact-risk criterion. Of its 711 nonzero-coefficient model–layer–SAE-width–feature units, 679 ( 95 .5% ) exceed af = 0 .80 in every forced-letter FP setting in which they are selected. Only nine units remain below this threshold in every se-lected setting. The HalluSAE units also have zero overlap with either our top-300 shortlist. Thus, HalluSAE’s predictive features are largely distinct from those retained by our artifact-aware selection. Despite this difference, HalluSAE is predictive: across 32 dataset–model–width groups, it obtains mean test AUROC/F1 of .775 /. 674 , compared with 
+
+.761 /. 659 for its random-feature controls. Appendix Table 15 reports the causal compari-son. We match 73 HalluSAE FP feature tests to our selected-feature budget within 42 dataset–model– layer–SAE-width. HalluSAE produces substan-tially larger |∆m| than selected(ours) or random FP features, with differences of +1 .606 [1 .327 , 1.902] 
+
+and +1 .524 [1 .245 , 1.818] , respectively. How-ever, its W2C rate is not detectably higher than either baseline, and its DLA-aligned margin in-terval includes zero. HalluSAE features are also much denser: their median activation frequency is .580 , compared with about .0013 for selected and random FP features. The comparison therefore matches the feature-test budget, but not activation density. It means that HalluSAE identifies dense, artifact-prone directions with substantial logit in-fluence, but not features that correct errors more reliably. 
+
+6 Conclusion 
+
+We observed that across eight datasets, SAE acti-vations contain predictive information about cor-rectness, confidence, and uncertainty. Our artifact-aware pipeline identifies candidates whose Q/O interventions change correct-vs.-wrong margins more than random-active controls and correct a larger fraction of initially wrong events. Neverthe-less, answer flips are rare, and effects are not stable across equivalent prompt formats or answer orders. The selected features influence answer preference without providing dependable error repair. However, artifact entanglement remains the main issue. Although every final candidate passes our prespecified gate, 26 of 55 non-oracle units retain an artifact or semantic tag. HalluSAE is predictive and produces larger FP margin shifts, yet 95 .5% of its nonzero units fail our artifact threshold in every setting where they are selected, without improv-ing correction rates. Thus, neither prediction nor large logit shifts establish clean error mechanisms. Our findings are consistent with sparsity favoring low-dimensional surface cues while higher-level behavior remains distributed across features (Ma et al., 2026). 8Limitations 
+
+Our results are limited to Gemma 3 1B and 4B at four mid-to-late residual layers, and 16K/65K Gemma Scope SAE based on the available pro-cessing power. Larger models may show different behavior; however, the cost of analysis and inter-vention increases substantially. Random-active controls are matched within acti-vation runs rather than exactly matched on activa-tion frequency or edit magnitude. We therefore re-port perturbation-adjusted analyses, although these do not include decoder norm, and our bootstrap intervals condition on the fixed candidate short-list. Our HalluSAE comparison applies its feature-selection method to the same analyzed layers rather than repeating its all-layer localization stage, and should therefore be viewed as a matched-layer adaptation. Finally, we focus on multiple-choice errors be-cause the constrained answer space enables precise measurement of correct-versus-wrong logits and controlled feature interventions. Extending this analysis to free-form wrong answers is an impor-tant direction for future work. 
+
+Use of AI Assistance 
+
+In preparing this work, we used AI-assisted tools for code completion with GitHub Copilot, and lan-guage editing, such as spell checking and stylistic revisions with Grammarly and ChatGPT. The au-thors take full responsibility for the scientific con-tent, analyses, and conclusions presented in this work. 
+
+References 
+
+Sviatoslav Chalnev, Matthew Siu, and Arthur Conmy. 2024. Improving steering vectors by targeting sparse autoencoder features. Preprint , arXiv:2411.02193. Boshui Chen, Zhaoxin Fan, Ke Wang, Zhiying Leng, Faguo Wu, Hongwei Zheng, Yifan Sun, and Wen-jun Wu. 2026. Hallusae: Detecting hallucinations in large language models via sparse auto-encoders. 
+
+Preprint , arXiv:2604.16430. Ikhyun Cho and Julia Hockenmaier. 2025. Toward ef-ficient sparse autoencoder-guided steering for im-proved in-context learning in large language models. In Proceedings of the 2025 Conference on Empiri-cal Methods in Natural Language Processing , pages 28961–28973, Suzhou, China. Association for Com-putational Linguistics. Hoagy Cunningham, Aidan Ewart, Logan Riggs, Robert Huben, and Lee Sharkey. 2024. Sparse autoencoders find highly interpretable features in language models. In International Conference on Learning Representa-tions .Sebastian Farquhar, Jannik Kossen, Lorenz Kuhn, and Yarin Gal. 2024. Detecting hallucinations in large language models using semantic entropy. Nature ,630(8017):625–630. Moghis Fereidouni, Muhammad Umair Haider, Peizhong Ju, and A.b. Siddique. 2026. Evaluating sparse autoencoders for monosemantic representa-tion. In Findings of the Association for Computa-tional Linguistics: EACL 2026 , pages 5969–5984, Rabat, Morocco. Association for Computational Lin-guistics. Prakhar Ganesh, Reza Shokri, and Golnoosh Farnadi. 2026. Rethinking hallucinations: Correctness, con-sistency, and prompt multiplicity. In Proceedings of the 19th Conference of the European Chapter of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 6959–6978, Rabat, Morocco. Association for Computational Linguistics. Leo Gao, Tom Dupré la Tour, Henk Tillman, Gabriel Goh, Rajan Troll, Alec Radford, Ilya Sutskever, Jan Leike, and Jeffrey Wu. 2024. Scaling and evaluating sparse autoencoders. Preprint , arXiv:2406.04093. Gemma Team. 2025. Gemma 3 technical report. Tech-nical report, Google DeepMind. Alex Gulko, Yusen Peng, and Sachin Kumar. 2025. CE-bench: Towards a reliable contrastive evaluation benchmark of interpretability of sparse autoencoders. In Proceedings of the 8th BlackboxNLP Workshop: Analyzing and Interpreting Neural Networks for NLP ,pages 1–15, Suzhou, China. Association for Compu-tational Linguistics. Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Steinhardt. 2021. Measuring massive multitask language under-standing. In International Conference on Learning Representations .Ziwei Ji, Nayeon Lee, Rita Frieske, Tiezheng Yu, Dan Su, Yan Xu, Etsuko Ishii, Yejin Bang, Andrea Madotto, and Pascale Fung. 2023. Survey of halluci-nation in natural language generation. ACM Comput-ing Surveys , 55(12):1–38. Subhash Kantamneni, Joshua Engels, Senthooran Ra-jamanoharan, Max Tegmark, and Neel Nanda. 2025. Are sparse autoencoders useful? a case study in sparse probing. Preprint , arXiv:2502.16681. Adam Karvonen, Can Rager, Johnny Lin, Curt Tigges, Joseph Bloom, David Chanin, Yeu-Tong Lau, Eoin Farrell, Callum McDougall, Kola Ayonrinde, Demian Till, Matthew Wearden, Arthur Conmy, Samuel Marks, and Neel Nanda. 2025. Saebench: 
+
+9A comprehensive benchmark for sparse autoen-coders in language model interpretability. Preprint ,arXiv:2503.09532. Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. 2023. Semantic uncertainty: Linguistic invariances for un-certainty estimation in natural language generation. 
+
+arXiv preprint arXiv:2302.09664 .Junyi Li, Xiaoxue Cheng, Xin Zhao, Jian-Yun Nie, and Ji-Rong Wen. 2023. HaluEval: A large-scale hal-lucination evaluation benchmark for large language models. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing ,pages 6449–6464, Singapore. Association for Com-putational Linguistics. Tom Lieberum, Matthew Rahtz, János Kramár, Neel Nanda, Geoffrey Irving, Rohin Shah, and Vladimir Mikulik. 2023. Does circuit analysis interpretability scale? evidence from multiple choice capabilities in chinchilla. Preprint , arXiv:2307.09458. Stephanie Lin, Jacob Hilton, and Owain Evans. 2022. TruthfulQA: Measuring how models mimic human falsehoods. In Proceedings of the 60th Annual Meet-ing of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 3214–3252, Dublin, Ireland. Association for Computational Linguistics. George Ma, Zhongyuan Liang, Irene Y. Chen, and So-mayeh Sojoudi. 2026. Do sparse autoencoders iden-tify reasoning features in language models? Preprint ,arXiv:2601.05679. George Ma, Samuel Pfrommer, and Somayeh Sojoudi. 2025. Revising and falsifying sparse autoencoder fea-ture explanations. In Advances in Neural Information Processing Systems , volume 38, Main Conference, pages 63175–63217. Curran Associates, Inc. Aleksandar Makelov, George Lange, and Neel Nanda. 2024. Towards principled evaluations of sparse au-toencoders for interpretability and control. Preprint ,arXiv:2405.08366. Samuel Marks, Can Rager, Eric Michaud, Yonatan Be-linkov, David Bau, and Aaron Mueller. 2025. Sparse feature circuits: Discovering and editing interpretable causal graphs in language models. In International Conference on Learning Representations , volume 2025, pages 23888–23923. Callum McDougall, Arthur Conmy, János Kramár, Tom Lieberum, Senthooran Rajamanoharan, and Neel Nanda. 2025. Gemma Scope 2: Technical paper. Technical report, Google DeepMind. Francesco Maria Molfese, Luca Moroni, Luca Gioffré, Alessandro Scirè, Simone Conia, and Roberto Nav-igli. 2025. Right answer, wrong score: Uncovering the inconsistencies of LLM evaluation in multiple-choice question answering. In Findings of the As-sociation for Computational Linguistics: ACL 2025 ,pages 18477–18494, Vienna, Austria. Association for Computational Linguistics. Dor Muhlgay, Ori Ram, Inbal Magar, Yoav Levine, Nir Ratner, Yonatan Belinkov, Omri Abend, Kevin Leyton-Brown, Amnon Shashua, and Yoav Shoham. 2024. Generating benchmarks for factuality evalua-tion of language models. In Proceedings of the 18th Conference of the European Chapter of the Associa-tion for Computational Linguistics (Volume 1: Long Papers) , pages 49–66, St. Julian’s, Malta. Associa-tion for Computational Linguistics. Kyle O’Brien, David Majercak, Xavier Fernandes, Richard G. Edgar, Blake Bullwinkel, Jingya Chen, Harsha Nori, Dean Carignan, Eric Horvitz, and For-ough Poursabzi-Sangdeh. 2025. Steering language model refusal with sparse autoencoders. In ICML 2025 Workshop on Reliable and Responsible Founda-tion Models .Hadas Orgad, Michael Toker, Zorik Gekhman, Roi Re-ichart, Idan Szpektor, Hadas Kotek, and Yonatan Belinkov. 2025. Llms know more than they show: On the intrinsic representation of llm hallucinations. In International Conference on Learning Representa-tions , volume 2025, pages 66880–66913. Ankit Pal, Logesh Kumar Umapathi, and Malaikannan Sankarasubbu. 2023. Med-HALT: Medical domain hallucination test for large language models. In Pro-ceedings of the 27th Conference on Computational Natural Language Learning (CoNLL) , pages 314– 334, Singapore. Association for Computational Lin-guistics. Kenny Peng, Rajiv Movva, Jon Kleinberg, Emma Pier-son, and Nikhil Garg. 2025. Use sparse autoencoders to discover unknown concepts, not to act on known concepts. Preprint , arXiv:2506.23845. Pouya Pezeshkpour and Estevam Hruschka. 2024. Large language models sensitivity to the order of op-tions in multiple-choice questions. In Findings of the Association for Computational Linguistics: NAACL 2024 , pages 2006–2017, Mexico City, Mexico. Asso-ciation for Computational Linguistics. Senthooran Rajamanoharan, Arthur Conmy, Lewis Smith, Tom Lieberum, Vikrant Varma, Janos Kramar, Rohin Shah, and Neel Nanda. 2024a. Improving sparse decomposition of language model activations with gated sparse autoencoders. In Advances in Neu-ral Information Processing Systems .Senthooran Rajamanoharan, Tom Lieberum, Nicolas Sonnerat, Arthur Conmy, Vikrant Varma, János Kramár, and Neel Nanda. 2024b. Jumping ahead: Im-proving reconstruction fidelity with jumprelu sparse autoencoders. Preprint , arXiv:2407.14435. Melanie Sclar, Yejin Choi, Yulia Tsvetkov, and Alane Suhr. 2024. Quantifying language models'sensitivity to spurious features in prompt design or: How i learned to start worrying about prompt formatting. In International Conference on Learning Representa-tions , volume 2024, pages 25055–25083. 
+
+10 Dong Shu, Xuansheng Wu, Haiyan Zhao, Daking Rai, Ziyu Yao, Ninghao Liu, and Mengnan Du. 2025. A survey on sparse autoencoders: Interpreting the internal mechanisms of large language models. In 
+
+Findings of the Association for Computational Lin-guistics: EMNLP 2025 , pages 1690–1712, Suzhou, China. Association for Computational Linguistics. Samuel Soo, Chen Guang, Wesley Teng, Chan-drasekaran Balaganesh, Tan Guoxian, and Yan Ming. 2025. Interpretable steering of large language mod-els with feature guided activation additions. Preprint ,arXiv:2501.09929. Niklas Stoehr, Kevin Du, Vésteinn Snæbjarnarson, Robert West, Ryan Cotterell, and Aaron Schein. 2024. Activation scaling for steering and interpreting lan-guage models. In Findings of the Association for Computational Linguistics: EMNLP 2024 , pages 8189–8200, Miami, Florida, USA. Association for Computational Linguistics. Alon Talmor, Jonathan Herzig, Nicholas Lourie, and Jonathan Berant. 2019. CommonsenseQA: A ques-tion answering challenge targeting commonsense knowledge. In Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Tech-nologies, Volume 1 (Long and Short Papers) , pages 4149–4158, Minneapolis, Minnesota. Association for Computational Linguistics. James Thorne, Andreas Vlachos, Christos Christodoulopoulos, and Arpit Mittal. 2018. FEVER: a large-scale dataset for fact extraction and VERification. In Proceedings of the 2018 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1 (Long Papers) , pages 809–819, New Orleans, Louisiana. Association for Computational Linguistics. Xinpeng Wang, Bolei Ma, Chengzhi Hu, Leon Weber-Genzel, Paul Röttger, Frauke Kreuter, Dirk Hovy, and Barbara Plank. 2024. “my answer is C”: First-token probabilities do not match text answers in instruction-tuned language models. In Findings of the Asso-ciation for Computational Linguistics: ACL 2024 ,pages 7407–7416, Bangkok, Thailand. Association for Computational Linguistics. Johannes Welbl, Nelson F. Liu, and Matt Gardner. 2017. Crowdsourcing multiple choice science questions. In Proceedings of the 3rd Workshop on Noisy User-generated Text , pages 94–106, Copenhagen, Den-mark. Association for Computational Linguistics. Sarah Wiegreffe, Oyvind Tafjord, Yonatan Belinkov, Hanna Hajishirzi, and Ashish Sabharwal. 2025. An-swer, assemble, ace: Understanding how lms answer multiple choice questions. In International Con-ference on Learning Representations , volume 2025, pages 78293–78318. Hugh Mee Wong, Rick Nouwen, and Albert Gatt. 2026. When models decide and when they bind: A two-stage computation for multiple-choice question an-swering. In Findings of the Association for Compu-tational Linguistics: ACL 2026 , pages 22804–22821, San Diego, California, United States. Association for Computational Linguistics. Zhen Yang, Ping Jian, and Chengzhi Li. 2025. Op-tion symbol matters: Investigating and mitigating multiple-choice option symbol bias of large language models. In Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Associ-ation for Computational Linguistics: Human Lan-guage Technologies (Volume 1: Long Papers) , pages 1902–1917, Albuquerque, New Mexico. Association for Computational Linguistics. Yu Zhao, Alessio Devoto, Giwon Hong, Xiaotang Du, Aryo Pradipta Gema, Hongru Wang, Xuanli He, Kam-Fai Wong, and Pasquale Minervini. 2025. Steer-ing knowledge selection behaviours in LLMs via SAE-based representation engineering. In Proceed-ings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computa-tional Linguistics: Human Language Technologies (Volume 1: Long Papers) , pages 5117–5136, Al-buquerque, New Mexico. Association for Compu-tational Linguistics. 
+
+Appendix A Feature Ranking, Artifact Controls, and Clean-Feature Filters 
+
+Feature selection combines predictive evidence with artifact controls. We first assign evidence weights to features identified by the candidate-ranking probes. We then adjust and combine this evidence across datasets, targets, response modes, and token positions. Finally, we apply eligibility requirements and retain the highest-scoring feature units. A feature unit denotes a particular feature within one model, layer, and SAE width. 
+
+Initial candidate-ranking weights. For each candidate-ranking probe, we retain up to 100 fea-tures ordered by the absolute magnitude of their fitted coefficients. Let j identify a probe fitted for a particular dataset, model, layer, SAE width, target, response mode, and token position. Feature f , at coefficient rank rf,j ≥ 1, contributes the initial evidence weight 
+
+e(0)  
+
+> f,j
+
+= Qj
+
+log 2(rf,j + 1) , (12) where Qj is the validation quality of the probe producing that coefficient. For binary targets, we 11 use 
+
+Qbin = min {1, max [0 , 2(AUROC val − 0.5)] } .
+
+(13) For regression targets, we use 
+
+Qreg = min {1, max(0 , R 2val )+ 0 .25 max(0 , |rval | − 0.10) },
+
+(14) where rval is the Pearson correlation between pre-dictions and targets. Binary probes receive zero weight at or below chance-level AUROC. For regression probes, nega-tive R2 values contribute zero, while absolute pre-diction correlation above 0.10 contributes an addi-tional term weighted by 0.25 . Both quality weights are capped at one 2. Evidence is retained only when 
+
+Qj > 0 and the feature is active on at least 20 instances in the corresponding setting. 
+
+Artifact-risk score. We compute artifact con-trols separately for each dataset, model, layer, SAE width, response mode, and token position. Token activations are max-pooled within the position, and we consider features active on at least 20 behavioral instances. Let Af denote the resulting instance-level activation vector, including zeros for inactive instances. For a categorical variable g, we measure associ-ation using eta-squared: 
+
+η2(Af , g ) = 
+
+P 
+
+> c
+
+nc( ¯Af,c − ¯Af )2
+
+P
+
+> i
+
+(Ai,f − ¯Af )2 , (15) where nc and ¯Af,c are the size and mean activation of category c, and ¯Af is the overall mean activation. This quantity measures the fraction of activation variance explained by category membership. Let GET group instances sharing the same orig-inal example and prompt template, and let GEP 
+
+group instances sharing the same original example and answer permutation. Let RG(Af ) subtract the mean activation within each group G. The option-letter and prompt-template controls are 
+
+sletter  
+
+> f
+
+= η2(RGET (Af ), y ) , (16) 
+
+sprompt  
+
+> f
+
+= η2(RGEP (Af ), template) , (17) where y is the gold answer letter for each instance. The first control measures whether activation tracks 
+
+> 2These are fixed ranking heuristics, not statistical signifi-cance measures.
+
+the gold letter across answer-order permutations of the same example and template. The second measures template sensitivity while holding the example and answer ordering fixed. Permutation instability measures the proportion of activation variance not explained by example– template groups: 
+
+sperm  
+
+> f
+
+= 1 − η2(Af , G ET ). (18) Within each such group, instances differ in their answer ordering. Topic/text dependence is the maximum available association with text covariates: 
+
+stext  
+
+> f
+
+= max { max  
+
+> j
+
+|corr( Af , c j )|,
+
+max  
+
+> k
+
+η2(Af , g k)}. (19) Here, corr denotes Pearson correlation. Continu-ous covariates cj include text lengths, token counts, the number of answer choices, answer-text TF-IDF similarities, and up to eight TF-IDF/SVD text com-ponents. Categorical covariates gk are the available nonconstant question categories, present for Com-monSenseQA and MMLU in our data. Unavailable or constant covariates are omitted. Each control is converted to its percentile q
+
+among the tested features in the same setting. The percentile component of artifact risk is 
+
+apct  
+
+> f
+
+= max {qletter  
+
+> f
+
+, q prompt  
+
+> f
+
+, q perm  
+
+> f
+
+, q text  
+
+> f
+
+}. (20) Thus, strong association with any one measured confound can produce a high score. Please note that this is a relative score and not a probability of contamination by artifacts. 
+
+Eligibility and final selection. After aggregation, a feature unit is eligible only if its maximum arti-fact risk is at most 0.80 , its maximum activation frequency is below 0.95 , it is active on at least 100 instances in one contributing setting, it has ev-idence from at least two datasets, and ¯cf ≥ 0.60 .Activation support, density, dataset coverage, and coefficient-sign consistency are separate eligibility requirements, not components of the artifact-risk score. 
+
+B DLA-Based Candidate Selection 
+
+We use DLA to identify shortlisted features whose decoder directions show both strong and consistent alignment with the answer contrast. Each combina-tion of dataset, model, layer, SAE width, response 12 0.0 0.2 0.4 0.6 0.8 1.0                
+
+> Maximum artifact risk af
+> 10 6
+> 10 5
+> 10 4
+> 10 3
+> 10 2
+> 10 1
+> 10 0
+> 10 1
+> 10 2
+> Unpenalized aggregate evidence
+> Non-oracle (FP/Q/O/GR; 81,304 units)
+> Artifact gate af= 0.80
+> Selected top 300
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Maximum artifact risk af
+> Oracle (C/TW; 48,888 units)
+> 10 0
+> 10 1
+> 10 2
+> 10 3
+> Feature units per hexagon
+
+Figure 2: Artifact risk versus unpenalized predictive evidence in the final eight-dataset feature-selection pools. Each hexagon counts model–layer–SAE-width–feature units; darker cells contain more units. Evidence is the sum of validation-quality-weighted coefficient-rank scores before artifact, density, overfit-gap, and position penalties. Orange circles mark the selected top 300, and the dashed line marks the artifact-risk gate. Because artifact risk is maximized and evidence is summed over contributing candidate-ranking records, this descriptive visualization is not used as a correlation test. 
+
+mode, and activation position defines one setting. We use all DLA summaries from discovery and val-idation instances. We call a feature correct-directed 
+
+when its maximum correct-minus-top-wrong DLA is at least 1.0, its mean DLA in that direction ex-ceeds 0.02 , and the direction agrees across at least 
+
+75% of its matched settings. The feature must also rank among the top 5% of correct-directed DLA values in at least one setting, and its strongest correct-directed score must exceed its strongest top-wrong-directed score. The symmetric rule defines 
+
+top-wrong-directed features. We retain large but context-dependent effects as 
+
+mixed-direction diagnostics. A feature gets this label when its maximum absolute DLA lies in the top 10% of the corresponding shortlist, ranks in the top 5% in both directions, and satisfies neither di-rectional rule. To prevent any model configuration from dominating, we retain at most five features per category and at most 25 distinct features per model–layer–SAE-width group. A directional fea-ture also receives an artifact-control label when its artifact risk is at least 0.70 , its description indicates a semantic or formatting pattern, or it is flagged as globally dense. 
+
+C Forced-Letter Behavioral Results 
+
+Table 6 reports descriptive test behavior before SAE analysis. Metrics are averaged over prompt-template and answer-permutation instances. N
+
+counts unique original examples and should not be                                               
+
+> 1B 4B Dataset NAcc. WHC Acc. WHC CommonSenseQA 796 .438 .519 .657 .325 TruthfulQA 175 .209 .735 .501 .485 HaluEval QA 833 .880 .114 .907 .092 Wiki-FACTOR 331 .453 .502 .499 .464 Med-HALT 534 .063 .866 .115 .833 MMLU 262 .418 .510 .603 .375 SciQ 808 .707 .272 .876 .116 FEVER 791 .338 .638 .532 .454
+
+Table 6: Forced-letter test accuracy and wrong high-confidence rate over rendered prompt instances. 
+
+interpreted as the number of independent rendered prompts. WHC is the fraction of all instances that are both wrong and assign at least .70 probability to the strongest wrong letter. 
+
+D Statistical Audit Details 
+
+Each model in the statistical audit is fit on discov-ery instances and evaluated on the test partition. A run corresponds to one dataset, model, layer, SAE width, response mode, and activation position. We use up to 1,000 features with at least 20 active instances. Binary models are standardized, class-balanced L1-logistic regressions with C = .1; re-gression models are standardized ridge models with candidate regularization strengths {100 }. Univari-ate analyses use Pearson and Spearman correla-tions with Benjamini–Hochberg correction, 100 bootstrap resamples for binary mean-activation dif-ferences, and three-neighbor mutual information. Table 7 defines the six targets. Tables 8 and 9 aggregate over datasets, models, 13 Abbrev. Type Target WvC Bin. Wrong vs. correct answer LMvHM Bin. mi ≤ 0.5 vs. mi ≥ 2.0; intermedi-ate instances are excluded WHC Bin. Wrong with pi(wi) ≥ 0.70 vs. cor-rect with pi(yi) ≥ 0.70 or mi ≥
+
+2.0
+
+WLM Bin. Wrong vs. correct among instances with mi ≤ 0.5
+
+Margin Reg. Correct-vs.-top-wrong margin Entropy Reg. Entropy over answer letters 
+
+Table 7: Statistical-audit target definitions.                             
+
+> Pos. WvC LMvHM WHC WLM FP .715/.644 .739/.711 .739/.688 .706/.805 Q.569/.522 .558/.572 .573/.553 .567/.779 O.662/.591 .720/.687 .722/.662 .638/.821 GR .740/.660 .749/.738 .782/.732 .784/.820 C.746/.652 .836/.774 .839/.760 .645/.825 TW .694/.617 .801/.750 .804/.735 .595/.800
+
+Table 8: Binary test performance by activation position. Each cell reports mean AUROC/F1 over the available runs. 
+
+layers, widths, and response modes. Question-span models are weakest overall, whereas GR and the oracle spans are stronger for several binary targets. Regression is more heterogeneous: median R2 is negative at Q for both targets but positive at FP, O, and GR. Coverage is 192 runs each at FP, Q, O, C, and TW, and 128 at GR because forced-letter runs have no generated reasoning span. 
+
+E Statistical Audit by Dataset and Position 
+
+Tables 10 and 11 give the eight-dataset break-down. Each non-GR cell aggregates 24 runs (eight model–layer–SAE configurations and three response modes); each GR cell aggregates 16 runs. Negative R2 indicates performance below a con-stant test-set predictor. 
+
+F Prompt Templates 
+
+The unwrapped model input is the response-mode prefix, two newlines, and the corresponding ren-dered template body. Gemma’s chat template then wraps the combined text as one user message. Ta-ble 12 summarizes this construction; vertical gaps denote two newline characters. Five labels are shown for readability, and the renderer substitutes the labels available for each dataset. 
+
+Answer parsing. For forced letter , behavior is read from the next-token answer-letter distribu-tion. For generated modes, decoding is determin-istic. In letter then reason , the first matched an-swer letter is used. In reason first , explicit strings 
+
+Pos. Margin R2 / r Entropy R2 / r
+
+FP .117/.357 .285/.541 Q -.138/.102 -.066/.176 O .059/.353 .054/.302 GR .104/.360 .106/.373 C .239/.550 -.020/.189 TW .185/.480 -.021/.196 
+
+Table 9: Regression test performance by activation posi-tion. Each cell reports median R2/Pearson r.                                                                                                                                                                                                     
+
+> Dataset Pos. WvC LMvHM WHC WLM CSQA FP .652 .688 .670 .648 Q.539 .531 .530 .555 O.583 .655 .650 .601 GR .672 .727 .751 .719 C.735 .820 .823 .636 TW .646 .781 .787 .556 TruthfulQA FP .722 .717 .730 .710 Q.622 .602 .629 .589 O.692 .738 .747 .625 GR .802 .740 .832 .795 C.744 .833 .841 .635 TW .716 .800 .818 .591 HaluEval FP .865 .902 .905 .759 Q.582 .568 .583 .549 O.801 .861 .868 .651 GR .905 .919 .932 .895 C.745 .826 .829 .596 TW .783 .848 .854 .631 Wiki-FACTOR FP .642 .670 .662 .658 Q.493 .504 .496 .524 O.558 .621 .620 .561 GR .659 .663 .690 .737 C.694 .807 .809 .615 TW .630 .759 .767 .545 Med-HALT FP .809 .851 .857 .748 Q.591 .579 .605 .561 O.741 .853 .858 .672 GR .826 .826 .842 .808 C.740 .851 .853 .655 TW .605 .732 .720 .561 MMLU FP .665 .674 .675 .671 Q.574 .556 .587 .544 O.613 .610 .622 .600 GR .650 .643 .684 .708 C.685 .785 .793 .593 TW .654 .765 .766 .559 SciQ FP .735 .771 .760 .686 Q.555 .544 .558 .585 O.653 .723 .699 .654 GR .745 .811 .795 .794 C.715 .802 .802 .622 TW .657 .771 .768 .581 FEVER FP .630 .640 .653 .767 Q.595 .578 .593 .626 O.655 .698 .709 .738 GR .660 .666 .733 .819 C.910 .962 .965 .806 TW .863 .948 .953 .734
+
+Table 10: Mean test AUROC for the four binary audit models by dataset and activation position. 
+
+of the form answer: <letter> or final answer: <letter> are preferred; otherwise, the last matched answer letter is used. If no letter is parseable, we append Final answer: and score one constrained valid label token. 
+
+Answer permutations. Answer-order permuta-tions keep the same strings but reassign answer texts to letters. 14 Dataset Pos. Margin Entropy CSQA FP .062 .369 Q -.140 -.017 O .006 .145 GR .105 .174 C .272 -.019 TW .178 .000 TruthfulQA FP .101 .209 Q -.390 -.152 O -.204 -.102 GR .091 .082 C -.061 -.141 TW .073 -.107 HaluEval FP .504 .124 Q -.044 -.048 O .399 .017 GR .471 .054 C .302 -.021 TW .316 -.016 Wiki-FACTOR FP .056 .216 Q -.222 -.124 O -.112 -.050 GR .015 .086 C .172 -.073 TW .094 -.075 Med-HALT FP .506 .350 Q -.144 -.050 O .292 .069 GR .169 .126 C .301 .048 TW .023 -.027 MMLU FP .095 .257 Q -.714 -.584 O -.140 .038 GR .004 .107 C -.175 -.095 TW .101 -.059 SciQ FP .299 .344 Q -.155 -.039 O .130 .092 GR .278 .148 C .233 -.010 TW .173 -.011 FEVER FP .068 .363 Q -.047 .058 O .116 .287 GR .058 .257 C .752 .161 TW .717 .165 
+
+Table 11: Median test R2 for margin and entropy regres-sion by dataset and activation position. 
+
+G HalluSAE Predictive and Artifact Audit 
+
+Table 13 summarizes HalluSAE’s predictive perfor-mance, artifact-risk associations, and feature over-lap with our shortlists and intervention candidates. 
+
+H Detailed Causal Intervention Results 
+
+Table 14 distinguishes intervention-event counts from unique feature–instance pairs. Table 15 com-pares HalluSAE with selected and random-active FP features, while Table 16 reports pooled Q/O selected–random differences and oracle C/TW out-comes with bootstrap intervals. Each sampled feature–instance pair is evaluated under zero re-placement, mean replacement, and steering by one, two, and four feature standard deviations. Random-active controls are sampled within each run; C and TW have no random-active counterpart. 1 2 4Steering strength ( )
+
+> 0.10 0.15 0.20 0.25 0.30 Mean |  m|
+> Selected Q/O Random Q/O Oracle C/TW
+
+Figure 3: Mean absolute margin shift under upward steering. Error bars are 95% feature-unit bootstrap in-tervals over matched pairs with +1 σ, +2 σ, and +4 σ
+
+results. 
+
+Steering-strength response and perturbation ad-justment. Figure 3 uses only feature–instance pairs observed at all three steering strengths. Its in-tervals resample model–layer–width–feature units. Selected Q/O has the clearest aggregate strength response, but only 51 .8% of its 8,256 pairs in-crease monotonically; the corresponding fractions are 46 .6% for random Q/O and 48 .6% for oracle C/TW. 
+
+Adjustment for intervention size and context. 
+
+Table 17 compares the unadjusted and adjusted selected–random differences in mean |∆m|. Be-cause the magnitude of an intervention depends partly on how far the feature is moved and how many tokens are edited, we perform an intervention-size adjustment. For each event, we measure the 
+
+L2 displacement between the original and target feature activations across edited tokens, normal-ized by the feature’s activation standard deviation. A feature-equal regression then compares selected and random features while controlling for this dis-placement, span length, intervention variant, base-line margin and correctness, activation frequency, token position, dataset, and model configuration. The resulting coefficient estimates the selected– random difference in |∆m| for interventions with comparable measured characteristics. 
+
+I Model Size and Budget 
+
+For running the experiments, we used 20 Nvidia V100 SXM2 GPUs. We used approximately 500 GPU hours for the experiments and analysis. 15 Response-mode prefixes 
+
+Mode Exact prefix 
+
+FL You are a multiple-choice classifier. Reply with only the answer label. 
+
+RF You are a careful multiple-choice assistant. Reason briefly about the choices, then put the final answer in the requested exact format on the last line. 
+
+LTR You are a careful multiple-choice assistant. Start with the answer letter, then explain your reasoning briefly. 
+
+T1: dotted labels T2: parenthesized labels T3: colon labels 
+
+Body Question: <QUESTION> A. <CHOICE_A> B. <CHOICE_B> C. <CHOICE_C> D. <CHOICE_D> E. <CHOICE_E> <MODE_ENDING> Choose the best answer. <QUESTION> (A) <CHOICE_A> (B) <CHOICE_B> (C) <CHOICE_C> (D) <CHOICE_D> (E) <CHOICE_E> <MODE_ENDING> <QUESTION> Options: A: <CHOICE_A> B: <CHOICE_B> C: <CHOICE_C> D: <CHOICE_D> E: <CHOICE_E> <MODE_ENDING> 
+
+FL ending Answer: The correct option is Final answer: 
+
+RF ending Reason briefly; final line: Final answer: <letter> Generation cue: Reasoning: Reason briefly; final line: Final answer: <letter> Reason briefly; final line: Final answer: <letter> 
+
+LTR ending First write one answer letter (A/B/C/D/E), then explain briefly. Answer: Give the letter first, then your reasoning. Answer letter first, then reasoning: 
+
+Table 12: Compact prompt construction for the three templates and three response modes. Template 3, the colon-labeled options block, was used in all Phase 0 runs alongside Templates 1 and 2. For datasets with fewer choices, the option lines and slash-separated label set are shortened accordingly. 
+
+Audit Quantity Result Predictive Dataset–model–width groups 32 HalluSAE test AUROC / F1 .775 / .674 Random-control test AUROC / F1 .761 / .659 Artifact Nonzero feature–setting records 3,020 Records above the af = 0 .80 gate 2,987 (98.9%) Unique nonzero feature units 711 Units above the gate in every setting 679 (95.5%) Units below the gate in every setting 9 (1.3%) Units that cross the gate across settings 23 (3.2%) Units with a dedicated artifact flag 578 (81.3%) Overlap Our top-300 / Phase 2 units 0 / 0 
+
+Table 13: Adapted HalluSAE predictive and artifact au-dit. Predictive metrics are means over the 32 groups; random-control metrics average ten repetitions per group. A unit is a model–layer–SAE-width–feature combination. Artifact categories refer to the forced-letter FP settings in which a unit has a nonzero classifier coefficient. 
+
+16 Set Pos. Ur /U f Pairs W2C e/p C2W e/p W2W e/p W2C% C2W% |∆m|                                                                                 
+
+> Selected FP 73/20 500 2/1 9/3 9/3 .159 .723 .154 Random FP 320/311 1,990 18/10 22/9 19/9 .347 .462 .237 HalluSAE FP 73/27 730 5/3 9/9 3/3 .332 .420 1.760 Selected Q425/55 4,222 16/6 17/6 8/6 .170 .145 .158 Random Q320/319 3,030 1/1 9/3 10/6 .013 .119 .135 Selected O415/55 4,034 19/8 19/10 23/12 .209 .172 .216 Random O320/318 2,679 7/7 4/2 3/2 .111 .056 .159 Oracle C145/22 1,361 6/2 9/4 4/2 .211 .227 .132 Oracle TW 160/22 1,558 0/0 5/3 0/0 .000 .107 .135
+
+Table 14: Event- and pair-level intervention outcomes. Ur /U f gives run-specific and global model–layer–width– feature units. “e/p” gives intervention events and unique feature–instance pairs. W2C% is conditional on an initially wrong baseline answer; C2W% is conditional on an initially correct answer.                                                      
+
+> Metric Selected FP Random FP HalluSAE FP H–Selected [95% CI] H–Random [95% CI]
+> Run-specific feature tests 73 320 73 ––Feature–instance pairs 500 1,990 730 ––Median activation frequency .00133 .00131 .580 ––W2C rate (%) .159 .347 .332 +.173 [−.294 , . 745] -.015 [−.458 , . 557]
+> C2W rate (%) .723 .462 .420 -.303 [−1.489 , . 566] -.043 [−.483 , . 412]
+> |∆m|.154 .237 1.760 +1.606 [1 .327 ,1.902] +1.524 [1 .245 ,1.818]
+> |∆py|.00305 .00392 .00517 +.00212 [−.00110 , . 00567] +.00125 [−.00169 , . 00462]
+
+Table 15: Matched-budget HalluSAE FP comparison. Outcome intervals use 10,000 bootstrap resamples of model– layer–width–feature units. HalluSAE and selected FP have the same feature-test budget within 42 strata; activation density and the number of active feature–instance pairs are not matched. 
+
+Metric Selected Q/O Random Q/O Selected–random Oracle C/TW W2C rate (%) .189 [.090, .308] .058 [.021, .101] +.132 [+.024, +.257] .101 [.000, .307] C2W rate (%) .158 [.074, .253] .089 [.014, .179] +.069 [-.055, +.191] .162 [.024, .330] 
+
+|∆m| .187 [.164, .212] .146 [.136, .160] +.041 [+.014, +.067] .134 [.114, .154] 
+
+|∆py | .00152 [.00122, .00187] .00133 [.00114, .00152] +.00019 [-.00018, +.00059] .00105 [.00085, .00130] 
+
+Table 16: Point estimates and 95% percentile intervals from 5,000 bootstrap resamples of model–layer–width–feature units. The intervals describe variation across tested feature units; they are not row-level tests or randomization-based 
+
+p-values. 
+
+Scope Tokens S/R Std. edit S/R Raw diff. Adjusted diff. [95% CI] Q/O 33/34 11.49/14.19 .041 .021 [−.006 , . 048] 
+
+Q 32/35 11.62/14.39 .023 .008 [−.001 , . 017] 
+
+O 33/33 11.38/13.94 .058 .049 [.014 , . 084] 
+
+Table 17: Selected–random difference in mean |∆m|
+
+before and after perturbation adjustment. Tokens and standardized latent-edit magnitude are medians for se-lected/random events. The feature-equal regression ad-ditionally adjusts for baseline margin and correctness, activation frequency, operation, dataset, and model con-figuration; intervals are clustered by feature and original question. Standardized latent magnitude excludes de-coder norm. 
+
+17

@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-22 ~ 2026-10-31</span>
+      <span class="dpr-home-dashboard-kicker">2026-11-01</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 24 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 13 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>10</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>14</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>5</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>8</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-31 12:37:10 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-11-01 12:06:27 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-22 至 10-31 日报：共筛选 24 篇论文，精读 10 篇、速读 14 篇，重点聚焦共形预测与因果发现。</p>
-<p>最值得看的是两篇满分共形预测工作：《Macro Mondrian Conformal Risk Control》和《Finite-Sample Optimal Conformal Prediction Sets under Covariate Shift》。</p>
-<p>普通读者可先读这两篇的摘要与实验部分，再按兴趣看速读列表中的因果可辨识性与多语言模型否定表示研究。</p>
+<p>今日筛选 13 篇论文并精读 5 篇，重点集中在共形预测与不确定性建模方向。</p>
+<p>最值得看的是《ConformalMOS》（9.0/10）用共形区间结合序数建模做不确定性感知的 MOS 预测，以及 8.0 分的共形新颖性检测；速读侧的 CalibraRL、STEP 则围绕置信度校准与幻觉缓解展开。</p>
+<p>普通读者可先读 ConformalMOS 了解共形方法如何给出可信区间，再顺着置信度校准这条线看 RAG 幻觉治理的落地思路。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">10 篇</strong>
+    <strong class="dpr-home-dashboard-count">5 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Macro Mondrian Conformal Risk Control">Macro Mondrian Conformal Risk Control</span></li><li><span class="dpr-home-dashboard-paper-title" title="Finite-Sample Optimal Conformal Prediction Sets under Covariate Shift">Finite-Sample Optimal Conformal Prediction Sets under Covariate Shift</span></li><li><span class="dpr-home-dashboard-paper-title" title="Metric Conformal Prediction via the Conditional Expected Local Radius">Metric Conformal Prediction via the Conditional Expected Local Radius</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="ConformalMOS: Uncertainty-Aware MOS Prediction with Conformal Intervals and Ordinal Modeling">ConformalMOS: Uncertainty-Aware MOS Prediction with Conformal Intervals and Ordinal Modeling</span></li><li><span class="dpr-home-dashboard-paper-title" title="Conformal Novelty Detection via Data-enhanced Localization">Conformal Novelty Detection via Data-enhanced Localization</span></li><li><span class="dpr-home-dashboard-paper-title" title="Causal Localization of Evidence Effects in Transformers">Causal Localization of Evidence Effects in Transformers</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>5</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>4</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>4</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">14 篇</strong>
+    <strong class="dpr-home-dashboard-count">8 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Identifiability from Stationary Covariance in Linear SDEs with Reciprocal Interactions and Latent Variables">Identifiability from Stationary Covariance in Linear SDEs with Reciprocal Interactions and Latent Variables</span></li><li><span class="dpr-home-dashboard-paper-title" title="&quot;Not&quot; is Not Lost in Translation: A Causal Analysis of Negation Representations in Multilingual LLMs">&quot;Not&quot; is Not Lost in Translation: A Causal Analysis of Negation Representations in Multilingual LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Optimal Correction Sets for Provable Redress of Contestable Causal Discovery">Optimal Correction Sets for Provable Redress of Contestable Causal Discovery</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="STEP: Soft Trajectory Estimation of Prediction Correctness via Per-Step Probability Scoring">STEP: Soft Trajectory Estimation of Prediction Correctness via Per-Step Probability Scoring</span></li><li><span class="dpr-home-dashboard-paper-title" title="CalibraRL: Confidence-Calibrated Reinforcement Learning for Mitigating Hallucinations in RAG">CalibraRL: Confidence-Calibrated Reinforcement Learning for Mitigating Hallucinations in RAG</span></li><li><span class="dpr-home-dashboard-paper-title" title="Test-Time Confidence Adaptation under RL-Induced Trajectory Shift">Test-Time Confidence Adaptation under RL-Induced Trajectory Shift</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">causal-infer <strong>10</strong></span><span class="dpr-home-dashboard-tag">llm-calib <strong>3</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">llm-calib <strong>4</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
 </section>
 </div>
 

@@ -1,0 +1,706 @@
+Title: SHIFT-JEV: Certified Abstention and Gain-Gated Continual Adaptation for LLM-Based Decision Models under Distribution Shift
+
+URL Source: https://arxiv.org/pdf/2610.34329v1
+
+Published Time: Tue, 27 Oct 2026 01:27:41 GMT
+
+Number of Pages: 31
+
+Markdown Content:
+SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+# SHIFT -J EV : Certified Abstention and Gain-Gated Continual Adaptation for LLM-Based Decision Models under Distribution Shift 
+
+A P REPRINT 
+
+Muhammad Atif Saeed 
+
+Department of AI & Data Science National University of Computer & Emerging Sciences Islamabad, Pakistan 
+
+atif.saeed@isb.nu.edu.pk 
+
+Azka Atiq 
+
+Department of AI & Data Science National University of Computer & Emerging Sciences Islamabad, Pakistan 
+
+azka.atiq@isb.nu.edu.pk 
+
+Adarsh Kumar 
+
+Data Engineer University of Arkansas at Little Rock Arkansas, USA 
+
+akumar1@ualr.edu 
+
+Akhtar Jamil 
+
+Department of Computer Science National University of Computer & Emerging Sciences Islamabad, Pakistan 
+
+akhtar.jamil@nu.edu.pk 
+
+Uzair Iqbal 
+
+Department of Software Engineering Faculty of Computer Science & Information Technology University of Malaya, Malaysia 
+
+uzairiqbal@um.edu.my 
+
+Roland Aydin 
+
+German Research Center for Artificial Intelligence (DFKI) Saarbrücken, Germany 
+
+roland.aydin@uni-saarland.de 
+
+October 2026 
+
+Abstract 
+
+Large language models (LLMs) can act as decision models that return a probability distribution over a fixed set of options, but deployed decision models face domain, label-prior, emerging-class and candidate-set shift. We study how such models fail under shift and propose S HIFT -J EV , a monitoring, abstention and continual-adaptation procedure for them. It scores the risk of each decision from uncertainty, format and option-consistency signals, certifies abstention thresholds with Learn-then-Test, monitors the decision stream with drift and label-shift detectors, and accepts a model update only when an expected-gain gate finds a significant held-out improvement without loss on earlier regimes. On a benchmark of ten shifted test environments with Qwen3-0.6B and Qwen3-4B (three seeds each) and Phi-4-mini, fine-tuning with KL anchors and temperature scaling lowers calibration error under shift from 0.289 to 0.087. At a target risk of 10%, a learned uncertainty score with a certified threshold exceeds the target in 3–5 of 27 environment–seed tests, against 5–15 for a max-probability score with the same certification and 9–14 for conformal prediction sets; drift-based routing changes little. A predicted-label χ2 test detects 95–99% of class-prior shifts that confidence- and embedding-based detectors miss. In continual adaptation S HIFT -J EV reaches 70.5% accuracy on Qwen3-0.6B, above replay, LwF, 1arXiv:2610.34329v1 [cs.LG] 25 Oct 2026 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+EWC and fine-tuning baselines in every seed, whereas on Qwen3-4B its conservative gate leaves it 0.4–1.4 points behind them. 
+
+Keywords LLM decision models · selective prediction · conformal risk control · distribution shift · continual learning 
+
+1 Introduction 
+
+Many software systems choose among a small set of predefined options: they route a support ticket, identify the intent of a customer message, check a document against a rule or grade a model response. General chat LLMs can perform these tasks, but their free-form answers must be parsed, they are slow to generate and they carry no usable confidence. Decision models such as Jev [1] instead return a probability distribution over the candidate options in a single call, which downstream code consumes directly. Such models have recently been used as cheap first-stage judges [2, 3], as detectors of alignment failures [4], for social-science annotation [5] and for coding administrative records [6]. Li and Wagle [7] showed that an ordinary instruction-tuned LLM already behaves as a decision model (LLM-as-Jev): listing the options with bracketed numbers, pre-filling “ Best answer: [” and scoring each option identifier through a prefix-free trie yields calibrated decisions without training, and a tree-factorized loss with KL anchors fine-tunes the model without damaging its chat behaviour. These evaluations use test data that resembles the calibration data. Deployment does not. A routing model meets new products and phrasing ( domain shift ), changing frequencies of the correct options ( class-prior shift ), requests that no offered option covers ( emerging classes ), and option lists that are reordered, reworded, extended or missing the right answer ( candidate-set shift ). Because software acts on the returned probabilities automatically, a model that is confidently wrong under shift is more harmful than one that fails visibly. LLM judges are over-confident [8], conformal guarantees for LLMs fail under dataset shift unless re-verified [9, 10], risk controlled over a population can exceed its budget within groups [11, 12], and sequential fine-tuning can collapse coverage before it lowers accuracy [13]. No existing work studies how LLM decision models behave under these shifts or how to keep their errors within a budget. We address three research questions. RQ1 : how do the accuracy and calibration of frozen and fine-tuned LLM decision models degrade under the four shift types? RQ2 : can abstention keep the realized error rate of answered inputs below a target α under shift, and which signals and threshold rules achieve this? RQ3 :when labelled data from a new regime arrive, can the model adapt without forgetting earlier regimes while declining updates that do not help? We answer them with S HIFT -J EV (Fig. 1), which adds three modules to the LLM-as-Jev interface. Module A monitors each decision and the decision stream. Module B abstains when a learned risk score exceeds a threshold certified by Learn-then-Test; drift distances are used to route inputs to a threshold but never enter the score. Module C adapts the LoRA adapter to a new regime and keeps the update only when it measurably helps. This paper makes three contributions. First, it introduces a shift benchmark for LLM decision models with one in-distribution and ten shifted test environments covering all four shift types, seven external benchmarks at the base paper’s sample sizes, stream protocols at three severities and a four-stage continual protocol that includes a no-shift control stage. Second, it proposes a monitoring, certified-abstention and gain-gated adaptation procedure and isolates which of its parts matter: the risk score and the data used for certification matter, drift-based routing does not, label-shift monitoring is essential, and the accuracy gains of adaptation come mainly from replay and severity-scaled anchoring, with the gate acting chiefly as a safeguard against 2SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+useless updates. Third, it reports a comparison with six abstention rules, five continual-learning baselines and a range of ablations over two Qwen3 sizes with three seeds each and a second model family, using statistics that do not treat repeated evaluations of the same items as independent, and it states where S HIFT -J EV does not help. 
+
+Stage 1 LLM-as-Jev decision model           
+
+> Decision request
+> state x, options
+> o1, . . . , o K
+> Answer interface
+> numbered options prefill Best answer: [
+> LLM backbone + LoRA
+> Qwen3-0.6B or 4B (tree loss + KL anchors)
+> Trie scoring
+> one packed forward pass gives P(k|x)
+> Signals
+> P(k|x),root mass, embedding h(x)
+
+Stage 2 Reliability layer (Module A: monitoring; Module B: certified abstention)                   
+
+> scoring lane
+> Risk features
+> uncertainty, trie format, rotation consistency
+> Risk score r(x)
+> logistic model fitted on ID + proxy-shift data routing lane
+> Input drift
+> k-NN distance of the option-invariant h(x)
+> Router + detectors
+> regime gor unknown; CUSUM, label-χ2alarms
+> Certified decision
+> answer iff r(x)≤ττ=τgfor a known regime
+> τ=τshift if unknown or after an alarm
+> τgcertified per regime by Learn-then-Test
+> r(x)
+> τgor τshift
+> Answer ˆy
+> Abstain / defer
+> yes no
+
+Stage 3 Module C: continual adaptation with an expected-gain gate           
+
+> New regime data
+> labelled training + held-out items
+> Measure shift
+> drift and accuracy tests →severity ˆs
+> Severity-scaled update
+> new data + replay, anchored to previous model
+> Expected-gain gate
+> keep if held-out gain is significant and old regimes hold, else roll back
+> Refresh
+> add regime gand certify its τg
+> ⟲the adapter and thresholds {τg}are redeployed in Stages 1–2
+
+Figure 1: Overview of S HIFT -J EV . Stage 1 : the LLM-as-Jev decision model scores numbered options through a prefix-free trie and exposes decision probabilities, the probability mass on legal identifier tokens and a state embedding. 
+
+Stage 2 : in the scoring lane, uncertainty, format and consistency features give the risk score r(x); in the routing lane, an option-invariant drift distance assigns the input to a known regime g or to unknown and drives the stream detectors. The model answers only if r(x) is below the threshold certified for that regime, or below the conservative τshift for unknown inputs and after an alarm. Stage 3 : a labelled batch from a new regime drives a severity-scaled LoRA update that is kept only if it significantly improves held-out accuracy without losing more than 5 points on earlier regimes. 
+
+2 Related Work 
+
+Decision models and LLM judges. Jev-style decision models [1] return calibrated probabilities over typed options and are ranked on JevBench [14]. Li and Wagle [7] extract the same behaviour from open LLMs with an architecture-preserving answer interface, a training-free trie-scoring recipe and a tree-factorized listwise fine-tuning loss with KL anchors on legal-token mass, illegal-token distribution and context positions. Work on LLM-as-a-judge [15] has shown that judgment distributions carry more information than greedy verdicts [16], that judges are over-confident [8], biased [17] and benefit from distribution-matching training [18] or reasoning [19], and that reported judge accuracies require bias correction [20] and reproducible protocols [21]. Confidence routing between a cheap decision model and an expensive judge is effective in-distribution [2, 22], but Rao and Callison-Burch [3] find that decision models and LLM judges err on the same items, which limits cascades, and Li et al. [2] report that routing weakens on style-adversarial inputs. Multiple-choice selection by LLMs is sensitive to option order and identifiers [23–25], which motivates our candidate-set shifts and rotation-consistency signal. None of these works studies decision models under distribution shift or provides risk guarantees. 3SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+Uncertainty and calibration of LLMs. Temperature scaling [26] remains a strong post-hoc calibrator for pre-trained transformers [27]. LLM uncertainty can be read from token probabilities [28], elicited verbally [29] or estimated from semantic dispersion [30]; for decision models the categorical output makes probability-based scores natural. UniCR [31] fuses heterogeneous evidence into a calibrated correctness probability and enforces an error budget by refusal, and robust-satisficing aggregation [32] stabilizes multi-LLM decisions under shift. Calibration is known to deteriorate under dataset shift [33]. 
+
+Selective prediction and conformal risk control. Selective classification trades coverage for risk [34, 35], with the maximum softmax probability as the classical score [36]. Conformal prediction [37, 38] and its risk-controlling extensions—RCPS [39], conformal risk control [40] and Learn-then-Test (LTT) [41]—give finite-sample guarantees under exchangeability, and Mondrian (group-conditional) variants give per-group guarantees [37]. For LLMs these tools have been applied to multiple-choice QA [42], generation [43] and factuality [44]. Very recent work studies when conformal risk control can certify structured LLM outputs and shows that guarantees fail under dataset shift unless re-verified [9], proposes similarity-weighted calibration for domain shift [10], and enforces risk per group hierarchy [11] or per argument role [12]. Beyond exchangeability, weighted [45], adaptive [46] and label-shift-aware [47] conformal methods exist, and online PAC-Bayes certificates have been proposed for forecasting under shift [48]. S HIFT -J EV is closest to group-conditional risk control: it certifies one LTT threshold per known regime, routes inputs to regimes with an option-invariant drift monitor, and falls back to a conservative threshold for unknown inputs and after stream alarms. 
+
+Shift and out-of-distribution detection. Dataset-shift detection compares feature or prediction distributions with two-sample tests [49]; BBSE [50] detects and corrects label shift from a black-box predictor’s confusion matrix. Embedding-based OOD scores include Mahalanobis [51], relative Mahalanobis [52], deep k-NN [53] and energy [54]; sequential change detection uses CUSUM [55]. Concept drift in streams [56] and zero-day settings where test data come from unseen distributions [57] motivate continuous monitoring, and LLM-mediated continuous adaptation has been proposed for anomaly detection streams [58]. WILDS [59] benchmarks in-the-wild shifts but not candidate-set shift, which is specific to decision models. 
+
+Continual learning for LLMs. Classical remedies for catastrophic forgetting are regularization (EWC [60]), distillation (LwF [61]) and replay [62–64]; see Wang et al. [65] and, for LLMs, Shi et al. [66]. LLMs forget during continual fine-tuning [67], although LoRA forgets less than full fine-tuning [68]. Recent work schedules replay by parameter change [69] and shows that conformal coverage collapses before accuracy under sequential fine-tuning, fixable by per-task recalibration [13]—an observation that our per-regime recertification (B6) also exploits. The KL anchors of LLM-as-Jev [7] act as a stability regularizer; we extend them to previous-stage anchors and couple their strength to measured shift severity. Table 1 positions S HIFT -J EV against the closest lines of work. 
+
+Table 1: Positioning. ✓: addressed; ◦: partially; —: not addressed. Work Decision-model interface Shift benchmark Risk guarantee Per-regime guarantee Stream detection Continual adaptation LLM-as-Jev [7] ✓ — — — — —JEV-as-a-Judge [2] ✓ ◦ ◦ — — —UniCR [31] — — ✓ — — —HG-CRC [11] — ◦ ✓ ✓ — —DS-CP [10] — ✓ ◦ — — —Continual calibration [13] — — ◦ ✓ — ✓                   
+
+> FOREVER [69] —————✓
+> BBSE / Failing loudly [49, 50] —✓——✓—
+> SHIFT -J EV (ours) ✓✓✓✓✓✓
+
+4SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+3 Method 
+
+3.1 Problem setting 
+
+A decision instance consists of a state x (instruction and input text), K candidate options and, for training and evaluation, the index y of the correct option. A decision model returns probabilities P (k | x) and predicts 
+
+ˆy(x) = arg max k P (k | x). A selective model with risk score r(x) and threshold τ answers only when 
+
+r(x) ≤ τ . On a data distribution D its coverage is the fraction of answered inputs and its selective risk is the error rate among them, 
+
+RD(τ ) = Pr 
+
+> D
+
+ˆy(x)̸ = y r(x) ≤ τ . (1) The deployment stream passes through regimes D0 (in-distribution, ID), D1, D2, . . . , and a labelled batch may arrive after each regime. S HIFT -J EV aims to keep RDt (τ ) ≤ α with high probability at the highest possible coverage, and to update the model only when the update improves accuracy on the new regime without degrading earlier ones. 
+
+3.2 Decision model 
+
+We follow Li and Wagle [7]. Options are listed as [1] , . . . , [K] in the user turn and the assistant turn is pre-filled with “ Best answer: [”. The score of option k is the log-probability of its identifier suffix 
+
+ck = “k] ”, 
+
+sk = log pθ(ck | x), P (k | x) = softmax k(sk/T ), (2) where T is a temperature fitted on ID validation data. Because the suffixes form a prefix-free trie, all options are scored in one forward pass: we pack the trie nodes after the prompt with a tree-shaped attention mask so that each node attends only to the prompt and its own ancestors, which gives exactly the same scores as scoring each option separately. For fine-tuning we use the base paper’s tree-factorized cross-entropy over the legal identifier tokens, plus KL anchors that tie the next-token distribution at the reply start and after the answer to the frozen model, which preserves normal text generation. Adapters are LoRA [70] modules with rank 16 on all linear layers. 
+
+3.3 Module A: monitoring 
+
+Module A computes four groups of signals for every decision without extra forward passes, except for the consistency check. Uncertainty is described by the normalized entropy, the maximum probability, the margin between the two most likely options and the number of options. Format is the log of the probability mass that the model places on legal identifier tokens at the trie root; low mass indicates that the model would rather produce something other than an option. Consistency compares the decision distribution with the one obtained after cyclically rotating the options, using the total-variation distance and agreement of the two argmax decisions; because it doubles scoring cost, we use it only for the 0.6B model. Input drift is the deep 
+
+k-NN distance [53] between the input’s state embedding and a reference pool of ID inputs. The embedding is the mean final-layer hidden state over the tokens of the state text only, so it does not change when the options change. Module A also monitors the stream of decisions with three detectors: CUSUM [55] on standardized per-decision signals, a windowed Kolmogorov–Smirnov test, and a black-box label-shift test in the spirit of BBSE [50], which compares the histogram of predicted labels in a 50-item window with its reference frequencies by a χ2 test. Every alarm level is set by simulation so that at most 5% of no-shift streams raise a false alarm. 5SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+3.4 Module B: certified, regime-conditional abstention 
+
+The risk score r(x) is a logistic regression on the uncertainty, format and consistency signals, trained to predict errors on ID calibration data and on two proxy shifts (SciQ and Emotion) that are disjoint from all test shifts. Each calibration set is split once into two halves: the risk model is fitted, and candidate thresholds are proposed, on the first half only, and thresholds are certified on the second half only. Temperature scaling and the drift reference use separate ID validation data. Drift distances are deliberately excluded from r(x). A risk model fitted on two proxy shifts learns that “far from the reference data” means “likely wrong”, which holds for some shifts, such as intent sets with many options, and fails for others, such as an easy emerging-class set or knowledge questions that resemble ID data but are answered wrongly with high confidence. Drift instead tells the system which population an input comes from, so S HIFT -J EV uses it for routing. Each known regime g has its own reference pool and threshold 
+
+τg. An input is assigned to the regime whose normalized k-NN distance is smallest, provided this distance is below the regime’s 95th percentile; otherwise it is unknown . Unknown inputs, and all inputs after a stream alarm, use the conservative threshold τshift , the smaller of the thresholds certified on ID and on proxy-shift data, so a detected shift can only make the model more cautious. An earlier design that placed drift inside 
+
+r(x) is kept as an ablation. Thresholds are certified by fixed-sequence Learn-then-Test (LTT) [41]. Candidate thresholds are proposed on the first calibration half, ordered from strict to permissive, and tested in that order on the second half: a threshold passes if the one-sided Clopper–Pearson [71] upper bound on its selective risk, at confidence 
+
+1 − δ with δ = 0 .1, is below α. Testing stops at the first failure and the last passing threshold is used, or the model abstains on everything if none passes. Because the risk model and the candidate thresholds depend only on the first half, the second half is used for a single test, and if calibration and test data of a regime are exchangeable the procedure guarantees RDg (τg) ≤ α with probability at least 1 − δ (Appendix B). No such guarantee is possible for unseen shifts, so for them we report empirical violation rates. 
+
+3.5 Module C: gain-gated continual adaptation 
+
+When a labelled batch from a new regime arrives, Module C first measures the shift. A binomial test checks whether more new inputs than expected lie beyond the reference 95th-percentile drift distance, and a Fisher exact test checks whether accuracy on the new data is lower than on the reference data. Their effect sizes give a severity ˆs ∈ [0 , 1] .The adapter is then trained for one epoch on the new data, with replay of buffered examples from earlier regimes. The buffer keeps, per regime, correctly classified examples with the smallest decision margin together with random examples. Two terms protect earlier behaviour. Tree-local distillation keeps the previous model’s option distributions on buffered examples [61, 72], and the LLM-as-Jev KL anchors are computed against the previous-stage model instead of the original one. Severity sets the stability–plasticity balance: the anchor weight decreases as λKL = λ0e−κˆs with κ = 1 .5, while the distillation weight increases with ˆs, so that larger shifts allow more change on new inputs and more protection of old decisions. The update is then judged by an expected-gain gate , which asks whether the update makes the model better rather than whether the model has become worse. Halfway through training, a probe compares the checkpoint with the current model on held-out new-regime items. If no shift was detected and the checkpoint wins no more items than it loses, training stops. Otherwise the half-trained and fully trained candidates are each accepted only if a one-sided sign test on paired held-out correctness against the current model gives p < 0.10 
+
+and their accuracy on buffered old-regime items drops by at most 5 points. The accepted candidate with the best combined new- and old-regime accuracy is deployed. If neither is accepted, the update is rolled back. In both cases the regime joins the replay buffer and the reference pools and receives its own certified 6SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+threshold (system B6). The sign test bounds the probability of accepting an update that does not help by 0.10 per candidate (Appendix B, which also gives the full procedure as pseudocode). 
+
+3.6 Compared systems 
+
+We compare six systems. B1 is the frozen LLM-as-Jev model and B2 is B1 fine-tuned on an ID mixture. B3 
+
+adds temperature scaling [26] to B2. B4 adds an uncertainty-only risk score with a single LTT threshold certified on pooled ID and proxy data. B5 is the full S HIFT -J EV reliability layer with routing and per-regime thresholds, and B6 is B5 after continual adaptation and per-regime recertification. The abstention baselines are the max-probability (MSP) score [36] and the energy score [54], both with the same pooled LTT certification as B4, and split-conformal LAC prediction sets [37], calibrated on all ID and proxy calibration data, that answer only when the set contains a single option. LAC guarantees marginal coverage of the prediction set rather than selective risk. The continual-learning baselines are naive sequential fine-tuning, EWC [60], sequential fine-tuning with the base paper’s KL anchors to the original model (Seq-FT+KL), experience replay [62] and LwF [61]. All baselines start from the same B2 adapter and use the same data, steps and LoRA capacity. 
+
+4 Experimental Setup 
+
+Table 2 summarizes the benchmark. The ID tasks are AG News [73], SST-2 [74], BoolQ [75] and ARC-Challenge [76], each split into training (500 items per task for the 0.6B model and 250 for the 4B model), validation (100), calibration (200) and test (300) sets. SciQ [77] and Emotion [78] serve only as proxy shifts for calibration. The test shifts are domain shift to Banking77 with 77 intents [79], Twitter financial-news topics with 20 classes [80] and MMLU [81]; class-prior shift on AG News with imbalance ratios of 10 and 100; emerging classes on CLINC150 [82], with 15 candidate intents plus “none of the above” and 50% out-of-scope requests; and four candidate-set perturbations of ID items: option rotation, label paraphrase and an added near-duplicate distractor, which leave the task unchanged, and removal of the correct option, which makes every answer wrong. External benchmarks follow the base paper: BoolQ, MMLU, MMLU-Pro [83], ARC-Challenge, WinoGrande [84], SciQ and Banking77. 
+
+Table 2: Evaluation environments and the use of their data: training (Tr), temperature fitting (Val), risk-model fitting and certification (Cal) and testing (Test). Group Environment Source Role n (test) ID AG News, SST-2, BoolQ, ARC-C 4 tasks Tr / Val / Cal / Test 1,200 Proxy shift SciQ, Emotion 2 tasks Cal only —A. Domain Banking77 ( K = 77 ), Twitter-Fin ( K = 20 ), MMLU ( K = 4 ) 3 tasks Test (+ adaptation) 3 × 500                         
+
+> B. Class prior AG News, ρ= 10 and ρ= 100 resampled Test 2×300
+> C. Emerging classes CLINC150 + “none of the above” ( K= 16 )50% out of scope Test (+ adaptation) 500 D. Candidate set rotation, paraphrase, distractor / gold removed ID test items Test 153–204 each External BoolQ, MMLU, MMLU-Pro, ARC-C, WinoGrande, SciQ, Banking77 paper sizes Test 6,456–7,456
+
+Each detection stream contains 200 ID items followed by 200 items of which 25%, 50% or 100% come from a shifted environment, and we simulate 50 streams per environment and severity. The continual protocol starts from the first-seed B2 adapter and visits Banking77, a control stage of fresh ID data in which adaptation cannot help, Twitter-Fin and CLINC150. Each stage supplies 300 training items and 260 held-out items: 80 for the gate, 20 for buffer validation and 160 for threshold certification. Accuracy on every regime seen so far is measured after each stage on 400 (0.6B) or 300 (4B) evaluation items per regime, and we report final average accuracy, backward transfer (BWT) and forgetting [63, 64]. The backbones are Qwen3-0.6B [85], the small model of the base paper, Qwen3-4B-Instruct-2507 and the frozen Phi-4-mini-instruct [86] as a second model family. We use Qwen3-4B-Instruct instead of the 7SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+base paper’s Qwen3.5-4B because the latter’s hybrid linear attention is impractically slow on T4 GPUs without custom kernels. Training follows the base paper: LoRA rank 16 and α = 32 on all linear layers, AdamW with learning rate 10 −4, one epoch, batch size 8 and anchor weight 1. Fine-tuning, abstention and continual-learning experiments on the Qwen backbones use three seeds (20260922, 13 and 42); the stream, perturbation, post-adaptation and base-recipe ablation analyses use the first seed, and the frozen models are deterministic. We report means and standard deviations over seeds and paired bootstrap intervals for differences in the area under the risk–coverage curve (AURC). Evaluation items are shared across seeds, and all continual runs start from the same B2 adapter, so we do not pool seeds as independent pairs. Instead, for continual learning we report the per-seed paired difference in accuracy, the number of seeds in which a method is better, and a two-sided exact sign test over unique items on correctness averaged over the three seeds. Abstention is evaluated by coverage, realized selective risk and the number of (environment, seed) tests in which the realized risk exceeds α (violations ); because these tests share items, we treat the counts as descriptive and also report them per seed. Each of the three parts of the study runs in a single Kaggle session with two T4 GPUs in under 12 hours (8.1, 9.4 and 11.1 h). Section A lists all implementation details and hyperparameters. 
+
+5 Results 
+
+5.1 Reproduction of the decision model 
+
+Table 3 and Fig. 2 compare our implementation with the base paper. Training-free Qwen3-0.6B reaches a six-task external macro accuracy of 57.10 against 57.85 reported, with per-task differences within 2.2 points except SciQ ( −3.5). Fine-tuning reaches 59 .61 ± 0.23 over three seeds, above the reported 58.30, while Banking77 stays at the training-free level (20.4%) because Banking77 is one of our test shifts and is therefore excluded from our training mixture. Fine-tuning halves the external calibration error (ECE 0.246 to 0.120), and text-mode decoding agrees with the scored decision on all audited items. 
+
+Table 3: Reproduction of LLM-as-Jev with Qwen3-0.6B on the base paper’s external benchmarks and sample sizes (accuracy, %). ECE averages the six macro tasks. System BoolQ MMLU MMLU-Pro ARC-C WinoGr. SciQ Macro-6 Banking77 ECE Base paper, training-free 72.60 46.75 22.25 54.17 53.60 97.75 57.85 22.21 –                                                   
+
+> This study, training-free (B1) 73.80 45.17 24.00 54.00 51.40 94.25 57.10 20.48 0.246 Base paper, LoRA λ=1 72.40 46.00 20.80 57.80 55.00 97.80 58.30 54.90 –Base paper, LoRA λ=0.01 72.80 47.00 21.50 57.20 55.20 97.50 58.53 59.00 –Base paper, full FT λ=1 74.40 47.83 20.50 60.33 53.60 97.75 59.07 60.49 –
+> This study, LoRA λ=1 (B2, 3 seeds) 77.87 46.19 23.71 61.83 53.00 95.08 59.61 ±0.23 20.41 0.120
+
+5.2 RQ1: decision models under shift 
+
+Domain shift to intent sets with many options is the most damaging shift (Tables 4 and 5, Fig. 3). Frozen Qwen3-0.6B falls from 73.3% ID accuracy to 18.4% on Banking77 and 27.6% on Twitter-Fin while remaining confident (ECE 0.47 and 0.58), and Qwen3-4B falls from 91.1% to 55.4% and 60.2%. Class-prior shift does not reduce accuracy at either scale (AG News is easier than the ID average), and emerging classes cost 4–5 points because “none of the above” is often chosen correctly. Candidate changes that leave the task unchanged still hurt the small model: with an added near-duplicate distractor, Qwen3-0.6B reaches 59.3% against 73.3% on ID data, while Qwen3-4B reaches 89.7% against 91.1%. Fine-tuning with KL anchors and temperature scaling (B3) reduces the shift-averaged ECE from 0.289 to 0.087 for Qwen3-0.6B and from 0.182 to 0.078 for Qwen3-4B, and raises the 0.6B model’s shift accuracy from 57.5% to 64.2%. These gains come from the base recipe and temperature scaling; the S HIFT -J EV reliability layer does not change 8SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 20 40 60 80 100 
+
+Accuracy (%) · 6-task macro: paper 57.85, ours 57.10 
+
+> BoolQ MMLU MMLU-Pro ARC-C WinoGrande SciQ Banking77
+> +1.2 -1.6 +1.8 -0.2 -2.2 -3.5 -1.7
+
+a Training-free (frozen)      
+
+> Base paper (reported) This study
+> 20 40 60 80 100
+
+Accuracy (%) · 6-task macro: paper 58.30, ours 59.61 
+
+> +5.5 +0.2 +2.9 +4.0 -2.0 -2.7 -34.5
+
+b LoRA fine-tuned, λ = 1 (3 seeds)  
+
+> Base paper (reported) This study
+
+Figure 2: Per-task reproduction of the base paper on Qwen3-0.6B. Hollow markers: reported; filled: this study (b: mean and range over 3 seeds). The Banking77 gap in (b) reflects intent data in the base paper’s training mixture, which our ID mixture excludes by design. 
+
+predictions or calibration and is evaluated separately below. Fine-tuning alone (B2, shift ECE 0.126 on both backbones) accounts for most of the calibration gain on Qwen3-0.6B and about half of it on Qwen3-4B. For Qwen3-4B fine-tuning leaves shift accuracy unchanged (80.4% vs. 80.1%), consistent with the base paper’s observation that gains shrink for stronger backbones. Even after fine-tuning, ECE remains higher under domain shift (0.08–0.17) than on ID data (0.02–0.04). 
+
+Table 4: RQ1. Accuracy (%) and ECE of the frozen model (B1, raw) and the fine-tuned, temperature-scaled model (B3; mean ± s.d. over 3 seeds) per environment. Qwen3-0.6B Qwen3-4B-Instruct Environment Shift n Acc B1 ECE B1 Acc B3 ECE B3 Acc B1 ECE B1 Acc B3 ECE B3 In-distribution — 1200 73.3 0.178 78.5 ± 1.1 0.018 ± 0.004 91.1 0.084 91.4 ± 0.3 0.038 ± 0.003 Banking77 Domain 500 18.4 0.472 19.2 ± 0.9 0.108 ± 0.011 55.4 0.400 56.3 ± 0.2 0.128 ± 0.034 Twitter-Fin Domain 500 27.6 0.582 38.2 ± 0.7 0.114 ± 0.012 60.2 0.375 59.5 ± 0.8 0.167 ± 0.009 MMLU Domain 500 43.4 0.346 46.5 ± 1.1 0.095 ± 0.017 71.0 0.260 71.3 ± 0.3 0.077 ± 0.008 AG prior ρ=10 Class prior 300 81.7 0.136 90.1 ± 1.0 0.044 ± 0.015 92.3 0.078 91.3 ± 0.9 0.044 ± 0.006 AG prior ρ=100 Class prior 300 78.0 0.187 89.0 ± 3.6 0.048 ± 0.007 86.3 0.134 87.4 ± 0.5 0.049 ± 0.006 CLINC-OOS Emerging classes 500 68.0 0.189 71.5 ± 3.2 0.153 ± 0.020 86.8 0.119 86.2 ± 0.8 0.066 ± 0.017 Option rotation Candidate set 204 70.6 0.199 76.8 ± 0.6 0.070 ± 0.011 92.6 0.076 89.9 ± 0.3 0.049 ± 0.007 Label paraphrase Candidate set 153 70.6 0.209 77.6 ± 0.8 0.074 ± 0.005 89.5 0.102 89.8 ± 0.4 0.047 ± 0.003 Near-duplicate distractor Candidate set 204 59.3 0.278 69.3 ± 3.0 0.077 ± 0.014 89.7 0.095 89.1 ± 0.7 0.075 ± 0.005 SciQ External 300 92.7 0.059 93.8 ± 0.8 0.065 ± 0.013 98.0 0.020 98.2 ± 0.2 0.034 ± 0.003 
+
+5.3 RQ2: certified abstention under shift 
+
+Tables 6 and 7 report every abstention rule on both backbones, Table 8 isolates the threshold rule from the risk score, and Fig. 4 summarizes the comparison. We focus on α = 0 .10 . At α = 0 .05 , every rule whose threshold is certified on ID data alone, including B5, certifies no threshold in most runs and abstains on all shifted inputs (coverage 0.0% on Qwen3-0.6B and 1.4% on Qwen3-4B); B5 also abstains on all ID inputs in five of six runs. Its zero violations at α = 0 .05 are therefore vacuous. With 60–350 answered calibration points and δ = 0 .1, the Clopper–Pearson bound falls below 0.05 only if the observed error rate is below about 2–3%; in four of the six Qwen runs no candidate threshold met this on the ID calibration half, in one the strictest candidate failed and ended the fixed sequence although later candidates would have passed, and 9SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 0.0 0.1 0.2 0.3 0.4 0.5 0.6 
+
+Expected calibration error (15 bins) 
+
+Twitter-Fin Banking77 MMLU Distractor Paraphrase Rotate Prior ρ=100 CLINC-OOS In-distribution Prior ρ=10 SciQ 
+
+a Qwen3-0.6B 
+
+0.0 0.1 0.2 0.3 0.4 0.5 0.6 
+
+Expected calibration error (15 bins) 
+
+b Qwen3-4B-Instruct 
+
+Frozen (B1), raw Fine-tuned + TS (B3), 3 seeds 
+
+Figure 3: Expected calibration error per environment for the frozen model (B1) and the fine-tuned, temperature-scaled model (B3; mean and s.d. over 3 seeds): (a) Qwen3-0.6B, (b) Qwen3-4B-Instruct. 
+
+Table 5: Systems B1–B6. Shift metrics average the nine shifted environments; abstention at α = 0 .10 , δ = 0 .1. The calibration gains of B2 and B3 come from fine-tuning with KL anchors and temperature scaling; the reliability layer (B4, B5) does not change predictions or calibration. B6 is evaluated on the continual evaluation sets: ID accuracy after the last stage (3 seeds) and, marked †, coverage and realized risk on the ID regime with its recertified threshold (seed 1; Table 15). Backbone System Seeds ID acc (%) ID ECE Shift acc (%) Shift ECE Coverage@.10 (%) Risk@.10 (%) Violations@.10 Qwen3-0.6B B1 frozen 1 73.3 0.178 57.5 0.289 – – –B2 fine-tuned + KL anchors 3 78.5 ± 1.1 0.061 ± 0.004 64.2 ± 0.6 0.126 ± 0.007 – – –B3 = B2 + temperature scaling 3 78.5 ± 1.1 0.018 ± 0.004 64.2 ± 0.6 0.087 ± 0.003 – – –B4 = B3 + uncertainty abstention 3 as B3 37.9 ± 4.9 6.4 ± 1.9 5/27 B5 = B3 + S HIFT -J EV monitor 3 as B3 33.3 ± 6.6 5.2 ± 2.8 4/27 B6 = B5 after continual adaptation 3 / 1 77.6 ± 0.9 – see Tables 12 and 14 64.5 † 11.6 † –Qwen3-4B B1 frozen 1 91.1 0.084 80.4 0.182 – – –B2 fine-tuned + KL anchors 3 91.4 ± 0.3 0.033 ± 0.022 80.1 ± 0.2 0.126 ± 0.024 – – –B3 = B2 + temperature scaling 3 91.4 ± 0.3 0.038 ± 0.003 80.1 ± 0.2 0.078 ± 0.005 – – –B4 = B3 + uncertainty abstention 3 as B3 55.8 ± 2.0 4.8 ± 0.6 3/27 B5 = B3 + S HIFT -J EV monitor 3 as B3 60.1 ± 7.4 6.2 ± 2.8 6/27 B6 = B5 after continual adaptation 3 / 1 89.0 ± 0.9 – see Tables 12 and 14 85.7 † 4.7 † –
+
+10 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+in one a threshold answering 17% of ID inputs was certified (Section 6.2). Pooled certification, with 700 instead of 400 test-half points, is less affected. The risk score matters even when the certification procedure is the same. With the same pooled LTT threshold, the MSP score violates α = 0 .10 in 15 of 27 tests on Qwen3-0.6B (five in every seed) at a mean realized risk of 16.0%, whereas the learned uncertainty score of B4 violates it in 5 tests at 6.4%; on Qwen3-4B the counts are 5 and 3. A plausible reason is that one threshold on the maximum probability does not transfer across tasks with very different numbers of options, whereas the learned score also uses the margin and the number of options. Split-conformal LAC sets answer the most inputs (53.6% and 73.8%), but at realized risks of 24.5% and 12.1%, and violate 14 and 9 tests, which is expected because they control marginal coverage rather than selective risk. Adding the format and consistency signals to the learned score does not reduce violations under a pooled threshold (8 and 3 tests at α = 0 .10 ). Drift-based routing has little effect (Table 8). Routing changes a threshold only when the proxy-shift threshold is stricter than the ID threshold, which never happened at α = 0 .05 and happened in one to three of the three runs at α = 0 .10 and 0.20. B5 therefore has the same violation counts as the same score with an ID-only threshold on Qwen3-4B, and differs from it only at α = 0 .20 on Qwen3-0.6B (12 against 14 violations). The calibration data matter more than routing, although not uniformly: certifying the uncertainty score on ID data instead of pooled data changes the violations at α = 0 .10 from 5 to 4 on Qwen3-0.6B but from 3 to 6 on Qwen3-4B. Applying the stricter of the ID and proxy thresholds to every input gives the fewest violations on both backbones (3 and 2 of 27 at α = 0 .10 ; 7 and 4 summed over the three levels for the S HIFT -J EV 
+
+score), at a coverage cost of 7.4 points on Qwen3-4B at α = 0 .10 (52.7% against 60.1%) and 10.4 points on Qwen3-0.6B at α = 0 .20 . Because this rule emerged from the post-hoc analysis in Table 8, we report it as a finding to be confirmed rather than as part of the method. At α = 0 .10 , B5 answers 33.3% of shifted inputs at 5.2% realized risk on Qwen3-0.6B and 60.1% at 6.2% on Qwen3-4B, with 4 and 6 violations, comparable to B4 (5 and 3). The risk–coverage curves (Fig. 5) explain why no rule can answer many Banking77 or Twitter-Fin inputs: even the 5% most confident decisions of Qwen3-0.6B on these sets are wrong 30–60% of the time. Placing the drift distances inside the risk model, as in our earlier design, increases summed violations relative to B5 from 16 to 20 on Qwen3-0.6B and from 9 to 19 on Qwen3-4B, worsens AURC on Qwen3-0.6B (0.2332 against 0.2265) and makes coverage unstable across seeds ( 27 .5 ± 24 .0% ). A risk model using drift alone ranks errors barely above chance (error AUROC 0.54 and 0.50). The drift embedding is nevertheless useful for routing in the sense that none of the candidate-perturbed items is routed to τshift (Table 9), because their state text is unchanged, and it drives the stream detectors of Section 5.4. The different risk scores rank errors almost identically. Shift AURC lies between 0.2244 and 0.2307 on Qwen3-0.6B and between 0.0902 and 0.0958 on Qwen3-4B for the MSP, uncertainty and S HIFT -J EV scores and their ablations without format or consistency signals, error AUROC is 0.75–0.76 and 0.80–0.81, and paired bootstrap tests do not separate B4 and B5 on most environments. Removing rotation consistency raises AURC to 0.2307, while removing the format signal lowers it to 0.2244 and reduces violations to 11, so the format signal does not help. The energy score is unsuitable for trie scores: because each option’s score is already a normalized log-probability, the energy measures total identifier mass rather than confidence among options, its error AUROC is inverted (0.25 and 0.20) and its certification abstains on everything. When the correct option is removed, every answer is wrong. B5 abstains on 40.0% of such items on Qwen3-0.6B and 41.3% on Qwen3-4B, against 35.8% and 17.2% for B4, but the Qwen3-4B figure varies strongly between seeds (72%, 14% and 38%). Under the three task-preserving perturbations B5 keeps realized risk between 2.6% and 8.8% (seed 1, Table 9). 11 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+Table 6: Abstention on B2 under shift (Qwen3-0.6B; 3 seeds × 9 shifted environments = 27 tests per α). “Pooled” thresholds are certified by LTT on ID and proxy-shift calibration data together, “ID-only” on ID data alone; B5 uses the ID threshold and routes unknown inputs to τshift . Coverage and realized risk average the nine environments (mean 
+
+± s.d. over seeds); a coverage of 0 means that no threshold could be certified and the rule abstains on everything. Violations count (environment, seed) tests whose realized risk exceeds α; because the test items are shared across seeds, the counts are descriptive. MSP and LAC rank inputs by the same score and therefore have the same AURC. Risk score / threshold rule Shift AURC ↓ Cov@.05 (%) Cov@.10 (%) Risk@.10 (%) Violations α=.05/.10/.20 Viol.@.10 per seed Gold removed: abstain (%) MSP score, pooled LTT τ 0.2287 ± 0.0034 28.8 ± 12.5 43.4 ± 2.3 16.0 ± 1.2 12 / 15 / 18 5 / 5 / 5 35.5 ± 1.5 Energy score, pooled LTT τ 0.4852 ± 0.0139 0.0 0.0 0.0 0 / 0 / 0 0 / 0 / 0 100.0 Split-conformal LAC (not risk-certified) 0.2287 ± 0.0034 36.3 ± 2.0 53.6 ± 0.9 24.5 ± 0.4 17 / 14 / 15 5 / 5 / 4 35.6 ± 0.6 SHIFT -J EV risk score, pooled LTT τ 0.2265 ± 0.0036 18.0 ± 16.7 39.1 ± 0.9 7.5 ± 1.0 4 / 8 / 10 2 / 3 / 3 35.8 ± 3.0 B4: uncertainty risk, pooled LTT τ 0.2280 ± 0.0027 20.2 ± 17.6 37.9 ± 4.9 6.4 ± 1.9 4 / 5 / 13 2 / 2 / 1 35.8 ± 2.9 Uncertainty risk, ID-only LTT τ 0.2280 ± 0.0027 0.0 35.4 ± 5.2 5.3 ± 1.7 0 / 4 / 8 2 / 1 / 1 37.9 ± 3.6 Drift features inside the risk score 0.2332 ± 0.0036 9.3 ± 16.1 27.5 ± 24.0 5.0 ± 4.6 2 / 4 / 14 1 / 0 / 3 55.1 ± 39.3 B5 − format signal 0.2244 ± 0.0007 0.0 30.3 ± 3.5 3.5 ± 1.1 0 / 1 / 10 0 / 0 / 1 43.1 ± 2.5 B5 − rotation consistency 0.2307 ± 0.0043 0.0 34.0 ± 7.8 6.6 ± 3.1 0 / 5 / 9 3 / 0 / 2 38.6 ± 5.8 Drift features only 0.3481 ± 0.0127 0.0 0.0 0.0 0 / 0 / 3 0 / 0 / 0 100.0                   
+
+> B5: S HIFT -J EV risk, ID LTT τ+ routing 0.2265 ±0.0036 0.0 33.3 ±6.6 5.2 ±2.8 0 / 4 / 12 1 / 0 / 3 40.0 ±6.9
+
+Table 7: Abstention on B2 under shift (Qwen3-4B-Instruct-2507; 3 seeds × 9 shifted environments = 27 tests per α). “Pooled” thresholds are certified by LTT on ID and proxy-shift calibration data together, “ID-only” on ID data alone; B5 uses the ID threshold and routes unknown inputs to τshift . Coverage and realized risk average the nine environments (mean ± s.d. over seeds); a coverage of 0 means that no threshold could be certified and the rule abstains on everything. Violations count (environment, seed) tests whose realized risk exceeds α; because the test items are shared across seeds, the counts are descriptive. MSP and LAC rank inputs by the same score and therefore have the same AURC. The 4B model has no consistency signal, so B5 without the format signal reduces to the uncertainty risk with routing and is omitted. Risk score / threshold rule Shift AURC ↓ Cov@.05 (%) Cov@.10 (%) Risk@.10 (%) Violations α=.05/.10/.20 Viol.@.10 per seed Gold removed: abstain (%) MSP score, pooled LTT τ 0.0902 ± 0.0021 37.3 ± 5.4 55.5 ± 6.8 7.7 ± 0.6 6 / 5 / 9 2 / 1 / 2 34.6 ± 2.7 Energy score, pooled LTT τ 0.3417 ± 0.0057 0.0 0.0 0.0 0 / 0 / 9 0 / 0 / 0 100.0 Split-conformal LAC (not risk-certified) 0.0902 ± 0.0021 39.3 ± 4.0 73.8 ± 4.6 12.1 ± 0.7 13 / 9 / 7 3 / 3 / 3 27.0 ± 3.4 SHIFT -J EV risk score, pooled LTT τ 0.0948 ± 0.0063 50.1 ± 1.5 55.9 ± 1.9 4.7 ± 0.4 6 / 3 / 3 1 / 1 / 1 48.4 ± 33.3 B4: uncertainty risk, pooled LTT τ 0.0958 ± 0.0047 50.5 ± 0.7 55.8 ± 2.0 4.8 ± 0.6 7 / 3 / 4 1 / 1 / 1 17.2 ± 4.7 Uncertainty risk, ID-only LTT τ 0.0958 ± 0.0047 1.4 ± 2.4 61.2 ± 8.1 6.6 ± 2.8 1 / 6 / 3 1 / 0 / 5 10.5 ± 11.1 Drift features inside the risk score 0.0959 ± 0.0049 34.1 ± 29.8 63.5 ± 12.0 7.7 ± 4.5 5 / 9 / 5 1 / 2 / 6 44.6 ± 37.9 Drift features only 0.1989 ± 0.0034 0.0 0.0 0.0 0 / 0 / 3 0 / 0 / 0 100.0                     
+
+> B5: S HIFT -J EV risk, ID LTT τ+ routing 0.0948 ±0.0063 1.4 ±2.5 60.1 ±7.4 6.2 ±2.8 0 / 6 / 3 1 / 0 / 5 41.3 ±29.3
+
+Table 8: Isolating the threshold rule from the risk score (both Qwen backbones, 3 seeds, 27 tests per α). All thresholds are re-certified offline from the stored calibration splits of each run. Routing changes a threshold only when τproxy < τ ID ,which never happened at α = 0 .05 ; “ τshift for all inputs” applies the stricter of the ID and proxy thresholds everywhere. Model Risk score Threshold rule Shift cov. .05/.10/.20 (%) Risk@.10 (%) ID cov.@.10 (%) Violations .05/.10/.20 Sum 0.6B uncertainty pooled (ID + proxy) 20.2 / 37.9 / 66.9 6.4 58.8 4 / 5 / 13 22 ID only 0.0 / 35.4 / 60.7 5.3 54.6 0 / 4 / 8 12 ID + routing to τshift (B5 rule) 0.0 / 35.4 / 60.7 5.3 54.6 0 / 4 / 8 12 
+
+τshift for all inputs 0.0 / 35.0 / 60.3 5.2 53.9 0 / 3 / 8 11 SHIFT -J EV pooled (ID + proxy) 18.0 / 39.1 / 63.3 7.5 60.8 4 / 8 / 10 22 ID only 0.0 / 33.3 / 68.0 5.5 51.1 0 / 4 / 14 18 ID + routing to τshift (B5 rule) 0.0 / 33.3 / 67.2 5.2 51.1 0 / 4 / 12 16 
+
+τshift for all inputs 0.0 / 32.8 / 56.8 5.8 50.1 0 / 3 / 4 74B uncertainty pooled (ID + proxy) 50.5 / 55.8 / 69.0 4.8 89.1 7 / 3 / 4 14 ID only 1.4 / 61.2 / 67.3 6.6 93.9 1 / 6 / 3 10 ID + routing to τshift (B5 rule) 1.4 / 60.9 / 66.9 6.7 93.9 1 / 6 / 3 10 
+
+τshift for all inputs 1.4 / 52.0 / 60.6 3.6 84.3 1 / 2 / 2 5SHIFT -J EV pooled (ID + proxy) 50.1 / 55.9 / 68.4 4.7 89.2 6 / 3 / 3 12 ID only 1.4 / 60.4 / 67.2 6.2 92.9 0 / 6 / 3 9ID + routing to τshift (B5 rule) 1.4 / 60.1 / 66.9 6.2 92.9 0 / 6 / 3 9
+
+τshift for all inputs 1.4 / 52.7 / 60.7 3.8 85.3 0 / 2 / 2 4
+
+12 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT α = 0.05 α = 0.10 α = 0.20 0510 15 
+
+> Violations (of 27)
+
+a Qwen3-0.6B (27 tests per α) 
+
+α = 0.05 α = 0.10 α = 0.20 0510 15 
+
+> Violations (of 27)
+
+b Qwen3-4B (27 tests per α) 
+
+0 20 40 60 80 
+
+Mean coverage at α = 0.10 (%) 
+
+0510 15 20 25 
+
+> Mean selective risk (%)
+
+c Coverage vs. realized risk 
+
+Qwen3-0.6B Qwen3-4B MSP threshold Split-conformal LAC SHIFT-Jev risk, pooled τ Uncertainty, pooled proxy τ (B4) Drift inside risk (v4 design) SHIFT-Jev (B5) 
+
+Figure 4: (a, b) Selective-risk violations out of 27 (environment, seed) tests at each target risk level. At α = 0 .05 ,B5 abstains on (almost) all inputs (coverage 0.0% and 1.4%), so its zero count there is vacuous; see Tables 6 and 7. (c) Mean coverage against mean realized risk at α = 0 .10 (error bars: s.d. over seeds); the dashed line marks the target. 0.0 0.5 1.0 020 40 60 80 
+
+> Selective risk (%)
+> α = 10%
+
+a Banking77   
+
+> 0.0 0.5 1.0 020 40 60
+> α = 10%
+
+b Twitter-Fin   
+
+> 0.0 0.5 1.0 020 40
+> α = 10%
+
+c MMLU   
+
+> 0.0 0.5 1.0
+> Coverage
+> 020 40 60 80 100
+> Selective risk (%)
+> α = 10%
+
+d CLINC-OOS    
+
+> 0.0 0.5 1.0
+> Coverage
+> 0246810 α = 10%
+
+e Prior ρ=100     
+
+> MSP ranking Uncertainty risk (B4) SHIFT-Jev risk (B5)
+> 0.0 0.5 1.0
+> Coverage
+> 010 20
+> α = 10%
+
+f Distractor 
+
+Figure 5: Risk–coverage curves on six shifted environments (Qwen3-0.6B, seed 1) for MSP, the uncertainty risk score (B4) and the S HIFT -J EV risk score (B5). The dotted line marks α = 10% .
+
+13 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+Table 9: Candidate-set perturbations (seed 1). For gold-removed items every answer is wrong, so abstention should be high. Rotation agreement is computed only at 0.6B (the consistency signal is not used at 4B). Model Perturbation Type Acc B1 (%) Acc B2 (%) Rotation agreement (%) Routed to τshift (%) B4 abstain / risk (%) B5 abstain / risk (%) 0.6B Option rotation harmless 70.6 77.5 87.7 0 38.7 / 9.6 49.5 / 8.7 0.6B Label paraphrase harmless 70.6 77.1 88.9 0 35.9 / 10.2 47.7 / 8.8 0.6B Near-duplicate distractor harmless 59.3 72.1 77.0 0 47.1 / 6.5 61.8 / 2.6 0.6B Gold option removed task-altering – – 81.9 0 32.8 / 100.0 42.2 / 100.0 4B Option rotation harmless 92.6 90.2 – 0 9.3 / 5.9 10.8 / 4.4 4B Label paraphrase harmless 89.5 90.2 – 0 9.2 / 7.2 5.9 / 6.2 4B Near-duplicate distractor harmless 89.7 89.2 – 0 19.6 / 3.7 15.7 / 3.5 4B Gold option removed task-altering – – – 0 14.2 / 100.0 72.1 / 100.0 
+
+5.4 Shift detection in decision streams 
+
+Domain shift and emerging classes are easy to detect (Table 10, Fig. 6): CUSUM on the drift distance or on the S HIFT -J EV risk score detects 97–100% of full-severity streams within 2–13 items. Class-prior shift is invisible to all confidence- and embedding-based signals (0–1% detection), because each input still looks like an ID input and the model remains equally confident. Only the predicted-label χ2 test detects it, in 95% (Qwen3-0.6B) and 99% (Qwen3-4B) of full-severity streams and 80% and 86% at 50% severity, after about 36 items. It is also the best detector of candidate perturbations (70% and 64%). On fresh no-shift streams its false-alarm rate is 6% and 10%, above the 5% calibration target on both backbones; CUSUM on drift and on the S HIFT -J EV risk (6% and 7%, Qwen3-0.6B) and the KS test (7%, Qwen3-4B) also exceed it, so the simulated calibration of alarm levels is somewhat optimistic. A drift CUSUM and the label test together cover all four shift types. Stream results use the seed-1 adapter. 
+
+Table 10: Stream-level shift detection: detection rate (%) at severity 100% (mean delay in items) · at 50%, 50 streams per environment and severity. Every alarm threshold is calibrated to ≤5% false alarms on 200 simulated no-shift streams; the last column is the observed false-alarm rate on 50 fresh no-shift streams per pool. Model Detector Domain shift Emerging classes Class-prior shift Candidate perturbation False alarm (%) 0.6B CUSUM · max-probability 98 (6) · 99 98 (11) · 100 0 · 0 34 (81) · 18 20.6B CUSUM · entropy 33 (19) · 25 0 · 0 0 · 0 9 (88) · 5 40.6B CUSUM · kNN drift 97 (12) · 98 98 (7) · 98 0 · 1 1 (90) · 1 60.6B CUSUM · SHIFT -J EV risk 99 (6) · 98 100 (7) · 98 0 · 0 36 (57) · 17 70.6B KS window · SHIFT -J EV risk 97 (13) · 98 100 (16) · 100 0 · 0 31 (90) · 15 30.6B χ2 · predicted labels (BBSE) 97 (10) · 96 94 (10) · 96 95 (37) · 80 70 (96) · 27 64B CUSUM · max-probability 97 (22) · 83 94 (70) · 34 0 · 0 8 (88) · 4 54B CUSUM · entropy 6 (103) · 1 0 · 0 0 · 0 5 (110) · 1 44B CUSUM · kNN drift 98 (11) · 99 98 (6) · 100 0 · 0 0 · 1 54B CUSUM · SHIFT -J EV risk 97 (13) · 91 98 (2) · 96 0 · 0 20 (99) · 7 34B KS window · SHIFT -J EV risk 99 (16) · 86 96 (10) · 98 0 · 0 33 (127) · 13 74B χ2 · predicted labels (BBSE) 94 (10) · 99 98 (10) · 100 99 (36) · 86 64 (89) · 27 10 
+
+Switching to τshift after an alarm reduces risk violations in most streams (Table 11). On MMLU, where errors are confident, the share of streams violating α = 0 .10 after the change point falls from 98% to 44% on Qwen3-0.6B and from 100% to 84% on Qwen3-4B. On AG News with imbalance ratio 100 it falls from 20% to 0% on Qwen3-4B, and on the near-duplicate distractor from 10% to 0% on Qwen3-0.6B. CLINC150 on Qwen3-0.6B is the exception (20% to 38%): the switch lowers coverage from 14% to 5% without making the remaining answers safer. For severe domain shifts both systems abstain on almost everything, which is safe but leaves those inputs unautomated. 
+
+5.5 RQ3: continual adaptation 
+
+On Qwen3-0.6B S HIFT -J EV has the highest final average accuracy (Table 12, Fig. 7): 70 .48 ± 0.88% ,against 68.10% for LwF, 66.65% for naive fine-tuning, 66.67% for experience replay, 66.48% for EWC 14 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 020 40 60 80 100 
+
+> Qwen3-0.6B Detection rate (%)
+
+Domain shift Emerging classes Class-prior shift Candidate perturbation 
+
+25% 50% 100% 
+
+Shift severity 
+
+020 40 60 80 100 
+
+> Qwen3-4B Detection rate (%)
+
+25% 50% 100% 
+
+Shift severity 
+
+CUSUM · max-prob. CUSUM · kNN drift CUSUM · SHIFT-Jev risk χ² · predicted labels (BBSE) 
+
+25% 50% 100% 
+
+Shift severity 
+
+25% 50% 100% 
+
+Shift severity 
+
+Figure 6: Detection rate against shift severity for four detectors (top: Qwen3-0.6B; bottom: Qwen3-4B; 50 streams per point). Only the predicted-label χ2 test detects class-prior shift. 
+
+Table 11: Selective risk after a change point (50 streams per environment, α = 0 .10 , seed 1). S HIFT -J EV switches to 
+
+τshift after a drift-CUSUM or label-χ2 alarm. Environment 0.6B B4 cov / risk 0.6B S HIFT -J EV cov / risk 0.6B violating streams B4 / S HIFT -J EV (%) 4B B4 cov / risk 4B S HIFT -J EV cov / risk 4B violating streams B4 / S HIFT -J EV (%) Banking77 0.0 / 0.0 0.0 / 0.0 0 / 0 0.0 / 0.0 0.0 / 0.0 0 / 0 Twitter-Fin 0.0 / 0.0 0.0 / 0.0 0 / 0 0.0 / 0.0 0.0 / 0.0 0 / 0 MMLU 18.2 / 27.3 9.2 / 9.9 98 / 44 66.5 / 16.0 59.3 / 12.5 100 / 84 AG prior ρ=10 87.3 / 5.4 75.8 / 4.1 0 / 0 93.2 / 6.1 88.7 / 4.5 4 / 0 AG prior ρ=100 89.0 / 7.1 78.0 / 6.5 6 / 4 93.5 / 8.6 86.3 / 5.5 20 / 0 CLINC-OOS 14.0 / 7.2 4.6 / 8.6 20 / 38 0.0 / 0.0 0.0 / 0.0 0 / 0 Option rotation 61.4 / 9.7 51.2 / 9.1 46 / 40 90.6 / 5.6 89.0 / 4.4 2 / 0 Label paraphrase 63.4 / 10.3 51.4 / 9.0 60 / 36 90.5 / 7.2 90.0 / 6.1 8 / 2 Near-duplicate distractor 53.4 / 6.5 38.1 / 2.5 10 / 0 80.3 / 3.8 78.6 / 3.1 0 / 0 
+
+15 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+and 66.33% for the base paper’s Seq-FT+KL recipe. It is better than every baseline in all three seeds, by 
+
+2.38 ± 2.52 points (LwF) to 4.15 ± 2.74 points (Seq-FT+KL). On the 1,600 unique evaluation items, with each item’s correctness averaged over the three seeds, the differences are significant (sign test p = 8 .5 × 10 −4
+
+against LwF and p ≤ 6.7 × 10 −7 against the others). With only three seeds, a seed-level paired test is not significant ( p = 0 .07 –0.24), so the evidence rests on the consistent direction across seeds and on the item-level differences. S HIFT -J EV also has the most negative forgetting ( −2.1 ± 1.9 points, meaning that earlier regimes improve after later stages) and the largest backward transfer ( +3 .0). Most of the gain comes from Banking77 (54.7% against 41.8–46.2%); on the other regimes it is within 1.7 points of the best baseline. The ablations show that most of this gain comes from the training recipe rather than from the gate (last columns of Table 12). Removing replay costs 4.81 ± 2.22 points, replacing the severity-scaled anchor weight with a fixed one 3.27 ± 1.50 , random instead of margin-based replay 2.38 ± 2.90 , and removing anchors and distillation 1.62 ± 2.05 points. Removing the gate costs only 1.23 ± 2.18 points and helps in two of three seeds (item-level p = 0 .024 ). The gate’s main contribution is to stop updates that do not help: with it, forgetting is −2.1 points instead of +1 .6, and the no-shift control stage is rejected in every seed. The choice of gate matters more than its presence: replacing the expected-gain gate with the earlier gate, which tests whether the model has degraded, costs 4.58 ± 1.09 points in all three seeds because that gate never adapts to CLINC150 (Table 13). The gate makes the right decision in every seed on Qwen3-0.6B (Table 13, Fig. 8). It stops the control stage at the probe (held-out gains between −3.8 and 0 points) and accepts Banking77, Twitter-Fin and CLINC150 with held-out gains of 11–33 points ( p < 0.025 ). The earlier gate skips CLINC150 in every seed because the model is not worse there, although it can become much better. The gate also responds to the amount of data: with 75 labelled Banking77 items it rejects the update, while with 150 and 300 items it accepts updates that raise Banking77 accuracy from 18.2% to 39.8% and 46.8% at unchanged ID accuracy (Table 17). 
+
+Table 12: Continual adaptation on Qwen3-0.6B. Stream: Banking77 → control (no shift) → Twitter-Fin → CLINC-OOS, starting from B2. Final accuracy (%) on 400 held-out items per regime; mean ± s.d. over 3 seeds. The last three columns compare S HIFT -J EV with each row: the per-seed paired difference in average accuracy (mean ± s.d.), the number of seeds in which S HIFT -J EV is better, and a two-sided sign test on the 1,600 unique evaluation items using each item’s correctness averaged over the three seeds (the evaluation items are shared across seeds, so seeds are not pooled as independent pairs). Method (3 seeds) Avg acc (%) BWT (pts) Forgetting (pts) ID Banking77 Twitter-Fin CLINC Stages adapted Train (min) SHIFT -J EV − row (pts) Seeds S HIFT -J EV better p (items) Naive fine-tuning 66.65 ± 1.17 −1.1 ± 1.0 1.1 ± 1.0 76.9 ± 0.9 42.7 ± 2.9 60.5 ± 2.2 86.5 ± 2.0 4.0/4 9.3 +3.83 ± 1.88 3/3 1.1 × 10 −9                                                                                                                                                                                                                                                                                                                                           
+
+> EWC 66.48 ±2.10 0.4 ±1.6 −0.3 ±1.7 77.2 ±0.8 42.0 ±4.6 59.9 ±3.5 86.8 ±1.6 4.0/4 9.6 +4.00 ±2.88 3/3 6.3×10 −8
+> Seq-FT + KL anchors (base paper) 66.33 ±1.92 0.3 ±1.0 −0.2 ±1.1 77.1 ±0.9 41.8 ±4.1 59.4 ±2.8 87.0 ±1.3 4.0/4 9.5 +4.15 ±2.74 3/3 1.2×10 −8
+> Experience replay 66.67 ±1.71 −0.3 ±2.7 1.4 ±2.5 76.2 ±1.1 46.2 ±3.2 56.5 ±5.7 87.8 ±1.0 4.0/4 13.4 +3.81 ±2.53 3/3 6.7×10 −7
+> LwF (tree-local) 68.10 ±1.71 0.3 ±1.3 −0.3 ±1.3 77.2 ±1.3 43.6 ±2.5 63.0 ±2.4 88.6 ±2.7 4.0/4 9.4 +2.38 ±2.52 3/3 8.5×10 −4
+> SHIFT -J EV (expected-gain gate) 70.48 ±0.88 3.0 ±0.9 −2.1 ±1.9 77.6 ±0.9 54.7 ±1.9 61.3 ±1.9 88.3 ±0.6 3.0/4 12.4 –––
+> Ablations of SHIFT -J EV (3 seeds)
+> −gate & rollback (always adapt) 69.25 ±1.32 0.7 ±2.0 1.6 ±1.2 76.4 ±0.6 54.7 ±0.7 58.0 ±3.5 87.9 ±0.8 4.0/4 14.0 +1.23 ±2.18 2/3 0.024 v4 shift gate instead of gain gate 65.90 ±0.34 0.2 ±0.5 0.3 ±0.1 78.4 ±0.4 49.4 ±2.5 57.6 ±2.1 78.2 ±1.8 2.0/4 9.3 +4.58 ±1.09 3/3 1.5×10 −9
+> −replay 65.67 ±2.30 −0.6 ±0.8 0.6 ±0.8 78.0 ±1.6 42.8 ±3.8 54.9 ±8.0 87.0 ±0.4 2.7/4 10.3 +4.81 ±2.22 3/3 6.1×10 −17
+> −KL anchors & distillation 68.85 ±1.63 0.3 ±1.2 1.9 ±1.6 77.2 ±0.9 51.9 ±4.7 58.9 ±5.7 87.3 ±1.6 3.0/4 13.7 +1.62 ±2.05 2/3 1.7×10 −4
+> −severity-scaled λ67.21 ±0.69 0.6 ±1.4 1.0 ±1.4 77.4 ±1.2 46.3 ±2.0 58.1 ±1.8 87.0 3.0/4 13.4 +3.27 ±1.50 3/3 1.1×10 −10
+> −risk-stratified replay (random) 68.10 ±2.30 0.9 ±2.7 −0.4 ±2.0 77.0 ±0.7 47.9 ±8.1 58.5 ±3.5 89.0 ±0.7 3.0/4 12.9 +2.38 ±2.90 2/3 6.4×10 −5
+
+On Qwen3-4B the gate is too conservative for small gains (Table 14, Fig. 9). S HIFT -J EV again rejects the control stage and accepts Banking77 and CLINC150 in all seeds, giving the best Banking77 (68.6%) and CLINC150 (96.0%) accuracy, the largest backward transfer ( +1 .9) and the least forgetting ( −1.8). It rejects the Twitter-Fin update in all three seeds, however, because gains of 2.5–7.5 points on 80 held-out items do not reach p < 0.10 . Baselines that adapted reach 68.7–73.0% on Twitter-Fin against 65.9%, so S HIFT -J EV 
+
+ends at 79 .86 ± 1.10% average accuracy, 0.42–1.36 points below the baselines and below four of them in all three seeds. On the 1,200 unique evaluation items none of these differences is significant ( p = 0 .055 –0.94). A strong model leaves only small gains, and an 80-item paired test lacks the power to confirm them. Recertifying one threshold per adapted regime on 160 held-out items (B6, Table 15) restores CLINC150 coverage at low risk (44.5% at 4.5% risk on Qwen3-0.6B and 67.0% at 3.5% on Qwen3-4B) and keeps the ID 16 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 64 66 68 70 
+
+> Final average accuracy (%)
+> Naive fine-tuning EWC Seq-FT + KL (paper) Experience replay LwF SHIFT-Jev − gain gate → v4 shift gate − gate & rollback − replay − KL anchors & distillation − severity-scaled λ − risk-stratified replay
+> 66.6 66.5 66.3 66.7 68.1 70.5 65.9 69.2 65.7 68.9 67.2 68.1
+
+a Accuracy   
+
+> −2.5 0.0 2.5
+> Forgetting (pts, ↓)
+
+Stability                           
+
+> ID Banking77 Twitter-Fin CLINC Naive fine-tuning EWC Seq-FT + KL (paper) Experience replay LwF SHIFT-Jev − gain gate → v4 shift gate − gate & rollback
+> 76.9 42.7 60.5 86.5 77.2 42.0 59.9 86.8 77.1 41.8 59.4 87.0 76.2 46.2 56.5 87.8 77.2 43.6 63.0 88.6 77.6 54.7 61.3 88.3 78.4 49.4 57.6 78.2 76.4 54.7 58.0 87.9
+
+b Final accuracy per regime (%) 
+
+Figure 7: Continual adaptation on Qwen3-0.6B. (a) Final average accuracy and forgetting (mean ± s.d., 3 seeds; shaded: S HIFT -J EV ablations). (b) Final accuracy per regime: the gain over the baselines comes from Banking77, and the earlier gate loses CLINC150, the regime it never adapts to. 
+
+Table 13: Expected-gain gate decisions of S HIFT -J EV (3 seeds per backbone). Gain = held-out accuracy gain (points) of the best candidate on 80 new-regime items, with its one-sided sign-test p; an update is kept iff p < 0.10 and old-regime accuracy drops by ≤5 points. “Trigger” = the v4 shift test’s outcome (logged only); the last column shows how often the v4 shift gate adapted. Model Regime Accepted Stopped by probe Gain (pts) Sign-test p v4 trigger v4 gate adapted Qwen3-0.6B Banking77 3/3 0/3 18.8 to 32.5 1.3 × 10 −6 to 2.0 × 10 −3 drift+perf, perf 3/3 Control (no shift) 0/3 3/3 −3.8 to 0.0 0.66 to 0.97 none 0/3 Twitter-Fin 3/3 0/3 11.2 to 15.0 2.1 × 10 −3 to 0.025 perf 3/3 CLINC-OOS 3/3 0/3 17.5 to 26.2 4.8 × 10 −7 to 6.6 × 10 −4 none 0/3 Qwen3-4B Banking77 3/3 0/3 10.0 to 12.5 3.2 × 10 −3 to 0.029 perf –Control (no shift) 0/3 2/3 −2.5 to 1.2 0.5 to 1 none –Twitter-Fin 0/3 0/3 2.5 to 7.5 0.11 to 0.4 perf –CLINC-OOS 3/3 0/3 7.5 to 10.0 3.9 × 10 −3 to 0.016 none –−5 0 5 10 15 20 25 30 
+
+Held-out gain on the new regime (pts) 
+
+10 −4 
+
+10 −3 
+
+10 −2 
+
+10 −1 
+
+10 0
+
+> One-sided sign-test p  p = 0.10
+
+a Qwen3-0.6B · 3 seeds 
+
+−2 0 2 4 6 8 10 12 
+
+Held-out gain on the new regime (pts) 
+
+> p = 0.10
+
+b Qwen3-4B · 3 seeds 
+
+> Banking77 Control (no shift) Twitter-Fin CLINC-OOS rejected → rollback
+
+Figure 8: All expected-gain gate decisions: held-out gain of the best candidate against its one-sided sign-test p-value (log scale). Filled markers: accepted; open markers: rolled back. On Qwen3-4B the Twitter-Fin gains of 2.5–7.5 points do not reach p < 0.10 on 80 items. 
+
+17 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+Table 14: Continual adaptation on Qwen3-4B-Instruct-2507 (3 seeds; 300 held-out items per regime). The last three columns are computed as in Table 12, with 1,200 unique evaluation items; negative differences mean that S HIFT -J EV is worse. Method (3 seeds) Avg acc (%) BWT (pts) Forgetting (pts) ID Banking77 Twitter-Fin CLINC Stages adapted Train (min) SHIFT -J EV − row (pts) Seeds S HIFT -J EV better p (items) Naive fine-tuning 81.22 ± 0.55 0.8 ± 1.4 −0.4 ± 1.4 89.2 ± 1.1 66.9 ± 1.8 73.0 ± 1.0 95.8 ± 0.5 4.0/4 15.0 −1.36 ± 0.59 0/3 0.31 EWC 81.00 ± 1.01 1.0 ± 1.2 −0.5 ± 0.9 89.3 ± 1.2 67.0 ± 1.2 72.0 ± 2.0 95.7 ± 0.3 4.0/4 15.2 −1.14 ± 0.10 0/3 0.055 Seq-FT + KL anchors (base paper) 80.28 ± 1.12 0.7 ± 1.3 −0.3 ± 1.0 89.8 ± 1.6 64.7 ± 2.2 71.3 ± 1.5 95.3 ± 0.3 4.0/4 15.1 −0.42 ± 0.22 0/3 0.94 Experience replay 80.33 ± 0.76 −0.4 ± 1.1 1.6 ± 0.6 89.9 ± 0.8 67.7 ± 1.2 68.7 ± 1.8 95.1 ± 1.3 4.0/4 18.6 −0.47 ± 1.43 1/3 0.94 LwF (tree-local) 81.00 ± 0.60 1.0 ± 0.7 −0.6 ± 0.7 89.7 ± 1.2 66.0 ± 0.9 72.9 ± 1.0 95.4 ± 0.8 4.0/4 15.0 −1.14 ± 0.50 0/3 0.14                                
+
+> SHIFT -J EV (expected-gain gate) 79.86 ±1.10 1.9 ±1.0 −1.8 ±1.0 89.0 ±0.9 68.6 ±1.0 65.9 ±3.4 96.0 ±0.3 2.0/4 17.9 –––B2 B77 Ctrl Fin CLINC
+
+89.0 89.5 90.0 
+
+> Accuracy (%)
+
+a ID     
+
+> B2 B77 Ctrl Fin CLINC
+
+55 60 65 70 
+
+b Banking77 
+
+SHIFT-Jev Replay Seq-FT+KL LwF EWC Naive     
+
+> B2 B77 Ctrl Fin CLINC
+
+60.0 62.5 65.0 67.5 70.0 72.5 
+
+c Twitter-Fin     
+
+> B2 B77 Ctrl Fin CLINC
+
+85.0 87.5 90.0 92.5 95.0 
+
+d CLINC 
+
+Figure 9: Qwen3-4B-Instruct: accuracy on each regime after every stage (mean of 3 seeds). S HIFT -J EV keeps ID and Banking77 stable and is best on CLINC150, but stays at its starting level on Twitter-Fin after rejecting that update. 
+
+regime within α on Qwen3-4B (85.7% coverage at 4.7% risk). Banking77 is fully abstained on, Twitter-Fin is answered for only 1.2% and 7.3% of inputs at realized risks of 40% and 27%, and on Qwen3-0.6B the ID regime is violated (64.5% coverage at 11.6% risk). Certification on 160 items is therefore fragile, in line with the finding that coverage degrades faster than accuracy under sequential fine-tuning [13]. 
+
+5.6 Scale and model family 
+
+Training-free Qwen3-4B-Instruct reaches a six-task external macro accuracy of 75.76, against 78.58 for the base paper’s different Qwen3.5-4B checkpoint, and fine-tuning leaves it unchanged (75.71) while halving its ECE (0.220 to 0.105; Table 18, Fig. 10). For the frozen Phi-4-mini (one run, Table 19), the MSP score with a pooled threshold has no violations at α = 0 .10 and four in total. The S HIFT -J EV layer has three in total but certifies no threshold at α = 0 .05 , has a higher realized risk at α = 0 .10 than the uncertainty score (7.9% against 5.2%), a worse AURC (0.160 against 0.129) and lower abstention on removed-answer items (14% against 25%). Without fine-tuning and without the consistency signal, the format signal of a different model family adds noise to the risk model. On the frozen Qwen models the S HIFT -J EV layer certifies no threshold at α ≤ 0.10 , whereas the MSP score with a pooled threshold answers 24.4% (0.6B) and 52.6% (4B) of shifted inputs at α = 0 .10 , with 7 and 0 violations. The learned risk models are therefore most useful on top of the fine-tuned and temperature-scaled model (B3), and a plain MSP score remains a reasonable choice for an unadapted backbone. 
+
+5.7 Ablations of the base recipe and cost 
+
+The anchor ablation reproduces the base paper’s finding (Table 16, Fig. 11). Decision accuracy hardly depends on the anchor weight (ID accuracy 79.8–80.2%), but without anchors the KL divergence to the base model at the reply start rises from 0.0002 to 0.62 and 85 of 100 text-mode replies continue beyond the option identifier, against none with anchors. Banking77 accuracy falls from 81.2% with 5 candidate intents to 18.6% 18 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+Table 15: Reliability after continual adaptation (B6, seed 1): coverage / realized risk (%) at α = 0 .10 on the continual evaluation sets after the last stage. Each adapted regime receives its own certified threshold. Model Method Eval set Acc (%) ID-only τ B4 pooled τ B4 regime τ SHIFT -J EV (B5) 0.6B SHIFT -J EV ID 76.5 53.8 / 6.5 62.0 / 8.9 59.8 / 11.3 64.5 / 11.6 Banking77 56.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 Twitter-Fin 60.2 0.0 / 0.0 0.0 / 0.0 1.2 / 40.0 1.2 / 40.0 CLINC-OOS 89.0 0.0 / 0.0 0.0 / 0.0 43.2 / 4.0 44.5 / 4.5 Experience replay ID 77.0 45.2 / 5.0 62.7 / 9.6 51.5 / 9.7 57.5 / 10.0 Banking77 45.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 Twitter-Fin 61.8 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 CLINC-OOS 86.8 0.0 / 0.0 0.0 / 0.0 42.5 / 4.1 44.5 / 5.1 Seq-FT + KL anchors ID 76.2 54.5 / 7.3 58.5 / 8.1 50.0 / 5.5 46.5 / 5.4 Banking77 43.2 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 Twitter-Fin 62.3 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 CLINC-OOS 87.5 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 4B SHIFT -J EV ID 89.3 91.0 / 5.9 90.7 / 5.9 91.3 / 5.8 85.7 / 4.7 Banking77 68.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 Twitter-Fin 69.7 0.0 / 0.0 0.0 / 0.0 4.7 / 35.7 7.3 / 27.3 CLINC-OOS 96.3 0.0 / 0.0 0.0 / 0.0 68.0 / 3.4 67.0 / 3.5 Experience replay ID 90.0 94.0 / 8.2 91.3 / 6.9 94.0 / 8.5 92.3 / 8.3 Banking77 67.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 Twitter-Fin 68.0 0.0 / 0.0 0.0 / 0.0 8.7 / 19.2 9.3 / 21.4 CLINC-OOS 93.7 0.0 / 0.0 0.0 / 0.0 67.7 / 6.9 67.7 / 6.9 Seq-FT + KL anchors ID 91.0 96.7 / 7.9 86.3 / 6.6 95.0 / 7.4 93.0 / 7.2 Banking77 65.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 0.0 / 0.0 Twitter-Fin 73.0 0.0 / 0.0 0.0 / 0.0 5.3 / 12.5 7.0 / 23.8 CLINC-OOS 95.3 0.0 / 0.0 0.0 / 0.0 65.0 / 4.6 63.7 / 4.7 40 60 80 100 
+
+> Accuracy (%), frozen
+> BoolQ MMLU MMLU-Pro ARC-C WinoGr. SciQ Banking77
+
+a External benchmarks   
+
+> Paper · Qwen3.5-4B Ours · Qwen3-4B-2507 Ours · Phi-4-mini
+> 0.2 0.4 0.6
+> ECE, frozen model (raw)
+> In-distribution Banking77 Twitter-Fin MMLU Prior ρ=100 CLINC-OOS Distractor
+
+b Calibration under shift  
+
+> Qwen3-0.6B Qwen3-4B Phi-4-mini
+> Qwen3-0.6B Qwen3-4B 020 40 60 80 100
+> Abstention, gold option removed (%)
+
+c Missing-answer detection 
+
+> Uncertainty risk (B4) SHIFT-Jev risk (B5)
+
+Figure 10: Scale and model family. (a) Frozen accuracy on the base paper’s external benchmarks. (b) ECE of the frozen models under shift. (c) Abstention when the correct option is removed (bars: mean of 3 seeds; dots: individual seeds). 
+
+19 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+with all 77, while latency rises from 49 to 383 ms per item, and a rank-4 adapter on attention layers only (1.1M parameters) recovers about 60% of the gain of the full rank-16 adapter (Table 17). 
+
+Table 16: Base-paper anchor-weight ablation on Qwen3-0.6B (seed 1). Anchor weight ID acc (%) ID ECE Banking77 MMLU SciQ KL start KL answer Text acc (%) Text ≡ score (%) Runaway replies                                  
+
+> λ= 1 79.8 0.057 18.6 45.6 93.0 0.0002 0.0034 81 100 0/100
+> λ= 0.1 79.8 0.066 18.2 45.6 92.7 0.0008 0.0043 80 100 0/100
+> λ= 0 80.2 0.066 18.8 46.6 92.7 0.6204 0.2329 81 100 85/100
+
+Table 17: Sweeps on Qwen3-0.6B (seed 1). Left: candidate-set size on Banking77. Middle: labelled data for one SHIFT -J EV stage on Banking77 (the gate rejects the 75-item update). Right: adapter configuration (shift accuracy over nine environments; AURC of B5).                                               
+
+> KAcc (%) AURC B4 AURC B5 ms/item 581.2 0.056 0.052 49 20 62.0 0.193 0.198 115 77 18.6 0.695 0.693 383 Items Gate B77 (%) ID (%) 75 rollback 18.2 79.0 150 full 39.8 78.8 300 full 46.8 78.5 Config. Params ID Shift AURC Frozen (B1) 073.3 57.5 0.317 r16, all linear 10.1 M 79.7 64.6 0.224 r4, attention 1.1 M 77.1 62.1 0.241 λ=1 λ=0.1 λ=0 10 −3
+> 10 −2
+> 10 −1
+> Truncated KL to base model
+
+a Behavioural drift    
+
+> KL at reply start KL after answer
+> λ=1 λ=0.1 λ=0 020 40 60 80 100
+> Runaway text replies (of 100)
+> 0085
+
+b Text-mode side effects   
+
+> 520 77
+> Candidate-set size K (Banking77)
+> 020 40 60 80 100
+> Accuracy (%)
+> 81.2% 49 ms/item 62.0% 115 ms/item 18.6% 383 ms/item
+
+c Candidate-set size 
+
+Figure 11: (a) KL divergence to the base model at the reply start and after the answer, by anchor weight (log scale). (b) Runaway text-mode replies out of 100. (c) Accuracy and latency against candidate-set size on Banking77. 
+
+The reliability layer adds no forward passes except the rotation check, which doubles scoring cost and is therefore used only for the 0.6B model. Packed trie scoring takes 72 ms per item on Qwen3-0.6B and 92 ms on Qwen3-4B on a T4 GPU. Fine-tuning B2 takes 11.1 minutes on Qwen3-0.6B and 6.7 minutes on Qwen3-4B including reference caching, and a four-stage S HIFT -J EV run trains for 12.4 and 17.9 minutes, slightly less than experience replay (13.4 and 18.6 minutes). Table 20 gives the full cost breakdown. 
+
+6 Discussion 
+
+6.1 Implications for deploying decision models 
+
+Under shift, both the risk score and the data used to certify its threshold determine whether selective risk stays within budget. All scores ranked errors almost identically, yet with the same pooled certification the MSP score violated α = 0 .10 three times as often as a learned uncertainty score on Qwen3-0.6B, and split-conformal prediction sets, which guarantee marginal coverage rather than selective risk, violated it in a third to a half of the tests. This agrees with reports that LLM risk guarantees must be re-verified for each deployment [9] and enforced per group [11, 12]. No rule eliminated violations at a useful coverage: at α = 0 .10 the best rules still violated 2–3 of 27 tests. Evaluations of decision models should therefore report realized selective risk and coverage under shift, not only calibration error, and should report coverage together with violation counts, since a rule that abstains on everything has no violations. 20 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+Drift tells the system which population an input belongs to, but in our experiments routing inputs to population-specific thresholds added little, because the proxy-shift threshold was rarely stricter than the ID threshold. A single conservative threshold, the stricter of those certified on ID and on proxy-shift data, gave the fewest violations; this post-hoc finding needs confirmation on further shifts. Drift is more useful for monitoring the stream, and label-shift monitoring should run by default: class-prior shift changes neither the inputs nor the model’s confidence, so every confidence- and embedding-based detector missed it, while a χ2 test on predicted labels, which needs nothing beyond the decisions themselves, detected 95–99% of shifted streams. For continual adaptation, replay of boundary examples and severity-scaled anchoring to the previous model produced most of the accuracy gain on Qwen3-0.6B. The expected-gain gate added about one point on average, but it rejected every no-shift update, turned forgetting negative and, unlike a gate that tests for degradation, did not skip a regime on which the model could improve. In practice, we recommend fine-tuning with KL anchors followed by temperature scaling, which lowers calibration error under shift two- to three-fold; certifying a learned uncertainty score with LTT on ID and proxy-shift data separately and applying the stricter threshold; running a predicted-label χ2 test next to a drift CUSUM; and gating updates on held-out gain with held-out and recertification sets larger than the 80 and 160 items used here when the backbone is strong. 
+
+6.2 Limitations and threats to validity 
+
+Several results are negative or weaker than the design intended. First, at α = 0 .05 the ID-only certification of B5 failed in five of six Qwen runs and the model abstained on everything. A 400-item test half is too small to certify a 5% risk unless the answered inputs are almost error-free, and the fixed-sequence order, which tests the strictest candidate first and stops at the first failure, discarded passing thresholds in one run. Larger calibration sets, or an ordering of candidates chosen on the first calibration half to maximize the chance of passing, would address this without affecting validity; we did not evaluate these changes. Second, routing by drift had little effect, as discussed above. Third, on Qwen3-4B the gate rejected a Twitter-Fin gain of 2.5–7.5 points that 80 paired items cannot confirm at p < 0.10 ; larger held-out sets or a sequential test would recover such gains. Fourth, abstention on items whose correct option was removed varied between 14% and 72% across seeds on Qwen3-4B, so a dedicated “none of the above” mechanism may be needed. Fifth, for the frozen Phi-4-mini the additional signals increased realized risk, so feature-rich risk models should be validated for each backbone. The statistical evidence is limited by three seeds per backbone and by evaluation items that are shared across seeds. We therefore avoided pooling seeds as independent pairs, but seed-level tests have little power, and violation counts over (environment, seed) tests are descriptive. The routing analysis in Table 8 re-certifies thresholds offline from the stored calibration splits of the same runs and is post hoc. The 4B comparisons with the base paper use a different checkpoint, and our fine-tuning mixture deliberately differs from the base paper’s so that the test shifts remain unseen. Class-prior and candidate-set shifts are synthetic, although parameterized by severity, and JevBench [14] was not available in our environment. The LTT and sign-test guarantees hold within a regime under exchangeability; for unseen shifts our violation counts are empirical. The present design was reached after earlier runs on the same benchmark exposed two failures, a gate that tested for degradation and drift features inside the risk score. All numbers reported here come from new runs with new seeds for the 4B model, new adapters and larger shift test sets, and the earlier designs are reported as ablations. Finally, the study covers two model families and models of up to 4B parameters on single-GPU budgets. 21 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+7 Conclusion 
+
+LLMs can serve as decision models, but deployment shifts their domain, label priors, label space and candidate sets. We evaluated such models on a benchmark of ten shifted environments and proposed S HIFT -J EV , which adds risk scoring with certified abstention, stream monitoring and gain-gated continual adaptation to the LLM-as-Jev interface. Fine-tuning with KL anchors and temperature scaling reduced calibration error under shift two- to three-fold. With the same certification, a learned uncertainty score kept selective risk within budget far more often than a max-probability score or conformal prediction sets, while drift-based routing added little and a single conservative threshold did best. A predicted-label χ2 test detected class-prior shifts that all other detectors missed. On Qwen3-0.6B, S HIFT -J EV was the most accurate continual learner in every seed, with negative forgetting and correct accept and reject decisions, and most of its gain came from replay and severity-scaled anchoring. On Qwen3-4B its gate was too conservative for the small remaining gains. Future work will repair the LTT ladder at strict risk levels, study sequential gain tests, larger per-regime calibration sets, label-shift-aware threshold correction [47], more model families and naturally occurring shifts in production decision streams. 
+
+Data and Code Availability 
+
+All datasets are public on the Hugging Face Hub. The implementation is a single Kaggle notebook that reproduces every table and figure in three 12-hour sessions on two T4 GPUs; it will be released with the camera-ready version. 
+
+References 
+
+[1] Diogo Almeida. Introducing system one models & Jev. TypeSafe AI blog, https://typesafe. ai/blog/introducing-system-one-models-and-jev , 2026. [2] Yubo Li, Yidi Miao, Ramayya Krishnan, and Rema Padman. JEV-as-a-judge: Accept when confident, escalate when unsure. arXiv preprint arXiv:2609.26550 , 2026. doi:10.48550/arXiv.2609.26550. [3] Delip Rao and Chris Callison-Burch. JEV vs. LLMs as rubric judges: Cheaper, faster, and wrong in the same places. arXiv preprint arXiv:2609.29769 , 2026. doi:10.48550/arXiv.2609.29769. [4] Ruoqi Guo, Yi Liu, Gelei Deng, Yuekang Li, Lida Zhao, Yutao Wu, Simin Chen, Ying Zhang, and Leo Yu Zhang. Just ask Jev: Reinforcement learning for calibrated decisions as a zero-shot detector of AI alignment failures. arXiv preprint arXiv:2609.29429 , 2026. doi:10.48550/arXiv.2609.29429. [5] Steven Denney and Matthew DiGiuseppe. JEV versus LLMs: Accuracy, cost and calibration on seven political science replications. arXiv preprint arXiv:2610.06625 , 2026. doi:10.48550/arXiv.2610.06625. [6] Amir Rafe and Subasish Das. Calibrated decisions at scale: Converting police crash narratives into probabilistic crash variables with a system one model (Jev). arXiv preprint arXiv:2609.24052 , 2026. doi:10.48550/arXiv.2609.24052. [7] Yinheng Li and Justin Wagle. LLM-as-Jev: LLMs are already Jev-style decision models—when and how to fine-tune them. arXiv preprint arXiv:2610.02076 , 2026. doi:10.48550/arXiv.2610.02076. [8] Zailong Tian, Zhuoheng Han, Yanzhe Chen, Haozhe Xu, Xi Yang, Richeng Xuan, Houfeng Wang, and Lizi Liao. Overconfidence in LLM-as-a-judge: Diagnosis and confidence-driven solution. arXiv preprint arXiv:2508.06225 , 2025. doi:10.48550/arXiv.2508.06225. 22 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+[9] Varun Kotte. When can conformal risk control certify LLM outputs? bounds, impossibility, and adapta-tion for structured generation. arXiv preprint arXiv:2606.29054 , 2026. doi:10.48550/arXiv.2606.29054. [10] Zhexiao Lin, Yuanyuan Li, Neeraj Sarna, Yuanyuan Gao, and Michael von Gablenz. Domain-shift-aware conformal prediction for large language models. arXiv preprint arXiv:2510.05566 , 2025. doi:10.48550/arXiv.2510.05566. [11] Murilo Salem, Luísa Böhm, Daniel Pontes, and Anderson Ferrugem. Hierarchical group-conditional conformal risk control for selective prediction in language models. arXiv preprint arXiv:2607.24562 ,2026. doi:10.48550/arXiv.2607.24562. [12] Md Ashikur Rahman, Md Arifur Rahman, Niamul Hassan Samin, Khandaker Rifah Tasnia, Md Ha-sibul Amin, Sifat Rahman Ahona, and Juena Ahmed Noshin. Beyond aggregate risk: Role-stratified conformal risk control for LLM tool calls. arXiv preprint arXiv:2607.24343 , 2026. doi:10.48550/arXiv.2607.24343. [13] Ibne Farabi Shihab, Sanjeda Akter, and Anuj Sharma. Continual calibration: Coverage can collapse before accuracy in lifelong LLM fine-tuning. arXiv preprint arXiv:2604.23987 , 2026. doi:10.48550/arXiv.2604.23987. [14] Benchmark Heaven. JevBench: Jev-class model benchmark (v1.4.2.2). https:// benchmarkheaven.com/jev-models/v1.4.2.2 , 2026. [15] Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, and Ion Stoica. Judging LLM-as-a-judge with MT-Bench and Chatbot Arena. Advances in Neural Information Processing Systems , 36, 2023. doi:10.48550/arXiv.2306.05685. [16] Victor Wang, Michael J. Q. Zhang, and Eunsol Choi. Improving LLM-as-a-judge inference with the judgment distribution. In Findings of the Association for Computational Linguistics: EMNLP 2025 ,2025. doi:10.48550/arXiv.2503.03064. [17] Jiaxin Gao, Chen Chen, Yanwen Jia, Xueluan Gong, Kwok-Yan Lam, and Qian Wang. Evaluating and mitigating LLM-as-a-judge bias in communication systems. arXiv preprint arXiv:2510.12462 , 2025. doi:10.48550/arXiv.2510.12462. [18] Zhuohang Li, Xiaowei Li, Chengyu Huang, Guowang Li, Katayoon Goshvadi, Bo Dai, Dale Schuur-mans, Paul Zhou, Hamid Palangi, Yiwen Song, Palash Goyal, Murat Kantarcioglu, Bradley A. Malin, and Yuan Xue. Judging with confidence: Calibrating autoraters to preference distributions. arXiv preprint arXiv:2510.00263 , 2025. doi:10.48550/arXiv.2510.00263. [19] Nuo Chen, Zhiyuan Hu, Qingyun Zou, Jiaying Wu, Qian Wang, Bryan Hooi, and Bingsheng He. JudgeLRM: Large reasoning models as a judge. arXiv preprint arXiv:2504.00050 , 2025. doi:10.48550/arXiv.2504.00050. [20] Chungpa Lee, Thomas Zeng, Jongwon Jeong, Jy-yong Sohn, and Kangwook Lee. How to correctly report LLM-as-a-judge evaluations. arXiv preprint arXiv:2511.21140 , 2026. doi:10.48550/arXiv.2511.21140. [21] Erlis Lushtaku, Bora Kargi, Alejandro R. Salamanca, Julia Kreutzer, Ali Elganzory, Fabio Ferreira, and David Salinas. JudgeArena: A unified framework for reproducible LLM-judge evaluation. arXiv preprint arXiv:2608.02620 , 2026. doi:10.48550/arXiv.2608.02620. 23 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+[22] Zhilong Zhao and Yindi Liu. A confidence–diversity framework for calibrating AI judgement in acces-sible qualitative coding tasks. arXiv preprint arXiv:2508.02029 , 2025. doi:10.48550/arXiv.2508.02029. [23] Joshua Robinson and David Wingate. Leveraging large language models for multiple choice question answering. In International Conference on Learning Representations , 2023. doi:10.48550/arXiv.2210.12353. [24] Chujie Zheng, Hao Zhou, Fandong Meng, Jie Zhou, and Minlie Huang. Large language models are not robust multiple choice selectors. In International Conference on Learning Representations , 2024. doi:10.48550/arXiv.2309.03882. [25] Pouya Pezeshkpour and Estevam Hruschka. Large language models sensitivity to the order of options in multiple-choice questions. In Findings of the Association for Computational Linguistics: NAACL 2024 , pages 2006–2017, 2024. doi:10.48550/arXiv.2308.11483. [26] Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger. On calibration of modern neural networks. In Proceedings of the 34th International Conference on Machine Learning , pages 1321–1330, 2017. doi:10.48550/arXiv.1706.04599. [27] Shrey Desai and Greg Durrett. Calibration of pre-trained transformers. In Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing , pages 295–302, 2020. doi:10.18653/v1/2020.emnlp-main.21. [28] Saurav Kadavath, Tom Conerly, Amanda Askell, Tom Henighan, Dawn Drain, Ethan Perez, Nicholas Schiefer, Zac Hatfield-Dodds, Nova DasSarma, Eli Tran-Johnson, et al. Language models (mostly) know what they know. arXiv preprint arXiv:2207.05221 , 2022. doi:10.48550/arXiv.2207.05221. [29] Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie Fu, Junxian He, and Bryan Hooi. Can LLMs express their uncertainty? an empirical evaluation of confidence elicitation in LLMs. In International Conference on Learning Representations , 2024. doi:10.48550/arXiv.2306.13063. [30] Sebastian Farquhar, Jannik Kossen, Lorenz Kuhn, and Yarin Gal. Detecting hallucinations in large language models using semantic entropy. Nature , 630(8017):625–630, 2024. doi:10.1038/s41586-024-07421-0. [31] Markus Oehri, Giulia Conti, Kaviraj Pather, Alexandre Rossi, Laia Serra, Adrian Parody, Rogvi Johan-nesen, Aviaja Petersen, and Arben Krasniqi. Trusted uncertainty in large language models: A unified framework for confidence calibration and risk-controlled refusal. arXiv preprint arXiv:2509.01455 ,2025. doi:10.48550/arXiv.2509.01455. [32] Ahmet Faruk Cetinkaya, Enes A˘ gırman, and Cem Tekin. Good enough is better: Uncertainty-aware aggregation for multi-LLM systems. Preprint, Bilkent University, 2026. [33] Yaniv Ovadia, Emily Fertig, Jie Ren, Zachary Nado, D. Sculley, Sebastian Nowozin, Joshua Dillon, Balaji Lakshminarayanan, and Jasper Snoek. Can you trust your model’s uncertainty? evaluating predictive uncertainty under dataset shift. In Advances in Neural Information Processing Systems ,volume 32, 2019. doi:10.48550/arXiv.1906.02530. [34] Ran El-Yaniv and Yair Wiener. On the foundations of noise-free selective classification. Journal of Machine Learning Research , 11:1605–1641, 2010. [35] Yonatan Geifman and Ran El-Yaniv. Selective classification for deep neural networks. In Advances in Neural Information Processing Systems , volume 30, 2017. doi:10.48550/arXiv.1705.08500. 24 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+[36] Dan Hendrycks and Kevin Gimpel. A baseline for detecting misclassified and out-of-distribution examples in neural networks. In International Conference on Learning Representations , 2017. doi:10.48550/arXiv.1610.02136. [37] Vladimir Vovk, Alexander Gammerman, and Glenn Shafer. Algorithmic Learning in a Random World .Springer, 2005. doi:10.1007/b106715. [38] Anastasios N. Angelopoulos and Stephen Bates. Conformal prediction: A gentle introduction. Founda-tions and Trends in Machine Learning , 16(4):494–591, 2023. doi:10.1561/2200000101. [39] Stephen Bates, Anastasios Angelopoulos, Lihua Lei, Jitendra Malik, and Michael Jordan. Distribution-free, risk-controlling prediction sets. Journal of the ACM , 68(6):1–34, 2021. doi:10.1145/3478535. [40] Anastasios N. Angelopoulos, Stephen Bates, Adam Fisch, Lihua Lei, and Tal Schuster. Conformal risk control. In International Conference on Learning Representations , 2024. doi:10.48550/arXiv.2208.02814. [41] Anastasios N. Angelopoulos, Stephen Bates, Emmanuel J. Candès, Michael I. Jordan, and Lihua Lei. Learn then test: Calibrating predictive algorithms to achieve risk control. arXiv preprint arXiv:2110.01052 , 2021. doi:10.48550/arXiv.2110.01052. [42] Bhawesh Kumar, Charlie Lu, Gauri Gupta, Anil Palepu, David Bellamy, Ramesh Raskar, and Andrew Beam. Conformal prediction with large language models for multi-choice question answering. In ICML 2023 Workshop on Neural Conversational AI , 2023. doi:10.48550/arXiv.2305.18404. [43] Victor Quach, Adam Fisch, Tal Schuster, Adam Yala, Jae Ho Sohn, Tommi S. Jaakkola, and Regina Barzilay. Conformal language modeling. In International Conference on Learning Representations ,2024. doi:10.48550/arXiv.2306.10193. [44] Christopher Mohri and Tatsunori Hashimoto. Language models with conformal factuality guar-antees. In Proceedings of the 41st International Conference on Machine Learning , 2024. doi:10.48550/arXiv.2402.10978. [45] Rina Foygel Barber, Emmanuel J. Candès, Aaditya Ramdas, and Ryan J. Tibshirani. Conformal prediction beyond exchangeability. The Annals of Statistics , 51(2):816–845, 2023. doi:10.1214/23-AOS2276. [46] Isaac Gibbs and Emmanuel Candès. Adaptive conformal inference under distribution shift. In Advances in Neural Information Processing Systems , volume 34, pages 1660–1672, 2021. doi:10.48550/arXiv.2106.00170. [47] Aleksandr Podkopaev and Aaditya Ramdas. Distribution-free uncertainty quantification for classification under label shift. In Proceedings of the 37th Conference on Uncertainty in Artificial Intelligence , pages 844–853, 2021. doi:10.48550/arXiv.2103.03323. [48] Chenfeng Huang, Zixuan Ma, and George Michailidis. Model-agnostic online certificate-driven calibration for time series forecasting under distribution shift. arXiv preprint arXiv:2609.31960 , 2026. doi:10.48550/arXiv.2609.31960. [49] Stephan Rabanser, Stephan Günnemann, and Zachary Lipton. Failing loudly: An empirical study of methods for detecting dataset shift. In Advances in Neural Information Processing Systems , volume 32, 2019. doi:10.48550/arXiv.1810.11953. 25 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+[50] Zachary Lipton, Yu-Xiang Wang, and Alexander Smola. Detecting and correcting for label shift with black box predictors. In Proceedings of the 35th International Conference on Machine Learning , pages 3122–3130, 2018. doi:10.48550/arXiv.1802.03916. [51] Kimin Lee, Kibok Lee, Honglak Lee, and Jinwoo Shin. A simple unified framework for detecting out-of-distribution samples and adversarial attacks. In Advances in Neural Information Processing Systems , volume 31, 2018. doi:10.48550/arXiv.1807.03888. [52] Jie Ren, Stanislav Fort, Jeremiah Liu, Abhijit Guha Roy, Shreyas Padhy, and Balaji Lakshmi-narayanan. A simple fix to Mahalanobis distance for improving near-OOD detection. arXiv preprint arXiv:2106.09022 , 2021. doi:10.48550/arXiv.2106.09022. [53] Yiyou Sun, Yifei Ming, Xiaojin Zhu, and Yixuan Li. Out-of-distribution detection with deep nearest neighbors. In Proceedings of the 39th International Conference on Machine Learning , pages 20827– 20840, 2022. doi:10.48550/arXiv.2204.06507. [54] Weitang Liu, Xiaoyun Wang, John Owens, and Yixuan Li. Energy-based out-of-distribution detec-tion. In Advances in Neural Information Processing Systems , volume 33, pages 21464–21475, 2020. doi:10.48550/arXiv.2010.03759. [55] E. S. Page. Continuous inspection schemes. Biometrika , 41(1/2):100–115, 1954. doi:10.1093/biomet/41.1-2.100. [56] João Gama, Indr˙ e Žliobait˙ e, Albert Bifet, Mykola Pechenizkiy, and Abdelhamid Bouchachia. A survey on concept drift adaptation. ACM Computing Surveys , 46(4):1–37, 2014. doi:10.1145/2523813. [57] Abdullah Al Siam, Nuruzzaman Faruqui, Akm Azad, and Mohammad Ali Moni. Securing the unseen: A comprehensive exploration review of AI-powered models for zero-day attack detection. Expert Systems , 43:e70217, 2026. doi:10.1111/exsy.70217. [58] Ashok Devireddy and Shunping Huang. CALM: A framework for continuous, adaptive, and LLM-mediated anomaly detection in time-series streams. arXiv preprint arXiv:2508.21273 , 2025. doi:10.48550/arXiv.2508.21273. [59] Pang Wei Koh, Shiori Sagawa, Henrik Marklund, Sang Michael Xie, Marvin Zhang, Akshay Balsubra-mani, Weihua Hu, Michihiro Yasunaga, Richard Lanas Phillips, Irena Gao, et al. WILDS: A benchmark of in-the-wild distribution shifts. In Proceedings of the 38th International Conference on Machine Learning , pages 5637–5664, 2021. doi:10.48550/arXiv.2012.07421. [60] James Kirkpatrick, Razvan Pascanu, Neil Rabinowitz, Joel Veness, Guillaume Desjardins, Andrei A. Rusu, Kieran Milan, John Quan, Tiago Ramalho, Agnieszka Grabska-Barwinska, et al. Overcoming catastrophic forgetting in neural networks. Proceedings of the National Academy of Sciences , 114(13): 3521–3526, 2017. doi:10.1073/pnas.1611835114. [61] Zhizhong Li and Derek Hoiem. Learning without forgetting. IEEE Transactions on Pattern Analysis and Machine Intelligence , 40(12):2935–2947, 2018. doi:10.1109/TPAMI.2017.2773081. [62] David Rolnick, Arun Ahuja, Jonathan Schwarz, Timothy Lillicrap, and Gregory Wayne. Experience replay for continual learning. In Advances in Neural Information Processing Systems , volume 32, 2019. doi:10.48550/arXiv.1811.11682. 26 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+[63] Arslan Chaudhry, Marcus Rohrbach, Mohamed Elhoseiny, Thalaiyasingam Ajanthan, Puneet K. Doka-nia, Philip H. S. Torr, and Marc’Aurelio Ranzato. On tiny episodic memories in continual learning. 
+
+arXiv preprint arXiv:1902.10486 , 2019. doi:10.48550/arXiv.1902.10486. [64] David Lopez-Paz and Marc’Aurelio Ranzato. Gradient episodic memory for continual learning. In 
+
+Advances in Neural Information Processing Systems , volume 30, 2017. doi:10.48550/arXiv.1706.08840. [65] Liyuan Wang, Xingxing Zhang, Hang Su, and Jun Zhu. A comprehensive survey of continual learning: Theory, method and application. IEEE Transactions on Pattern Analysis and Machine Intelligence , 46 (8):5362–5383, 2024. doi:10.1109/TPAMI.2024.3367329. [66] Haizhou Shi, Zihao Xu, Hengyi Wang, Weiyi Qin, Wenyuan Wang, Yibin Wang, Zifeng Wang, Sayna Ebrahimi, and Hao Wang. Continual learning of large language models: A comprehensive survey. ACM Computing Surveys , 2025. doi:10.1145/3735633. [67] Yun Luo, Zhen Yang, Fandong Meng, Yafu Li, Jie Zhou, and Yue Zhang. An empirical study of catastrophic forgetting in large language models during continual fine-tuning. arXiv preprint arXiv:2308.08747 , 2023. doi:10.48550/arXiv.2308.08747. [68] Dan Biderman, Jacob Portes, Jose Javier Gonzalez Ortiz, Mansheej Paul, Philip Greengard, Connor Jennings, Daniel King, Sam Havens, Vitaliy Chiley, Jonathan Frankle, Cody Blakeney, and John P. Cunningham. LoRA learns less and forgets less. Transactions on Machine Learning Research , 2024. doi:10.48550/arXiv.2405.09673. [69] Yujie Feng, Hao Wang, Jian Li, Xu Chu, Zhaolu Kang, Yiran Liu, Yasha Wang, Philip S. Yu, and Xiao-Ming Wu. FOREVER: Forgetting curve-inspired memory replay for language model continual learning. arXiv preprint arXiv:2601.03938 , 2026. doi:10.48550/arXiv.2601.03938. [70] Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. LoRA: Low-rank adaptation of large language models. In International Conference on Learning Representations , 2022. doi:10.48550/arXiv.2106.09685. [71] C. J. Clopper and E. S. Pearson. The use of confidence or fiducial limits illustrated in the case of the binomial. Biometrika , 26(4):404–413, 1934. doi:10.1093/biomet/26.4.404. [72] Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling the knowledge in a neural network. arXiv preprint arXiv:1503.02531 , 2015. doi:10.48550/arXiv.1503.02531. [73] Xiang Zhang, Junbo Zhao, and Yann LeCun. Character-level convolutional networks for text classification. In Advances in Neural Information Processing Systems , volume 28, 2015. doi:10.48550/arXiv.1509.01626. [74] Richard Socher, Alex Perelygin, Jean Wu, Jason Chuang, Christopher D. Manning, Andrew Ng, and Christopher Potts. Recursive deep models for semantic compositionality over a sentiment treebank. In 
+
+Proceedings of the 2013 Conference on Empirical Methods in Natural Language Processing , pages 1631–1642, 2013. [75] Christopher Clark, Kenton Lee, Ming-Wei Chang, Tom Kwiatkowski, Michael Collins, and Kristina Toutanova. BoolQ: Exploring the surprising difficulty of natural yes/no questions. In Proceedings of NAACL-HLT 2019 , pages 2924–2936, 2019. doi:10.18653/v1/N19-1300. 27 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+[76] Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot, Ashish Sabharwal, Carissa Schoenick, and Oyvind Tafjord. Think you have solved question answering? try ARC, the AI2 reasoning challenge. 
+
+arXiv preprint arXiv:1803.05457 , 2018. doi:10.48550/arXiv.1803.05457. [77] Johannes Welbl, Nelson F. Liu, and Matt Gardner. Crowdsourcing multiple choice science ques-tions. In Proceedings of the 3rd Workshop on Noisy User-generated Text , pages 94–106, 2017. doi:10.18653/v1/W17-4413. [78] Elvis Saravia, Hsien-Chi Toby Liu, Yen-Hao Huang, Junlin Wu, and Yi-Shin Chen. CARER: Contextual-ized affect representations for emotion recognition. In Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing , pages 3687–3697, 2018. doi:10.18653/v1/D18-1404. [79] Iñigo Casanueva, Tadas Temˇ cinas, Daniela Gerz, Matthew Henderson, and Ivan Vuli´ c. Efficient intent detection with dual sentence encoders. In Proceedings of the 2nd Workshop on Natural Language Processing for Conversational AI , pages 38–45, 2020. doi:10.18653/v1/2020.nlp4convai-1.5. [80] Zeroshot. Twitter financial news topic dataset. https://huggingface.co/datasets/ zeroshot/twitter-financial-news-topic , 2022. [81] Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Steinhardt. Measuring massive multitask language understanding. In International Conference on Learning Representations , 2021. doi:10.48550/arXiv.2009.03300. [82] Stefan Larson, Anish Mahendran, Joseph J. Peper, Christopher Clarke, Andrew Lee, Parker Hill, Jonathan K. Kummerfeld, Kevin Leach, Michael A. Laurenzano, Lingjia Tang, and Jason Mars. An evaluation dataset for intent classification and out-of-scope prediction. In Proceedings of EMNLP-IJCNLP 2019 , pages 1311–1316, 2019. doi:10.18653/v1/D19-1131. [83] Yubo Wang, Xueguang Ma, Ge Zhang, Yuansheng Ni, Abhranil Chandra, Shiguang Guo, Weiming Ren, Aaran Arulraj, Xuan He, Ziyan Jiang, et al. MMLU-Pro: A more robust and challenging multi-task language understanding benchmark. In Advances in Neural Information Processing Systems (Datasets and Benchmarks Track) , volume 37, 2024. doi:10.48550/arXiv.2406.01574. [84] Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. WinoGrande: An ad-versarial Winograd schema challenge at scale. Communications of the ACM , 64(9):99–106, 2021. doi:10.1145/3474381. [85] An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. doi:10.48550/arXiv.2505.09388. [86] Abdelrahman Abouelenin, Atabak Ashfaq, Adam Atkinson, Hany Awadalla, Nguyen Bach, Jianmin Bao, Alon Benhaim, Martin Cai, Vishrav Chaudhary, Congcong Chen, et al. Phi-4-Mini technical report: Compact yet powerful multimodal language models via mixture-of-LoRAs. arXiv preprint arXiv:2503.01743 , 2025. doi:10.48550/arXiv.2503.01743. 28 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+A Implementation Details 
+
+Answer interface and scoring. We use each model’s chat template with thinking disabled (Qwen3). The user message lists the state followed by “ [1] o1 . . . [K] oK ” and the instruction to answer with the bracketed identifier only, and the assistant turn is pre-filled with “ Best answer: [”. Identifier suffixes are taken from the tokenization of the full string, so multi-digit identifiers and merged bracket tokens are handled exactly, and the prefix-free property is checked for every item. For packed scoring, all trie nodes are appended after the prompt in one sequence; a token of a node attends to the whole prompt, to its ancestors and causally to itself, and position ids continue along each root-to-node path. When a model is loaded, packed and unpacked scores are compared on four items, and the packed path is used only if the maximum probability difference is below 10 −4 (fp32) or 0.03 (fp16); the observed difference was at most 2 × 10 −5.
+
+Fine-tuning objective. The B2 loss is the sum of the cross-entropy over legal child tokens at each node of the correct option’s trie path and three KL anchors with weight 1: on the probability mass of legal identifier tokens, on the distribution of illegal tokens, and on the full next-token distribution at the reply start and after the answer. Anchors are computed against the frozen model on correct-path and sampled off-path nodes with top-64 plus tail truncation. 
+
+Precision and hardware. On T4 GPUs Qwen3-0.6B runs in fp32 because fp16 overflows in its attention, and the 4B and Phi models run in fp16 with fp32 LoRA weights. Each part of the study runs two lanes in parallel on the two T4 GPUs of one Kaggle session with a shared time budget, and results are merged afterwards. 
+
+Monitor and detectors. The drift model standardizes the state embeddings of 400 ID validation items, projects them to 64 principal components and uses a cosine k-NN index with k = 10 ; Mahalanobis [51] and relative-Mahalanobis [52] distances with a Ledoit–Wolf covariance are computed for ablations. CUSUM uses a drift allowance of 0.5 on signals standardized by the reference pool, with the alarm level at the 95th percentile of no-shift maxima over 200 simulated streams. The Kolmogorov–Smirnov test uses windows of 25 items with step 5, and the χ2 test uses windows of 50 items over the predicted-category histogram with an “unseen” bin and add-0.5 smoothing. 
+
+Risk model and certification. Features are standardized and the logistic regression uses C = 1 . Calibration sets are split 50/50 with a fixed seed. Candidate thresholds are the largest thresholds whose empirical selective risk on the first half is at most cα for c ∈ { 0.2, 0.35 , 0.5, 0.65 , 0.8, 0.9, 1.0, 1.1}. The Clopper–Pearson bound is the 1 − δ quantile of Beta( e + 1 , n − e) for e errors among n answered points. Split-conformal LAC uses the non-conformity score 1 − P (y | x) on pooled calibration data and the ⌈(n + 1)(1 − α)⌉/n empirical quantile. 
+
+Module C. Shift measurement uses 250 incoming items and a reference pool of 200 ID validation items, extended by 100 items per adapted regime; a shift is validated if either test gives p < 0.01 with an effect of at least 5 points. The buffer stores 60 items per regime (half lowest-margin correct, half random) and replay adds 30% of the new-data count. The gate uses 80 held-out new-regime items and the buffer’s validation items (40 ID and 20 per adapted regime). EWC uses an online diagonal Fisher estimate over 100 examples with decay 0.9 and weight 50, and LwF uses tree-local distillation to the previous-stage model on new data with weight 1. 29 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+B Formal Guarantees and Module C Pseudocode 
+
+Proposition 1 (Per-regime validity) . If the calibration points of regime g and a new test point from g are exchangeable, and the risk model and the candidate thresholds depend only on the first calibration half, the fixed-sequence procedure of Section 3.4 returns τg with Pr[ RDg (τg) ≤ α] ≥ 1 − δ.Proof sketch. For each candidate threshold, the null hypothesis that its selective risk exceeds α is rejected only if the Clopper–Pearson bound, a valid level-δ test given the number of answered points, falls below α.The order of the hypotheses is fixed before the second half is seen and testing stops at the first non-rejection, so the family-wise error rate is at most δ without multiplicity correction [41]. A violation requires a false rejection, which has probability at most δ.
+
+Proposition 2 (Controlled false acceptance) . If a candidate update is no more likely to be right where the current model is wrong than the reverse, the gate accepts it with probability at most γ = 0 .10 ; with two candidates, the probability of accepting any such update is at most 2γ.Proof sketch. Given the number of discordant held-out pairs, the candidate’s number of wins is stochastically no larger than a Binomial (n, 12 ) variable under the null hypothesis, so the one-sided exact sign test has level 
+
+γ. A union bound covers the two candidates, and the retention condition can only remove acceptances. 
+
+Algorithm 1 SHIFT -J EV Module C: one adaptation stage 
+
+Require: current adapter θ, new batch S with held-out set V, replay buffer B with validation set VB 
+
+> 1:
+
+measure shift on S; obtain validated flag and severity ˆs 
+
+> 2:
+
+set anchor weight λ0e−κˆs and distillation weight ∝ (1 + ˆ s) 
+
+> 3:
+
+train on S + replay from B; at 50%: if not validated and the checkpoint wins ≤ loses on V then stop  
+
+> 4:
+
+for each candidate θ′ ∈ { θ50% , θ 100% } do  
+
+> 5:
+
+accept θ′ iff sign test vs. θ on V gives p < 0.10 and accuracy on VB drops ≤ 5 points  
+
+> 6:
+
+end for  
+
+> 7:
+
+deploy the accepted candidate with the best mean of new- and old-regime accuracy, else keep θ 
+
+> 8:
+
+add boundary and random items of S to B; add the regime to the reference pools; certify its threshold 
+
+C Additional Results 
+
+Table 18: External benchmarks for the larger backbones (accuracy, %; Banking77 = fixed random 1,000 of 3,080 items). The paper’s 4B model is Qwen3.5-4B. System BoolQ MMLU MMLU-Pro ARC-C WinoGr. SciQ Macro-6 Banking77 ECE (6) Base paper, Qwen3.5-4B, training-free 88.00 77.08 47.12 93.33 66.20 99.75 78.58 69.03 –Base paper, Qwen3.5-4B, LoRA λ=1 88.20 77.00 46.90 92.70 68.80 100.00 78.93 75.40 –Ours, Qwen3-4B-Instruct-2507, B1 87.20 70.25 45.00 90.33 62.80 99.00 75.76 57.30 0.220 Ours, Qwen3-4B-Instruct-2507, B2 (seed 1) 88.20 69.42 45.00 90.17 62.20 99.25 75.71 57.10 0.105 Ours, Phi-4-mini-instruct, B1 85.60 65.17 39.25 84.33 63.60 98.00 72.66 55.80 0.111 
+
+30 SHIFT -J EV : S HIFT -A WARE ABSTENTION AND ADAPTATION A P REPRINT 
+
+Table 19: Frozen Phi-4-mini-instruct with abstention layers (one run; 9 shifted environments, 9 tests per α). Columns as in Table 6. Risk score / threshold rule Shift AURC ↓ Cov@.05 (%) Cov@.10 (%) Risk@.10 (%) Violations α=.05/.10/.20 Viol.@.10 per seed Gold removed: abstain (%) MSP score, pooled LTT τ 0.1119 31.8 49.0 6.3 1 / 0 / 3 0 30.9 Split-conformal LAC 0.1119 43.2 68.4 14.3 4 / 4 / 1 4 30.9 Uncertainty risk, pooled τ 0.1291 32.9 47.9 5.2 1 / 2 / 1 2 25.0 Uncertainty risk, ID-only τ 0.1291 0.0 49.0 5.6 0 / 2 / 1 2 19.6 Drift inside risk 0.1609 33.5 45.7 12.1 5 / 3 / 4 3 22.1 SHIFT -J EV layer (B5 rule) 0.1595 0.0 48.7 7.9 0 / 2 / 1 2 14.2 
+
+Table 20: Computational cost on Kaggle Tesla T4 GPUs. Quantity Value Scoring latency, mean over environments, 0.6B / 4B / Phi-4-mini 72 / 92 / 89 ms/item Peak GPU memory, scoring 0.6B / 4B 2.87 / 8.37 GB Peak GPU memory, LoRA training 0.6B / 4B 3.23 / 9.09 GB LoRA parameters ( r = 16, all linear), 0.6B / 4B 10.1 M / 33.0 M Adapter storage (fp32), 0.6B / 4B 40.4 / 132.1 MB B2 training + reference cache, 0.6B (2,000 examples) 8.8 + 2.3 min B2 training + reference cache, 4B (1,000 examples) 5.3 + 1.4 min Four-stage continual run (training), S HIFT -J EV / replay, 0.6B 12.4 / 13.4 min Four-stage continual run (training), S HIFT -J EV / replay, 4B 17.9 / 18.6 min Session wall-clock, parts A / B / C (two T4 lanes each) 8.1 / 9.4 / 11.1 h 
+
+Table 21: Hyperparameters. Parameter Value LoRA rank / α / dropout / targets 16 / 32 / 0 / all linear layers Optimizer, learning rate, weight decay AdamW, 10 −4, 0.01 Schedule 10% warm-up, linear decay to 10%, 1 epoch, batch 8 Gradient clipping, max length 1.0, 1024 tokens Anchor weight λ, truncation 1, top-64 + tail Risk levels α, LTT δ {0.05 , 0.10 , 0.20 }, 0.1 PCA dim., k (k-NN) 64, 10 Stream lengths (pre / post), severities 200 / 200, {0.25 , 0.5, 1.0}
+
+Shift tests (logged; severity) p < 0.01 , effect ≥5 points Gain gate: level γ, retention margin, held-out items 0.10, 5 points, 80 
+
+κ, λ0, λret , λdec 1.5, 1, 1, 1 Replay per regime, replay ratio, EWC weight, LwF weight 60, 0.3, 50, 1 Continual eval items per regime, 0.6B / 4B 400 / 300 Seeds 20260922, 13, 42 
+
+31
