@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-11-01</span>
+      <span class="dpr-home-dashboard-kicker">2026-11-02</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 13 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 0 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>5</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>8</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>0</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>0</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-11-01 12:06:27 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-11-02 12:30:37 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日筛选 13 篇论文并精读 5 篇，重点集中在共形预测与不确定性建模方向。</p>
-<p>最值得看的是《ConformalMOS》（9.0/10）用共形区间结合序数建模做不确定性感知的 MOS 预测，以及 8.0 分的共形新颖性检测；速读侧的 CalibraRL、STEP 则围绕置信度校准与幻觉缓解展开。</p>
-<p>普通读者可先读 ConformalMOS 了解共形方法如何给出可信区间，再顺着置信度校准这条线看 RAG 幻觉治理的落地思路。</p>
+<p>今日无新推荐，系统未产出可展示论文。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +78,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">5 篇</strong>
+    <strong class="dpr-home-dashboard-count">0 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="ConformalMOS: Uncertainty-Aware MOS Prediction with Conformal Intervals and Ordinal Modeling">ConformalMOS: Uncertainty-Aware MOS Prediction with Conformal Intervals and Ordinal Modeling</span></li><li><span class="dpr-home-dashboard-paper-title" title="Conformal Novelty Detection via Data-enhanced Localization">Conformal Novelty Detection via Data-enhanced Localization</span></li><li><span class="dpr-home-dashboard-paper-title" title="Causal Localization of Evidence Effects in Transformers">Causal Localization of Evidence Effects in Transformers</span></li></ul>
+<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">cp <strong>4</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>1</strong></span></div>
+
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +91,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">8 篇</strong>
+    <strong class="dpr-home-dashboard-count">0 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="STEP: Soft Trajectory Estimation of Prediction Correctness via Per-Step Probability Scoring">STEP: Soft Trajectory Estimation of Prediction Correctness via Per-Step Probability Scoring</span></li><li><span class="dpr-home-dashboard-paper-title" title="CalibraRL: Confidence-Calibrated Reinforcement Learning for Mitigating Hallucinations in RAG">CalibraRL: Confidence-Calibrated Reinforcement Learning for Mitigating Hallucinations in RAG</span></li><li><span class="dpr-home-dashboard-paper-title" title="Test-Time Confidence Adaptation under RL-Induced Trajectory Shift">Test-Time Confidence Adaptation under RL-Induced Trajectory Shift</span></li></ul>
+<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">llm-calib <strong>4</strong></span><span class="dpr-home-dashboard-tag">causal-infer <strong>2</strong></span><span class="dpr-home-dashboard-tag">cp <strong>1</strong></span><span class="dpr-home-dashboard-tag">tabular-data <strong>1</strong></span></div>
+
 </section>
 </div>
 
